@@ -1205,6 +1205,57 @@ test(
   },
 );
 
+test(
+  "a variable of a file's own code, also as its functions read it, or of a function is its own: another file's or function's variable of the same name gives it no stored keys",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'let mode = load("darts.mode", default: false)\nfunction level(ignore) {\n  let score = load("darts.score", default: 0)\n' +
+          '  return score\n}\nshowButton "Darts"\nif mode == true {\n  say "Darts mode."\n}\ngoto "cards.tease"\n',
+      },
+      {
+        path: "cards.tease",
+        source:
+          'let mode = load("cards.mode", default: false)\nfunction points(ignore) {\n  let score = load("cards.score", default: 0)\n' +
+          '  return score\n}\nshowButton "Cards"\nif mode == true {\n  say "Cards mode."\n}\nif points(0) > 9 {\n  say "High."\n}\n' +
+          'function moodOf(ignore) {\n  return mode\n}\nif moodOf(0) == true {\n  say "Moody."\n}\nexit\n',
+      },
+    ];
+    const { plan } = engine.compileProject(files, { builtins: [] });
+    assert.ok(isRecord(plan));
+    const missed = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map(files.map((file) => [file.path, file.source])),
+      diagnostics: [],
+    }).coverage.unvisitedBranches;
+    // What a missed way is said to need or depend on, and why.
+    const about = (path: string, line: number) =>
+      JSON.stringify(
+        missed
+          .filter((entry) => entry.path === path && entry.line === line)
+          .map((entry) => [entry.reason, entry.dependsOn, entry.parts]),
+      );
+    for (const [path, line, own, other] of [
+      ["main.tease", 7, "darts.mode", "cards.mode"],
+      ["cards.tease", 7, "cards.mode", "darts.mode"],
+      ["cards.tease", 10, "cards.score", "darts.score"],
+      // A function of the file reads the file's own variable.
+      ["cards.tease", 16, "cards.mode", "darts.mode"],
+    ] as const) {
+      assert.ok(about(path, line).includes(own), about(path, line));
+      assert.ok(!about(path, line).includes(other), about(path, line));
+    }
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

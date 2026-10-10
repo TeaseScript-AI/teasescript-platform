@@ -14,10 +14,10 @@ import {
   difference,
   distance,
   goalsFor,
+  identifiersIn,
   KEY_PLACEHOLDER,
   keyMatcher,
   loadDefaultCheck,
-  namesIn,
   callsClock,
   successors,
   unreachableInstructions,
@@ -2859,7 +2859,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       if (node.kind !== "identifier" || typeof node.name !== "string") return undefined;
       if (variables.has(node.name)) return atomScalar(variables.get(node.name));
-      const alias = flow.loadAlias(node.name);
+      const alias = flow.loadAlias(node);
       return alias === null ? undefined : stored(alias.key, alias.fallback);
     };
   /** The variables of a state by name, innermost binding last, as they are. */
@@ -3334,9 +3334,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (known !== undefined) return known;
     const before = instructions[earlier]!.condition;
     const aliases = new Map<string, LoadAlias>();
-    for (const name of namesIn(before)) {
-      const alias = flow.loadAlias(name);
-      if (alias !== null) aliases.set(name, alias);
+    for (const node of identifiersIn(before)) {
+      const alias = flow.loadAlias(node);
+      if (alias !== null) aliases.set(String(node.name), alias);
     }
     const guard = { condition: before, aliases, goals: goalsFor(flow, before, false, earlier) };
     guardsByCondition.set(earlier, guard);

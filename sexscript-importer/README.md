@@ -368,7 +368,9 @@ Directed search looks at each condition that a step reached but left only one wa
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
 stored value (also by a key template such as `"script${i}.time"`; one whose computed parts are constants at the
 condition, such as the argument of `has(KNIFE)` for a helper `has(name)` that loads `"toys.${name}"`, also in a helper
-it passes `name` to, is the one key it names), the clock, or a variable the code assigns. Its
+it passes `name` to, is the one key it names), the clock, or a variable the code assigns (told apart by scope: a
+function's own variable, a file's own, also as a function of that file reads it, and otherwise one name for the
+package, as a `global function` reads the variables of whichever file calls it). Its
 comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
 the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
 that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage

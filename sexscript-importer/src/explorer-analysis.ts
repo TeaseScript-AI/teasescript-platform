@@ -319,18 +319,23 @@ function keyText(expression: unknown): string | null {
 
 /** The variables an expression reads; a called function's name is no variable. */
 export function namesIn(expression: unknown): Set<string> {
-  const names = new Set<string>();
+  return new Set(identifiersIn(expression).map((node) => String(node.name)));
+}
+
+/** The identifiers an expression reads, as their nodes, not those that name a called function. */
+export function identifiersIn(expression: unknown): Data[] {
+  const found: Data[] = [];
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(walk);
     else if (isRecord(value)) {
-      if (value.kind === "identifier" && typeof value.name === "string") names.add(value.name);
+      if (value.kind === "identifier" && typeof value.name === "string") found.push(value);
       const callee = value.kind === "call" && record(value.callee).kind === "identifier";
       for (const [key, item] of Object.entries(value))
         if (key !== "span" && !(callee && key === "callee")) walk(item);
     }
   };
   walk(expression);
-  return names;
+  return found;
 }
 
 /** The name a call calls, for a plain name or a method. */
@@ -353,15 +358,29 @@ export class DataFlow {
   readonly #stored = new Map<string, Flow>();
   /** Variables an assignment adds to or subtracts from their own value. */
   readonly #counters = new Set<string>();
+  /**
+   * The scope key of each identifier the code reads, by the node: its name, and for a variable a function or a file's
+   * own code declares, also where (see {@link scopeKey}).
+   */
+  readonly #scopeOfNode = new WeakMap<object, string>();
+  /** The names each function, and each file's own code, declares, by function ID and by file. */
+  readonly #functionBinds = new Map<number, Set<string>>();
+  readonly #fileBinds = new Map<number, Set<string>>();
+  /** The functions any file can call (`global function`), by ID. */
+  readonly #globalFunctions = new Set<number>();
+  /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
+  readonly #fileRanges: { start: number; end: number }[] = [];
+  /** The scope keys of each name. */
+  readonly #keysOfName = new Map<string, Set<string>>();
   /** The interaction instructions by kind of answer: typed asks (`text`, `number`, ...) only. */
   readonly #typedAsks = new Set<number>();
   /** Every save, by key or key pattern: the literal it writes, or {@link COMPUTED}. */
   readonly #saves = new Map<string, SavedValue[]>();
-  /** Variables whose every assignment is the same `load`, by name; null for any other variable. */
+  /** Variables whose every assignment is the same `load`, by scope key; null for any other variable. */
   readonly #loads = new Map<string, LoadAlias | null>();
   /** The function each instruction of a function body belongs to, by its ID. */
   readonly #functionOf = new Map<number, number>();
-  /** Variables whose every assignment is the same literal, by name; null for any other variable. */
+  /** Variables whose every assignment is the same literal, by scope key; null for any other variable. */
   readonly #literals = new Map<string, SavedScalar | null>();
   readonly #instructions: readonly Data[];
   /** The instructions a jump, condition, or loop goes to. */
@@ -398,6 +417,41 @@ export class DataFlow {
       for (let index = Number(definition.entryInstruction); index < end; index += 1)
         functionOf.set(index, Number(definition.id));
     }
+    for (const file of list(plan.files))
+      this.#fileRanges.push({
+        start: Number(file.startInstruction),
+        end: Number(file.endInstruction),
+      });
+    // The names functions and files' own code declare, then the scope key of each name the code reads or writes.
+    const bind = (name: unknown, index: number) => {
+      if (typeof name !== "string") return;
+      const owner = this.functionAt(index);
+      const binds = owner === 0 ? this.#fileBinds : this.#functionBinds;
+      const scope = owner === 0 ? this.#fileAt(index) : owner;
+      binds.set(scope, (binds.get(scope) ?? new Set()).add(name));
+    };
+    for (const definition of functions) {
+      if (definition.global === true) this.#globalFunctions.add(Number(definition.id));
+      for (const parameter of list(definition.parameters))
+        bind(parameter.name, Number(definition.entryInstruction));
+    }
+    instructions.forEach((instruction, index) => {
+      if (instruction.kind === "declareBinding") bind(instruction.name, index);
+      if (instruction.kind === "loopStart") {
+        bind(instruction.variable, index);
+        bind(instruction.valueVariable, index);
+      }
+    });
+    instructions.forEach((instruction, index) => {
+      const walk = (value: unknown): void => {
+        if (Array.isArray(value)) value.forEach(walk);
+        if (!isRecord(value)) return;
+        if (value.kind === "identifier" && typeof value.name === "string")
+          this.#scopeOfNode.set(value, this.scopeKey(value.name, index));
+        for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+      };
+      walk(instruction);
+    });
     for (const instruction of instructions)
       for (const target of [instruction.target, instruction.continueTarget])
         if (typeof target === "number") this.#jumpTargets.add(target);
@@ -434,7 +488,7 @@ export class DataFlow {
       this.#temporary(instruction.destinationTemporary).asks.add(index);
     });
     this.#recordSaves(instructions);
-    this.#recordLoads(plan, instructions);
+    this.#recordAssignments(plan, instructions);
     // Propagate to a fixed point; each round only adds, so it ends.
     for (let round = 0; round < 50; round += 1) {
       let changed = false;
@@ -465,14 +519,17 @@ export class DataFlow {
           case "declareGlobal":
             if (typeof instruction.name === "string")
               changed =
-                merge(this.#variable(instruction.name), this.flowOf(instruction.value)) || changed;
+                merge(
+                  this.#variable(this.scopeKey(instruction.name, index)),
+                  this.flowOf(instruction.value),
+                ) || changed;
             break;
           case "assign": {
             const name = targetName(instruction.target);
             if (name === null) break;
-            if (round === 0 && this.#addsToItself(name, instruction.value))
-              this.#counters.add(name);
-            changed = merge(this.#variable(name), this.flowOf(instruction.value)) || changed;
+            const key = this.scopeKey(name, index);
+            if (round === 0 && this.#addsToItself(name, instruction.value)) this.#counters.add(key);
+            changed = merge(this.#variable(key), this.flowOf(instruction.value)) || changed;
             break;
           }
           case "storageWrite": {
@@ -489,10 +546,113 @@ export class DataFlow {
 
   /**
    * The load a variable only ever holds (`let ready = load("ready", default: true)`): its key and default; null for
-   * another variable.
+   * another variable. The variable as the code reads it (an identifier of a condition), or by name in any scope.
    */
-  loadAlias(name: string): LoadAlias | null {
-    return this.#loads.get(name) ?? null;
+  loadAlias(variable: unknown): LoadAlias | null {
+    return this.#loadOf(this.#keyOf(variable));
+  }
+
+  /**
+   * The key a name has in the data flow where instruction `at` uses it: with the function, for a name the function
+   * declares (a parameter, a `let`, a loop variable); with the file, for one a file's own code declares, read there or
+   * in a function of that file only it calls (not a `global function`, which sees the top-level variables of whichever
+   * file calls it); else the name alone, as for a global. Values of a name alone and of its scoped keys are read
+   * together (see {@link #variableFlow}).
+   */
+  scopeKey(name: string, at: number): string {
+    const owner = this.functionAt(at);
+    const file = this.#fileAt(at);
+    const scoped =
+      owner !== 0 && this.#functionBinds.get(owner)?.has(name) === true
+        ? `${name}\u0001function ${owner}`
+        : (owner === 0 || !this.#globalFunctions.has(owner)) &&
+            this.#fileBinds.get(file)?.has(name) === true
+          ? `${name}\u0001file ${file}`
+          : name;
+    this.#keysOfName.set(name, (this.#keysOfName.get(name) ?? new Set()).add(scoped));
+    return scoped;
+  }
+
+  /** The scope key of an identifier the code reads, or of a name: the name alone. */
+  #keyOf(variable: unknown): string {
+    if (typeof variable === "string") return variable;
+    const value = record(variable);
+    return isRecord(variable)
+      ? (this.#scopeOfNode.get(variable) ?? String(value.name))
+      : String(value.name);
+  }
+
+  /** The file whose code, its functions' included, instruction `index` is in; -1 for none. */
+  #fileAt(index: number): number {
+    return this.#fileRanges.findIndex((range) => index >= range.start && index < range.end);
+  }
+
+  /**
+   * The keys whose values a variable key reads: a scoped key and its name alone, as a function can assign the file's
+   * variable; a name alone and all its scoped keys, as a function can read any calling file's variable.
+   */
+  #keysRead(key: string): string[] {
+    const name = key.split("\u0001")[0]!;
+    return key === name ? [...(this.#keysOfName.get(name) ?? [name])] : [key, name];
+  }
+
+  /** The flow of a variable key, with the keys it reads ({@link #keysRead}). */
+  #variableFlow(key: string): Flow | undefined {
+    const keys = this.#keysRead(key);
+    if (keys.length === 1) return this.#variables.get(keys[0]!);
+    const flow = emptyFlow();
+    for (const each of keys) {
+      const known = this.#variables.get(each);
+      if (known !== undefined) merge(flow, known);
+    }
+    return flow;
+  }
+
+  /** The values assigned to a variable key, with those of the keys it reads ({@link #keysRead}). */
+  #assignmentsOf(key: string): { value: Data; index: number }[] {
+    return this.#keysRead(key).flatMap((each) => this.#assigned.get(each) ?? []);
+  }
+
+  /** The load a variable key only ever holds, as {@link loadAlias}. */
+  #loadOf(key: string): LoadAlias | null {
+    const known = this.#loads.get(key);
+    if (known !== undefined) return known;
+    let load: LoadAlias | null | undefined;
+    for (const { value } of this.#assignmentsOf(key)) {
+      const loaded = value.kind === "storageLoad" ? literalText(value.key) : null;
+      const fallback = record(value.default);
+      const literal = value.default == null ? null : scalar(fallback.value);
+      const found =
+        loaded === null ||
+        (value.default != null && fallback.kind !== "literal") ||
+        literal === undefined
+          ? null
+          : { key: loaded, fallback: literal };
+      load =
+        load === undefined
+          ? found
+          : load === null ||
+              found === null ||
+              load.key !== found.key ||
+              load.fallback !== found.fallback
+            ? null
+            : load;
+    }
+    this.#loads.set(key, load ?? null);
+    return load ?? null;
+  }
+
+  /** The literal a variable key only ever holds; null for another variable. */
+  #literalOf(key: string): SavedScalar | null {
+    const known = this.#literals.get(key);
+    if (known !== undefined) return known;
+    let only: SavedScalar | null | undefined;
+    for (const { value } of this.#assignmentsOf(key)) {
+      const found = value.kind === "literal" ? (scalar(value.value) ?? null) : null;
+      only = only === undefined || only === found ? found : null;
+    }
+    this.#literals.set(key, only ?? null);
+    return only ?? null;
   }
 
   /**
@@ -535,9 +695,9 @@ export class DataFlow {
         return fits(record(value.type), need) && keyText(value.key) === key;
       if (value.kind === "identifier" && typeof value.name === "string")
         return node(
-          `variable ${value.name}`,
+          `variable ${this.#keyOf(value)}`,
           need,
-          (this.#assigned.get(value.name) ?? []).map((each) => ({
+          this.#assignmentsOf(this.#keyOf(value)).map((each) => ({
             value: each.value,
             at: each.index,
           })),
@@ -660,10 +820,11 @@ export class DataFlow {
       else if (value.kind === "storageLoad") {
         if (this.#stored.get(keyText(value.key) ?? "")?.keys.has(pattern) === true) keys.add(null);
       } else if (value.kind === "identifier" && typeof value.name === "string") {
-        if (this.#variables.get(value.name)?.keys.has(pattern) !== true || followed.has(value.name))
+        const variable = this.#keyOf(value);
+        if (this.#variableFlow(variable)?.keys.has(pattern) !== true || followed.has(variable))
           return;
-        followed.add(value.name);
-        for (const assigned of this.#assigned.get(value.name) ?? []) {
+        followed.add(variable);
+        for (const assigned of this.#assignmentsOf(variable)) {
           if (!this.flowOf(assigned.value).keys.has(pattern)) continue;
           const kind = assigned.value.kind;
           if (kind === "parameter" || kind === "element" || kind === "part") keys.add(null);
@@ -719,7 +880,7 @@ export class DataFlow {
       .filter((load) => keyText(load.key) === pattern)
       .map((load) => this.#keyNamed(load.key, parameters));
     for (const name of code.names)
-      if (!code.bound.has(name) && this.#variables.get(name)?.keys.has(pattern) === true)
+      if (!code.bound.has(name) && this.#variableFlow(name)?.keys.has(pattern) === true)
         keys.push(null);
     for (const key of code.keys)
       if (this.#stored.get(key)?.keys.has(pattern) === true) keys.push(null);
@@ -749,7 +910,7 @@ export class DataFlow {
         value.kind === "literal"
           ? value.value
           : value.kind === "identifier" && typeof value.name === "string"
-            ? this.#literals.get(value.name)
+            ? this.#literalOf(this.#keyOf(value))
             : undefined;
       if (typeof constant !== "string" && !Number.isSafeInteger(constant)) return null;
       text += String(constant);
@@ -825,7 +986,7 @@ export class DataFlow {
       }
       if (!isRecord(value)) return;
       if (value.kind === "identifier" && typeof value.name === "string") {
-        const known = this.#variables.get(value.name);
+        const known = this.#variableFlow(this.#keyOf(value));
         if (known !== undefined) merge(flow, known);
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         const known = this.#temporaries.get(value.temporaryId);
@@ -861,11 +1022,13 @@ export class DataFlow {
       ...(flow.clock ? [{ kind: "clock" as const }] : []),
     ];
     // A variable is a source of its own when the code assigns it: it counts, or no ask, key, or clock reaches it.
-    for (const name of namesIn(expression)) {
-      const known = this.#variables.get(name);
+    const named = new Map<string, string>();
+    for (const node of identifiersIn(expression)) named.set(String(node.name), this.#keyOf(node));
+    for (const [name, key] of named) {
+      const known = this.#variableFlow(key);
       const external =
         known !== undefined && (known.asks.size > 0 || known.keys.size > 0 || known.clock);
-      const counter = this.#counters.has(name);
+      const counter = this.#keysRead(key).some((each) => this.#counters.has(each));
       if (counter || !external) sources.push({ kind: "variable", name, counter });
     }
     return sources;
@@ -929,8 +1092,8 @@ export class DataFlow {
           this.#readsOnlyStorage(value.left, keys) && this.#readsOnlyStorage(value.right, keys)
         );
       case "identifier": {
-        const load = typeof value.name === "string" ? this.#loads.get(value.name) : undefined;
-        if (load == null) return false;
+        const load = typeof value.name === "string" ? this.#loadOf(this.#keyOf(value)) : null;
+        if (load === null) return false;
         keys.add(load.key);
         return true;
       }
@@ -958,8 +1121,8 @@ export class DataFlow {
       case "group":
         return this.#evaluate(value.expression, values);
       case "identifier": {
-        const load = typeof value.name === "string" ? this.#loads.get(value.name) : undefined;
-        if (load == null) return undefined;
+        const load = typeof value.name === "string" ? this.#loadOf(this.#keyOf(value)) : null;
+        if (load === null) return undefined;
         const stored = values.get(load.key);
         return stored === undefined ? undefined : stored === ABSENT ? load.fallback : stored;
       }
@@ -1045,66 +1208,42 @@ export class DataFlow {
     }
   }
 
-  #recordLoads(plan: Data, instructions: readonly Data[]): void {
+  /**
+   * The values assigned to each variable, by scope key: its declaration's and assignments' values, and a marker for
+   * a parameter, a loop variable, and an assignment to a part of it (see {@link #assigned}).
+   */
+  #recordAssignments(plan: Data, instructions: readonly Data[]): void {
     const assigned = (name: string, value: Data, index: number) => {
-      const known = this.#assigned.get(name) ?? [];
+      const key = this.scopeKey(name, index);
+      const known = this.#assigned.get(key) ?? [];
       known.push({ value, index });
-      this.#assigned.set(name, known);
+      this.#assigned.set(key, known);
     };
-    const assign = (name: string, value: unknown, index: number) => {
-      const expression = record(value);
-      assigned(name, expression, index);
-      const key = expression.kind === "storageLoad" ? literalText(expression.key) : null;
-      const fallback = record(expression.default);
-      const literal = expression.default == null ? null : scalar(fallback.value);
-      const load =
-        key === null ||
-        (expression.default != null && fallback.kind !== "literal") ||
-        literal === undefined
-          ? null
-          : { key, fallback: literal };
-      const only = expression.kind === "literal" ? (scalar(expression.value) ?? null) : null;
-      const fixed = this.#literals.get(name);
-      this.#literals.set(name, fixed === undefined || fixed === only ? only : null);
-      const known = this.#loads.get(name);
-      if (known === undefined) this.#loads.set(name, load);
-      else if (
-        known !== null &&
-        (load === null || known.key !== load.key || known.fallback !== load.fallback)
-      )
-        this.#loads.set(name, null);
-    };
-    // Parameters and loop variables get their values elsewhere.
     for (const definition of list(plan.functions))
       for (const parameter of list(definition.parameters))
-        if (typeof parameter.name === "string") {
-          this.#loads.set(parameter.name, null);
-          this.#literals.set(parameter.name, null);
+        if (typeof parameter.name === "string")
           assigned(parameter.name, { kind: "parameter" }, Number(definition.entryInstruction));
-        }
     instructions.forEach((instruction, index) => {
       if (instruction.kind === "loopStart")
         for (const name of [instruction.variable, instruction.valueVariable])
-          if (typeof name === "string") {
-            this.#loads.set(name, null);
-            this.#literals.set(name, null);
+          if (typeof name === "string")
             assigned(name, { kind: "element", of: instruction.expression }, index);
-          }
       if (
         (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
         typeof instruction.name === "string"
       )
-        assign(instruction.name, instruction.value, index);
+        assigned(instruction.name, record(instruction.value), index);
       if (instruction.kind === "assign") {
         const target = record(instruction.target);
         const name = targetName(instruction.target);
         if (name === null) return;
-        if (target.kind === "identifier") assign(name, instruction.value, index);
-        else {
-          this.#loads.set(name, null);
-          this.#literals.set(name, null);
-          assigned(name, { kind: "part", of: instruction.value }, index);
-        }
+        assigned(
+          name,
+          target.kind === "identifier"
+            ? record(instruction.value)
+            : { kind: "part", of: instruction.value },
+          index,
+        );
       }
     });
   }
@@ -1441,6 +1580,8 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
           ? flow.heldAt(item.temporaryId, before)
           : null;
       if (held !== null) inner.push(...held);
+      // An identifier stays the node it is, which knows its scope.
+      if (item.kind === "identifier") return item;
       return held !== null
         ? { kind: "literal", value: null }
         : Object.fromEntries(
