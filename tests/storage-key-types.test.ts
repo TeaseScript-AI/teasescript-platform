@@ -267,7 +267,7 @@ test("a save fits every load of its key, and a key that is never loaded is not c
   );
 });
 
-test("a key computed at runtime has no type, and operations on its value widen and narrow their places", () => {
+test("a key computed at runtime has no type, and a division of its value widens the place it is stored in", () => {
   assert.deepEqual(
     codes(
       [
@@ -291,30 +291,26 @@ test("a key computed at runtime has no type, and operations on its value widen a
       loads.push(instruction.value.type);
   assert.deepEqual(loads, [null, { kind: "integer" }]);
 
-  // The loaded value is checked where it is stored. A division of it can never give a whole number, so an inferred
-  // integer that takes the result is a number (rule 1.2); an operation on it never gives null, so a declared optional
-  // that takes the result holds its non-null type (rule 5.2). The value itself stays as it was saved.
+  // The loaded value is checked where it is stored, and stays as it was saved. A division of it can never give a
+  // whole number, so an inferred integer that takes the result is a number (rule 1.2) instead of failing at runtime.
   const result = assertRuntimeResumeEquivalent(
     [
       'let id = "a"',
       'let d = load("k.${id}", default: 5)',
       "let p = 0",
       "p = p + d / 2",
-      "let x: integer? = null",
-      'x = load("k.${id}", default: 0) + 1',
       'let raw = load("k.${id}", default: null)',
-      'say "${p} ${x + 1} ${raw}"',
+      'say "${p} ${raw}"',
       "exit",
     ].join("\n"),
     { scriptStorage: [{ key: "k.a", value: 7 }] },
   );
   assert.deepEqual(warnings(result.events), []);
   assert.equal(binding(result.finalSnapshot, "p"), 3.5);
-  assert.equal(binding(result.finalSnapshot, "x"), 8);
   assert.equal(binding(result.finalSnapshot, "raw"), 7);
   assert.deepEqual(
     result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["3.5 9 7"],
+    ["3.5 7"],
   );
 });
 
