@@ -721,6 +721,8 @@ function analyse(
   closedCalls: boolean,
 ): Analysis {
   const knownNull = knownNullCompares(statements);
+  // The types of the elements stored in each list that starts without an element type (storeElement).
+  const elementWrites = new Map<Binding, TeaseType[]>();
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1392,6 +1394,8 @@ function analyse(
     const type = bindingType(list);
     const collection = type === undefined ? undefined : nonNull(type);
     if (collection?.kind !== "list" || nonNull(value).kind === "unknown") return;
+    if (collection.element.kind === "unknown")
+      elementWrites.set(list, [...(elementWrites.get(list) ?? []), nonNull(value)]);
     // A list that starts empty takes its element type from its first element (ADR 0021 rule 1.3), so an element that
     // holds several types needs that union written on the declaration.
     if (
@@ -1447,6 +1451,24 @@ function analyse(
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
+  }
+  // A list that starts empty takes the type of the element it gets first, so one whose elements are of several types,
+  // `out[0] = text` and `out[1] = 0` (ADR 0021 rule 1.3), needs their union written on its declaration.
+  for (const [list, written] of elementWrites) {
+    if (list.declaration === null || list.fixed !== undefined || list.union !== undefined) continue;
+    let element: TeaseType | null = written[0]!;
+    for (const type of written.slice(1)) {
+      if (element === null) break;
+      element = isAssignable(element, type)
+        ? element
+        : isAssignable(type, element)
+          ? type
+          : unionOf(element, type);
+    }
+    if (element?.kind === "union" && annotation(listOf(element)) !== null) {
+      const union = listOf(element);
+      change(() => (list.union = union));
+    }
   }
   // A parameter without a Groovy type that some call gives a number that may be a fraction, `numSeries / 4`, and every
   // other call a number or a whole number, holds numbers, so a variable it sets does too (DisciplineClinic's numSeries).

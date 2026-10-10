@@ -268,4 +268,12 @@ function check(limitValue, n = limitValue) {
   say "Result ${value}"
 }
 check("good")
+// A list that starts empty and gets elements of several types holds their union, and an element read where one type
+// is needed is read open (Concentration's pairs).
+// NOTE SX_UNION_TYPE line 163: Groovy gave the list 'pair' elements of several types; TeaseScript declares it '(string | integer)[]' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is string { ... }
+let pair: (string | integer)[] = []
+pair.add("Hearts")
+pair.add(3)
+// NOTE SX_PLUS_OPERAND_TYPE line 166: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Pair ${pair[0]} ${sexscriptLegacyValue(pair[1]) + 1}"
 exit

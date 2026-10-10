@@ -158,3 +158,9 @@ def check = { limit, n = limit ->
 	show("Result ${value}")
 }
 check("good")
+// A list that starts empty and gets elements of several types holds their union, and an element read where one type
+// is needed is read open (Concentration's pairs).
+def pair = []
+pair[0] = "Hearts"
+pair[1] = 3
+show("Pair " + pair[0] + " " + (pair[1] + 1))
