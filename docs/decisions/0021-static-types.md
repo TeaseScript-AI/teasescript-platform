@@ -178,3 +178,13 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
   of the script saved and an author may still want to migrate.
 - Typing families of computed keys by prefix, such as `"toys.${id}"`: prefixes overlap and computed keys can equal a
   literal key, so a family needs its own explicit form rather than a guessed naming convention.
+- Typing a computed-key load by its default or by the declared type of the place that receives it: no new syntax, but
+  it turns a value of unknown type into a fixed type, so ordinary code such as `value = "ready"` after
+  `let value = load(key, default: 0)`, a `switch` on the value, or returning it beside text becomes a compile error.
+- Widening an inferred `integer` place to `number` when it can take a non-whole result from a value the compiler cannot
+  know, such as `p = p + d / 2` with `d` loaded from a computed key: it removes that runtime failure, but a place has
+  one type for the whole script, so every whole-number use of the place becomes a compile error, also before the
+  store, after `p = 0`, or when the store is in a function that is never called. The wider type also reaches a literal
+  key whose `default:` is that place, so a stored fraction that was treated as absent is accepted and fails later. A
+  correct version needs types that can differ per point in the script; until then such a store is checked when the
+  script runs (rule 1.7).
