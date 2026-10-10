@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import type { RuntimeDebugContext } from "../src/index.js";
 import type * as Adapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
  * The Player host runs Debug's value trace (DEBUGGER.md "Player Debug") while Debug is on: Start traces a new session
@@ -40,50 +40,37 @@ let adapter: Pick<
 
 before(async () => {
   // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    assert.equal(typeof module.usePlayerSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-    const loaded: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/runtime-adapter.ts",
-    );
-    for (const name of [
-      "createPlayerRuntimeSession",
-      "createPlayerRuntimeRestorePoint",
-      "restorePlayerRuntimeSession",
-      "submitPlayerRuntimeComposer",
-      "playerRuntimeSnapshot",
-    ])
-      assert.equal(typeof loaded[name], "function");
-    adapter = {
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      createPlayerRuntimeSession:
-        loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      createPlayerRuntimeRestorePoint:
-        loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      restorePlayerRuntimeSession:
-        loaded.restorePlayerRuntimeSession as typeof Adapter.restorePlayerRuntimeSession,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      submitPlayerRuntimeComposer:
-        loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      playerRuntimeSnapshot: loaded.playerRuntimeSnapshot as typeof Adapter.playerRuntimeSnapshot,
-    };
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  assert.equal(typeof module.usePlayerSession, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  const loaded: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  for (const name of [
+    "createPlayerRuntimeSession",
+    "createPlayerRuntimeRestorePoint",
+    "restorePlayerRuntimeSession",
+    "submitPlayerRuntimeComposer",
+    "playerRuntimeSnapshot",
+  ])
+    assert.equal(typeof loaded[name], "function");
+  adapter = {
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    createPlayerRuntimeSession:
+      loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    createPlayerRuntimeRestorePoint:
+      loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    restorePlayerRuntimeSession:
+      loaded.restorePlayerRuntimeSession as typeof Adapter.restorePlayerRuntimeSession,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    submitPlayerRuntimeComposer:
+      loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    playerRuntimeSnapshot: loaded.playerRuntimeSnapshot as typeof Adapter.playerRuntimeSnapshot,
+  };
 });
 
 function traceOf(host: TraceHost): RuntimeDebugContext | null {

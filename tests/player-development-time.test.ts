@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   activatePlayerRuntimeButton,
@@ -23,6 +22,7 @@ import {
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { MediaProgressReport } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Development time controls (#615) jump scene time through ordinary observations. A jump must give exactly the
 // session that observing the same scene time in real time gives, so its oracles here are independent observation
@@ -314,35 +314,22 @@ let usePlayerDebug: (
 ) => DebugHost;
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const time: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDevelopmentTime.ts",
-    );
-    const debug: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerDebug.ts",
-    );
-    assert.equal(typeof debug.usePlayerDebug, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
-    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof time.useDevelopmentTime, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their host API.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: as above.
-    useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
-  } finally {
-    await server.close();
-  }
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const time: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDevelopmentTime.ts",
+  );
+  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  assert.equal(typeof debug.usePlayerDebug, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
+  usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof time.useDevelopmentTime, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their host API.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: as above.
+  useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
 });
 
 // The browser surface the session host uses without a camera.

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   advancePlayerRuntimeTime,
@@ -23,6 +22,7 @@ import {
   type RandomSite,
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Debug's random draws (DEBUGGER.md "Random draws") through the real Vue session host and engine: with Choose outcomes
 // on in the debug room, a session pauses at every draw and goes on with the outcome the picker gives; Next time and
@@ -95,44 +95,32 @@ let useDebugRandom: (player: RandomHost) => DebugRandom;
 let presentation: Presentation;
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const random: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDebugRandom.ts",
-    );
-    const shown: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/randomDrawPresentation.ts",
-    );
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof random.useDebugRandom, "function");
-    assert.equal(typeof shown.randomDrawCode, "function");
-    assert.equal(typeof shown.outcomeLines, "function");
-    assert.equal(typeof shown.randomDrawChoices, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const random: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDebugRandom.ts",
+  );
+  const shown: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/randomDrawPresentation.ts",
+  );
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof random.useDebugRandom, "function");
+  assert.equal(typeof shown.randomDrawCode, "function");
+  assert.equal(typeof shown.outcomeLines, "function");
+  assert.equal(typeof shown.randomDrawChoices, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: as above.
+  useDebugRandom = random.useDebugRandom as typeof useDebugRandom;
+  presentation = {
     // EVIDENCE: validation: as above.
-    useDebugRandom = random.useDebugRandom as typeof useDebugRandom;
-    presentation = {
-      // EVIDENCE: validation: as above.
-      randomDrawCode: shown.randomDrawCode as Presentation["randomDrawCode"],
-      // EVIDENCE: validation: as above.
-      outcomeLines: shown.outcomeLines as Presentation["outcomeLines"],
-      // EVIDENCE: validation: as above.
-      randomDrawChoices: shown.randomDrawChoices as Presentation["randomDrawChoices"],
-    };
-  } finally {
-    await server.close();
-  }
+    randomDrawCode: shown.randomDrawCode as Presentation["randomDrawCode"],
+    // EVIDENCE: validation: as above.
+    outcomeLines: shown.outcomeLines as Presentation["outcomeLines"],
+    // EVIDENCE: validation: as above.
+    randomDrawChoices: shown.randomDrawChoices as Presentation["randomDrawChoices"],
+  };
 });
 
 function savedData(): ScriptStorageProvider {

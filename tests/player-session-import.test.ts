@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
 import {
@@ -22,6 +21,7 @@ import {
 } from "../player/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface ImportScript {
   readonly scope: string;
@@ -63,27 +63,16 @@ let browserSavedData: (
 // Load the real Vue composable and saved-data host through the existing build tool, as one module graph: its
 // browser-source imports use Vite resolution, and error classes stay one class.
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const savedData: Record<string, unknown> = await server.ssrLoadModule("/player/saved-data.ts");
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof savedData.browserSavedData, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    browserSavedData = savedData.browserSavedData as typeof browserSavedData;
-  } finally {
-    await server.close();
-  }
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const savedData: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof savedData.browserSavedData, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  browserSavedData = savedData.browserSavedData as typeof browserSavedData;
 });
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.

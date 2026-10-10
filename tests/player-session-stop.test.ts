@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, watch, type Ref } from "vue";
-import { createServer } from "vite";
 
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
@@ -58,41 +58,28 @@ let runtime: typeof RuntimeAdapter;
 
 // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const rewind: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDebugRewind.ts",
-    );
-    const time: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDevelopmentTime.ts",
-    );
-    const adapter: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/runtime-adapter.ts",
-    );
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof rewind.useDebugRewind, "function");
-    assert.equal(typeof time.useDevelopmentTime, "function");
-    assert.equal(typeof adapter.createPlayerRuntimeSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and each export is callable; these are their host APIs.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: checked as a function above.
-    useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
-    // EVIDENCE: validation: checked as a function above.
-    useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
-    // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
-    runtime = adapter as typeof runtime;
-  } finally {
-    await server.close();
-  }
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const rewind: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDebugRewind.ts",
+  );
+  const time: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDevelopmentTime.ts",
+  );
+  const adapter: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof rewind.useDebugRewind, "function");
+  assert.equal(typeof time.useDevelopmentTime, "function");
+  assert.equal(typeof adapter.createPlayerRuntimeSession, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and each export is callable; these are their host APIs.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: checked as a function above.
+  useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
+  // EVIDENCE: validation: checked as a function above.
+  useDevelopmentTime = time.useDevelopmentTime as typeof useDevelopmentTime;
+  // EVIDENCE: validation: the source module the compiled one is built from; checked by one export above.
+  runtime = adapter as typeof runtime;
 });
 
 class FakeTrack extends EventTarget {
