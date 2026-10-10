@@ -240,14 +240,23 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   string `"null"` as null. Since `save null` removes the key on `main` too (#484), a typed read followed by a null
   default (`x = loadInteger(k)`, then `if (x == null) x = d`) becomes `load k, default: d` (#541), 101 corpus sites
   (100 in DisciplineClinic); other reads compare with `null` explicitly, and generic `load()` keeps that test because
-  of the `"null"` text. TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old
-  sub-keys.
-- Legacy `load(key)` of a key that is not stored itself rebuilt a list or map from its dotted sub-keys (`key.0`,
-  `key.name`), and `loadMap(key)` is that value cast to a map (sexscripts.jar 1.29.4), so `loadMap("intro")` read the
-  profile's `intro.*` keys as one map and `loadMap("toys")` the owned-item flags. TeaseScript keys are flat and have no
-  listing, so such a read stays reported (`SX_STORAGE_MAP_SEMANTICS`; AI_Mistress, 3 sites, an online-only package).
-  With the distribution's own keys known (profile.ts), a read of `intro`, `toys`, or `clothes` could become a dict
-  built from them, should the profile cover those packages.
+  of the `"null"` text.
+- Every legacy `save(key, value)` first removed the key and its dotted elements (`key.*`), then stored a list as
+  `key.0`, `key.1`, ..., a map as `key.name`, and any other value under the key; generic `load(key)` of a key that was
+  not stored itself rebuilt a list (element names all numbers, padded with null) or a map from them, while
+  `loadString()` and the other typed reads read the key itself only (PropertiesWorker). Where a package's keys can be
+  one another's elements, compared by shape with a parameter's part taken from the calls, its saves, deletes, and
+  generic `load()` reads go through two generated helpers in main.tease that do the same (`sexscriptLegacySave`,
+  `sexscriptLegacyLoad`) and list the keys they store under `sexscriptLegacy.storedKeys`, since TeaseScript storage
+  has no listing; typed reads and other keys stay native. Not covered: data stored by an earlier conversion, which the
+  list does not know; keys that another package saves or reads; a key without literal text that no call resolves; an
+  object with fixed properties, which is stored whole; and a null list element, which legacy stored as the text
+  `"null"`.
+- Legacy `loadMap(key)` is `load(key)` cast to a map (sexscripts.jar 1.29.4), so `loadMap("intro")` read the
+  profile's `intro.*` keys as one map and `loadMap("toys")` the owned-item flags. The profile's keys are no saves of
+  the package, so such a read stays reported (`SX_STORAGE_MAP_SEMANTICS`; AI_Mistress, 3 sites, an online-only
+  package). With the distribution's own keys known (profile.ts), a read of `intro`, `toys`, or `clothes` could become a
+  dict built from them, should the profile cover those packages.
 - `getRandom(max)` returned 0 for `max` 0 (rounding toward zero for a negative bound, and 0..99 for null), while
   `randomInteger()` rejects the empty range `0..0`. Bounds other than a positive whole number known before the script
   runs (a literal, a constant, or arithmetic on them without a division), or a variable that a declaration gives one

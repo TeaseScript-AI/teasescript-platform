@@ -193,6 +193,8 @@ export type HelperName =
   | "loadInteger"
   | "loadIntegerOr"
   | "loadFloat"
+  | "storedSave"
+  | "storedLoad"
   | "textMinus"
   | "textAt"
   | "slice"
@@ -276,6 +278,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "loadInteger",
   "loadIntegerOr",
   "loadFloat",
+  "storedSave",
+  "storedLoad",
   "button",
   "indexOf",
   "count",
@@ -471,6 +475,36 @@ const range = (to: IrExpression, inclusive = false): IrExpression => ({
 const template = (...parts: Array<string | IrExpression>): IrExpression => ({
   kind: "template",
   parts: parts.map((part) => (typeof part === "string" ? { text: part } : { value: part })),
+});
+const call = (target: IrExpression, name: string, ...args: IrExpression[]): IrExpression => ({
+  kind: "methodCall",
+  target,
+  name,
+  arguments: args,
+});
+const not = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "not", value });
+const typedLet = (name: string, type: string, value: IrExpression): IrStatement => ({
+  kind: "let",
+  name,
+  type,
+  value,
+  span: null,
+});
+/** The storage helpers (storedSave, storedLoad) and the key that lists the keys they store. */
+export const STORED_SAVE = "sexscriptLegacySave";
+export const STORED_LOAD = "sexscriptLegacyLoad";
+const STORED_KEYS = "sexscriptLegacy.storedKeys";
+const storedKeys = (): IrStatement =>
+  typedLet("stored", "string[]", {
+    kind: "load",
+    key: lit(STORED_KEYS),
+    defaultValue: { kind: "list", items: [] },
+  });
+const elementLoad = (): IrExpression => ({
+  kind: "call",
+  name: STORED_LOAD,
+  positional: [template(v("prefix"), v("part"))],
+  named: {},
 });
 
 /**
@@ -1207,6 +1241,191 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   loadFloat: {
     name: "sexscriptLegacyLoadFloat",
     build: () => parsedLoad("sexscriptLegacyLoadFloat", "toNumber"),
+  },
+  // PropertiesWorker.save: removes the key and its elements, then stores a list as key.0, key.1, ..., a dict as
+  // key.name, and any other value under the key itself; null stores nothing.
+  storedSave: {
+    name: STORED_SAVE,
+    build: () => ({
+      ...fn(
+        STORED_SAVE,
+        ["key", "value"],
+        [
+          storedKeys(),
+          typedLet("kept", "string[]", { kind: "list", items: [] }),
+          letS("prefix", template(v("key"), ".")),
+          forS("name", v("stored"), [
+            ifS(
+              bin("or", bin("==", v("name"), v("key")), call(v("name"), "startsWith", v("prefix"))),
+              [{ kind: "delete", key: v("name"), span: null }],
+              [add("kept", v("name"))],
+            ),
+          ]),
+          { kind: "delete", key: v("key"), span: null },
+          // A plain value is stored under the key as it is, which keeps the key readable in a plain save.
+          ifS(
+            bin(
+              "or",
+              { kind: "typeTest", value: v("value"), type: "list" },
+              { kind: "typeTest", value: v("value"), type: "dict" },
+            ),
+            [
+              typedLet("names", "string[]", { kind: "list", items: [v("key")] }),
+              typedLet("values", "list", { kind: "list", items: [v("value")] }),
+              letS("position", lit(0)),
+              {
+                kind: "while",
+                condition: bin("<", v("position"), prop(v("names"), "length")),
+                body: [
+                  letS("name", at(v("names"), v("position"))),
+                  letS("item", at(v("values"), v("position"))),
+                  set(v("position"), lit(1), "+="),
+                  ifS(
+                    { kind: "typeTest", value: v("item"), type: "list" },
+                    [
+                      letS("index", lit(0)),
+                      forS("element", v("item"), [
+                        add("names", template(v("name"), ".", v("index"))),
+                        add("values", v("element")),
+                        set(v("index"), lit(1), "+="),
+                      ]),
+                    ],
+                    [
+                      ifS(
+                        { kind: "typeTest", value: v("item"), type: "dict" },
+                        [
+                          {
+                            kind: "for",
+                            variable: "entry",
+                            valueVariable: "inner",
+                            collection: v("item"),
+                            body: [
+                              add("names", template(v("name"), ".", v("entry"))),
+                              add("values", v("inner")),
+                            ],
+                            span: null,
+                          },
+                        ],
+                        [
+                          ifS(bin("!=", v("item"), lit(null)), [
+                            { kind: "save", key: v("name"), value: v("item"), span: null },
+                            add("kept", v("name")),
+                          ]),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+                span: null,
+              },
+            ],
+            [
+              ifS(bin("!=", v("value"), lit(null)), [
+                { kind: "save", key: v("key"), value: v("value"), span: null },
+                add("kept", v("key")),
+              ]),
+            ],
+          ),
+          { kind: "save", key: lit(STORED_KEYS), value: v("kept"), span: null },
+        ],
+      ),
+      leadingComments: [
+        "// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key",
+        "// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.",
+      ],
+    }),
+  },
+  // PropertiesWorker.load: the key's own value, or else the value its elements make, a list padded with null where
+  // their names are all numbers and a dict otherwise, or `whenMissing` without any.
+  storedLoad: {
+    name: STORED_LOAD,
+    build: () =>
+      fn(
+        STORED_LOAD,
+        ["key", "whenMissing"],
+        [
+          letS("value", { kind: "load", key: v("key"), defaultValue: lit(null) }),
+          ifS(bin("==", v("value"), lit(null)), [
+            storedKeys(),
+            letS("prefix", template(v("key"), ".")),
+            typedLet("parts", "string[]", { kind: "list", items: [] }),
+            forS("name", v("stored"), [
+              ifS(call(v("name"), "startsWith", v("prefix")), [
+                letS("part", call(v("name"), "substring", prop(v("prefix"), "length"))),
+                letS("dot", call(v("part"), "indexOf", lit("."))),
+                ifS(bin(">=", v("dot"), lit(0)), [
+                  set(v("part"), call(v("part"), "substring", lit(0), v("dot"))),
+                ]),
+                ifS(not(call(v("parts"), "contains", v("part"))), [add("parts", v("part"))]),
+              ]),
+            ]),
+            letS("numbered", lit(true)),
+            forS("part", v("parts"), [
+              letS("position", lit(0)),
+              {
+                kind: "while",
+                condition: bin("<", v("position"), prop(v("part"), "length")),
+                body: [
+                  ifS(
+                    not(
+                      call(
+                        lit("0123456789"),
+                        "contains",
+                        call(
+                          v("part"),
+                          "substring",
+                          v("position"),
+                          bin("+", v("position"), lit(1)),
+                        ),
+                      ),
+                    ),
+                    [set(v("numbered"), lit(false))],
+                  ),
+                  set(v("position"), lit(1), "+="),
+                ],
+                span: null,
+              },
+            ]),
+            ifS(
+              bin("and", bin(">", prop(v("parts"), "length"), lit(0)), v("numbered")),
+              [
+                typedLet("items", "list", { kind: "list", items: [] }),
+                forS("part", v("parts"), [
+                  letS("index", {
+                    kind: "call",
+                    name: "toInteger",
+                    positional: [v("part")],
+                    named: {},
+                  }),
+                  {
+                    kind: "while",
+                    condition: bin("<=", prop(v("items"), "length"), v("index")),
+                    body: [add("items", lit(null))],
+                    span: null,
+                  },
+                  set(at(v("items"), v("index")), elementLoad()),
+                ]),
+                set(v("value"), v("items")),
+              ],
+              [
+                ifS(bin(">", prop(v("parts"), "length"), lit(0)), [
+                  typedLet("entries", "dict", { kind: "object", properties: [], dict: true }),
+                  forS("part", v("parts"), [
+                    set(
+                      { kind: "index", target: v("entries"), index: v("part"), dict: true },
+                      elementLoad(),
+                    ),
+                  ]),
+                  set(v("value"), v("entries")),
+                ]),
+              ],
+            ),
+          ]),
+          ifS(bin("==", v("value"), lit(null)), [set(v("value"), v("whenMissing"))]),
+          ret(v("value")),
+        ],
+        { whenMissing: lit(null) },
+      ),
   },
   booleanText: {
     name: "sexscriptLegacyBooleanText",

@@ -353,7 +353,7 @@ const ONLINE_STORAGE_NOTE =
   "The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.";
 
 /** The storage key prefix under which a sent photo reference is kept, by its code (sendImage). */
-const SENT_IMAGE_PREFIX = "sexscript.image.";
+export const SENT_IMAGE_PREFIX = "sexscript.image.";
 
 const DIRECT_STORAGE_LOADS = new Set([
   "load",
@@ -16842,7 +16842,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       return { kind: "load", key, read: "string" };
     if (call.name === "loadBoolean" || call.name === "receiveBoolean")
       return { kind: "load", key, read: "boolean" };
-    return { kind: "load", key };
+    // Legacy load() rebuilt a list or a map from the key's elements where the key itself was not stored.
+    return call.name === "load" ? { kind: "load", key, rebuilds: true } : { kind: "load", key };
   }
   if (call.name === "loadMap") {
     return unsupportedExpression(

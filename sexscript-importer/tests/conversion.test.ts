@@ -958,6 +958,7 @@ test(
       "entries",
       "module-files",
       "module-list-append",
+      "stored-list",
       "entry-hub",
       "entry-own-folder",
       "stand-alone",
@@ -1017,6 +1018,23 @@ test(
         // The entry holds the package's global helpers and goes straight to the story, with no menu.
         const menu = emitTease(unit.main.menu);
         assert.ok(menu.endsWith('\ngoto "Story/start.tease"\n') && !menu.includes("choose"), menu);
+      }
+      if (name === "stored-list") {
+        // The scene reads the elements of the list the club saved, each under its own key as legacy storage kept it.
+        const report = analyzeFeasibility(files, {
+          compiler: projectResult.compiler,
+          runner: projectResult.runner,
+        });
+        assert.deepEqual(
+          report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
+          [
+            {
+              start: "main.tease",
+              status: "halted",
+              visited: ["main.tease", "club.tease", "scene.tease"],
+            },
+          ],
+        );
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.

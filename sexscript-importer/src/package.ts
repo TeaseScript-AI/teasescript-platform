@@ -1,3 +1,4 @@
+import { withLegacyStorage } from "./legacy-storage.ts";
 import {
   constantString,
   isAstNode,
@@ -1052,8 +1053,10 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const moduleFiles = withModuleFiles(noted, files);
-  const withClasses = withBooleanResultTruths(
-    noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
+  const withClasses = withLegacyStorage(
+    withBooleanResultTruths(
+      noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
+    ),
   );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
@@ -1623,6 +1626,8 @@ function freeNames(statement: FunctionStatement): { variables: Set<string>; call
     if (!isRecord(value)) return;
     if (value.kind === "let" && typeof value.name === "string") declared.add(value.name);
     if (value.kind === "for" && typeof value.variable === "string") declared.add(value.variable);
+    if (value.kind === "for" && typeof value.valueVariable === "string")
+      declared.add(value.valueVariable);
     if (value.kind === "variable" && typeof value.name === "string") variables.add(value.name);
     if (value.kind === "call" && typeof value.name === "string") calls.add(value.name);
     for (const child of Object.values(value)) visit(child);

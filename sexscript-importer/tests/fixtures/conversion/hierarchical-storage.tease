@@ -1,0 +1,148 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key
+// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
+function sexscriptLegacySave(key, value) {
+  let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+  let kept: string[] = []
+  let prefix = "${key}."
+  for name in stored {
+    if name == key or name.startsWith(prefix) {
+      delete name
+    } else {
+      kept.add(name)
+    }
+  }
+  delete key
+  if value is list or value is dict {
+    let names: string[] = [key]
+    let values: list = [value]
+    let position = 0
+    while position < names.length {
+      let name = names[position]
+      let item = values[position]
+      position += 1
+      if item is list {
+        let indexValue = 0
+        for element in item {
+          names.add("${name}.${indexValue}")
+          values.add(element)
+          indexValue += 1
+        }
+      } else if item is dict {
+        for entry, inner in item {
+          names.add("${name}.${entry}")
+          values.add(inner)
+        }
+      } else if item != null {
+        save item as name
+        kept.add(name)
+      }
+    }
+  } else if value != null {
+    save value as key
+    kept.add(key)
+  }
+  save kept as "sexscriptLegacy.storedKeys"
+}
+function sexscriptLegacyLoad(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+    let prefix = "${key}."
+    let parts: string[] = []
+    for name in stored {
+      if name.startsWith(prefix) {
+        let part = name.substring(prefix.length)
+        let dot = part.indexOf(".")
+        if dot >= 0 {
+          part = part.substring(0, dot)
+        }
+        if not parts.contains(part) {
+          parts.add(part)
+        }
+      }
+    }
+    let numbered = true
+    for part in parts {
+      let position = 0
+      while position < part.length {
+        if not "0123456789".contains(part.substring(position, position + 1)) {
+          numbered = false
+        }
+        position += 1
+      }
+    }
+    if parts.length > 0 and numbered {
+      let items: list = []
+      for part in parts {
+        let indexValue = toInteger(part)
+        while items.length <= indexValue {
+          items.add(null)
+        }
+        items[indexValue] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = items
+    } else if parts.length > 0 {
+      let entries: dict = dict{}
+      for part in parts {
+        entries[part] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = entries
+    }
+  }
+  if value == null {
+    value = whenMissing
+  }
+  return value
+}
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
+// Legacy storage kept a list as one key per element, which a read of an element reads (DisciplineClinic's session toys).
+let toys = ["clamps", "whip", "cane"]
+sexscriptLegacySave("club.toys", toys)
+// A script variable with the name of a helper's own variable, index, gives the helper's variable another name.
+let index = 0
+let laid = ""
+while load("club.toys.${index}", default: "") != "" {
+  laid += "${load("club.toys.${index}", default: "")} "
+  index += 1
+}
+say "Lay out ${laid}"
+// An element saved on its own is part of its key's map for load() (ToyExpanded's availability).
+sexscriptLegacySave("club.visits.monday", 2)
+sexscriptLegacySave("club.visits.friday", 3)
+let visits = sexscriptLegacyLoad("club.visits")
+// NOTE SX_LENGTH_RECEIVER line 16: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Visits ${visits.length} ${sexscriptLegacyLoadInteger("club.visits.friday")}"
+// Elements whose names are numbers make a list, with null where a number is missing.
+sexscriptLegacySave("club.days.3", 5)
+sexscriptLegacySave("club.days.1", 2)
+let days = sexscriptLegacyLoad("club.days")
+// NOTE SX_LENGTH_RECEIVER line 21: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+// NOTE SX_INDEX_PAST_END line 21: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+say "Days ${days.length} ${days[1]} ${sexscriptLegacyItemAt(days, 2) == null}"
+// A key that holds a value first and gets elements later keeps its value for load(), as legacy did.
+sexscriptLegacySave("club.level", 3)
+sexscriptLegacySave("club.level.kink", 5)
+say "Level ${sexscriptLegacyLoad("club.level")} ${sexscriptLegacyLoadInteger("club.level.kink")}"
+// save(key, null) removes the key with all its elements.
+sexscriptLegacySave("club", null)
+// NOTE SX_LOAD_OPEN_NULL line 28: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+say "Reset ${sexscriptLegacyLoad("club.toys") == null} ${load("club.level.kink", default: sexscriptLegacyValue(null)) == null} ${sexscriptLegacyLoad("club") == null}"
+exit

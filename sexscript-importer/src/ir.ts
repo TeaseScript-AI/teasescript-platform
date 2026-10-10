@@ -314,6 +314,8 @@ export type IrExpression =
       fill?: true;
       /** A read whose variable the script fills in later and uses as a value, which keeps an open null. */
       open?: true;
+      /** Legacy `load()`, which rebuilt a list or a map from the key's elements (legacy-storage.ts). */
+      rebuilds?: true;
     }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
