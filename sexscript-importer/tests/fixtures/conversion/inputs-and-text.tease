@@ -78,5 +78,9 @@ let penalty = [-60, 0]
 penalty[0] = penalty[0] + 30
 timer max(penalty[0], 0) s
 timer (randomInteger(0..3) + 1) s
+// So is a variable that every write sets to such a number.
+let gaugeStep = 1
+gaugeStep += 1
+timer (gaugeStep * 2) s
 say "Gauges done"
 exit

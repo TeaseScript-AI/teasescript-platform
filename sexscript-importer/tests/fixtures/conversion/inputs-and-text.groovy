@@ -47,4 +47,8 @@ def penalty = [-60, 0]
 penalty[0] = penalty[0] + 30
 waitWithGauge(penalty[0])
 waitWithGauge(getRandom(3) + 1)
+// So is a variable that every write sets to such a number.
+def gaugeStep = 1
+gaugeStep += 1
+waitWithGauge(gaugeStep * 2)
 show("Gauges done")

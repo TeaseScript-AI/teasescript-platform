@@ -4,6 +4,7 @@ import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import { withLoopedTailCalls } from "./tail-calls.ts";
 import { withListAppends } from "./list-appends.ts";
+import { atLeastZero, withProvenGaugeWaits } from "./gauge-waits.ts";
 import {
   constantString,
   groovyParameters,
@@ -2775,7 +2776,8 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
       },
     ]);
   }
-  if (replaced.size === 0 && staleText.size === 0) return withListAppends(result.statements);
+  if (replaced.size === 0 && staleText.size === 0)
+    return withListAppends(withProvenGaugeWaits(result.statements));
   const replace = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((statement): IrStatement[] => {
       if (isStale(statement)) return [];
@@ -2802,7 +2804,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
           return [statement];
       }
     });
-  return withListAppends(replace(result.statements));
+  return withListAppends(withProvenGaugeWaits(replace(result.statements)));
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
@@ -17567,39 +17569,6 @@ function lowerArguments(args: AstNode[], context: LowerContext): IrExpression[] 
     result.push(lowered);
   }
   return result;
-}
-
-/**
- * A number of seconds as a timer takes it: as it is where it is certain to be at least 0, as a literal at least 0,
- * `randomInteger(a..b)` with such an `a`, a random number below such a bound, or a sum, product, rounding, absolute
- * value, or maximum with such numbers; else `max(seconds, 0)`.
- */
-function atLeastZero(seconds: IrExpression): IrExpression {
-  const certain = (value: IrExpression): boolean => {
-    if (value.kind === "literal") return typeof value.value === "number" && value.value >= 0;
-    if (value.kind === "binary")
-      return (
-        (value.operator === "+" || value.operator === "*") &&
-        certain(value.left) &&
-        certain(value.right)
-      );
-    if (value.kind !== "call" || value.local === true) return false;
-    const [first] = value.positional;
-    if (value.name === "abs") return value.positional.length === 1;
-    if (value.name === "max") return value.positional.some(certain);
-    if (value.name === "randomInteger") return first?.kind === "range" && certain(first.from);
-    if (["round", "floor", "ceil", "sexscriptLegacyRandom"].includes(value.name))
-      return value.positional.length === 1 && first !== undefined && certain(first);
-    return false;
-  };
-  return certain(seconds)
-    ? seconds
-    : {
-        kind: "call",
-        name: "max",
-        positional: [seconds, { kind: "literal", value: 0 }],
-        named: {},
-      };
 }
 
 function oneArgumentStatement(
