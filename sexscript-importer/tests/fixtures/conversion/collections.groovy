@@ -117,3 +117,13 @@ for (toy in ["paddle", "cane"]) {
 }
 owned = owned.reverse()
 show("Owned " + owned.size())
+// A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
+// check.
+def marks = ["a|re", "b|ok"].collect { entry ->
+	def parts = entry.split('\\|')
+	if (parts[1] == "re") {
+		return parts[0] + "|ex"
+	}
+	return entry
+}
+show("Marks " + marks.join(","))

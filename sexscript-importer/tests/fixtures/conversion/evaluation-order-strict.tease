@@ -22,10 +22,7 @@ let xs = [1, 2, 3]
 say "Pick ${xs[getRandom(xs.length)]}"
 let count = 0
 let ready = false
-let question = null
-if question != null {
-  say question
-}
+// NOTE SX_NULL_ONLY_VARIABLE line 11: question is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
 let answer = askText().replace("\n", " ")
 let ignoredAnswer1 = askBoolean "Ready?"
 let match = 1

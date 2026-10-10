@@ -31,6 +31,16 @@ function sexscriptLegacyItemAt(listValue, position) {
   }
   return listValue[position]
 }
+function sexscriptLegacySplit(text, separator) {
+  let partsValue = text.split(separator)
+  if text == "" {
+    return partsValue
+  }
+  while partsValue.length > 0 and partsValue.last == "" {
+    partsValue.removeLast()
+  }
+  return partsValue
+}
 function sexscriptLegacyReversed(itemsValue3) {
   let result = []
   let index = itemsValue3.length - 1
@@ -294,4 +304,17 @@ for toy in ["paddle", "cane"] {
 }
 owned = sexscriptLegacyReversed(owned)
 say "Owned ${owned.length}"
+// A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
+// check.
+let marks = []
+for entry in ["a|re", "b|ok"] {
+  let partsValue2 = sexscriptLegacySplit(entry, "|")
+  if partsValue2[1] == "re" {
+    marks.add("${partsValue2[0]}|ex")
+    continue
+  }
+  marks.add(entry)
+}
+// NOTE SX_LIST_JOIN line 129: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Marks ${marks.join(",")}"
 exit

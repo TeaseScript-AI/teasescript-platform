@@ -21,3 +21,9 @@ outer: for (def i = 0; i < 2; i++) {
 loadBoolean("ritual.done")
 def limit = 7.5
 if (limit > 5) "Limit now ${Math.round(limit)} seconds."
+// A variable the script never gives a value only holds null: it is left out and read as null, as SubChallenges'
+// challenge types.
+def challengeType
+def kind = challengeType
+if (kind == null) show("No kind yet")
+if (challengeType != null) show("Kind " + challengeType)

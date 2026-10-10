@@ -282,6 +282,8 @@ interface LowerContext {
   writeTargets: Set<AstNode>;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
+  /** Variables that only ever hold null, whose declarations are left out and whose reads read null (nullOnlyVariables). */
+  nullOnly: ReadonlySet<string>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -1342,6 +1344,45 @@ function declaredWrites(body: AstNode, keys: BindingKeys): DeclaredWrites {
   return { initialized, other };
 }
 
+/**
+ * Variables that only ever hold null: declared without a value or with null, and never set, counted, or changed
+ * anywhere else in the script, as SubChallenges' `def ChallengeType0` beside `typeout = ChallengeType0`. They are the
+ * legacy script's dead variables, whose every read gave null.
+ */
+function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
+  const declared = new Set<string>();
+  const changed = new Set<string>();
+  const read = new Set<string>();
+  const declarationTargets = new Set<unknown>();
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      declarationTargets.add(node.left);
+      const key = bindingKey(node.left, context.bindings);
+      // `int count` starts at 0 and `boolean ready` at false, not null.
+      const primitive = PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "");
+      if (key !== null && !primitive) declared.add(key);
+    } else if (node.kind === "postfix" || node.kind === "prefix") {
+      const key = bindingKey(node.value, context.bindings);
+      if (key !== null) changed.add(key);
+    } else if (node.kind === "variable" && !declarationTargets.has(node)) {
+      const key = bindingKey(node, context.bindings);
+      if (key !== null) read.add(key);
+    }
+  });
+  // A variable nothing reads keeps its declaration, as before.
+  return new Set(
+    [...declared].filter(
+      (key) =>
+        read.has(key) &&
+        !changed.has(key) &&
+        !context.compoundValues.has(key) &&
+        (context.assignedValues.get(key) ?? []).every(
+          (value) => isNullConstant(value) || isEmptyGroovyExpression(value),
+        ),
+    ),
+  );
+}
+
 /** The value each compound update gives its variable, as the binary expression it computes (`x += y` is `x + y`). */
 function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
   const values = new Map<string, AstNode[]>();
@@ -1484,6 +1525,7 @@ export function lowerParsedFile(
     knownKeys: [],
     writeTargets: new Set(),
     indexedSplits: new Set(),
+    nullOnly: new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -1571,6 +1613,7 @@ export function lowerParsedFile(
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
+    context.nullOnly = nullOnlyVariables(body, context);
     context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
@@ -2637,6 +2680,7 @@ function lowerHelperMethod(
     knownKeys: [],
     writeTargets: new Set(),
     indexedSplits: new Set(),
+    nullOnly: new Set(),
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -4555,6 +4599,26 @@ function lowerDeclaration(
         "SX_UNSUPPORTED_DECLARATION",
         "Only single-variable declarations are supported.",
       ),
+    ];
+  }
+  // A variable that only ever held null is left out, with a note where it was declared.
+  if (context.nullOnly.has(bindingKey(node.left, context.bindings) ?? "")) {
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_NULL_ONLY_VARIABLE",
+      severity: "info",
+      message: `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    const line = span === null ? "" : ` line ${span.line}`;
+    return [
+      {
+        kind: "comment",
+        text: `// NOTE ${diagnostic.code}${line}: ${diagnostic.message}`,
+        trailing: false,
+        span,
+      },
     ];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
@@ -7207,7 +7271,12 @@ function lowerCollectionAssignment(
   if (argument !== null && argument.parameters.length !== 1) return null;
   const variable = argument?.parameters[0] ?? "item";
   const result = argument === null ? null : closureResult(argument.closure);
-  if (argument !== null && result === null) return null;
+  // A collect() closure that returns early adds each returned element in the loop (collectReturnsBody).
+  const returning =
+    call.name === "collect" && argument !== null && result === null
+      ? collectReturnsBody(argument.closure, syntheticVariable("collected", null)) !== null
+      : false;
+  if (argument !== null && result === null && !returning) return null;
   // Groovy sum() adds numbers (it joins text) and returns null for an empty list.
   const summand =
     result === null ? listElementType(receiver, context) : inferType(result.value, context.types);
@@ -7310,6 +7379,14 @@ function lowerCollectionAssignment(
       initial = { kind: "list", items: [] };
       if (identity) {
         body = [add(item)];
+        break;
+      }
+      if (returning) {
+        const variables = new Map(context.types.variables);
+        variables.set(accumulator, LIST);
+        context.types = { ...context.types, variables };
+        const statements = collectReturnsBody(argument!.closure, syntheticVariable(accumulator, span));
+        body = lowerStatementList(statements!, null, context);
         break;
       }
       const value = computed(result!.value);
@@ -7416,6 +7493,60 @@ function listElementType(node: AstNode, context: LowerContext): number {
     return nodeArray(node.items).reduce((type, item) => type | inferType(item, context.types), 0);
   }
   return context.types.listElements?.get(variableName(node) ?? "") ?? UNKNOWN;
+}
+
+/**
+ * The body of a collect() closure that returns early, as loop statements that add each returned element to the
+ * accumulator and go on with the next element: `return v` becomes `accumulator.add(v)` and `continue`, and a last value
+ * is added too (SissyPlaytimeExposure's exposure check). Null where a return sits in a loop or switch of the body,
+ * which a continue would not leave, or where the body does not end in a return or a value.
+ */
+function collectReturnsBody(closure: AstNode, accumulator: AstNode): AstNode[] | null {
+  let jumps = true;
+  const add = (value: AstNode | null, span: SourceSpan | null): AstNode => ({
+    kind: "expressionStatement",
+    span,
+    expression: {
+      kind: "methodCall",
+      span,
+      object: accumulator,
+      method: { kind: "constant", span, value: "add" },
+      arguments: { kind: "arguments", span, items: [value ?? syntheticConstant(null, span)] },
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    },
+  });
+  const rewrite = (node: AstNode, inJump: boolean): AstNode => {
+    if (node.kind === "closure") return node;
+    if (node.kind === "return") {
+      if (inJump) jumps = false;
+      return {
+        kind: "block",
+        span: node.span,
+        statements: [add(asNode(node.value), node.span), { kind: "continue", span: node.span, label: null }],
+      };
+    }
+    const nested = inJump || ["for", "while", "doWhile", "switch"].includes(node.kind);
+    const result: AstNode = { ...node };
+    for (const [key, value] of Object.entries(node)) {
+      if (isAstNode(value)) result[key] = rewrite(value, nested);
+      else if (Array.isArray(value))
+        result[key] = value.map((item) => (isAstNode(item) ? rewrite(item, nested) : item));
+    }
+    return result;
+  };
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const last = statements.at(-1);
+  if (last === undefined) return null;
+  const leading = statements.slice(0, -1).map((statement) => rewrite(statement, false));
+  const tail =
+    last.kind === "return"
+      ? add(asNode(last.value), last.span)
+      : last.kind === "expressionStatement"
+        ? add(asNode(last.expression), last.span)
+        : null;
+  return jumps && tail !== null ? [...leading, tail] : null;
 }
 
 /** A closure body ending in an expression (or `return expression`) with no other returns. */
@@ -8677,6 +8808,22 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const thenNode = asNode(node.then);
   const elseNode = asNode(node.else);
+  // A test that a variable which only ever held null holds a value never passed: the branch is left out.
+  if (
+    conditionNode !== null &&
+    (elseNode === null || elseNode.kind === "empty") &&
+    nullOnlyTruth(conditionNode, context) === false
+  ) {
+    const line = node.span === null ? "" : ` line ${node.span.line}`;
+    return [
+      {
+        kind: "comment",
+        text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.`,
+        trailing: false,
+        span: node.span,
+      },
+    ];
+  }
   const condition = conditionNode === null ? null : lowerCondition(conditionNode, context);
   if (condition === null || thenNode === null || thenNode.kind === "empty") {
     return [
@@ -8699,6 +8846,34 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
           lowerBranch(elseNode, context),
         );
   return [{ kind: "if", condition, then, else: otherwise, span: node.span }];
+}
+
+/** Whether a value is null wherever it is read: the null constant, or a variable that only ever held null. */
+function holdsOnlyNull(node: AstNode, context: LowerContext): boolean {
+  return (
+    isNullConstant(node) ||
+    (node.kind === "variable" && context.nullOnly.has(bindingKey(node, context.bindings) ?? ""))
+  );
+}
+
+/**
+ * The outcome of a test on a variable that only ever held null (nullOnlyVariables): `x`, `!x`, `x == null`,
+ * `x != null`, and an `&&` whose first test is known false. Null where the outcome is not known that way.
+ */
+function nullOnlyTruth(node: AstNode, context: LowerContext): boolean | null {
+  const nullOnly = (side: AstNode | null): boolean => side !== null && holdsOnlyNull(side, context);
+  if (node.kind === "variable") return nullOnly(node) ? false : null;
+  if (node.kind === "not") {
+    const inner = asNode(node.value);
+    const truth = inner === null ? null : nullOnlyTruth(inner, context);
+    return truth === null ? null : !truth;
+  }
+  if (node.kind !== "binary") return null;
+  const [left, right] = [asNode(node.left), asNode(node.right)];
+  if (node.operator === "&&") return left !== null && nullOnlyTruth(left, context) === false ? false : null;
+  if (node.operator !== "==" && node.operator !== "!=") return null;
+  if (!nullOnly(left) || !nullOnly(right) || (isNullConstant(left!) && isNullConstant(right!))) return null;
+  return node.operator === "==";
 }
 
 function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
@@ -10046,6 +10221,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
       }
+      if (!context.writeTargets.has(node) && context.nullOnly.has(bindingKey(node, context.bindings) ?? ""))
+        return { kind: "literal", value: null };
       if (
         context.checksUndefinedVariables &&
         !context.types.variables.has(name) &&
@@ -16375,7 +16552,7 @@ function pushPrompt(
    */
   computed: { nodes: readonly AstNode[]; values: IrExpression[] } | null = null,
 ): boolean {
-  if (isNullConstant(messageNode)) return true;
+  if (holdsOnlyNull(messageNode, context)) return true;
   const root = context.statementRoot;
   const effects = computed?.nodes.filter((node) => !isPure(node, context)) ?? [];
   // Groovy evaluates all arguments before showing the message, so other arguments must not have effects.

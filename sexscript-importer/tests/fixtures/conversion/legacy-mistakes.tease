@@ -42,4 +42,12 @@ let limit = 7.5
 // NOTE SX_DISCARDED_VALUE line 23: Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).
 if limit > 5 {
 }
+// A variable the script never gives a value only holds null: it is left out and read as null, as SubChallenges'
+// challenge types.
+// NOTE SX_NULL_ONLY_VARIABLE line 26: challengeType is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+let kind = null
+if kind == null {
+  say "No kind yet"
+}
+// NOTE SX_NULL_ONLY_VARIABLE line 29: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.
 exit
