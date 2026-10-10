@@ -11,6 +11,7 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
+  serializeValidatedRuntimeJson,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -19,8 +20,10 @@ import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
 } from "../src/runtime/serializable-values.js";
+import { createFreshRuntimeSession, createRuntimeSession } from "../src/runtime/session.js";
 import {
   createFreshRuntimeSnapshot,
+  DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
@@ -69,6 +72,39 @@ test("checkpoint restoration accepts the configured call-depth ceiling", () => {
     restoreCheckpoint(createCheckpoint(compiled, snapshot)).snapshot.maxCallDepth,
     MAX_SUPPORTED_CALL_DEPTH,
   );
+});
+
+test("a call stack as deep as the default call depth saves, restores, and resumes", () => {
+  // Each caller waits inside its loop, in the argument of a mutating call, so every frame keeps a loop and a prepared
+  // reference.
+  const source = [
+    "function level(n) {",
+    "  let items = [n]",
+    "  repeat 1 {",
+    "    if n <= 1 {",
+    "      wait 1 s",
+    "      return 1",
+    "    }",
+    "    items.add(level(n - 1))",
+    "  }",
+    "  return items.length",
+    "}",
+    `let deepest = level(${DEFAULT_MAX_CALL_DEPTH})`,
+    "exit",
+  ].join("\n");
+  const compiled = plan(source);
+  const session = createFreshRuntimeSession(compiled);
+  session.run();
+  assert.equal(session.callStack().length, DEFAULT_MAX_CALL_DEPTH);
+  // As the Player keeps a session and opens it again: both capture and validate the state.
+  const kept = serializeValidatedRuntimeJson(session.exportSnapshot());
+  const restored = createRuntimeSession(compiled, JSON.parse(kept));
+  assert.equal(serializeValidatedRuntimeJson(restored.exportTrustedSnapshot()), kept);
+  restored.observeTime(1_000);
+  restored.run();
+  const view = restored.view();
+  assert.equal(view.status, "halted");
+  assert.equal(view.failure, null);
 });
 
 test("restores inside function loops, after continue, and before early return", () => {

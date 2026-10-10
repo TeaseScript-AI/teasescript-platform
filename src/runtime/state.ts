@@ -130,8 +130,8 @@ import {
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 72;
-export const DEFAULT_MAX_CALL_DEPTH = 256;
-export const MAX_SUPPORTED_CALL_DEPTH = 4096;
+export const DEFAULT_MAX_CALL_DEPTH = 8192;
+export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
@@ -1174,12 +1174,13 @@ function validateCapturedRuntimeSnapshotDetails(
   validateGlobals(value, plan, errors);
   validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
+  const scopesById = referenceScopesById(scopes);
   const preparedReferenceTemporaries = analysis?.preparedReferenceTemporaries;
   const preparedSayTemporaryOwnership = analysis?.preparedSayTemporaryOwnership;
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
-    scopes,
+    scopesById,
     value.speakers,
     preparedReferenceTemporaries,
     "Runtime temporaries",
@@ -1202,6 +1203,7 @@ function validateCapturedRuntimeSnapshotDetails(
     plan,
     analysis,
     continuationRequests,
+    scopesById,
     preparedReferenceTemporaries,
     preparedSayTemporaryOwnership,
     value,
@@ -1602,7 +1604,7 @@ const preparedReferencePropertyNames = Object.freeze([
 
 function validatePreparedReferenceTemporaries(
   value: unknown,
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   speakers: unknown,
   preparedTemporaries: ReadonlyMap<number, boolean> | undefined,
   label: string,
@@ -1617,7 +1619,7 @@ function validatePreparedReferenceTemporaries(
     if (keepsRoot === undefined) continue;
     const failure = validatePreparedReferenceDescriptor(
       temporary.value,
-      frames,
+      scopesById,
       speakers,
       keepsRoot,
     );
@@ -1754,7 +1756,7 @@ function validPreparedSayContextualSpeaker(
 /** `keepsRoot`: whether the plan keeps a copy of the root of an attached reference in this temporary. */
 function validatePreparedReferenceDescriptor(
   value: unknown,
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   speakers: unknown,
   keepsRoot: boolean,
 ): string | null {
@@ -1810,7 +1812,7 @@ function validatePreparedReferenceDescriptor(
   }
 
   if (rootFrameId !== null && rootName !== null) {
-    const binding = serializedFrameBinding(frames, rootFrameId, rootName);
+    const binding = serializedFrameBinding(scopesById, rootFrameId, rootName);
     if (!binding.found) {
       return "the binding root does not exist in the serialized scope frames.";
     }
@@ -1892,13 +1894,12 @@ function parsePreparedReferencePath(value: unknown): readonly PreparedReferenceP
 }
 
 function serializedFrameBinding(
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   frameId: number,
   name: string,
 ): { readonly found: boolean; readonly value: unknown } {
-  if (!Array.isArray(frames)) return { found: false, value: null };
-  const frame = frames.find((candidate) => isPlainRecord(candidate) && candidate.id === frameId);
-  if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) {
+  const frame = scopesById.get(frameId);
+  if (frame === undefined || !Array.isArray(frame.bindings)) {
     return { found: false, value: null };
   }
   const binding = frame.bindings.find(
@@ -2037,6 +2038,7 @@ function validateCallFrames(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   continuationRequests: ContinuationRequests,
+  scopesById: ReferenceScopesById,
   preparedReferenceTemporaries: ReadonlyMap<number, boolean> | undefined,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership | undefined,
   snapshotValue: Record<string, unknown>,
@@ -2175,7 +2177,7 @@ function validateCallFrames(
     validateTemporaries(frame.callerTemporaries, plan, "Runtime caller temporaries", errors);
     validatePreparedReferenceTemporaries(
       frame.callerTemporaries,
-      referenceScopes(snapshotValue),
+      scopesById,
       speakers,
       preparedReferenceTemporaries,
       "Runtime caller temporaries",
@@ -2234,9 +2236,8 @@ function validateCallFrames(
         // The caller stands at its call, or where it was interrupted.
         isPlainRecord(interruption) ? frame.returnInstruction : frame.returnInstruction - 1,
         contextLoopIds(
-          Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
-            ? loopFrames.slice(0, frame.loopBaseDepth)
-            : [],
+          Array.isArray(loopFrames) ? loopFrames : [],
+          nonNegativeSafeInteger(frame.loopBaseDepth) ? frame.loopBaseDepth : 0,
           callContextOwner(value, frameIndex),
         ),
         analysis!,
@@ -3199,6 +3200,19 @@ function referenceScopes(snapshot: Record<string, unknown>): unknown {
     : snapshot.frames;
 }
 
+/** Each of the {@link referenceScopes} by its ID, the first with that ID; built once per validation. */
+type ReferenceScopesById = ReadonlyMap<number, Record<string, unknown>>;
+
+function referenceScopesById(scopes: unknown): ReferenceScopesById {
+  const byId = new Map<number, Record<string, unknown>>();
+  if (!Array.isArray(scopes)) return byId;
+  for (const scope of scopes) {
+    if (isPlainRecord(scope) && typeof scope.id === "number" && !byId.has(scope.id))
+      byId.set(scope.id, scope);
+  }
+  return byId;
+}
+
 /**
  * The session's globals: the host's, then those that the start of `main.tease` set up so far, in its order (ADR 0022
  * §6). While it runs, exactly the globals and speakers before the next instruction are set up; after it, all of them. A
@@ -4012,13 +4026,14 @@ function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): stri
   }
 }
 
-/** The loops of a context, outermost first: the loop frames at the end that the context owns. */
+/** The loops of a context, outermost first: the loop frames just before `end` that the context owns. */
 function contextLoopIds(
   loopFrames: readonly unknown[],
+  end: number,
   owner: number | null | undefined,
 ): number[] {
   const loopIds: number[] = [];
-  for (let index = loopFrames.length - 1; index >= 0; index -= 1) {
+  for (let index = Math.min(end, loopFrames.length) - 1; index >= 0; index -= 1) {
     const frame = loopFrames[index];
     if (
       !isPlainRecord(frame) ||

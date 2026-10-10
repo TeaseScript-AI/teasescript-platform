@@ -72,11 +72,18 @@ export function findRoot(
 
 /** A scope on the stack or a retained root, by ID: where a prepared reference's binding lives. */
 export function findScope(
-  snapshot: Pick<RuntimeSnapshot, "frames" | "retainedScopes">,
+  snapshot: Pick<RuntimeSnapshot, "callFrames" | "frames" | "retainedScopes">,
   id: number,
 ): RuntimeScopeFrameSnapshot | undefined {
-  return (
-    snapshot.frames.find((frame) => frame.id === id) ??
-    snapshot.retainedScopes.find((frame) => frame.id === id)
-  );
+  // Scope IDs are unique. The running call's own scopes at the top come first, where a reference mostly points, so a
+  // deep stack is not searched from its bottom at each use.
+  const { frames } = snapshot;
+  const base = snapshot.callFrames.at(-1)?.scopeBaseDepth ?? 0;
+  for (let index = frames.length - 1; index >= base; index -= 1) {
+    if (frames[index]!.id === id) return frames[index];
+  }
+  for (let index = 0; index < base; index += 1) {
+    if (frames[index]!.id === id) return frames[index];
+  }
+  return snapshot.retainedScopes.find((frame) => frame.id === id);
 }
