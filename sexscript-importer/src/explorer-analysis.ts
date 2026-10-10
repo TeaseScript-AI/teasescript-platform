@@ -424,6 +424,7 @@ export class DataFlow {
   /** The contexts of {@link #enter}, by ID; each call's arguments by the scope key of the parameter they give. */
   readonly #callContexts = new Map<string, CallContext>();
   readonly #argumentsByCall = new Map<number, ReadonlyMap<string, Data>>();
+  readonly #ownKeysOf = new Map<number, readonly string[]>();
   /** {@link #callFlow}, by call, constants, and depth; cleared each round of the fixpoint, kept after it. */
   readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
@@ -786,22 +787,58 @@ export class DataFlow {
   }
 
   /**
-   * The flows of the parameters a context's call gives ({@link CallContext.flows}): each argument's, read in the context
-   * of the call, with what the function assigns the parameter.
+   * The flows of a context's call in its function ({@link CallContext.flows}): of each parameter, the argument's, read
+   * where the call is, or for one left out its default's, read with the parameters before it; and of each variable of the
+   * function's own, as what it sets it to reads those (`let m = n + 1`), with what it assigns the parameters.
    */
   #flowsIn(context: CallContext | null): ReadonlyMap<string, Flow> | undefined {
     if (context === null) return undefined;
     if (context.flows !== undefined) return context.flows;
     const flows = new Map<string, Flow>();
-    for (const [key, argument] of this.#argumentsOf(context.call)) {
-      const flow = emptyFlow();
-      merge(flow, this.#flowIn(argument, context.call, context.outer));
-      const assigned = this.#assignedInCode.has(key) ? this.#variableFlow(key) : undefined;
-      if (assigned !== undefined) merge(flow, assigned);
-      flows.set(key, flow);
+    const id = Number(this.#instructions[context.call]!.functionId);
+    const entry = this.#entryOf.get(id);
+    const given = this.#argumentsOf(context.call);
+    for (const name of entry === undefined ? [] : (this.#parameterNames.get(id) ?? [])) {
+      const key = this.scopeKey(name, entry!);
+      const argument = given.get(key);
+      const value = argument ?? this.#defaults.get(key);
+      if (value !== undefined)
+        flows.set(
+          key,
+          argument === undefined
+            ? this.flowOf(value, flows)
+            : this.#flowIn(argument, context.call, context.outer),
+        );
+    }
+    const own = this.#ownKeys(id);
+    for (let round = 0, changed = true; changed && round < 50; round += 1) {
+      changed = false;
+      for (const key of own)
+        for (const { value, index } of this.#assigned.get(key) ?? []) {
+          if (
+            value.kind === "parameter" ||
+            this.#instructions[index]?.kind === "bindDefaultParameter"
+          )
+            continue;
+          const flow = flows.get(key) ?? flows.set(key, emptyFlow()).get(key)!;
+          changed =
+            merge(flow, this.#flowAt(value, index, flows, context.constants, HELPER_DEPTH)) ||
+            changed;
+        }
     }
     context.flows = flows;
     return flows;
+  }
+
+  /** The variable keys of a function's own code ({@link scopeKey}) that it assigns, by function. */
+  #ownKeys(id: number): readonly string[] {
+    let found = this.#ownKeysOf.get(id);
+    if (found === undefined) {
+      const suffix = `\u0001function ${id}`;
+      found = [...this.#assigned.keys()].filter((key) => key.endsWith(suffix));
+      this.#ownKeysOf.set(id, found);
+    }
+    return found;
   }
 
   /**
@@ -1694,8 +1731,10 @@ export class DataFlow {
         if (given.has(name))
           substitute.set(key, this.#flowAt(given.get(name), call, substituted, bound, depth));
         else {
+          // A default may read the parameters before it.
           const value = this.#defaults.get(key);
-          if (value !== undefined) substitute.set(key, this.flowOf(value, substituted));
+          if (value !== undefined)
+            substitute.set(key, this.flowOf(value, new Map([...substituted, ...substitute])));
         }
       }
     }

@@ -1038,6 +1038,21 @@ test(
     };
     assert.deepEqual(relayed(3, ""), ["score > 7"]);
     assert.deepEqual(relayed(4, " + 1"), ["score"]);
+    // A value the helper computes in a variable of its own is not the stored value; a default that reads the parameter
+    // before it is that parameter's.
+    assert.deepEqual(
+      compared(
+        "function relay(n) {\n  if n == 0 {\n    return n\n  }\n  let m = n + 1\n  return m\n}\n" +
+          'if relay(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["score"],
+    );
+    assert.deepEqual(
+      compared(
+        'function echo(n, m = n) {\n  return m\n}\nif echo(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["score > 7"],
+    );
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",
