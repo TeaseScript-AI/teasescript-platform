@@ -101,4 +101,10 @@ if sexscriptLegacyCompare(level, 0) < 0 {
 } else {
   say "Not below"
 }
+let copiedLevel: integer? = level
+if sexscriptLegacyCompare(copiedLevel, 0) < 0 {
+  say "Copy below"
+} else {
+  say "Copy not below"
+}
 exit

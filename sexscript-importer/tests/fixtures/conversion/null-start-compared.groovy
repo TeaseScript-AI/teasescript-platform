@@ -27,3 +27,5 @@ if (level == null) show("No level")
 level = 1
 level = null
 if (level < 0) show("Below") else show("Not below")
+def copiedLevel = level
+if (copiedLevel < 0) show("Copy below") else show("Copy not below")

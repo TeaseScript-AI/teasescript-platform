@@ -707,7 +707,7 @@ function analyse(
   results: ReadonlyMap<string, TeaseType>,
 ): Analysis {
   const testedIntegerReads = nullTestedIntegerReads(statements);
-  const nullStored = nullStoredNames(statements);
+  const knownNull = knownNullCompares(statements);
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1077,14 +1077,14 @@ function analyse(
           analysis.indexes.add(child);
         } else {
           plainCompares.delete(child);
-          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too. One
-          // that a null is stored in keeps the helper: where the compiler knows it holds null, the comparison after
-          // the test does not compile.
+          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too.
+          // Where the compiler knows it holds null (knownNullCompares), the comparison after the test does not
+          // compile, so the helper stays.
           const nullable = (side: number): boolean => {
             const value = compared[side]!;
             return (
               value.kind === "variable" &&
-              !nullStored.has(value.name) &&
+              !knownNull.has(child) &&
               [left!, right!][side]!.kind === "optional" &&
               plain(nonNull([left!, right!][side]!)) === "number"
             );
@@ -2535,30 +2535,111 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
   return found;
 }
 
-/** The names of the variables that a null literal is stored in, by a `let` or an assignment. */
-function nullStoredNames(statements: readonly IrStatement[]): Set<string> {
-  const names = new Set<string>();
-  const visit = (value: unknown): void => {
+/**
+ * The helper orderings (`sexscriptLegacyCompare(x, k) < 0`) evaluated where the compiler knows a side variable holds
+ * null: after `x = null`, a copy of such a variable, or in the branch of `x == null` that it took. A forward pass in
+ * statement order; branches keep what all of them know, a loop forgets what it sets, and a function starts knowing
+ * nothing.
+ */
+function knownNullCompares(statements: readonly IrStatement[]): Set<object> {
+  const found = new Set<object>();
+  const nameOf = (value: IrExpression): string | null =>
+    value.kind === "variable" ? value.name : null;
+  const isNull = (value: IrExpression): boolean => value.kind === "literal" && value.value === null;
+  // The variables that the condition, when true, shows to hold null (`x == null`), and when false (`x != null`).
+  const nullWhen = (condition: IrExpression, holds: boolean): string | null => {
+    if (condition.kind !== "binary" || condition.operator !== (holds ? "==" : "!=")) return null;
+    if (isNull(condition.right)) return nameOf(condition.left);
+    if (isNull(condition.left)) return nameOf(condition.right);
+    return null;
+  };
+  const check = (value: unknown, known: ReadonlySet<string>): void => {
     if (Array.isArray(value)) {
-      for (const item of value) visit(item);
+      for (const item of value) check(item, known);
       return;
     }
     if (!isRecord(value)) return;
-    const stored =
-      isRecord(value.value) && value.value.kind === "literal" && value.value.value === null;
-    if (stored && value.kind === "let" && typeof value.name === "string") names.add(value.name);
     if (
-      stored &&
-      value.kind === "assign" &&
-      isRecord(value.target) &&
-      value.target.kind === "variable" &&
-      typeof value.target.name === "string"
+      value.kind === "binary" &&
+      isRecord(value.left) &&
+      value.left.kind === "call" &&
+      value.left.name === COMPARE_HELPER &&
+      Array.isArray(value.left.positional) &&
+      value.left.positional.some(
+        (side) => isRecord(side) && side.kind === "variable" && known.has(String(side.name)),
+      )
     )
-      names.add(value.target.name);
-    for (const child of Object.values(value)) visit(child);
+      found.add(value);
+    for (const child of Object.values(value)) check(child, known);
   };
-  visit(statements);
-  return names;
+  const assigned = (items: readonly IrStatement[]): Set<string> => {
+    const names = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!isRecord(value)) return;
+      if (value.kind === "let" && typeof value.name === "string") names.add(value.name);
+      if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+        names.add(String(value.target.name));
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(items);
+    return names;
+  };
+  const block = (items: readonly IrStatement[], entry: ReadonlySet<string>): Set<string> => {
+    const known = new Set(entry);
+    for (const item of items) {
+      for (const value of ownExpressions(item)) check(value, known);
+      switch (item.kind) {
+        case "let":
+        case "assign": {
+          const name = item.kind === "let" ? item.name : nameOf(item.target);
+          if (name === null) break;
+          const value = item.value;
+          const source = nameOf(value);
+          if (isNull(value) || (source !== null && known.has(source))) known.add(name);
+          else known.delete(name);
+          break;
+        }
+        case "if": {
+          const then = new Set(known);
+          const otherwise = new Set(known);
+          const whenTrue = nullWhen(item.condition, true);
+          const whenFalse = nullWhen(item.condition, false);
+          if (whenTrue !== null) then.add(whenTrue);
+          if (whenFalse !== null) otherwise.add(whenFalse);
+          const ends = [block(item.then, then), block(item.else, otherwise)];
+          for (const name of [...known])
+            if (!ends.every((end) => end.has(name))) known.delete(name);
+          for (const name of ends[0]!) if (ends[1]!.has(name)) known.add(name);
+          break;
+        }
+        case "switch": {
+          const ends = [
+            ...item.cases.map((switchCase) => block(switchCase.body, known)),
+            block(item.default, known),
+          ];
+          for (const name of [...known])
+            if (!ends.every((end) => end.has(name))) known.delete(name);
+          break;
+        }
+        case "while":
+        case "repeat":
+        case "for": {
+          for (const name of assigned(item.body)) known.delete(name);
+          block(item.body, known);
+          break;
+        }
+        case "function":
+          block(item.body, new Set());
+          break;
+        default:
+          break;
+      }
+    }
+    return known;
+  };
+  block(statements, new Set());
+  return found;
 }
 
 /** Whether evaluating a value can neither fail nor change anything: a literal, a variable, or `+`, `-`, `*` of these. */
