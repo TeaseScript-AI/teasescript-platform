@@ -3584,12 +3584,12 @@ test(
 );
 
 test(
-  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's binding of the name",
+  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    const cases: [string, { path: string; source: string }[]][] = [
+    const cases: [string, { path: string; source: string }[], boolean][] = [
       [
         "receiver",
         [
@@ -3605,6 +3605,7 @@ test(
               "global function elapsed(stamp) {\n  return getAbsoluteDateTime().toSeconds() - stamp.toSeconds()\n}\n",
           },
         ],
+        false,
       ],
       [
         "another function's binding",
@@ -3622,9 +3623,27 @@ test(
               '  if hour == 12 {\n    say "Right."\n  } else {\n    say "Wrong."\n  }\n}\n',
           },
         ],
+        true,
+      ],
+      [
+        // The outer call bound the name; the inner one, which the comparison reads in, has not yet: it loads what the
+        // outer one saved since.
+        "another activation's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              'function visit(rounds) {\n  if rounds > 0 {\n    let wanted = load("wanted", default: 12)\n' +
+              '    save 13 as "wanted"\n    visit(rounds - 1)\n    return\n  }\n  showButton "Check"\n' +
+              '  let wanted = load("wanted", default: 12)\n' +
+              '  if getDateTime().hour == wanted {\n    say "Wrong."\n  } else {\n    say "Right."\n  }\n}\n' +
+              "visit(1)\nexit\n",
+          },
+        ],
+        false,
       ],
     ];
-    for (const [name, files] of cases) {
+    for (const [name, files, expected] of cases) {
       const { plan } = engine.compileProject(files, { builtins: [] });
       assert.ok(isRecord(plan), name);
       const instructions = Array.isArray(plan.instructions)
@@ -3639,22 +3658,27 @@ test(
       const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
       assert.deepEqual(after?.texts, ["Right."], name);
       const holds = holdsAt(comparison, model, timeContext(before.snapshot), EPOCH_MS);
-      // The receiver is read as the parameter; a name another function binds leaves this one unknown, never wrong.
-      if (name === "receiver") assert.equal(holds, false, name);
-      else assert.ok(holds === undefined || holds, name);
+      // The receiver is read as the parameter; a name another function or activation binds leaves this one unknown,
+      // never wrong.
+      if (name === "receiver") assert.equal(holds, expected, name);
+      else assert.ok(holds === undefined || holds === expected, name);
     }
     // A persistent button's file variable after the file was left, or entered again: never the storage saved since, nor
     // the other file's or the older scope's binding of that name, for what the runtime then says.
-    const kept = (files: { path: string; source: string }[], expected: boolean) => {
+    const kept = (
+      files: { path: string; source: string }[],
+      expected: boolean,
+      first: "Invoke" | "Check" = "Invoke",
+    ) => {
       const { plan } = engine.compileProject(files, { builtins: [] });
       assert.ok(isRecord(plan));
       const session = new Session(engine, plan, 1);
       const start = session.start();
-      const invoke = session
+      const enter = session
         .options(start.runtime)
-        .find((input) => input.kind === "press" && input.label === "Invoke");
-      assert.ok(invoke !== undefined);
-      const before = session.apply(start.runtime, invoke, false);
+        .find((input) => "label" in input && input.label === first);
+      assert.ok(enter !== undefined);
+      const before = session.apply(start.runtime, enter, false);
       assert.ok(before !== null);
       const instructions = Array.isArray(plan.instructions)
         ? plan.instructions.filter(isRecord)
@@ -3697,6 +3721,21 @@ test(
         { path: "other.tease", source: 'let wantedHour = 13\nshowButton "Outside"\nexit\n' },
       ],
       true,
+    );
+    // Entered again, the file's new root has not bound the name yet; the root it left behind has.
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'showButton "Check"\nlet wantedHour = load("hour", default: 12)\nif wantedHour == 12 {\n' +
+            '  showPermanentButton "Invoke", persist: true {\n    say "Old."\n  }\n  save 13 as "hour"\n' +
+            '  goto "main.tease"\n}\nif getDateTime().hour == wantedHour {\n  say "True."\n} else {\n' +
+            '  say "False."\n}\nexit\n',
+        },
+      ],
+      false,
+      "Check",
     );
   },
 );

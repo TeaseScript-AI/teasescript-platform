@@ -1460,7 +1460,17 @@ export function timeContext(snapshot: Data): TimeContext {
   }
   // The scope each frame belongs to: that of the function whose call's frames start at or before it, unless a file's
   // call started since; else the file of the nearest frame before it that names one (its own code, also in its blocks).
+  // A scope with two activations (a function's recursive call, a file's root and a root it left behind) is not clear:
+  // a name only one of them bound yet may still be bound by the other, which the code reads.
   const calls = list(snapshot.callFrames);
+  const activations = new Map<string, number>();
+  const activate = (scope: string) => activations.set(scope, (activations.get(scope) ?? 0) + 1);
+  for (const call of calls)
+    if (call.kind === "function") activate(`function ${String(call.functionId)}`);
+  for (const root of [...list(snapshot.frames), ...list(snapshot.retainedScopes)])
+    if (typeof root.file === "number") activate(`file ${root.file}`);
+  const single = (scope: string | null) =>
+    scope !== null && activations.get(scope) === 1 ? scope : null;
   let owner: string | null = null;
   let file: string | null = null;
   list(snapshot.frames).forEach((frame, depth) => {
@@ -1470,7 +1480,7 @@ export function timeContext(snapshot: Data): TimeContext {
     if (typeof frame.file === "number") file = `file ${frame.file}`;
     for (const binding of list(frame.bindings)) {
       if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-      hold(binding.name, owner ?? file, binding.value);
+      hold(binding.name, single(owner ?? file), binding.value);
     }
   });
   // A scope kept after its file was left (a persistent button's or timer's) holds that file's own variables.
@@ -1478,7 +1488,7 @@ export function timeContext(snapshot: Data): TimeContext {
     for (const binding of list(scope.bindings))
       hold(
         binding.name,
-        typeof scope.file === "number" ? `file ${scope.file}` : null,
+        typeof scope.file === "number" ? single(`file ${scope.file}`) : null,
         binding.value,
       );
   // A variable named by its scope is read from the state only where the state binds its name once, in that scope.
