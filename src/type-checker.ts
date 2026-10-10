@@ -488,6 +488,65 @@ function decidingSlots(slots: readonly OpenType[]): {
   return { deciding, unknown };
 }
 
+/** An operation whose operands held only null when it was checked, with what it reports if they still do at the end. */
+interface NullOnlyOperation {
+  readonly file: number;
+  /** Where among the diagnostics of its file the operation reports. */
+  readonly at: number;
+  readonly slots: readonly OpenType[];
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+/**
+ * The undecided slot of a type that so far held only null, such as the type of `v` after `let v = null` once nothing
+ * narrows it any more, or `undefined` for any other type. A value that a later store gives may still decide the slot.
+ */
+function nullOnlySlot(type: StaticType): OpenType | undefined {
+  let slot: OpenType | undefined;
+  let sawNull = false;
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "null") sawNull = true;
+    else if (
+      value.kind === "open" &&
+      slot === undefined &&
+      value.resolved === null &&
+      value.heldUnknown === undefined
+    )
+      slot = value;
+    else return undefined;
+  }
+  return slot !== undefined && (sawNull || slot.sawNull) ? slot : undefined;
+}
+
+/**
+ * Whether an undecided slot held only null to the end of a check: no value decided it or a slot it was copied from, and
+ * none of them took a value the compiler cannot know. `known` keeps the answer for each slot walked, so a chain of copies
+ * that many slots share is walked once.
+ */
+function heldOnlyNull(slot: OpenType, known: Map<OpenType, boolean>): boolean {
+  const walked = new Set<OpenType>();
+  let only = true;
+  for (
+    let current: OpenType | undefined = slot;
+    current !== undefined;
+    current = current.copiedFrom
+  ) {
+    const seen = known.get(current);
+    if (seen !== undefined) {
+      only = seen;
+      break;
+    }
+    if (walked.has(current) || current.resolved !== null || current.heldUnknown !== undefined) {
+      only = false;
+      break;
+    }
+    walked.add(current);
+  }
+  for (const current of walked) known.set(current, only);
+  return only;
+}
+
 /** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
 function storedIn(slot: OpenType): Set<OpenType> {
   const chain = new Set<OpenType>();
@@ -839,6 +898,12 @@ class TypeChecker {
    */
   readonly #unknownOperations = new Map<Expression, readonly StaticType[]>();
 
+  /**
+   * Operations on a variable, element, or property that so far held only null, which fail if it holds only null to the
+   * end: the check reports them once it has checked every store (see {@link #reportNullOnlyOperations}).
+   */
+  readonly #nullOnlyOperations: NullOnlyOperation[] = [];
+
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
 
@@ -1188,6 +1253,7 @@ class TypeChecker {
       }
       this.#handlers.length = 0;
     }
+    this.#reportNullOnlyOperations();
   }
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
@@ -2079,18 +2145,30 @@ class TypeChecker {
       read ?? (variable === undefined ? place.type : this.#currentType(variable)),
     );
     if (variable !== undefined) this.#flow.set(variable, undefined);
+    const reported = this.diagnostics.length;
+    const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
+    const cannotCombine = (held: StaticType) =>
+      `${place.subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(held), value, statement)}`;
     // Adding or subtracting null is never supported.
     const outcome =
       resolved(nonNullType(value)).kind === "never"
         ? { failed: [kept, value] }
-        : this.#memberOperation([kept, value], [target, statement.value], (a, b) =>
-            arithmeticType(operator, a, b),
-          );
+        : this.#memberOperation([kept, value], [target, statement.value], combine);
     const result = "type" in outcome ? outcome.type : undefined;
     if (result !== undefined && isScalar(value, "calendarDuration"))
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) {
       if (place.inferred === undefined) this.#checkUnknownCompound(place, kept, statement);
+      // A place that so far held only null is checked as null too, in case no store gives it another value.
+      const slot = this.diagnostics.length === reported ? nullOnlySlot(kept) : undefined;
+      if (slot !== undefined)
+        this.#deferNullOnly([slot], () => {
+          if (
+            "failed" in
+            this.#memberOperation([NULL_TYPE, value], [target, statement.value], combine)
+          )
+            this.#report(typeCode.typeMismatch, cannotCombine(NULL_TYPE), statement.value.span);
+        });
       return;
     }
     if (result === undefined) {
@@ -2118,11 +2196,7 @@ class TypeChecker {
         );
         return;
       }
-      this.#report(
-        typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
-        statement.value.span,
-      );
+      this.#report(typeCode.typeMismatch, cannotCombine(kept), statement.value.span);
       return;
     }
     if (this.#widens(place, result, statement.value)) return;
@@ -4624,6 +4698,33 @@ class TypeChecker {
     result: (...values: StaticType[]) => StaticType | undefined,
   ): StaticType {
     const reported = this.diagnostics.length;
+    const type = this.#checkedOperation(operator, operands, expression, result);
+    // An operand that so far held only null, such as `v` after `let v = null` once a loop or a block may have stored
+    // in it, is checked as null too, in case no store gives it another value.
+    const slots = operands.flatMap((operand) => nullOnlySlot(operand) ?? []);
+    if (slots.length > 0 && this.diagnostics.length === reported) {
+      const possible = this.#unknownOperations.get(expression);
+      this.#deferNullOnly(slots, () => {
+        this.#checkedOperation(
+          operator,
+          operands.map((operand) => (nullOnlySlot(operand) === undefined ? operand : NULL_TYPE)),
+          expression,
+          result,
+        );
+      });
+      if (possible === undefined) this.#unknownOperations.delete(expression);
+      else this.#unknownOperations.set(expression, possible);
+    }
+    return type;
+  }
+
+  #checkedOperation(
+    operator: string,
+    operands: readonly StaticType[],
+    expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
+    result: (...values: StaticType[]) => StaticType | undefined,
+  ): StaticType {
+    const reported = this.diagnostics.length;
     const outcome = this.#memberOperation(
       operands,
       expression.kind === "binaryExpression"
@@ -4730,6 +4831,44 @@ class TypeChecker {
           ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
           : null,
     };
+  }
+
+  /**
+   * Runs `check` for an operation whose operands in `slots` so far held only null, and keeps what it reports for the
+   * end of the check instead of reporting it now.
+   */
+  #deferNullOnly(slots: readonly OpenType[], check: () => void): void {
+    const before = this.diagnostics.length;
+    check();
+    const found = this.diagnostics.splice(before);
+    if (found.length > 0)
+      this.#nullOnlyOperations.push({ file: this.#file, at: before, slots, diagnostics: found });
+  }
+
+  /**
+   * Reports the operations of {@link #nullOnlyOperations} whose operands held only null to the end of the check, at the
+   * place among the other diagnostics of their file where they would have been reported.
+   */
+  #reportNullOnlyOperations(): void {
+    const known = new Map<OpenType, boolean>();
+    const byFile = new Map<number, NullOnlyOperation[]>();
+    for (const operation of this.#nullOnlyOperations) {
+      if (!operation.slots.every((slot) => heldOnlyNull(slot, known))) continue;
+      const operations = byFile.get(operation.file) ?? [];
+      operations.push(operation);
+      byFile.set(operation.file, operations);
+    }
+    for (const [file, operations] of byFile) {
+      const diagnostics = this.fileDiagnostics[file]!;
+      const merged: Diagnostic[] = [];
+      let next = 0;
+      for (const operation of operations) {
+        for (; next < operation.at; next += 1) merged.push(diagnostics[next]!);
+        for (const diagnostic of operation.diagnostics) merged.push(diagnostic);
+      }
+      for (; next < diagnostics.length; next += 1) merged.push(diagnostics[next]!);
+      this.fileDiagnostics[file] = merged;
+    }
   }
 
   /**

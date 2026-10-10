@@ -171,6 +171,33 @@ test("null beside an operand of unknown type is an impossible operand", () => {
   assert.deepEqual(says("function f(other) {\n    say 1 + other\n}\nf(2)\nexit"), ["3"]);
 });
 
+test("a place that held only null is an impossible operand also where a loop or a block may have stored in it", () => {
+  // Once a loop body or a shared block may store in `v`, the checker no longer knows that it is null; while every store
+  // is null, it still is, so the operation always fails.
+  for (const [source, code, marked] of [
+    ["let v = null\nrepeat 2 {\n    say v + 1\n    v = null\n}\nexit", "TSV043", "v + 1"],
+    [
+      "let v = null\nlet t = timer async 1 s {\n    v = null\n}\nwait 2 s\nsay v + 1\nexit",
+      "TSV043",
+      "v + 1",
+    ],
+    ["let v = null\nrepeat 2 {\n    v += 1\n    v = null\n}\nexit", "TSV041", "1"],
+    ["let xs = [null]\nsay xs[0] + 1\nexit", "TSV043", "xs[0] + 1"],
+  ] as const)
+    assert.deepEqual(errors(source), [[code, marked]], source);
+  // A store of another value anywhere decides the place, and then only a missing null check is reported.
+  assert.deepEqual(errors("let v = null\nrepeat 2 {\n    say v + 1\n    v = 5\n}\nexit"), [
+    ["TSV043", "v"],
+  ]);
+  // A value the compiler cannot know may be what the place holds, so the operation stays a runtime check.
+  assert.deepEqual(
+    says(
+      "function pick(value) {\n    return value\n}\nlet v = null\nlet first = true\nrepeat 2 {\n    if not first {\n        say v + 1\n    }\n    first = false\n    v = pick(2)\n}\nexit",
+    ),
+    ["3"],
+  );
+});
+
 test("a set operation's argument that may be null names the check", () => {
   const maybe = "function others: integer[]? {\n    return [2]\n}\nlet other = others()\n";
   assert.deepEqual(errors(`${maybe}say [1].union(other)\nexit`), [["TSV043", "other"]]);
