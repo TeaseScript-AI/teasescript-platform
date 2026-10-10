@@ -944,7 +944,7 @@ test(
         .filter((goal) => goal.source.kind === "storage")
         .map((goal) =>
           goal.source.kind === "storage"
-            ? `${goal.source.key}${goal.comparison === null ? "" : ` ${goal.comparison.operator} ${String(goal.comparison.shown)}`}`
+            ? `${goal.source.key.replaceAll("\u0000", "*")}${goal.comparison === null ? "" : ` ${goal.comparison.operator} ${String(goal.comparison.shown)}`}`
             : "",
         );
     };
@@ -982,6 +982,28 @@ test(
       compared('let x = load("n", default: 0) == true\nif x == true {\n  say "Yes"\n}\nexit\n'),
       ["n"],
     );
+    // Also through a variable; a whole number only of a whole-number load; a load of an open type (a template's) may
+    // hold a truth.
+    assert.deepEqual(
+      compared(
+        'let x = load("n", default: 0)\nlet y = x == true\nif y == true {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["n"],
+    );
+    assert.deepEqual(compared(`let x = toInteger(load("n", default: 0.5))\n${shown}`), ["n"]);
+    assert.deepEqual(
+      compared(
+        'let item = "a"\nsave true as "n.${item}"\nlet y = load("n.${item}", default: 0) == true\n' +
+          'if y == true {\n  say "Yes"\n}\nexit\n',
+      ),
+      // Read through a variable, the template's key stays its pattern.
+      ["n.* == true"],
+    );
+    // Copies that branch and join again are each worked out once.
+    let copies = 'let x0 = load("n", default: 0)\n';
+    for (let index = 1; index <= 24; index += 1)
+      copies += `let x${index} = x${index - 1}\nx${index} = x${index - 1}\n`;
+    assert.deepEqual(compared(`${copies}if x24 > 7 {\n  say "Yes"\n}\nexit\n`), ["n > 7"]);
   },
 );
 

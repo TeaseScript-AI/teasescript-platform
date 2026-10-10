@@ -220,22 +220,6 @@ export type Source =
   /** A variable the code assigns; `counter` when an assignment adds to or subtracts from its own value. */
   | { readonly kind: "variable"; readonly name: string; readonly counter: boolean };
 
-/** Conversions whose result is the number their argument holds. */
-const KEEPS_NUMBER = new Set(["toInteger", "toNumber"]);
-
-/**
- * Whether a load can give a truth: one typed as a boolean or with a boolean default; one of an open type, which a
- * script may have saved as a truth; not one typed as or defaulting to another kind of value. Other expressions can.
- */
-function maybeTruth(expression: Data): boolean {
-  if (expression.kind !== "storageLoad") return true;
-  const type = record(expression.type);
-  if (typeof type.kind === "string") return type.kind === "boolean";
-  const fallback = record(expression.default);
-  return (
-    fallback.kind !== "literal" || fallback.value === null || typeof fallback.value === "boolean"
-  );
-}
 /** Getters of the current date and time. */
 // getTimestamp is the name before #759, getAbsoluteDateTime the one after it.
 const CLOCK_GETTERS = new Set([
@@ -390,6 +374,10 @@ export class DataFlow {
    * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
   readonly #assigned = new Map<string, { value: Data; index: number }[]>();
+  /** {@link holdsStored} of variables, temporaries, and functions, by them, the key, and the kind of value needed. */
+  readonly #holds = new Map<string, boolean>();
+  /** Each function's `returnValue` instructions, by its ID. */
+  readonly #returns = new Map<number, number[]>();
   /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
   readonly #stores = new Map<number, number[]>();
 
@@ -413,6 +401,11 @@ export class DataFlow {
     for (const instruction of instructions)
       for (const target of [instruction.target, instruction.continueTarget])
         if (typeof target === "number") this.#jumpTargets.add(target);
+    instructions.forEach((instruction, index) => {
+      if (instruction.kind !== "returnValue") return;
+      const owner = this.functionAt(index);
+      this.#returns.set(owner, [...(this.#returns.get(owner) ?? []), index]);
+    });
     instructions.forEach((instruction, index) => {
       const stored =
         instruction.kind === "storeTemporary"
@@ -502,80 +495,111 @@ export class DataFlow {
 
   /**
    * Whether an expression's value is a stored key's value (`key` as {@link sourcesOf} names it, a pattern for a
-   * template): its load, a conversion of such that keeps its number (`toInteger`), a truth such compared with `true`, a
-   * variable whose every assignment that reads the key is such (a value from elsewhere, such as a random draw, may also
-   * be assigned), a temporary that holds such at instruction `at` (a `switch` on a load), or a call's result whose
-   * every returned value that reads the key is such. A comparison of such a value with a constant compares the stored
-   * value; of anything else computed from it, such as `todo - done` or a count added to, it does not. A variable or
-   * function met again while this is worked out (`x = x`, a function that calls itself) holds what its other values
-   * hold.
+   * template): its load, a whole number of an integer load (`toInteger`), a truth of a boolean load compared with
+   * `true`, a variable whose every assignment that reads the key is such (a value from elsewhere, such as a random draw,
+   * may also be assigned), a temporary that holds such at instruction `at` (a `switch` on a load), or a call's result
+   * whose every returned value that reads the key is such. A load of an open type may hold a truth or a whole number. A
+   * comparison of such a value with a constant compares the stored value; of anything else computed from it, such as
+   * `todo - done` or a count added to, it does not. A variable, temporary, or function met again while this is worked
+   * out (`x = x`, a function that calls itself) holds what its other values hold: the greatest answer that holds
+   * together, which is kept for later questions once it no longer rests on one still being worked out.
    */
-  holdsStored(
-    expression: unknown,
-    key: string,
-    at: number | undefined,
-    open: ReadonlySet<string> = new Set(),
-  ): boolean {
-    const value = record(expression);
-    // Of several values the expression may take, those that read the key, at least one, are all the stored value.
-    const all = (name: string, values: { value: unknown; at: number | undefined }[]) => {
-      if (open.has(name)) return true;
-      const inner = new Set([...open, name]);
+  holdsStored(expression: unknown, key: string, at: number | undefined): boolean {
+    type Need = "value" | "truth" | "integer";
+    // The ones being worked out, by name, with their depth; the shallowest of them an answer so far rested on.
+    const working = new Map<string, number>();
+    let rests = Infinity;
+    const node = (
+      name: string,
+      need: Need,
+      values: { value: unknown; at: number | undefined }[],
+    ) => {
+      const id = `${name}\u0000${key}\u0000${need}`;
+      const known = this.#holds.get(id);
+      if (known !== undefined) return known;
+      const depth = working.get(id);
+      if (depth !== undefined) {
+        rests = Math.min(rests, depth);
+        return true;
+      }
+      const mine = working.size;
+      working.set(id, mine);
+      const outer = rests;
+      rests = Infinity;
       const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
-      return (
-        reading.length > 0 &&
-        reading.every((each) => this.holdsStored(each.value, key, each.at, inner))
-      );
+      const holds =
+        reading.length > 0 && reading.every((each) => holdsAt(each.value, each.at, need));
+      working.delete(id);
+      if (!holds || rests >= mine) this.#holds.set(id, holds);
+      rests = Math.min(outer, rests >= mine ? Infinity : rests);
+      return holds;
     };
-    if (value.kind === "group") return this.holdsStored(value.expression, key, at, open);
-    if (value.kind === "storageLoad") return keyText(value.key) === key;
-    if (value.kind === "identifier" && typeof value.name === "string")
-      return all(
-        `variable ${value.name}`,
-        (this.#assigned.get(value.name) ?? []).map((each) => ({
-          value: each.value,
-          at: each.index,
-        })),
-      );
-    if (value.kind === "call" && KEEPS_NUMBER.has(calleeName(value) ?? "")) {
-      const [only, ...rest] = list(value.arguments);
-      return only !== undefined && rest.length === 0 && this.holdsStored(only.value, key, at, open);
-    }
-    // A truth compared with `true` is that truth (`load(k) == true`), when it can be a truth.
-    if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
-      const truth = value.operator === "==";
-      const [left, right] = [record(value.left), record(value.right)];
-      const side =
-        right.kind === "literal" && right.value === truth
-          ? left
-          : left.kind === "literal" && left.value === truth
-            ? right
-            : null;
-      return side !== null && maybeTruth(side) && this.holdsStored(side, key, at, open);
-    }
-    if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
-      const held = this.heldAt(value.temporaryId, at);
-      return (
-        held !== null &&
-        all(
-          `temporary ${value.temporaryId}`,
-          held.map((store) => ({ value: store.value, at: store.index })),
-        )
-      );
-    }
-    // A call's result: what the function returns.
-    if (value.kind === "callResult" && typeof value.functionId === "number") {
-      const id = value.functionId;
-      return all(
-        `function ${id}`,
-        this.#instructions.flatMap((instruction, index) =>
-          instruction.kind === "returnValue" && this.functionAt(index) === id
-            ? [{ value: instruction.value, at: index }]
-            : [],
-        ),
-      );
-    }
-    return false;
+    const holdsAt = (expression: unknown, at: number | undefined, need: Need): boolean => {
+      const value = record(expression);
+      if (value.kind === "group") return holdsAt(value.expression, at, need);
+      if (value.kind === "storageLoad") {
+        const type = record(value.type);
+        const fits =
+          need === "value" ||
+          typeof type.kind !== "string" ||
+          type.kind === (need === "truth" ? "boolean" : "integer");
+        return fits && keyText(value.key) === key;
+      }
+      if (value.kind === "identifier" && typeof value.name === "string")
+        return node(
+          `variable ${value.name}`,
+          need,
+          (this.#assigned.get(value.name) ?? []).map((each) => ({
+            value: each.value,
+            at: each.index,
+          })),
+        );
+      if (value.kind === "call" && calleeName(value) === "toInteger") {
+        const [only, ...rest] = list(value.arguments);
+        return (
+          only !== undefined &&
+          rest.length === 0 &&
+          holdsAt(only.value, at, need === "truth" ? need : "integer")
+        );
+      }
+      // A truth compared with `true` is that truth (`load(k) == true`).
+      if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
+        const truth = value.operator === "==";
+        const [left, right] = [record(value.left), record(value.right)];
+        const side =
+          right.kind === "literal" && right.value === truth
+            ? left
+            : left.kind === "literal" && left.value === truth
+              ? right
+              : null;
+        return side !== null && holdsAt(side, at, "truth");
+      }
+      if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
+        const held = this.heldAt(value.temporaryId, at);
+        return (
+          held !== null &&
+          node(
+            `temporary ${value.temporaryId} at ${at}`,
+            need,
+            held.map((store) => ({ value: store.value, at: store.index })),
+          )
+        );
+      }
+      // A call's result: what the function returns.
+      if (value.kind === "callResult" && typeof value.functionId === "number") {
+        const id = value.functionId;
+        return node(
+          `function ${id}`,
+          need,
+          (this.#returns.get(id) ?? []).map((index) => ({
+            value: this.#instructions[index]!.value,
+            at: index,
+          })),
+        );
+      }
+      return false;
+    };
+    return holdsAt(expression, at, "value");
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
