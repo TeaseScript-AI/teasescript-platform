@@ -2629,7 +2629,10 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
-  const result = enforceVariableTypes(withFoldedListPicks(withLoopedTailCalls(statements)), helperResults);
+  const result = enforceVariableTypes(
+    withFoldedListPicks(withLoopedTailCalls(statements)),
+    helperResults,
+  );
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
@@ -15590,7 +15593,6 @@ function fixedClosureCalls(body: AstNode): Map<AstNode, string> {
   return result;
 }
 
-/** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
 /**
  * Variables declared without a value, `def i`, that only C-style loops use which set them in their first part, `for (i
  * = start; ...)`, none inside another of them nor in a closure: Groovy's null start is never read, and each loop's
@@ -15681,6 +15683,7 @@ function cStyleCounter(node: AstNode, keys: BindingKeys): string | null {
   return plain ? counter : null;
 }
 
+/** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
 function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
   const names = new Set<string>();
   walkAst(body, (node) => {
