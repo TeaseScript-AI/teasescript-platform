@@ -2589,10 +2589,9 @@ function isVariable(value: IrExpression, name: string): boolean {
 /** Whether IR statements or expressions read a variable of the name. */
 function readsVariable(value: unknown, name: string): boolean {
   if (Array.isArray(value)) return value.some((item) => readsVariable(item, name));
-  if (typeof value !== "object" || value === null) return false;
-  const node = value as Record<string, unknown>;
-  if (node.kind === "variable" && node.name === name) return true;
-  return Object.values(node).some((child) => readsVariable(child, name));
+  if (!isRecord(value)) return false;
+  if (value.kind === "variable" && value.name === name) return true;
+  return Object.values(value).some((child) => readsVariable(child, name));
 }
 
 /**

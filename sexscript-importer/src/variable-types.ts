@@ -2474,16 +2474,16 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       for (const item of value) walk(item, visit);
       return;
     }
-    if (typeof value !== "object" || value === null) return;
-    const node = value as Record<string, unknown>;
-    if (node.kind === "function") return;
-    if (typeof node.kind === "string") visit(node);
-    for (const child of Object.values(node)) walk(child, visit);
+    if (!isRecord(value) || value.kind === "function") return;
+    if (typeof value.kind === "string") visit(value);
+    for (const child of Object.values(value)) walk(child, visit);
   };
   const isNull = (value: unknown): boolean =>
-    (value as IrExpression).kind === "literal" && (value as { value: unknown }).value === null;
+    isRecord(value) && value.kind === "literal" && value.value === null;
   const nameOf = (value: unknown): string | null =>
-    (value as IrExpression).kind === "variable" ? (value as { name: string }).name : null;
+    isRecord(value) && value.kind === "variable" && typeof value.name === "string"
+      ? value.name
+      : null;
   for (const statement of statements) {
     if (statement.kind !== "function") continue;
     const tested = new Set<string>();
@@ -2498,20 +2498,31 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       if (node.kind === "call" && node.name === COMPARE_HELPER && Array.isArray(node.positional))
         for (const side of node.positional) tested.add(nameOf(side) ?? "");
     });
-    walk(statement.body, (node) => {
-      const item = node as unknown as IrStatement;
-      if (
-        item.kind === "let" &&
-        item.type === undefined &&
-        item.integer !== true &&
-        item.value.kind === "load" &&
-        item.value.integer === true &&
-        item.value.defaultValue === undefined &&
-        tested.has(item.name) &&
-        !copied.has(item.name)
-      )
-        found.add(item);
-    });
+    const declarations = (items: readonly IrStatement[]): void => {
+      for (const item of items) {
+        if (
+          item.kind === "let" &&
+          item.type === undefined &&
+          item.integer !== true &&
+          item.value.kind === "load" &&
+          item.value.integer === true &&
+          item.value.defaultValue === undefined &&
+          tested.has(item.name) &&
+          !copied.has(item.name)
+        )
+          found.add(item);
+        if (item.kind === "if") {
+          declarations(item.then);
+          declarations(item.else);
+        } else if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") {
+          declarations(item.body);
+        } else if (item.kind === "switch") {
+          for (const switchCase of item.cases) declarations(switchCase.body);
+          declarations(item.default);
+        }
+      }
+    };
+    declarations(statement.body);
   }
   return found;
 }
