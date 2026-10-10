@@ -279,12 +279,15 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   bindings, so a closure's own `def m` is apart from a script `m`.
 - An empty-text placeholder that later holds one other type (`def lineArray = ""`, later a list) starts with that
   type's empty value (`let lineArray: string[] = []`), which differs only where the empty text was read
-  (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty (also where
-  it is set to lists of unknown length later, OwlSays' `imp = shuffle(imp, nimp)`), or at a literal position past the
-  end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), or by a loop counter whose
-  bound may exceed the literal list's length (Farkel's seventh die), grew the Groovy list, padding it with null up to
-  the position. Where the writes are proven to count up (a counter that
-  grows with them, or literal positions in order) the conversion appends, or writes in place; elsewhere, such as a
+  (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty, or at a
+  literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), or by
+  a loop counter whose bound may exceed the literal list's length (Farkel's seventh die), grew the Groovy list,
+  padding it with null up to the position. Where the writes are proven to count up (a counter that grows with them,
+  or literal positions in order, also after `add` calls that show the position inside the list or at its end, as
+  OwlSays' `index2.add(index2[0])` before `index2[0] = nphr`) the conversion appends, or writes in place; so does a
+  list that starts empty and is set to lists of unknown length later, where a counter counts up with its writes
+  (OwlSays' `imp[nimp]` before `imp = shuffle(imp, nimp)`), whose other writes are taken to lie inside it as in any
+  list of unknown length; elsewhere, such as a
   list filled from its end or from position 1, it first pads the list up to the position: with null where the code
   compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
   truth treats like null (`SX_LIST_PADDING`; accepted 2026-10-06, following the zero-start decision). A list of elements of unknown type still appends at the end, which

@@ -140,3 +140,11 @@ show("Settings " + [[speed: 2], [:]])
 // A declaration whose value cannot be converted keeps its variable, also where a part of it is computed first.
 int kept = getSelectedValue("Keep:", shocks.collect { Eval.me(it.toString()) } + ["Back"])
 if (kept < shocks.size()) show("Kept")
+// A position that add() calls before it show inside the list, or at its end, is written in place or appended.
+def picks = []
+if (getBoolean("Pick?")) {
+	picks.add("a")
+	picks[0] = "b"
+	picks[1] = "c"
+}
+show("Picks " + picks.size())

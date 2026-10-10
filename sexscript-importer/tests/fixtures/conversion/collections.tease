@@ -376,4 +376,16 @@ let kept = 0
 if kept < shocks.length {
   say "Kept"
 }
+// A position that add() calls before it show inside the list, or at its end, is written in place or appended.
+let picks = []
+if askBoolean "Pick?" {
+  picks.add("a")
+  picks[0] = "b"
+  if picks.length == 1 {
+    picks.add("c")
+  } else {
+    picks[1] = "c"
+  }
+}
+say "Picks ${picks.length}"
 exit

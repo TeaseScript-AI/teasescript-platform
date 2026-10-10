@@ -14217,6 +14217,8 @@ const sequentialBounds = new WeakMap<AstNode, { bound: AstNode; inclusive: boole
 /** Writes at a literal position that a straight-line block shows to be the list's length, or inside it. */
 const literalAppends = new WeakSet<AstNode>();
 const literalSets = new WeakSet<AstNode>();
+/** Writes at a literal position that a straight-line block shows to be inside the list or at its end. */
+const literalEnds = new WeakSet<AstNode>();
 
 /**
  * Marks the list writes whose position grows by one with each write, so a list that starts empty grows by appending:
@@ -14276,8 +14278,9 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       if (key !== null) counters.add(key);
     }
     // The known lengths of lists in this straight-line block, for writes at literal positions: `a = []`, `a[0] = x`,
-    // `a[1] = y`.
+    // `a[1] = y`; and the lengths a list at least has after the `add` calls and writes on it.
     const lengths = new Map<string, number>();
+    const atLeast = new Map<string, number>();
     for (const statement of statements) {
       const expression = expressionOf(statement);
       const operator = expression?.kind === "binary" ? text(expression.operator) : null;
@@ -14301,6 +14304,23 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
         if (position <= length) {
           (position === length ? literalAppends : literalSets).add(left!);
           lengths.set(listKey, Math.max(length, position + 1));
+          atLeast.set(listKey, Math.max(length, position + 1));
+          continue;
+        }
+      }
+      // A list that `add` made at least that long holds a position below it, and grows by one at it (OwlSays'
+      // `index2.add(index2[0])` before `index2[0] = nphr`), where a value without calls cannot shorten it first.
+      if (
+        listKey !== null &&
+        typeof position === "number" &&
+        atLeast.has(listKey) &&
+        assigned !== null &&
+        withoutCalls(assigned)
+      ) {
+        const least = atLeast.get(listKey)!;
+        if (position <= least) {
+          (position === least ? literalEnds : literalSets).add(left!);
+          atLeast.set(listKey, Math.max(least, position + 1));
           continue;
         }
       }
@@ -14308,17 +14328,38 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       const variable = target === null || left !== null ? null : bindingKey(target, keys);
       if (variable !== null && assigned?.kind === "list") {
         lengths.set(variable, nodeArray(assigned.items).length);
+        atLeast.set(variable, nodeArray(assigned.items).length);
+        continue;
+      }
+      // `list.add(value)` appends one element, where a value without calls cannot change the list first.
+      const call = expression?.kind === "methodCall" ? callParts(expression) : null;
+      const appended =
+        call?.name === "add" &&
+        !call.inherited &&
+        call.arguments.length === 1 &&
+        withoutCalls(call.arguments[0]!)
+          ? bindingKey(asNode(expression!.object), keys)
+          : null;
+      if (appended !== null) {
+        if (lengths.has(appended)) lengths.set(appended, lengths.get(appended)! + 1);
+        atLeast.set(appended, (atLeast.get(appended) ?? 0) + 1);
         continue;
       }
       let calls = false;
       walkAst(statement, (child) => {
         if (child.kind === "variable") {
           const key = bindingKey(child, keys);
-          if (key !== null) lengths.delete(key);
+          if (key !== null) {
+            lengths.delete(key);
+            atLeast.delete(key);
+          }
         } else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
           calls ||= legacyApiCall(child, context) === null;
       });
-      if (calls) lengths.clear();
+      if (calls) {
+        lengths.clear();
+        atLeast.clear();
+      }
     }
   };
   walkAst(body, (node) => {
@@ -14345,6 +14386,20 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
         bound === null ? null : { counter, bound, inclusive: comparison === "<=" },
       );
   });
+}
+
+/** Whether evaluating an expression calls nothing and assigns nothing, so it cannot change a list. */
+function withoutCalls(node: AstNode): boolean {
+  let calls = false;
+  walkAst(node, (child) => {
+    calls ||=
+      ["methodCall", "call", "closure", "postfix", "prefix", "constructorCall"].includes(
+        child.kind,
+      ) ||
+      (child.kind === "binary" &&
+        /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(text(child.operator) ?? ""));
+  });
+  return !calls;
 }
 
 /** Lists whose elements the code compares with null: `list[i] == null`, `list.contains(null)`, `any { e -> e == null }`. */
@@ -14493,10 +14548,12 @@ function growingListWrite(
   const startsEmpty =
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
   // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
-  // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows past its end the same way.
+  // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows by appending where the writes count up with a
+  // counter; a write at another position of such a list is taken to lie inside it, as in a list of unknown length.
   const refilled =
     isEmptyList(assigned[0]) &&
-    assigned.every((node) => node.kind !== "list" || nodeArray(node.items).length === 0);
+    assigned.every((node) => node.kind !== "list" || nodeArray(node.items).length === 0) &&
+    sequentialWrites.has(targetNode);
   // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
   // `label[2] = exit`, grows it too.
   const position = indexNode === null ? undefined : constantValue(indexNode);
@@ -14531,6 +14588,27 @@ function growingListWrite(
   const list = target.target;
   // A literal position known to be inside the list is a plain write; one known to be its length appends.
   if (literalSets.has(targetNode)) return null;
+  if (literalEnds.has(targetNode))
+    return [
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: { kind: "property", target: list, name: "length" },
+          right: { kind: "literal", value: constantValue(indexNode) as number },
+        },
+        then: [
+          {
+            kind: "expression",
+            expression: { kind: "methodCall", target: list, name: "add", arguments: [value] },
+            span,
+          },
+        ],
+        else: [{ kind: "assign", target, operator: "=", value, span }],
+        span,
+      },
+    ];
   if (literalAppends.has(targetNode))
     return [
       {
