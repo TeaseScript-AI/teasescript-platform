@@ -996,7 +996,15 @@ test(
         'let item = "a"\nsave true as "n.${item}"\nlet y = load("n.${item}", default: 0) == true\n' +
           'if y == true {\n  say "Yes"\n}\nexit\n',
       ),
-      // Read through a variable, the template's key stays its pattern.
+      // Read through a variable, the template's key is the one it names.
+      ["n.a == true"],
+    );
+    // Not when its assignments name two keys of the pattern.
+    assert.deepEqual(
+      compared(
+        'let item = "a"\nlet other = "b"\nlet y = load("n.${item}", default: 0) == true\nshowButton "Go"\n' +
+          'y = load("n.${other}", default: 0) == true\nif y == true {\n  say "Yes"\n}\nexit\n',
+      ),
       ["n.* == true"],
     );
     // Copies that branch and join again are each worked out once.

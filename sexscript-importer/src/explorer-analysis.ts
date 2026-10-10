@@ -652,21 +652,31 @@ export class DataFlow {
    * names that key with constants: a load whose template's computed parts are literals or variables that only ever hold
    * one literal, or a load in a helper whose result the condition reads, with the helper's parameters that its code
    * does not assign as the arguments of the call that gave that result right before (also in the helpers it calls, a
-   * few calls deep). The pattern otherwise, also when the pattern can come another way: through a variable, a stored
-   * value, or a helper call that names no key.
+   * few calls deep), also through a variable, as each of its assignments that reads the pattern names it. The pattern
+   * otherwise, also when the pattern can come another way: through a parameter, a loop variable, a stored value, or a
+   * helper call that names no key.
    */
   keyAt(pattern: string, condition: unknown, at: number): string {
     if (!pattern.includes(KEY_PLACEHOLDER)) return pattern;
     const keys = new Set<string | null>();
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) value.forEach(walk);
+    const followed = new Set<string>();
+    const walk = (value: unknown, at: number): void => {
+      if (Array.isArray(value)) value.forEach((item) => walk(item, at));
       if (!isRecord(value)) return;
       if (value.kind === "storageLoad" && keyText(value.key) === pattern)
         keys.add(this.#keyNamed(value.key, new Map()));
       else if (value.kind === "storageLoad") {
         if (this.#stored.get(keyText(value.key) ?? "")?.keys.has(pattern) === true) keys.add(null);
       } else if (value.kind === "identifier" && typeof value.name === "string") {
-        if (this.#variables.get(value.name)?.keys.has(pattern) === true) keys.add(null);
+        if (this.#variables.get(value.name)?.keys.has(pattern) !== true || followed.has(value.name))
+          return;
+        followed.add(value.name);
+        for (const assigned of this.#assigned.get(value.name) ?? []) {
+          if (!this.flowOf(assigned.value).keys.has(pattern)) continue;
+          const kind = assigned.value.kind;
+          if (kind === "parameter" || kind === "element" || kind === "part") keys.add(null);
+          else walk(assigned.value, assigned.index);
+        }
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
         const call = this.#callBefore(value.temporaryId, at);
@@ -684,9 +694,9 @@ export class DataFlow {
         if (named.length === 0) keys.add(null);
         for (const key of named) keys.add(key);
       }
-      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item, at);
     };
-    walk(condition);
+    walk(condition, at);
     const [key] = keys;
     return keys.size === 1 && typeof key === "string" ? key : pattern;
   }
