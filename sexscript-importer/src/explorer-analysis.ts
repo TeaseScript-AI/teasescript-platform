@@ -66,8 +66,9 @@ export function successors(
   const entry = (id: unknown) => functions[Number(id) - 1]?.entryInstruction;
   const functionOf = new Map<number, number>();
   for (const definition of functions) {
+    // A function's instructions run from its entry up to, not including, its end.
     const end = Number(definition.endInstruction);
-    for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+    for (let index = Number(definition.entryInstruction); index < end; index += 1)
       functionOf.set(index, Number(definition.id));
   }
   const returnPoints = new Map<number, number[]>();
@@ -367,6 +368,8 @@ export class DataFlow {
   readonly #jumpTargets = new Set<number>();
   /** Each function's own code, by its ID ({@link Code}); made when first needed. */
   #code: Map<number, Code> | null = null;
+  /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
+  readonly #stores = new Map<number, number[]>();
 
   /**
    * `computedPrompts` also counts an ask whose prompt the code computes (`askText "Type: ${line}"`, a prepared UI) as
@@ -382,12 +385,24 @@ export class DataFlow {
     const functionOf = this.#functionOf;
     for (const definition of functions) {
       const end = Number(definition.endInstruction);
-      for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+      for (let index = Number(definition.entryInstruction); index < end; index += 1)
         functionOf.set(index, Number(definition.id));
     }
     for (const instruction of instructions)
       for (const target of [instruction.target, instruction.continueTarget])
         if (typeof target === "number") this.#jumpTargets.add(target);
+    instructions.forEach((instruction, index) => {
+      const stored =
+        instruction.kind === "storeTemporary"
+          ? instruction.temporaryId
+          : instruction.kind === "callFunction"
+            ? instruction.destinationTemporary
+            : null;
+      if (typeof stored !== "number") return;
+      const known = this.#stores.get(stored) ?? [];
+      known.push(index);
+      this.#stores.set(stored, known);
+    });
     instructions.forEach((instruction, index) => {
       if (
         instruction.kind !== "interaction" ||
@@ -469,6 +484,46 @@ export class DataFlow {
   }
 
   /**
+   * What a temporary may hold at an instruction, with the index of the store that put it there: the expression of the
+   * nearest store of it before the instruction, and of earlier stores too while a jump between the earlier store and the
+   * later one goes past the later one (a condition `a and b` lowers to a temporary that holds `a`, then `b` only when
+   * `a` holds; `load(k, default: f())` to one that holds the load, then `f()`'s result only when the load gives
+   * nothing). A temporary lives within one expression, from its first store on, so no jump goes past that one. A call's
+   * result is `{ kind: "callResult", functionId, call }` with the call's index, which {@link flowOf} reads as the
+   * function's result. Null when there is no store before the instruction in its function.
+   */
+  heldAt(temporaryId: number, at: number): { value: Data; index: number }[] | null {
+    const stores = this.#stores.get(temporaryId) ?? [];
+    const owner = this.functionAt(at);
+    const held: { value: Data; index: number }[] = [];
+    let nearest = stores.length - 1;
+    while (nearest >= 0 && stores[nearest]! >= at) nearest -= 1;
+    for (let store = nearest; store >= 0; store -= 1) {
+      const index = stores[store]!;
+      if (this.functionAt(index) !== owner) return null;
+      const instruction = this.#instructions[index]!;
+      held.push({
+        value:
+          instruction.kind === "callFunction"
+            ? { kind: "callResult", functionId: instruction.functionId, call: index }
+            : record(instruction.value),
+        index,
+      });
+      if (store === 0 || !this.#jumpedOver(stores[store - 1]!, index, at)) return held;
+    }
+    return null;
+  }
+
+  /** Whether a jump after instruction `from` and before `index` goes past `index` to at most `at`. */
+  #jumpedOver(from: number, index: number, at: number): boolean {
+    for (let jump = from + 1; jump < index; jump += 1) {
+      const target = this.#instructions[jump]!.target;
+      if (typeof target === "number" && target > index && target <= at) return true;
+    }
+    return false;
+  }
+
+  /**
    * The one stored key that a key pattern a condition at instruction `at` reads stands for, when every read of it there
    * names that key with constants: a load whose template's computed parts are literals or variables that only ever hold
    * one literal, or a load in a helper whose result the condition reads, with the helper's parameters that its code
@@ -492,6 +547,16 @@ export class DataFlow {
         if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
         const call = this.#callBefore(value.temporaryId, at);
         const named = call === null ? [] : this.#keysCalled(call, pattern, new Map(), HELPER_DEPTH);
+        if (named.length === 0) keys.add(null);
+        for (const key of named) keys.add(key);
+      } else if (value.kind === "callResult" && typeof value.call === "number") {
+        if (this.#functions.get(Number(value.functionId))?.keys.has(pattern) !== true) return;
+        const named = this.#keysCalled(
+          this.#instructions[value.call]!,
+          pattern,
+          new Map(),
+          HELPER_DEPTH,
+        );
         if (named.length === 0) keys.add(null);
         for (const key of named) keys.add(key);
       }
@@ -648,6 +713,9 @@ export class DataFlow {
         }
       } else if (value.kind === "call" && CLOCK_GETTERS.has(calleeName(value) ?? "")) {
         flow.clock = true;
+      } else if (value.kind === "callResult" && typeof value.functionId === "number") {
+        const known = this.#functions.get(value.functionId);
+        if (known !== undefined) merge(flow, known);
       }
       for (const [key, item] of Object.entries(value))
         if (key !== "span" && key !== "typeCheck") walk(item);
@@ -966,6 +1034,21 @@ const FLIP: Readonly<Record<string, string>> = {
 };
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
+/** Whether an expression is a truth the code computes: a comparison, a text test, or `and`, `or`, or `not` of such. */
+function comparesTruth(expression: unknown): boolean {
+  const value = record(expression);
+  if (value.kind === "group") return comparesTruth(value.expression);
+  if (value.kind === "unary") return value.operator === "not";
+  if (value.kind === "binary")
+    return (
+      String(value.operator) in FLIP ||
+      value.operator === "and" ||
+      value.operator === "or" ||
+      value.operator === "in"
+    );
+  return value.kind === "call" && TEXT_TESTS.has(calleeName(value) ?? "");
+}
+
 /**
  * The comparisons a condition must make for it to have the value `wanted`, as alternatives: each one alone is a way to
  * get there (for `and` wanted true, all of its parts are listed, and a value is checked against the whole condition).
@@ -1105,7 +1188,48 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
     source.kind === "storage" && at !== undefined
       ? { kind: "storage", key: flow.keyAt(source.key, expression, at) }
       : source;
-  for (const atom of atomsFor(condition, wanted, true)) {
+  // A temporary's truth compared with `true` or `false` is read through what the stores before the condition that can
+  // reach it put there, also through temporaries copied into it, as the temporary itself merges every value it ever
+  // held. A truth the code computes, as a short-circuit `a and b` or `a or b` lowers to, holds what the way taken left
+  // there: no stored value to make true, so it is left out and what it reads stays a dependency (below). A value the code
+  // tests (`load(...) and f()`), or a call's result, is an atom's subject instead. A temporary copied further than
+  // followed is left out too, and stays a dependency as it is.
+  const read = new Map<number, Data[]>();
+  const leaves = (temporaryId: number, before: number, depth: number): Data[] | "deep" | null => {
+    if (depth === 0) return "deep";
+    const held = flow.heldAt(temporaryId, before);
+    if (held === null) return null;
+    const found: Data[] = [];
+    for (const { value, index } of held) {
+      if (value.kind !== "temporary" || typeof value.temporaryId !== "number") {
+        found.push(value);
+        continue;
+      }
+      const inner = leaves(value.temporaryId, index, depth - 1);
+      if (inner === null || inner === "deep") return inner;
+      found.push(...inner);
+    }
+    return found;
+  };
+  const atoms = atomsFor(condition, wanted, true).flatMap((atom): Atom[] => {
+    const subject = record(atom.subject);
+    if (
+      at === undefined ||
+      atom.against !== undefined ||
+      typeof atom.constant !== "boolean" ||
+      subject.kind !== "temporary" ||
+      typeof subject.temporaryId !== "number"
+    )
+      return [atom];
+    const found = leaves(subject.temporaryId, at, 8);
+    if (found === null) return [atom];
+    if (found === "deep") return [];
+    read.set(subject.temporaryId, found);
+    return found
+      .filter((value) => !comparesTruth(value))
+      .map((value) => ({ ...atom, subject: value }));
+  });
+  for (const atom of atoms) {
     if (atom.against !== undefined) {
       const goal = differenceGoal(flow, atom);
       if (goal !== null) goals.push(goal);
@@ -1155,9 +1279,30 @@ export function goalsFor(flow: DataFlow, condition: unknown, wanted: boolean, at
       goals.push({ source, candidates, comparison });
     }
   }
-  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`.
-  for (const found of flow.sourcesOf(condition)) {
-    const source = keyed(found, condition);
+  // Stored keys and clock reads of comparisons with no constant side, such as `now < start + period`; of a temporary's
+  // truth read through, of what it was read through to, each value apart, so that keys one names are not taken for keys
+  // another names.
+  const masked = (value: Data): Data =>
+    value.kind === "temporary" && read.has(Number(value.temporaryId))
+      ? { kind: "literal", value: null }
+      : Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            Array.isArray(item)
+              ? item.map((each: unknown) => (isRecord(each) ? masked(each) : each))
+              : isRecord(item)
+                ? masked(item)
+                : item,
+          ]),
+        );
+  const parts: unknown[] =
+    read.size === 0 || !isRecord(condition)
+      ? [condition]
+      : [masked(condition), ...[...read.values()].flat()];
+  for (const [found, expression] of parts.flatMap((part) =>
+    flow.sourcesOf(part).map((found) => [found, part] as const),
+  )) {
+    const source = keyed(found, expression);
     if (source.kind !== "storage" && source.kind !== "clock") continue;
     const known = goals.some(
       (goal) =>

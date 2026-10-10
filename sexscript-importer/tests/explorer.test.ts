@@ -673,6 +673,187 @@ test(
   },
 );
 
+test(
+  "a condition that ands a stored value's test with a call asks no stored value to be true: the temporary the code computes its truth in is no stored value",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      "function later(stamp) {\n  return stamp - 100\n}\n" +
+      'let pick = choose keep: "Keep", drop: "Drop"\nif pick == "keep" {\n  save 500 as "pass.until"\n}\n' +
+      'showButton "Check"\nif load("pass.until", default: 0) != 0 and later(load("pass.until", default: 0)) > 1000 {\n' +
+      '  say "Still valid."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const missed = result.coverage.unvisitedBranches.filter((entry) => entry.line === 9);
+    assert.ok(missed.length > 0);
+    for (const entry of missed) {
+      assert.ok(!(entry.reason ?? "").includes("== true"), entry.reason);
+      assert.ok(
+        entry.parts.every((part) => !part.needs.includes("== true")),
+        JSON.stringify(entry.parts),
+      );
+    }
+    // The truth of such a temporary depends on the way taken: a skipped part asks nothing of an `else if`'s guard, and
+    // parts kept in other temporaries, as `(a and f()) or (b and f())` lowers, ask no stored value to be true either.
+    const nested = (condition: string) => {
+      const written =
+        'function pick(ignore) {\n  return load("right", default: 0)\n}\nsave 0 as "left"\nsave 1 as "right"\n' +
+        `save 0 as "third"\nshowButton "Check"\nif ${condition} {\n  say "First."\n} else if load("third", default: 0) > 0 {\n` +
+        '  say "Second."\n}\nexit\n';
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      return explore(engine, compiled, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 2000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", written]]),
+        diagnostics: [],
+        realign: true,
+      }).coverage.unvisitedBranches.flatMap((entry) => entry.parts.map((part) => part.needs));
+    };
+    for (const needs of [
+      nested('load("left", default: 0) > 0 and pick(0) > 0'),
+      nested(
+        '(load("left", default: 0) > 0 and pick(0) > 0) or (load("third", default: 0) > 0 and pick(0) > 2)',
+      ),
+      nested('(load("left", default: 0) > 0 and pick(0) > 0) != true'),
+    ]) {
+      assert.ok(
+        needs.every(
+          (need) => !/(left|right|third) [!=]= (true|false)|stored right <= 0/u.test(need),
+        ),
+        JSON.stringify(needs),
+      );
+    }
+    // A stored value the code tests as the last part, or loads with a default a call gives, is asked to be true: the
+    // value itself, not every value the temporary held before.
+    const tested = nested('pick(0) > 2 and load("flag", default: false)');
+    assert.ok(tested.includes("stored flag == true"), JSON.stringify(tested));
+    assert.ok(
+      tested.every((need) => !need.startsWith("stored right ==")),
+      JSON.stringify(tested),
+    );
+    // In a file after another file's function, the condition's own stores are found.
+    const other = 'if load("left", default: 0) > 0 and pick(0) > 0 {\n  say "Both."\n}\nexit\n';
+    const { plan: files } = engine.compileProject(
+      [
+        {
+          path: "main.tease",
+          source:
+            'global function pick(ignore) {\n  return load("right", default: 0)\n}\nsave 1 as "right"\n' +
+            'showButton "Go"\ngoto "other.tease"\n',
+        },
+        { path: "other.tease", source: other },
+      ],
+      { builtins: [] },
+    );
+    assert.ok(isRecord(files));
+    const across = explore(engine, files, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["other.tease", other]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches.flatMap((entry) => entry.parts.map((part) => part.needs));
+    assert.ok(
+      across.every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(across),
+    );
+    // Copies nested deeper than are followed ask nothing either, and what they read stays a dependency; a call's result
+    // is what the function returns, not every value its temporary held; a stored value with a fallback call is asked
+    // for as well as the call's result; and a key the condition names stays that key, not its pattern.
+    const deep = nested(`${"true and (".repeat(9)}pick(0) > 2${")".repeat(9)}`);
+    assert.ok(
+      deep.every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(deep),
+    );
+    const gated = (condition: string) => {
+      const written =
+        'function ready(ignore) {\n  return load("gate", default: false)\n}\nsave false as "gate"\n' +
+        'function count(ignore) {\n  return load("n", default: 0)\n}\nsave randomInteger(0..3) as "n"\n' +
+        'function tick(ignore) {\n  return 0\n}\nfunction packed(thing) {\n  return load("pack.${thing}", default: 0) > 0\n}\n' +
+        'save 1 as "pack.knife"\n' +
+        'save true as "flag"\nlet item = "knife"\nsave true as "gear.knife"\nshowButton "Check"\n' +
+        `if ${condition} {\n  say "Through."\n}\nexit\n`;
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      return explore(engine, compiled, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 2000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", written]]),
+        diagnostics: [],
+      })
+        .coverage.unvisitedBranches.filter(
+          (entry) =>
+            entry.line === written.split("\n").findIndex((line) => line.startsWith("if ")) + 1,
+        )
+        .sort((left, right) => left.instruction - right.instruction);
+    };
+    const needsOf = (entry: { parts: { needs: string }[] } | undefined) =>
+      (entry?.parts ?? []).map((part) => part.needs);
+    const outer = gated(`${"true and (".repeat(9)}count(0) > 2${")".repeat(9)}`).at(-1);
+    assert.ok(outer?.dependsOn.includes("stored n"), JSON.stringify(outer));
+    assert.ok(
+      needsOf(outer).every((need) => !/[!=]= true/u.test(need)),
+      JSON.stringify(outer),
+    );
+    // The call's own test asks for its result; the whole condition for the result and the stored value.
+    const [guard, ...rest] = gated('ready(0) and load("flag", default: false)');
+    assert.deepEqual(needsOf(guard), ["stored gate == true"]);
+    assert.ok(
+      rest.some((entry) => needsOf(entry).includes("stored flag == true")),
+      JSON.stringify(rest.map(needsOf)),
+    );
+    // `flag` is saved true, so the way missed is the false one: the stored value itself is asked for.
+    const fallback = gated('load("flag", default: ready(0))').map(needsOf);
+    assert.ok(
+      fallback.some((needs) => needs.includes("stored flag != true")),
+      JSON.stringify(fallback),
+    );
+    // A fallback whose argument takes many instructions to compute is still read as the load's fallback.
+    const far = gated(
+      `load("flag", default: ready(${Array(100).fill("tick(0)").join(" + ")}))`,
+    ).map(needsOf);
+    assert.ok(
+      far.some((needs) => needs.includes("stored flag != true")),
+      JSON.stringify(far),
+    );
+    // Keys of one pattern that two parts name are each that key.
+    const both = gated('load("pack.${item}", default: 0) > 2 or packed("gun")').at(-1);
+    assert.deepEqual(
+      [...(both?.dependsOn ?? [])].filter((key) => key.startsWith("stored pack")).sort(),
+      ["stored pack.gun", "stored pack.knife"],
+    );
+    const keyed = gated('ready(0) and load("gear.${item}", default: false)');
+    assert.ok(
+      keyed.every(
+        (entry) =>
+          !(entry.reason ?? "").includes("gear.*") &&
+          entry.parts.every((part) => !part.needs.includes("gear.*")),
+      ),
+      JSON.stringify(keyed.map((entry) => entry.parts)),
+    );
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,
@@ -686,7 +867,12 @@ test("a missed way's note tells what the condition itself needs: a stored value 
     noteOf({
       goals: [level, older],
       guards: [],
-      chains: new Map([["tour.level", { best: 0, closest: { distance: 0 } }]]),
+      chains: new Map([
+        [
+          "tour.level",
+          { best: 0, closest: { distance: 0, value: "tour.level = 2", left: { sessions: 1 } } },
+        ],
+      ]),
       notes: new Map([[older, "needs tour.oldLevel == 2; no explored session stored it"]]),
     }),
     "needs tour.level == 2; a session from storage that has it did not reach the condition",
@@ -705,6 +891,25 @@ test("a missed way's note tells what the condition itself needs: a stored value 
       ]),
     }),
     'needs desk.mode = "inspect"; no explored session stored it',
+  );
+  // A note that no session stored a key, written before a session did, says what the closest stored value is.
+  const plugged = goal("room.plugged", [], { operator: "!=", constant: 1, shown: true });
+  assert.equal(
+    noteOf({
+      goals: [plugged],
+      guards: [],
+      chains: new Map([
+        [
+          "room.plugged",
+          {
+            best: 1,
+            closest: { distance: 1, value: "room.plugged = true", left: { sessions: 2 } },
+          },
+        ],
+      ]),
+      notes: new Map([[plugged, "needs room.plugged != true; no explored session stored it"]]),
+    }),
+    "needs room.plugged != true; best reached: room.plugged = true after 2 sessions",
   );
   // The condition's own note goes before its chain's, even when only the chain's has progress.
   assert.equal(
