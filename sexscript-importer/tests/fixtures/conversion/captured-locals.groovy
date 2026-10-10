@@ -60,3 +60,11 @@ def showMenu = { List items, int depth ->
 }
 nested = showMenu
 showMenu(["a", "b"], 1)
+// A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
+def tune = { ->
+	String note = "low"
+	def raise = { -> note = note.unknownMethod() }
+	raise()
+	show("Tuned")
+}
+tune()

@@ -247,6 +247,10 @@ interface LowerContext {
   closureFunctions: IrStatement[];
   /** The locals of their functions that closure values read or set, which the next lowering lifts (lowerParsedFile). */
   capturedLocals: CapturedLocal[];
+  /** The closure values whose captured locals this lowering passes or lifts, by spanKey, with those locals' names. */
+  resolvedClosures: ReadonlyMap<string, readonly string[]>;
+  /** The closure values that stay unconverted, whose converted body had an error, with the locals they capture. */
+  excludedClosures: ReadonlyMap<string, readonly string[]>;
   /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
   actions: Set<string>;
   /** Counter for variables that keep an input result the legacy statement ignored. */
@@ -1783,28 +1787,95 @@ export function lowerParsedFile(
   file: ParsedGroovyFile,
   options: LowerOptions = {},
 ): MigrationProgram {
-  // A file whose closure values read or set locals of their functions lowers again with those locals lifted
-  // (withLiftedLocals); a closure value inside such a closure value shows what it captures only then.
+  // A file whose closure values read or set locals of their functions lowers again with those locals passed or lifted
+  // (withPassedLocals, withLiftedLocals); a closure value inside such a closure value shows what it captures only then.
+  // A closure whose converted body then has an error stays as it was, unconverted, and the file lowers again without
+  // resolving it, so that code that cannot convert does not come into the script.
   let lifted: CapturedLocal[] = [];
-  for (let round = 0; ; round += 1) {
-    const found: CapturedLocals = { locals: [], body: null };
+  // The closures that stay unconverted, by spanKey, with the locals they capture.
+  const excluded = new Map<string, string[]>();
+  let previous: MigrationProgram | null = null;
+  for (let round = 0; round < 6; round += 1) {
+    const found: CapturedLocals = { locals: [], body: null, excluded };
     const program = lowerFileOnce(file, options, lifted, found);
+    const failed = failedClosures(program, lifted, excluded);
+    if (failed.length > 0) {
+      for (const closure of failed)
+        excluded.set(closure, [
+          ...new Set(
+            lifted.filter((local) => local.closure === closure).map((local) => local.name),
+          ),
+        ]);
+      lifted = lifted.filter((local) => !excluded.has(local.closure));
+      continue;
+    }
+    previous = program;
     const key = (local: CapturedLocal): string => `${local.body} ${local.closure} ${local.name}`;
     const known = new Set(lifted.map(key));
-    const next = [...lifted, ...found.locals.filter((local) => !known.has(key(local)))];
-    // The file lowers again only where that lifts more locals.
+    const next = [
+      ...lifted,
+      ...found.locals.filter((local) => !known.has(key(local)) && !excluded.has(local.closure)),
+    ];
+    // The file lowers again only where that resolves more locals.
     const more =
       found.body !== null &&
       liftableCaptures(found.body, next).length > liftableCaptures(found.body, lifted).length;
-    if (!more || round === 2) return program;
+    if (!more) return program;
     lifted = next;
   }
+  return (
+    previous ?? lowerFileOnce(file, options, [], { locals: [], body: null, excluded: new Map() })
+  );
 }
 
-/** The locals that closure values captured in one lowering, and the script body it lowered before lifting any. */
+/** The closures whose captures a lowering resolved and whose converted body has an error, by spanKey. */
+function failedClosures(
+  program: MigrationProgram,
+  lifted: readonly CapturedLocal[],
+  excluded: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const spans = new Map<string, SourceSpan>();
+  for (const local of lifted) {
+    if (excluded.has(local.closure)) continue;
+    const [line, column, endLine, endColumn] = local.closure.split(":").map(Number);
+    if (
+      line === undefined ||
+      column === undefined ||
+      endLine === undefined ||
+      endColumn === undefined
+    )
+      continue;
+    spans.set(local.closure, { line, column, endLine, endColumn });
+  }
+  const inside = (span: SourceSpan, outer: SourceSpan): boolean =>
+    (span.line > outer.line || (span.line === outer.line && span.column >= outer.column)) &&
+    (span.endLine < outer.endLine ||
+      (span.endLine === outer.endLine && span.endColumn <= outer.endColumn));
+  const failed: string[] = [];
+  for (const [key, span] of spans)
+    if (
+      program.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.severity === "error" &&
+          diagnostic.span !== null &&
+          // A closure value in it that captures locals is resolved, or stays as it was, by its own round.
+          diagnostic.code !== "SX_CAPTURING_CLOSURE" &&
+          diagnostic.code !== "SX_NESTED_CLOSURE" &&
+          inside(diagnostic.span, span),
+      )
+    )
+      failed.push(key);
+  return failed;
+}
+
+/**
+ * The locals that closure values captured in one lowering, the script body it lowered before lifting any, and the
+ * closures that stay unconverted, with the locals they capture.
+ */
 interface CapturedLocals {
   locals: CapturedLocal[];
   body: AstNode | null;
+  excluded: ReadonlyMap<string, readonly string[]>;
 }
 
 function lowerFileOnce(
@@ -1846,6 +1917,8 @@ function lowerFileOnce(
     currentFunction: null,
     closureFunctions: [],
     capturedLocals: found.locals,
+    resolvedClosures: new Map(),
+    excludedClosures: new Map(),
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
@@ -1950,6 +2023,18 @@ function lowerFileOnce(
       (base) => freshName(base, context),
     );
     found.body = body;
+    // The closures whose locals are passed, and the locals lifted, by their functions.
+    const resolvable = liftableCaptures(body, lifted);
+    const closures = new Set(resolvable.map((local) => local.closure));
+    const names = new Set(resolvable.map((local) => `${local.body} ${local.name}`));
+    const resolved = new Map<string, string[]>();
+    for (const local of lifted)
+      if (closures.has(local.closure) || names.has(`${local.body} ${local.name}`))
+        resolved.set(local.closure, [
+          ...new Set([...(resolved.get(local.closure) ?? []), local.name]),
+        ]);
+    context.resolvedClosures = resolved;
+    context.excludedClosures = found.excluded;
     const passed = withPassedLocals(body, lifted);
     body = withLiftedLocals(passed.body, passed.rest, (base) => freshName(base, context));
   }
@@ -3182,6 +3267,8 @@ function lowerHelperMethod(
     closureFunctions: baseContext.closureFunctions,
     // A helper class's methods are not script functions, whose locals withLiftedLocals lifts.
     capturedLocals: [],
+    resolvedClosures: new Map(),
+    excludedClosures: new Map(),
     actions: baseContext.actions,
     ignoredInputs: 0,
     switchValues: 0,
@@ -6156,6 +6243,23 @@ function lowerClosureValue(
   }
   const base = hint ?? context.currentFunction?.name ?? "script";
   const name = `${base}Callback${context.closureFunctions.length + 1}`;
+  // A closure whose captured locals withPassedLocals or withLiftedLocals resolved converts only where its body does;
+  // otherwise it stays as it was, unconverted, rather than bring code that cannot convert into the script.
+  const resolved = context.resolvedClosures.get(spanKey(closure.span));
+  const excludedLocals = context.excludedClosures.get(spanKey(closure.span));
+  if (excludedLocals !== undefined)
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_CAPTURING_CLOSURE",
+      `This closure value captures local ${excludedLocals.join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
+  const before = {
+    diagnostics: context.diagnostics.length,
+    functions: context.closureFunctions.length,
+    actions: new Set(context.actions),
+    comments: context.comments.next,
+  };
   const outerFunction = context.currentFunction;
   context.currentFunction = { name, locals: ownNames, body, parameters: parameterNames };
   context.functionDepth += 1;
@@ -6183,6 +6287,22 @@ function lowerClosureValue(
     context.functionDepth -= 1;
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
+  }
+  if (
+    resolved !== undefined &&
+    context.diagnostics.slice(before.diagnostics).some(({ severity }) => severity === "error")
+  ) {
+    context.diagnostics.length = before.diagnostics;
+    context.closureFunctions.length = before.functions;
+    context.actions.clear();
+    for (const action of before.actions) context.actions.add(action);
+    context.comments.next = before.comments;
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_CAPTURING_CLOSURE",
+      `This closure value captures local ${resolved.join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
   }
   context.actions.add(name);
   return { kind: "literal", value: name, action: true };

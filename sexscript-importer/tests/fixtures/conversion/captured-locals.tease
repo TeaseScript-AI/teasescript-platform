@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
@@ -82,4 +82,15 @@ function showMenu(items, depth) {
 }
 nested = "showMenu"
 showMenu(["a", "b"], 1)
+// A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
+let tuneNote = "low"
+function tune {
+  tuneNote = "low"
+  // TODO SX_CAPTURING_CLOSURE line 66: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def raise = { -> note = note.unknownMethod() }
+  let raise = null
+  sexscriptLegacyCall(raise, [])
+  say "Tuned"
+}
+tune()
 exit

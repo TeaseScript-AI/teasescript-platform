@@ -123,11 +123,10 @@ export function withPassedLocals(
   const owners = new Map<string, Map<string, Pass>>();
   for (const pass of passes.values())
     owners.set(pass.owner, new Map([...(owners.get(pass.owner) ?? []), [pass.name, pass]]));
-  const parameter = (name: string): { name: string; type: string; default: null } => ({
-    name,
-    type: "java.lang.Object",
-    default: null,
-  });
+  const parameter = (
+    name: string,
+    type = "java.lang.Object",
+  ): { name: string; type: string; default: null } => ({ name, type, default: null });
   // The calls of the passed closures of a function, outside the closures in it, pass the locals.
   const addArguments = (current: AstNode, calls: ReadonlyMap<string, Pass>): AstNode => {
     if (current.kind === "closure") return current;
@@ -165,7 +164,8 @@ export function withPassedLocals(
           : (Array.isArray(node.parameters) ? node.parameters : []).map((item: unknown) =>
               typeof item === "object" && item !== null ? { ...item, default: null } : item,
             )),
-        ...pass.names.map(parameter),
+        // A local's declared type is its parameter's, which the calls then do not give it.
+        ...pass.names.map((name) => parameter(name, pass.types.get(name))),
       ],
     };
   };
@@ -178,6 +178,8 @@ interface Pass {
   name: string;
   implicit: boolean;
   names: string[];
+  /** The declared Groovy types of the locals that have one. */
+  types: ReadonlyMap<string, string>;
   locals: CapturedLocal[];
 }
 
@@ -219,15 +221,35 @@ function passPlan(body: AstNode, captured: readonly CapturedLocal[]): Map<string
       if (nested || (implicit ? passed > 1 : passed !== count)) safe = false;
     });
     if (!safe || calls === 0) continue;
+    const types = new Map<string, string>();
+    for (const name of names) {
+      const declared = declaredType(owner.node, name);
+      if (declared !== null) types.set(name, declared);
+    }
     passes.set(key, {
       owner: spanKey(owner.node.span),
       name: closure.name,
       implicit,
       names,
+      types,
       locals,
     });
   }
   return passes;
+}
+
+/** The declared Groovy type of a function's parameter or local, where it has one and declares it once. */
+function declaredType(owner: AstNode, name: string): string | null {
+  const parameter = parameterType(owner, name);
+  if (parameter !== null) return parameter;
+  const types: string[] = [];
+  walkOutsideOwn(owner, (node, nested) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    if (nested || left === null || variableName(left) !== name) return;
+    types.push(typeof left.originType === "string" ? left.originType : "java.lang.Object");
+  });
+  const [type] = types;
+  return types.length === 1 && type !== undefined && type !== "java.lang.Object" ? type : null;
 }
 
 /** Visits every node below a closure, telling whether it stands in a closure nested in it. */
