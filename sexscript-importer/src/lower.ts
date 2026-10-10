@@ -70,6 +70,7 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
+import { withListAliasesAsPaths } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
@@ -1767,6 +1768,8 @@ export function lowerParsedFile(
     );
     context.bindings = bindingKeys(desugared, file.sourceName);
     body = splitScratchVariables(desugared, context);
+    // Changes through an element or an iterated item reach the list they came from, as Groovy's shared lists did.
+    body = withListAliasesAsPaths(body, (base) => freshName(base, context));
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);

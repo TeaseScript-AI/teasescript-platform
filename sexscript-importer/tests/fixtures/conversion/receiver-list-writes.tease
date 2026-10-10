@@ -17,8 +17,7 @@ let drawn = deck.removeFirst()
 deck.add("nine")
 let piles = [pick([1], [2]), [3]]
 piles[0].add(5)
-let hand = piles[1]
-// NOTE SX_SHARED_LIST_WRITE line 12: Groovy shared the list in hand with the variable, list element, or field it was assigned from, so this change affected that place too; in TeaseScript hand holds a separate copy (ADR 0014).
-hand.add(7)
-say "Drew ${drawn}, next ${deck[0]}, piles end with ${piles[0][1]} and ${hand[1]}"
+let handIndex = 1
+piles[handIndex].add(7)
+say "Drew ${drawn}, next ${deck[0]}, piles end with ${piles[0][1]} and ${piles[handIndex][1]}"
 exit

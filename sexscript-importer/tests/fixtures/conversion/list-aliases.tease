@@ -1,0 +1,54 @@
+// Groovy lists are shared, so a change through a variable that took an element, or through a loop's item, changed
+// the list it came from; the element is read through its list (PainStacks' stacks, whose session never ended).
+let stacks = [
+  [
+    [false],
+    [false]
+  ],
+  [[false]]
+]
+function fill {
+  let colIndex = 0
+  let stackIndex = 0
+  let done = 0
+  while done < 2 {
+    stackIndex = colIndex
+    if stacks[stackIndex][stacks[stackIndex].length - 1][0] == true {
+      colIndex = (colIndex + 1) % stacks.length
+      continue
+    }
+    let row = 0
+    while stacks[stackIndex][row][0] == true {
+      row += 1
+    }
+    stacks[stackIndex][row][0] = true
+    if stacks[stackIndex][stacks[stackIndex].length - 1][0] == true {
+      done += 1
+    }
+  }
+  say "Done ${done}"
+}
+fill()
+for stIndex in 0..stacks.length {
+  stacks[stIndex].add([true])
+}
+say "Rows ${stacks[0].length} ${stacks[1].length}"
+for stIndex2 in 0..stacks.length {
+  stacks[stIndex2][0][0] = false
+}
+say "First ${stacks[0][0][0]} ${stacks[1][0][0]}"
+// A position that may be -1 counted from the end (PainStacks' unfair pick).
+let unfairColumn = -1
+function pick {
+  let column = 0
+  let pickedIndex = 0
+  column = unfairColumn
+  pickedIndex = column
+  if pickedIndex < 0 {
+    pickedIndex = stacks.length + pickedIndex
+  }
+  stacks[pickedIndex][0][0] = true
+}
+pick()
+say "Last first ${stacks[1][0][0]}"
+exit

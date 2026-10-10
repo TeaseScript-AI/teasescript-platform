@@ -1925,6 +1925,38 @@ test(
   },
 );
 
+// The list-aliases fixture says what Groovy said: the element changes reached the list they came from.
+test("the list-aliases fixture says what Groovy's shared lists gave", async () => {
+  const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+  assert.ok(typeof runtime === "object" && runtime !== null);
+  // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+  const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+  const tease = readFileSync(
+    fileURLToPath(new URL("./fixtures/conversion/list-aliases.tease", import.meta.url)),
+    "utf8",
+  );
+  const { plan } = compileSource(tease);
+  assert.ok(plan !== undefined);
+  const said: string[] = [];
+  const note = (events: readonly PacedEvent[]): void => {
+    for (const event of events) if (event.kind === "say") said.push(event.text ?? "");
+  };
+  let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+  note(step.events);
+  for (let turn = 0; turn < 20 && step.snapshot.status === "waiting"; turn += 1) {
+    const observed = observeTime(
+      plan,
+      step.snapshot,
+      step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+    );
+    note(observed.events);
+    step = run(plan, observed.snapshot);
+    note(step.events);
+  }
+  assert.equal(step.snapshot.status, "halted");
+  assert.deepEqual(said, ["Done 2", "Rows 3 2", "First false false", "Last first true"]);
+});
+
 // Groovy ranges ran down where the first bound was greater, also where only the values showed it: `1..0` went through
 // 1 and 0, and `1..<0` through 1 (Domme2's reward of 0 points ran twice).
 test("ranges count down as Groovy's did", { skip: parserUnavailable }, async () => {

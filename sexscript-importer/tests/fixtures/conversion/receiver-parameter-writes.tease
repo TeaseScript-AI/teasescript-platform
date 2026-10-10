@@ -1,8 +1,8 @@
-// MIGRATION INCOMPLETE: 3 error diagnostics.
+// MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
-// Groovy changed the caller's list through a parameter and each element through a loop variable;
-// TeaseScript passes copies, so these changes stay reported.
+// Groovy changed the caller's list through a parameter, which TeaseScript passes as a copy, so that change stays
+// reported; a change of each element through a loop variable goes through the list's positions instead.
 function addCard(cards, card) {
   // TODO SX_PARAMETER_LIST_WRITE line 3: Groovy changed the list that cards refers to, which the caller or the iterated collection shares; in TeaseScript cards holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
   // | def addCard = { cards, card -> cards.add(card) }
@@ -13,13 +13,11 @@ let stacks = [
   [1],
   [2]
 ]
-for stack in stacks {
-  // TODO SX_PARAMETER_LIST_WRITE line 7: Groovy changed the list that stack refers to, which the caller or the iterated collection shares; in TeaseScript stack holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
-  // | stacks.each { stack -> stack << 3 }
+for stackIndex in 0..stacks.length {
+  stacks[stackIndex].add(3)
 }
-for stack in stacks {
-  // TODO SX_PARAMETER_LIST_WRITE line 9: Groovy changed the list that stack refers to, which the caller or the iterated collection shares; in TeaseScript stack holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
-  // | stack.clear()
+for stackIndex2 in 0..stacks.length {
+  stacks[stackIndex2].clear()
 }
-say "Queue ${queue[0]}, stacks ${stacks[0][0]}"
+say "Queue ${queue[0]}, stacks ${stacks[0].length}"
 exit
