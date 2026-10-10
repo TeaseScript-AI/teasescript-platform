@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
-import { createServer } from "vite";
 
 import type * as Adapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -31,54 +31,41 @@ let adapter: Pick<
 
 before(async () => {
   // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const host: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const announcements: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useMessageUpdateAnnouncements.ts",
-    );
-    const loaded: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/runtime-adapter.ts",
-    );
-    assert.equal(typeof host.usePlayerSession, "function");
-    assert.equal(typeof announcements.useMessageUpdateAnnouncements, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = host.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable.
-    useMessageUpdateAnnouncements =
-      announcements.useMessageUpdateAnnouncements as typeof useMessageUpdateAnnouncements;
-    for (const name of [
-      "createPlayerRuntimeSession",
-      "createPlayerRuntimeRestorePoint",
-      "restorePlayerRuntimeSession",
-      "submitPlayerRuntimeComposer",
-    ])
-      assert.equal(typeof loaded[name], "function");
-    adapter = {
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      createPlayerRuntimeSession:
-        loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      createPlayerRuntimeRestorePoint:
-        loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      restorePlayerRuntimeSession:
-        loaded.restorePlayerRuntimeSession as typeof Adapter.restorePlayerRuntimeSession,
-      // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
-      submitPlayerRuntimeComposer:
-        loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
-    };
-  } finally {
-    await server.close();
-  }
+  const host: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const announcements: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useMessageUpdateAnnouncements.ts",
+  );
+  const loaded: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  assert.equal(typeof host.usePlayerSession, "function");
+  assert.equal(typeof announcements.useMessageUpdateAnnouncements, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = host.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable.
+  useMessageUpdateAnnouncements =
+    announcements.useMessageUpdateAnnouncements as typeof useMessageUpdateAnnouncements;
+  for (const name of [
+    "createPlayerRuntimeSession",
+    "createPlayerRuntimeRestorePoint",
+    "restorePlayerRuntimeSession",
+    "submitPlayerRuntimeComposer",
+  ])
+    assert.equal(typeof loaded[name], "function");
+  adapter = {
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    createPlayerRuntimeSession:
+      loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    createPlayerRuntimeRestorePoint:
+      loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    restorePlayerRuntimeSession:
+      loaded.restorePlayerRuntimeSession as typeof Adapter.restorePlayerRuntimeSession,
+    // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
+    submitPlayerRuntimeComposer:
+      loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
+  };
 });
 
 function createHost(context: TestContext) {

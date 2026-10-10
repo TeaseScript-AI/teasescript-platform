@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
-import { createServer } from "vite";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
@@ -11,6 +10,7 @@ import {
   playerRuntimeMedia,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface CaptureView {
   readonly phase: string;
@@ -30,23 +30,12 @@ let useImageCapture: (host: unknown) => Capture;
 
 // Load the real composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useImageCapture.ts",
-    );
-    assert.equal(typeof module.useImageCapture, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested API.
-    useImageCapture = module.useImageCapture as typeof useImageCapture;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useImageCapture.ts",
+  );
+  assert.equal(typeof module.useImageCapture, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested API.
+  useImageCapture = module.useImageCapture as typeof useImageCapture;
 });
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

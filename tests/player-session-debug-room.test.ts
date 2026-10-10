@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   activatePlayerRuntimeButton,
@@ -27,6 +26,7 @@ import type {
   SerializableRuntimeValue,
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on
 // with a copy in the debug room while the normal session stays as it was; a page opened in the debug room makes it from
@@ -66,30 +66,16 @@ let usePlayerDebug: (
 ) => { readonly menu: Ref<boolean>; readonly on: Readonly<Ref<boolean>> };
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const debug: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerDebug.ts",
-    );
-    assert.equal(typeof module.usePlayerSession, "function");
-    assert.equal(typeof debug.usePlayerDebug, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-    usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: as above.
-    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  assert.equal(typeof module.usePlayerSession, "function");
+  assert.equal(typeof debug.usePlayerDebug, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
+  usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: as above.
+  usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
 });
 
 /** The script's own saved data, in memory. */
