@@ -298,7 +298,7 @@
       "id": "availability-cleanup",
       "layer": "source",
       "category": "b",
-      "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which TeaseScript's step limit makes too slow to walk. Read the days from 20 days ago to today directly instead: availability is only ever saved for the current day, and a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
+      "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which is slow to walk. Read the days from 20 days ago to two days ahead directly instead: availability is only ever saved for the day the session runs, which a later session in a time zone behind sees as a day or, across the date line, two days ahead; a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
       "diff": "availability-cleanup.diff"
     }
   ]

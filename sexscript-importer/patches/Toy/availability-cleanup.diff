@@ -1,7 +1,7 @@
 --- a/scripts/toy/availability.groovy
 +++ b/scripts/toy/availability.groovy
-@@ -38,12 +38,12 @@
- 	toy.addTriggerHandler("talkEnded", { toy.setTalkEnded() });
+@@ -10,12 +10,12 @@
+ 	toy.addTriggerHandler("toyEventTime", { a -> addAvail(a) });
  
  	return {
 -		def p = toy.load("toy.availability");
