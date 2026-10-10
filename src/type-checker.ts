@@ -868,7 +868,10 @@ interface Place {
   readonly elementOf?: string | null;
   /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
   readonly listed?: boolean;
-  /** For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`. */
+  /**
+   * For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`: the type as it
+   * is when a message reads it, which a later value may have decided. A copy made by spreading keeps the text of then.
+   */
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
   readonly verb: string;
@@ -2779,13 +2782,7 @@ class TypeChecker {
     const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
       isCollection(member)
-        ? [
-            {
-              ...elementPlace(member, label, nullable, this.#text, inferred, owner),
-              ...(verb === undefined ? {} : { verb }),
-              listed,
-            },
-          ]
+        ? [elementPlace(member, label, nullable, this.#text, inferred, owner, verb, listed)]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -7605,7 +7602,9 @@ function variablePlace(variable: Variable, text: PlaceText): Place {
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
-    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
   };
@@ -7618,20 +7617,24 @@ function elementPlace(
   text: PlaceText,
   inferred = false,
   owner?: PlacePath,
+  verb = "contain",
+  listed = false,
 ): Place {
-  const subject = name === null ? `This ${collection.kind}` : `'${name}'`;
-  const element = resolved(collection.element);
+  const holder = name === null ? `This ${collection.kind}` : `'${name}'`;
   return {
     type: collection.element,
     widening: extendPath(owner, "[]"),
     inferred: inferred ? "part" : undefined,
     label: null,
     elementOf: name,
-    subject:
-      element.kind === "open"
-        ? `${subject} holds a ${collection.kind}`
-        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`,
-    verb: "contain",
+    get subject() {
+      const element = resolved(collection.element);
+      return element.kind === "open"
+        ? `${holder} holds a ${collection.kind}`
+        : `${holder} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`;
+    },
+    verb,
+    listed,
     fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
   };
 }
@@ -7667,7 +7670,9 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
-    subject: `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
