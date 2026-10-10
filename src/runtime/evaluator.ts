@@ -737,7 +737,17 @@ export class Evaluator {
             expression.temporaryId,
             expression.span,
           );
-          const descriptor = readPreparedReference(serialized, expression.span);
+          let descriptor = readPreparedReference(serialized, expression.span);
+          // A prepared-reference leaf only copies its descriptor; its parent resolves it at the receiver span. One
+          // that keeps a copy of its root is resolved here instead, so that it is detached at this use, as an
+          // assignment through it would be, once its path leads nowhere from its variable.
+          let value: SerializableRuntimeValue = null;
+          let epoch = -1;
+          if (!descriptor.detached && descriptor.capturedRoot !== undefined) {
+            value = this.#resolvePreparedReference(serialized, expression.span);
+            descriptor = readPreparedReference(serialized, expression.span);
+            epoch = this.#referenceEpoch;
+          }
           if (trace !== null)
             this.#tracePreparedReference(
               serialized,
@@ -746,14 +756,7 @@ export class Evaluator {
                 this.#resolveDescriptor({ ...descriptor, path: [] }, expression.span),
               expression.span,
             );
-          result = {
-            // A prepared-reference leaf only copies its descriptor. Its parent resolves
-            // it at the receiver span; a root prepareReference does not read it.
-            value: null,
-            owned: false,
-            descriptor,
-            epoch: -1,
-          };
+          result = { value, owned: false, descriptor, epoch };
           pending.pop();
           continue;
         }

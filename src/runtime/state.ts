@@ -129,7 +129,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 71;
+export const RUNTIME_SNAPSHOT_VERSION = 72;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1814,7 +1814,14 @@ function validatePreparedReferenceDescriptor(
     if (!binding.found) {
       return "the binding root does not exist in the serialized scope frames.";
     }
-    if (!detached && !preparedReferencePathResolves(binding.value, path, speakers)) {
+    // A reference that keeps a copy of its root is detached at its next use once its path leads nowhere from its
+    // variable. A dict's `keys` and `values` are made anew at each read, so no change of the dict detaches a reference
+    // through them before that use.
+    if (
+      !detached &&
+      capturedRoot === undefined &&
+      !preparedReferencePathResolves(binding.value, path, speakers)
+    ) {
       return "the attached binding root does not satisfy the prepared path.";
     }
   }
