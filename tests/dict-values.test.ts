@@ -6,6 +6,7 @@ import { parse } from "../src/parser.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { SerializableRuntimeProperty } from "../src/runtime/serializable-values.js";
 import type { RuntimeForLoopFrameSnapshot, RuntimeSnapshot } from "../src/runtime/state.js";
@@ -22,6 +23,10 @@ function says(source: string): string[] {
   const result = runValidSource(source);
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
   return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+}
+
+function said(events: readonly InterpreterEvent[]): string[] {
+  return events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
 
 function failure(source: string): [string, string] | null {
@@ -687,11 +692,36 @@ test("is dict and is T dict test the values, and typed parameters take dicts", (
   );
 });
 
-test("an assignment through a dict's values list keeps the list it read when a call then empties the dict", () => {
+test("a change through a dict's values list keeps the list it read when a call then empties the dict", () => {
   // `values` is a new list each time it is read: the prepared target `d.values[0]` keeps the one it read, and the
-  // assignment goes to that copy, also when the call clears, removes from, or replaces the dict.
+  // change goes to that copy, also when the call clears, removes from, or replaces the dict. Each state, also the one
+  // right after the dict was emptied, resumes from a checkpoint.
   for (const emptying of ["d.clear()", 'd.remove("x")', "d.clear()\n    d = dict{}"]) {
-    const source = `let d = dict{ "x": [0] }\nfunction f {\n    ${emptying}\n    return 7\n}\nd.values[0][0] = f()\nsay d\nexit`;
-    assert.deepEqual(says(source), ["dict{}"], emptying);
+    for (const change of ["d.values[0][0] = f()", "d.values[0].add(f())"]) {
+      const scenarioName = `${emptying} / ${change}`;
+      const result = assertRuntimeResumeEquivalent(
+        `let d = dict{ "x": [0] }\nfunction f {\n    ${emptying}\n    return 7\n}\n${change}\nsay d\nexit`,
+        { scenarioName },
+      );
+      assert.deepEqual(said(result.events), ["dict{}"], scenarioName);
+    }
   }
+  // A path that leads somewhere again by the time it is used reads what it leads to then.
+  const healed = assertRuntimeResumeEquivalent(
+    'let d = dict{ "x": [0] }\nfunction f {\n    d.clear()\n    d["y"] = [7]\n    return 7\n}\nsay d.values[0].contains(f())\nexit',
+  );
+  assert.deepEqual(said(healed.events), ["true"]);
+  // A preparation that extends `d.values` without a call or a `values` of its own keeps the copy too, also in callers.
+  const extended = assertRuntimeResumeEquivalent(
+    [
+      'let d = dict{ "x": [[[0]]] }',
+      "function pick {\n    return 0\n}",
+      "function f {\n    d.clear()\n    d = dict{}\n    return 7\n}",
+      "function outer {\n    return f()\n}",
+      "d.values[pick()][0][0][0] = outer()",
+      "say d",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(said(extended.events), ["dict{}"]);
 });
