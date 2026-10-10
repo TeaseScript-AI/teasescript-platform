@@ -249,9 +249,14 @@ folder), one browser at a time. A run presses buttons, picks choices, and types 
 fails, hangs, or uses up its steps. It opens `/player/?dev&package=<id>&time=skip`, whose development time controls
 skip waits, timers, pacing, and audio while no input is pending; `--clock fake` falls back to Playwright's fake clock.
 When the same prompt comes back three times in a row, the script may time its answer, so the runner lets 30, then 120,
-then 300 seconds pass before answering (+10 s and +1 min presses), noted as `[waited 30 s]` in the run's path. A text
-prompt that quotes a sentence gets that sentence. Each run prefers the choices that earlier runs tried least, and a
-package stops after a run that reaches nothing new. The session state is read from the Player's Vue tree, because the
+then 300 seconds pass before answering (+10 s and +1 min presses), noted as `[waited 30 s]` in the run's path. A button
+waits too where the text before it asks for a minimum time ("at least 15 seconds") or the script reads the clock right
+after it, as when it times an edge. A text prompt that quotes a sentence gets that sentence, and one that names a
+format gets an answer in it: a cell of "(A1 to G7)", "4 digits", a URL, or one of the numbers of "27 to quit". Each run
+prefers the choices that earlier runs tried least, and a package stops after a run that reaches nothing new. A run
+that reaches its limit `loops` when its second half only comes back to places with options its first half reached,
+whatever their texts say, and is `parked` otherwise. A control that cannot be used is tried again after the state is
+read again, so a session that ended meanwhile gives its end; every result keeps the run's path, steps, and screenshot. The session state is read from the Player's Vue tree, because the
 Player shows no runtime failure. The result in `<out>/<id>/result.json` records each run's stop, the path of answers,
 the files and interactions reached, missing media, legacy HTML shown as text, and a screenshot of each stop, for the
 package's current `.tease` files.

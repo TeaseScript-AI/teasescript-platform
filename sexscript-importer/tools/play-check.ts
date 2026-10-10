@@ -16,7 +16,8 @@
  * fake clock and media at 16 times speed. A prompt that comes back three times in a row may wait for an answer that
  * takes time, so the runner then lets 30 seconds pass before answering, then 120 and 300 seconds after three more
  * repeats each (+10 s and +1 min presses in the Debug tool's time controls, or fake-clock jumps), noted in the run's path as
- * `[waited 30 s]`. Each run picks, at
+ * `[waited 30 s]`; a button that the script times, or after a text that asks for a minimum time, waits before it is
+ * pressed. A text prompt that names a format gets an answer in it (formatAnswer). Each run picks, at
  * every choice, the option tried least often in
  * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
  * run that hung or used up its steps, which other paths rarely change. A package whose `.tease` files are unchanged
@@ -245,6 +246,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       })),
   );
   const present = new Set(files);
+  const timed = timedButtons(sources);
   const outFolder = path.join(out, id);
   if (!values.again) {
     const last = await readFile(path.join(outFolder, "result.json"), "utf8").then(
@@ -280,14 +282,18 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     });
     let result: RunResult;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Each prompt the run answered, by place, options, and text, to tell a long tease from a loop.
-    const prompts: string[] = [];
+    // Each prompt the run answered, by place and options, to tell a long tease from a loop.
+    const prompts: Prompt[] = [];
+    // The run's answers and steps so far, which a run that ends by a time limit or a failure of the runner keeps.
+    const progress: Progress = { taken: [], steps: 0 };
+    const screenshot = `run-${run + 1}.png`;
+    let page: Page | null = null;
     try {
-      const page = await context.newPage();
+      page = await context.newPage();
+      const opened = page;
       const timedOut = new Promise<RunResult>((resolve) => {
         timer = setTimeout(() => {
-          const screenshot = `run-${run + 1}.png`;
-          void page
+          void opened
             .screenshot({ path: path.join(outFolder, screenshot), timeout: 5_000 })
             .then(
               () => screenshot,
@@ -300,9 +306,9 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
                   prompts,
                   `still running after ${RUN_TIMEOUT_MS / 60_000} minutes of real time`,
                 ),
-                steps: 0,
+                steps: progress.steps,
                 files: [],
-                path: [],
+                path: [...progress.taken],
                 lastText: "",
                 screenshot: taken,
               }),
@@ -312,6 +318,8 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       const playing = playOnce(page, id, run, outFolder, {
         tries,
         prompts,
+        progress,
+        timed,
         seen: (state) => {
           siteCount = Math.max(siteCount, state.sites);
           if (state.file !== null) coveredFiles.add(state.file);
@@ -328,6 +336,14 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       playing.catch(() => undefined);
       result = await Promise.race([playing, timedOut]);
     } catch (error) {
+      // The page could not open or play at all; what the run did before is kept.
+      const taken =
+        page === null
+          ? null
+          : await page.screenshot({ path: path.join(outFolder, screenshot), timeout: 5_000 }).then(
+              () => screenshot,
+              () => null,
+            );
       result = {
         run,
         stop: {
@@ -337,11 +353,11 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
           line: null,
           code: null,
         },
-        steps: 0,
+        steps: progress.steps,
         files: [],
-        path: [],
+        path: [...progress.taken],
         lastText: "",
-        screenshot: null,
+        screenshot: taken,
       };
     } finally {
       clearTimeout(timer);
@@ -410,7 +426,10 @@ async function playOnce(
   outFolder: string,
   track: {
     tries: Map<string, number[]>;
-    prompts: string[];
+    prompts: Prompt[];
+    progress: Progress;
+    /** The buttons whose press the script times (timedButtons). */
+    timed: ReadonlySet<string>;
     seen(state: PlayerState): void;
     chose(site: string, option: number): void;
   },
@@ -441,21 +460,42 @@ async function playOnce(
     dev
       ? new Promise((resolve) => setTimeout(resolve, Math.min(ms, 150)))
       : page.clock.fastForward(ms);
-  // Time passes while a prompt waits for an answer: +1 min and +10 s presses, or a fake-clock jump.
-  const pass = async (seconds: number) => {
-    if (!dev) return page.clock.fastForward(seconds * 1_000);
+  // The +10 s and +1 min buttons live in the Debug tool (#624), which a session that already ended may not open.
+  let debugOpen = false;
+  const openDebug = async (): Promise<boolean> => {
+    if (!debugOpen)
+      debugOpen = await page.click('button[aria-label="Debug"]', { timeout: 5_000 }).then(
+        () => true,
+        () => false,
+      );
+    return debugOpen;
+  };
+  // Time passes while a prompt waits for an answer: +1 min and +10 s presses, or a fake-clock jump. Whether it passed.
+  const pass = async (seconds: number): Promise<boolean> => {
+    if (!dev) {
+      await page.clock.fastForward(seconds * 1_000);
+      return true;
+    }
+    if (!(await openDebug())) return false;
     const presses = [
       ...Array.from({ length: Math.floor(seconds / 60) }, () => "advance-1min"),
-      ...Array.from({ length: Math.floor((seconds % 60) / 10) }, () => "advance-10s"),
+      ...Array.from({ length: Math.ceil((seconds % 60) / 10) }, () => "advance-10s"),
     ];
     for (const action of presses)
-      await page.click(`[data-development-time-action="${action}"]`, { timeout: 5_000 });
+      if (
+        !(await page.click(`[data-development-time-action="${action}"]`, { timeout: 5_000 }).then(
+          () => true,
+          () => false,
+        ))
+      )
+        return false;
+    return true;
   };
   await page.waitForSelector("[data-session-activation] button, [data-script-failure]", {
     timeout: 30_000,
   });
   let state = await readState(page);
-  const taken: string[] = [];
+  const taken = track.progress.taken;
   const finish = async (
     kind: RunResult["stop"]["kind"],
     detail: string,
@@ -465,9 +505,14 @@ async function playOnce(
       line: null,
       code: null,
     },
-  ) => {
+  ): Promise<RunResult> => {
     const screenshot = `run-${run + 1}.png`;
-    await page.screenshot({ path: path.join(outFolder, screenshot) });
+    const shot = await page
+      .screenshot({ path: path.join(outFolder, screenshot), timeout: 10_000 })
+      .then(
+        () => screenshot,
+        () => null,
+      );
     return {
       run,
       stop: { kind, detail, ...where },
@@ -475,191 +520,253 @@ async function playOnce(
       files: [...files].sort(),
       path: taken,
       lastText: state.lastText,
-      screenshot,
+      screenshot: shot,
     };
+  };
+  // How a session that halted ended.
+  const halted = (step: number): Promise<RunResult> => {
+    if (step === 0 && state.entries === 0 && state.stageImage === null)
+      return finish("empty", "the session ended without showing anything", step);
+    // For example a script that needs legacy settings, such as owned toys, that a fresh player does not have.
+    if (step === 0 && state.sites > 0)
+      return finish("early-end", `ended before its first interaction: "${state.lastText}"`, step);
+    return finish("ended", "the session reached its end", step);
   };
   if (state.scriptFailure !== null) return finish("no-start", state.scriptFailure, 0);
   await page.click("[data-session-activation] button");
-  // The +10 s and +1 min buttons live in the Debug tool (#624).
-  if (dev) await page.click('button[aria-label="Debug"]', { timeout: 5_000 });
+  // A session without interactions may end at once, before the Debug tool opens, and its end dialog then covers the
+  // page; the loop below reads the end.
+  state = await readState(page);
+  if (dev && state.status !== "halted" && state.status !== "failed") await openDebug();
   const visits = new Map<string, number>();
   // The prompt answered last, how often in a row, and how many waits that streak has had.
   let repeated = { key: "", count: 0, waits: 0 };
   let unchanged = 0;
   let lastProgress = -1;
   let progressAt = Date.now();
-  for (let step = 0; step < Number(values.steps);) {
-    state = await readState(page);
-    track.seen(state);
-    if (state.file !== null) files.add(state.file);
-    if (state.status === "halted") {
-      if (step === 0 && state.entries === 0 && state.stageImage === null)
-        return finish("empty", "the session ended without showing anything", step);
-      // For example a script that needs legacy settings, such as owned toys, that a fresh player does not have.
-      if (step === 0 && state.sites > 0)
-        return finish("early-end", `ended before its first interaction: "${state.lastText}"`, step);
-      return finish("ended", "the session reached its end", step);
-    }
-    if (state.status === "failed" || state.failure !== null) {
-      const failure = state.failure;
+  // Answers whose control could not be used, in a row: the state is read again, as the session may have moved on.
+  let missed = 0;
+  let step = 0;
+  // Runs one answer; one whose control cannot be used is tried again after the state is read again.
+  const answer = async (what: string, act: () => Promise<void>): Promise<RunResult | null> => {
+    try {
+      await act();
+      missed = 0;
+      step += 1;
+      return null;
+    } catch (error) {
+      missed += 1;
+      taken.pop();
+      if (missed < 4) return null;
       return finish(
-        "error",
-        failure === null
-          ? "the session failed"
-          : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
+        "harness",
+        `${what} could not be answered: ${error instanceof Error ? error.message.split("\n")[0]! : String(error)}`,
         step,
-        failure === null
-          ? undefined
-          : { file: failure.path, line: failure.line, code: failure.code },
       );
     }
-    if (pageErrors.length > 0) return finish("error", `page error: ${pageErrors[0]}`, step);
-    if (state.progress === lastProgress) unchanged += 1;
-    else {
-      unchanged = 0;
-      progressAt = Date.now();
-    }
-    lastProgress = state.progress;
-    // About 20 minutes of skipped time and half a minute of real time, for media, without any new event.
-    if (unchanged > 60 && Date.now() - progressAt > 30_000)
-      return finish(
-        "hang",
-        `nothing happens while waiting for ${state.foreground ?? "nothing"}`,
-        step,
-        {
-          file: state.site?.slice(0, state.site.lastIndexOf(":")) ?? state.file,
-          line:
-            state.site === null ? null : Number(state.site.slice(state.site.lastIndexOf(":") + 1)),
-          code: null,
-        },
-      );
-    if (state.foreground?.startsWith("interaction:") === true && state.site !== null) {
-      const kind = state.foreground.slice("interaction:".length);
-      const visit = visits.get(state.site) ?? 0;
-      visits.set(state.site, visit + 1);
-      // A script may time how long its prompt stays unanswered, as in "beg for at least 15 seconds". The same place
-      // with the same options and text counts as the same prompt; a loop over questions, such as toys, does not.
-      const key = `${state.site}\u0000${state.options.join("\u0000")}\u0000${state.lastText}`;
-      track.prompts.push(key);
-      repeated =
-        key === repeated.key
-          ? { ...repeated, count: repeated.count + 1 }
-          : { key, count: 1, waits: 0 };
-      if (
-        repeated.count >= 3 &&
-        repeated.waits < WAIT_STEPS_S.length &&
-        (state.options.length > 0 || state.composer !== null)
-      ) {
-        const seconds = WAIT_STEPS_S[repeated.waits]!;
-        await pass(seconds);
-        taken.push(`[waited ${seconds} s]`);
-        repeated = { key, count: 0, waits: repeated.waits + 1 };
+  };
+  try {
+    while (step < Number(values.steps)) {
+      track.progress.steps = step;
+      state = await readState(page);
+      track.seen(state);
+      if (state.file !== null) files.add(state.file);
+      if (state.status === "halted") return await halted(step);
+      if (state.status === "failed" || state.failure !== null) {
+        const failure = state.failure;
+        return await finish(
+          "error",
+          failure === null
+            ? "the session failed"
+            : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
+          step,
+          failure === null
+            ? undefined
+            : { file: failure.path, line: failure.line, code: failure.code },
+        );
       }
-      if ((kind === "button" || kind === "choice") && state.options.length > 0) {
-        const counts =
-          track.tries.get(state.site) ?? new Array<number>(state.options.length).fill(0);
-        track.tries.set(state.site, counts);
-        // The option tried least often so far; among equals, a run- and visit-dependent one, so loops vary too.
-        const order = state.options.map((_, index) => index);
-        const offset = (run + visit) % state.options.length;
-        order.sort(
-          (left, right) =>
-            (counts[left] ?? 0) - (counts[right] ?? 0) ||
-            ((left - offset + order.length) % order.length) -
-              ((right - offset + order.length) % order.length),
+      if (pageErrors.length > 0) return await finish("error", `page error: ${pageErrors[0]}`, step);
+      if (state.progress === lastProgress) unchanged += 1;
+      else {
+        unchanged = 0;
+        progressAt = Date.now();
+      }
+      lastProgress = state.progress;
+      // About 20 minutes of skipped time and half a minute of real time, for media, without any new event.
+      if (unchanged > 60 && Date.now() - progressAt > 30_000)
+        return await finish(
+          "hang",
+          `nothing happens while waiting for ${state.foreground ?? "nothing"}`,
+          step,
+          {
+            file: state.site?.slice(0, state.site.lastIndexOf(":")) ?? state.file,
+            line:
+              state.site === null
+                ? null
+                : Number(state.site.slice(state.site.lastIndexOf(":") + 1)),
+            code: null,
+          },
         );
-        const option = order[0]!;
-        counts[option] = (counts[option] ?? 0) + 1;
-        track.chose(state.site, option);
-        taken.push(`${state.site} → ${state.options[option] ?? option}`);
-        await page.click(`[data-foreground-controls] button >> nth=${option}`, { timeout: 5_000 });
-        step += 1;
-      } else if (kind === "image") {
-        // askImage: the composer's attach button opens a file picker, which gets the answer picture.
-        const [chooser] = await Promise.all([
-          page.waitForEvent("filechooser", { timeout: 5_000 }),
-          page.click("[data-composer-attach]", { timeout: 5_000 }),
-        ]);
-        await chooser.setFiles(answerImage);
-        taken.push(`${state.site} → [picture]`);
-        step += 1;
-      } else if (kind === "form" && state.options.length > 0) {
-        // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all toggles
-        // on, the others keep them as offered; then it is submitted, the first of the form's actions.
-        // A typed field the form requires and the check would have to fill, or an open field editor, is not handled.
-        const blocked = await page.evaluate(
-          () =>
-            document.querySelector("[data-form-fields] [data-editing]") !== null ||
-            [...document.querySelectorAll("[data-form-fields] button")].some(
-              (button) => button.textContent?.trim().endsWith("Set…") === true,
-            ),
-        );
-        if (blocked) return finish("unsupported", "a form with a required typed field", step);
-        const allOn = run % 2 === 1;
-        if (allOn) {
-          const off = await page.evaluate(
-            () => document.querySelectorAll("[data-form-fields] button[data-state='off']").length,
+      if (state.foreground?.startsWith("interaction:") === true && state.site !== null) {
+        const site = state.site;
+        const kind = state.foreground.slice("interaction:".length);
+        const visit = visits.get(site) ?? 0;
+        visits.set(site, visit + 1);
+        // A script may time how long its prompt stays unanswered, as in "beg for at least 15 seconds". The same place
+        // with the same options and text counts as the same prompt; a loop over questions, such as toys, does not.
+        const key = `${site}\u0000${state.options.join("\u0000")}\u0000${state.lastText}`;
+        if (missed === 0)
+          track.prompts.push({
+            key: `${site}\u0000${state.options.join("\u0000")}`,
+            text: state.lastText,
+          });
+        repeated =
+          key === repeated.key
+            ? { ...repeated, count: repeated.count + 1 }
+            : { key, count: 1, waits: 0 };
+        if (
+          repeated.count >= 3 &&
+          repeated.waits < WAIT_STEPS_S.length &&
+          (state.options.length > 0 || state.composer !== null)
+        ) {
+          const seconds = WAIT_STEPS_S[repeated.waits]!;
+          if (await pass(seconds)) taken.push(`[waited ${seconds} s]`);
+          repeated = { key, count: 0, waits: repeated.waits + 1 };
+        }
+        // A button whose press the script times, or after a text that asks for a minimum time, is pressed after it.
+        const minimum =
+          kind === "button" ? buttonWait(state.recentText, track.timed.has(site)) : null;
+        if (minimum !== null && missed === 0 && (await pass(minimum)))
+          taken.push(`[waited ${minimum} s]`);
+        let stopped: RunResult | null = null;
+        if ((kind === "button" || kind === "choice") && state.options.length > 0) {
+          const counts = track.tries.get(site) ?? new Array<number>(state.options.length).fill(0);
+          track.tries.set(site, counts);
+          // The option tried least often so far; among equals, a run- and visit-dependent one, so loops vary too.
+          const order = state.options.map((_, index) => index);
+          const offset = (run + visit) % state.options.length;
+          order.sort(
+            (left, right) =>
+              (counts[left] ?? 0) - (counts[right] ?? 0) ||
+              ((left - offset + order.length) % order.length) -
+                ((right - offset + order.length) % order.length),
           );
-          for (let index = 0; index < off; index += 1)
-            await page.click("[data-form-fields] button[data-state='off'] >> nth=0", {
+          const option = order[0]!;
+          taken.push(`${site} → ${state.options[option] ?? option}`);
+          stopped = await answer(`the ${kind} at ${site}`, async () => {
+            await page.click(`[data-foreground-controls] button >> nth=${option}`, {
               timeout: 5_000,
             });
+            counts[option] = (counts[option] ?? 0) + 1;
+            track.chose(site, option);
+          });
+        } else if (kind === "image") {
+          // askImage: the composer's attach button opens a file picker, which gets the answer picture.
+          taken.push(`${site} → [picture]`);
+          stopped = await answer(`the picture at ${site}`, async () => {
+            const [chooser] = await Promise.all([
+              page.waitForEvent("filechooser", { timeout: 5_000 }),
+              page.click("[data-composer-attach]", { timeout: 5_000 }),
+            ]);
+            await chooser.setFiles(answerImage);
+          });
+        } else if (kind === "form" && state.options.length > 0) {
+          // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all
+          // toggles on, the others keep them as offered; then it is submitted, the first of the form's actions.
+          // A typed field the form requires and the check would have to fill, or an open field editor, is not handled.
+          const blocked = await page.evaluate(
+            () =>
+              document.querySelector("[data-form-fields] [data-editing]") !== null ||
+              [...document.querySelectorAll("[data-form-fields] button")].some(
+                (button) => button.textContent?.trim().endsWith("Set…") === true,
+              ),
+          );
+          if (blocked)
+            return await finish("unsupported", "a form with a required typed field", step);
+          const allOn = run % 2 === 1;
+          taken.push(`${site} → [form${allOn ? ", all on" : ""}]`);
+          stopped = await answer(`the form at ${site}`, async () => {
+            if (allOn) {
+              const off = await page.evaluate(
+                () =>
+                  document.querySelectorAll("[data-form-fields] button[data-state='off']").length,
+              );
+              for (let index = 0; index < off; index += 1)
+                await page.click("[data-form-fields] button[data-state='off'] >> nth=0", {
+                  timeout: 5_000,
+                });
+            }
+            await page.click("[data-form-actions] button >> nth=0", { timeout: 5_000 });
+          });
+        } else if (state.composer !== null) {
+          const numeric = state.composer.mode === "numeric" || state.composer.mode === "decimal";
+          const answers = numeric ? NUMBER_ANSWERS : TEXT_ANSWERS;
+          // A prompt that quotes a sentence, as in a lines game ("Write 'I will obey' ten times"), gets that sentence.
+          // Or one that names it after "Type:" or "Write:" at the end of a line.
+          const quoted = numeric ? undefined : quotedAnswer(state.recentText);
+          const text =
+            ISO_ANSWERS[state.composer.type] ??
+            formatAnswer(state.recentText, run + visit) ??
+            quoted ??
+            answers[(run + visit) % answers.length]!;
+          taken.push(`${site} → "${text}"`);
+          stopped = await answer(`the text field at ${site}`, async () => {
+            await page.fill("[data-composer-input]", text, { timeout: 5_000 });
+            await page.press("[data-composer-input]", "Enter", { timeout: 5_000 });
+          });
+        } else if (kind !== "button" && kind !== "choice" && unchanged > 3) {
+          return await finish("unsupported", `no control for the ${kind} interaction`, step);
         }
-        taken.push(`${state.site} → [form${allOn ? ", all on" : ""}]`);
-        await page.click("[data-form-actions] button >> nth=0", { timeout: 5_000 });
-        step += 1;
-      } else if (state.composer !== null) {
-        const answers =
-          state.composer.mode === "numeric" || state.composer.mode === "decimal"
-            ? NUMBER_ANSWERS
-            : TEXT_ANSWERS;
-        // A prompt that quotes a sentence, as in a lines game ("Write 'I will obey' ten times"), gets that sentence.
-        // Or one that names it after "Type:" or "Write:" at the end of a line.
-        const quoted =
-          answers === TEXT_ANSWERS
-            ? ([...state.recentText.matchAll(/["'“„«]([^"'“”„«»\n]{3,200})["'”“»]/gu)].at(
-                -1,
-              )?.[1] ??
-              [
-                ...state.recentText.matchAll(
-                  /(?:^|\n)\s*(?:type|write|copy|schreibe|tippe)\s*:\s*([^\n]{3,200}?)\s*$/gimu,
-                ),
-              ].at(-1)?.[1])
-            : undefined;
-        const answer =
-          ISO_ANSWERS[state.composer.type] ?? quoted ?? answers[(run + visit) % answers.length]!;
-        taken.push(`${state.site} → "${answer}"`);
-        await page.fill("[data-composer-input]", answer, { timeout: 5_000 });
-        await page.press("[data-composer-input]", "Enter", { timeout: 5_000 });
-        step += 1;
-      } else if (kind !== "button" && kind !== "choice" && unchanged > 3) {
-        return finish("unsupported", `no control for the ${kind} interaction`, step);
+        if (stopped !== null) return stopped;
+        await idle(300);
+      } else if (state.foreground === "delay" && state.delayMs !== null) {
+        // Jumping fires each due timer once, instead of every animation frame on the way.
+        await idle(Math.max(50, state.delayMs + 50));
+      } else {
+        // Media play in real time; everything else waits on the fake clock.
+        if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
+        // Auto-skip pauses while media load, which a missing file never finishes; "Skip event" still jumps then.
+        if (dev && unchanged > 2)
+          await page
+            .click('[data-development-time-action="skip"]:not([disabled])', { timeout: 1_000 })
+            .catch(() => undefined);
+        await idle(unchanged > 2 ? 20_000 : 1_000);
       }
-      await idle(300);
-    } else if (state.foreground === "delay" && state.delayMs !== null) {
-      // Jumping fires each due timer once, instead of every animation frame on the way.
-      await idle(Math.max(50, state.delayMs + 50));
-    } else {
-      // Media play in real time; everything else waits on the fake clock.
-      if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
-      // Auto-skip pauses while media load, which a missing file never finishes; "Skip event" still jumps then.
-      if (dev && unchanged > 2)
-        await page
-          .click('[data-development-time-action="skip"]:not([disabled])', { timeout: 1_000 })
-          .catch(() => undefined);
-      await idle(unchanged > 2 ? 20_000 : 1_000);
     }
+  } catch (error) {
+    // A step the runner could not take: the session may have ended meanwhile, which is then its result.
+    state = await readState(page).catch(() => state);
+    if (state.status === "halted") return await halted(step);
+    return await finish(
+      "harness",
+      error instanceof Error ? error.message.split("\n")[0]! : String(error),
+      step,
+    );
   }
+  track.progress.steps = step;
   const limit = limitStop(track.prompts, `${values.steps} interactions without reaching the end`);
   return finish(limit.kind, limit.detail, Number(values.steps), limit);
 }
 
+/** A prompt a run answered: its place and options, which tell a loop from a long tease, and its last text. */
+interface Prompt {
+  readonly key: string;
+  readonly text: string;
+}
+
+/** A run's answers and steps so far. */
+interface Progress {
+  readonly taken: string[];
+  steps: number;
+}
+
 /**
- * How a run that reached a limit ended: `loops` when the prompts of its second half all appeared in its first half,
- * with the most repeated ones, else `parked`, as a long tease that kept showing new prompts.
+ * How a run that reached a limit ended: `loops` when the prompts of its second half, by place and options, all
+ * appeared in its first half, with the most repeated ones, else `parked`, as a long tease that kept showing new
+ * prompts. A text that changes, such as a score or a hand of cards, does not make a prompt new.
  */
 function limitStop(
-  prompts: readonly string[],
+  prompts: readonly Prompt[],
   limit: string,
 ): {
   kind: "parked" | "loops";
@@ -669,8 +776,13 @@ function limitStop(
   code: null;
 } {
   const half = Math.floor(prompts.length / 2);
-  const earlier = new Set(prompts.slice(0, half));
-  const fresh = new Set(prompts.slice(half).filter((prompt) => !earlier.has(prompt)));
+  const earlier = new Set(prompts.slice(0, half).map((prompt) => prompt.key));
+  const fresh = new Set(
+    prompts
+      .slice(half)
+      .map((prompt) => prompt.key)
+      .filter((key) => !earlier.has(key)),
+  );
   if (prompts.length < 20 || fresh.size > 0)
     return {
       kind: "parked",
@@ -679,12 +791,13 @@ function limitStop(
       line: null,
       code: null,
     };
-  const counts = new Map<string, number>();
-  for (const prompt of prompts.slice(half)) counts.set(prompt, (counts.get(prompt) ?? 0) + 1);
-  const repeated = [...counts].sort((left, right) => right[1] - left[1]).slice(0, 3);
-  const shown = repeated.map(([prompt, count]) => {
-    const [site, options, text] = prompt.split("\u0000");
-    return `${site} "${(text ?? "").slice(0, 60)}" [${(options ?? "").replaceAll("\u0000", " / ")}] ×${count}`;
+  const counts = new Map<string, { count: number; text: string }>();
+  for (const prompt of prompts.slice(half))
+    counts.set(prompt.key, { count: (counts.get(prompt.key)?.count ?? 0) + 1, text: prompt.text });
+  const repeated = [...counts].sort((left, right) => right[1].count - left[1].count).slice(0, 3);
+  const shown = repeated.map(([key, { count, text }]) => {
+    const [site, ...options] = key.split("\u0000");
+    return `${site} "${text.slice(0, 60)}" [${options.join(" / ")}] ×${count}`;
   });
   const top = repeated[0]?.[0].split("\u0000")[0] ?? "";
   const colon = top.lastIndexOf(":");
@@ -695,6 +808,105 @@ function limitStop(
     line: colon < 0 ? null : Number(top.slice(colon + 1)),
     code: null,
   };
+}
+
+/** A sentence that a prompt quotes, or names after "Type:" or "Write:" at the end of a line, to type. */
+function quotedAnswer(text: string): string | undefined {
+  return (
+    [...text.matchAll(/["'“„«]([^"'“”„«»\n]{3,200})["'”“»]/gu)].at(-1)?.[1] ??
+    [
+      ...text.matchAll(
+        /(?:^|\n)\s*(?:type|write|copy|schreibe|tippe)\s*:\s*([^\n]{3,200}?)\s*$/gimu,
+      ),
+    ].at(-1)?.[1]
+  );
+}
+
+/**
+ * An answer in the format that a prompt asks for, different on each visit `n`, or null: a cell in a range such as
+ * "(A1 to G7)"; a number of "N digits", all different and without a leading 0 where the prompt rules that out; on an
+ * optional field nothing every other visit; a URL; or, where the prompt names a number "to quit", one of the numbers it
+ * names, so that the quit comes within a few visits.
+ */
+export function formatAnswer(text: string, n: number): string | null {
+  const cells = /\b([A-Z])(\d{1,2})\s*(?:to|-|–)\s*([A-Z])(\d{1,2})\b/u.exec(text);
+  if (cells !== null) {
+    const [first, last] = [cells[1]!.charCodeAt(0), cells[3]!.charCodeAt(0)];
+    const [low, high] = [Number(cells[2]), Number(cells[4])];
+    const columns = last - first + 1;
+    const rows = high - low + 1;
+    if (columns > 0 && rows > 0) {
+      // A step that shares no factor with the number of cells visits each cell once before any comes back.
+      const total = columns * rows;
+      let stride = 7;
+      while (gcd(stride, total) !== 1) stride += 1;
+      const cell = (n * stride) % total;
+      return `${String.fromCharCode(first + (cell % columns))}${low + Math.floor(cell / columns)}`;
+    }
+  }
+  const digits =
+    /\b(?:is|exactly|has|have|a|of|enter|input)\s+(\d{1,2})[\s-]*digits?\b/iu.exec(text) ??
+    /\b(\d{1,2})-digit\b/iu.exec(text);
+  if (digits !== null) {
+    const length = Number(digits[1]);
+    const noZero = /(?:begin|start)s?\s+with\s+(?:a\s+)?(?:0|zero)/iu.test(text);
+    if (length > 0 && length <= 10) {
+      // Different digits fit a rule against repeated ones too.
+      let answer = "";
+      for (let index = 0; answer.length < length; index += 1) {
+        const digit = String((n + index + (noZero ? 1 : 0)) % 10);
+        if ((answer === "" && noZero && digit === "0") || answer.includes(digit)) continue;
+        answer += digit;
+      }
+      return answer;
+    }
+  }
+  if (/\(optional\)/iu.test(text) && n % 2 === 0) return "";
+  if (/\burl\b|web\s*address/iu.test(text)) return "http://example.com/";
+  if (/\b\d+\s+to\s+(?:quit|exit|stop|end)\b/iu.test(text)) {
+    const named = [...new Set([...text.matchAll(/\b\d+\b/gu)].map((match) => match[0]))];
+    return named[n % named.length]!;
+  }
+  return null;
+}
+
+function gcd(left: number, right: number): number {
+  return right === 0 ? left : gcd(right, left % right);
+}
+
+/**
+ * How long to wait before pressing a button: the minimum a text before it asks for, "at least 15 seconds" or "longer
+ * than 5 seconds", plus one, or 10 seconds where the script times the press (timedButtons); else null.
+ */
+function buttonWait(text: string, timed: boolean): number | null {
+  const asked =
+    /\b(?:at least|longer than|more than|minimum of|no less than)\s+(\d+)\s*(seconds?|secs?|minutes?|mins?)\b/iu.exec(
+      text,
+    );
+  if (asked !== null) {
+    const amount = Number(asked[1]);
+    return (/^min/iu.test(asked[2]!) ? amount * 60 : amount) + 1;
+  }
+  return timed ? 10 : null;
+}
+
+/**
+ * The buttons, `file:line`, whose press a script times: the line that shows the button, or one of the two after it,
+ * reads the clock, or the button's elapsed time is used as a value. A button with a timeout is left out, as waiting
+ * would let it expire.
+ */
+function timedButtons(sources: ReadonlyArray<{ path: string; source: string }>): Set<string> {
+  const sites = new Set<string>();
+  for (const { path: file, source } of sources) {
+    const lines = source.split("\n");
+    lines.forEach((line, index) => {
+      if (!/\bshowButton\b/u.test(line) || /\btimeout:/u.test(line)) return;
+      const following = [line, ...lines.slice(index + 1, index + 3)].join("\n");
+      if (/getAbsoluteDateTime\(|\(showButton\b[^)]*\)\s*\/|=\s*showButton\b/u.test(following))
+        sites.add(`${file}:${index + 1}`);
+    });
+  }
+  return sites;
 }
 
 /** Reads the session from the Player's mounted Vue tree and the controls from the page. */
