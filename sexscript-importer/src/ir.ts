@@ -184,8 +184,6 @@ export type IrStatement =
       global?: true;
       /** The counter a C-style `for` declared, which Groovy scoped to its loop. */
       loopCounter?: true;
-      /** The importer's capture of a value read earlier only to be shown, such as an input's question (pushPrompt). */
-      capture?: true;
     })
   | (IrBase & {
       kind: "assign";

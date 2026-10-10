@@ -28,24 +28,6 @@ function sexscriptLegacyText(value): string? {
   }
   return "${value}"
 }
-function sexscriptLegacyCompare(left, right) {
-  if left == null {
-    if right == null {
-      return 0
-    }
-    return -1
-  }
-  if right == null {
-    return 1
-  }
-  if left < right {
-    return -1
-  }
-  if left > right {
-    return 1
-  }
-  return 0
-}
 // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping the fraction toward
 // zero; a missing key read null.
 save "5.1" as "game.version"
@@ -102,7 +84,7 @@ if picture == null or picture == "" {
 say "Picture ${picture}"
 // A read of the script's own with a default, which a whole-number default makes a whole number.
 function loadIntegerVal(keyword, defaultValue) {
-  let stored: integer? = sexscriptLegacyLoadInteger(keyword)
+  let stored = sexscriptLegacyLoadInteger(keyword)
   if stored == null {
     return defaultValue
   } else {
@@ -127,71 +109,4 @@ function loadAsText(keyword, defaultValue) {
   }
 }
 say "Text ${loadAsText("game.squares", "none")}"
-// A read that the function tests for null but then sets to a parameter's value or to text stays open: the value
-// may be of another type, and the text needs no number at all.
-function readDefault(key, fallbackValue) {
-  let x = sexscriptLegacyLoadInteger(key)
-  if x == null {
-    say "Default"
-    x = fallbackValue
-  }
-  return x
-}
-let counts = { count: 0 }
-// NOTE SX_SHARED_MAP_WRITE line 74: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
-counts.count = readDefault("game.missing", 7)
-say "Count ${counts.count}"
-function readText {
-  let x = sexscriptLegacyLoadInteger("game.missing")
-  if x != null {
-    say "Saved"
-  }
-  x = "text"
-  return x
-}
-say "Read ${readText()}"
-// An integer answer kept in a local, whole arithmetic with a whole local, a remainder, a sign, and a question shown
-// from the read keep it a whole number or
-// null, so a caller that tests its own read for null gets a whole number back.
-function fillLabel {
-  say "Filling"
-  return "label"
-}
-function readAsked {
-  let x: integer? = sexscriptLegacyLoadInteger("game.missing")
-  if x == null {
-    let answer = askInteger "How many?", prefill: 3
-    x = answer
-  }
-  let step = 1
-  x = +((x + step) * 2 % 50)
-  let question: integer? = x
-  let prefill = fillLabel()
-  if question != null {
-    say question
-  }
-  let labelValue = askText(prefill: prefill).replace("\n", " ")
-  return x
-}
-let asked: integer? = 0
-asked = sexscriptLegacyLoadInteger("game.asked")
-if asked == null {
-  say "Nothing asked yet"
-}
-asked = readAsked()
-say "Asked ${asked * 2}"
-// A read that arithmetic uses where the function has not tested it stays open: Groovy failed there only at runtime,
-// on the path where the key is missing.
-function misbehaved {
-  let summoned = sexscriptLegacyLoadInteger("game.summoned")
-  let talked = 0
-  if (summoned != null and summoned != 0) or talked != 0 {
-    say "Penalty ${summoned * 10 + talked}"
-  }
-  if summoned != null and sexscriptLegacyCompare(summoned, 1) > 0 {
-    say "Summoned ${summoned * 50}"
-  }
-  return talked
-}
-say "Talked ${misbehaved()}"
 exit

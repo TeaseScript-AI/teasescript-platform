@@ -80,7 +80,7 @@ spell()
 // So do numbers set from a closure that returns a load with a default through another one, as SlideLadderDare's
 // loadInteger0 over loadIntegerVal.
 function loadOr(key, fallbackValue) {
-  let stored: integer? = sexscriptLegacyLoadInteger(key)
+  let stored = sexscriptLegacyLoadInteger(key)
   if stored == null {
     return fallbackValue
   }
