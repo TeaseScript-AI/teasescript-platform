@@ -244,4 +244,28 @@ if column < 0 {
 }
 shots[column][0] = 1
 say "Shot ${shots[0][0]}"
+// A loop that fills a literal list by position up to a count that can be more than its length grows the list, as
+// Farkel's cheating roll of seven dice into six values.
+let rolled = [0, 0, 0]
+let throwCount = 3
+if askBoolean "Cheat?" {
+  throwCount = 4
+}
+for i in 0..throwCount {
+  // NOTE SX_LIST_GROWTH line 101: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+  if i < rolled.length {
+    rolled[i] = randomInteger(0..6) + 1
+  } else {
+    rolled.add(randomInteger(0..6) + 1)
+  }
+}
+say "Rolled ${rolled.length}"
+// A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
+// after a bracket of one.
+let finalists = ["Anna", "Bea"]
+if askBoolean "Bye?" {
+  finalists = ["Anna"]
+}
+// NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
+say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}"
 exit

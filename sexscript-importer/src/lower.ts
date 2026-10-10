@@ -10948,6 +10948,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       );
       return useHelper(context, "itemAt", [target, index]);
     }
+    if (!context.writeTargets.has(node) && pastShorterLiteral(indexNode, targetNode, context)) {
+      addDiagnostic(
+        context,
+        "SX_INDEX_PAST_END",
+        "warning",
+        "This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
     // A variable that may hold a negative position, such as a -1 for "none yet": Groovy counted it from the end.
     if (
       !context.writeTargets.has(node) &&
@@ -13952,6 +13962,8 @@ function closureContains(closure: AstNode, node: AstNode): boolean {
 
 /** Positions of list writes that count up with the writes (markSequentialWrites), as the `list[i]` target nodes. */
 const sequentialWrites = new WeakSet<AstNode>();
+/** The bound of the C-style loop whose counter is the position of a sequential write: `i < bound` or `i <= bound`. */
+const sequentialBounds = new WeakMap<AstNode, { bound: AstNode; inclusive: boolean }>();
 /** Writes at a literal position that a straight-line block shows to be the list's length, or inside it. */
 const literalAppends = new WeakSet<AstNode>();
 const literalSets = new WeakSet<AstNode>();
@@ -14004,7 +14016,11 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
   };
   const expressionOf = (statement: AstNode): AstNode | null =>
     statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-  const mark = (statements: readonly AstNode[], counters: Set<string>): void => {
+  const mark = (
+    statements: readonly AstNode[],
+    counters: Set<string>,
+    loop: { counter: string; bound: AstNode; inclusive: boolean } | null = null,
+  ): void => {
     for (const statement of statements) {
       const key = countsUp(expressionOf(statement));
       if (key !== null) counters.add(key);
@@ -14024,7 +14040,11 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       const position = left === null ? undefined : constantValue(asNode(left.right) ?? undefined);
       if (left !== null) {
         const key = bindingKey(asNode(left.right), keys);
-        if (key !== null && counters.has(key) && counts(key)) sequentialWrites.add(left);
+        if (key !== null && counters.has(key) && counts(key)) {
+          sequentialWrites.add(left);
+          if (loop !== null && key === loop.counter)
+            sequentialBounds.set(left, { bound: loop.bound, inclusive: loop.inclusive });
+        }
       }
       if (listKey !== null && typeof position === "number" && lengths.has(listKey)) {
         const length = lengths.get(listKey)!;
@@ -14062,10 +14082,17 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
     walkAst(loopBody, (child) => {
       if (child.kind === "continue") skips = true;
     });
+    const condition = parts[1];
+    const comparison = condition?.kind === "binary" ? text(condition.operator) : null;
+    const bound =
+      (comparison === "<" || comparison === "<=") && bindingKey(condition!.left, keys) === counter
+        ? asNode(condition!.right)
+        : null;
     if (!skips)
       mark(
         loopBody.kind === "block" ? nodeArray(loopBody.statements) : [loopBody],
         new Set([counter]),
+        bound === null ? null : { counter, bound, inclusive: comparison === "<=" },
       );
   });
 }
@@ -14136,6 +14163,44 @@ function listPadding(
   return null;
 }
 
+/** Whether a loop bound may be more than a limit: a larger number, or a variable that is set to one somewhere. */
+function mayExceed(
+  bound: AstNode,
+  limit: number,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const value = constantValue(bound);
+  if (typeof value === "number") return value > limit;
+  if (bound.kind !== "variable") return false;
+  const key = bindingKey(bound, context.bindings);
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  return (context.assignedValues.get(key) ?? []).some((assigned) =>
+    mayExceed(assigned, limit, context, seen),
+  );
+}
+
+/**
+ * Whether a literal position of a list variable lies past the end of a shorter non-empty literal list the variable is
+ * set to again later, `contestants = [winner1]` beside `contestants[1]`, where Groovy read null. The first value, which
+ * the code may grow before reading, as `rules = ["Kneel"]` then `rules.add(…)`, does not count.
+ */
+function pastShorterLiteral(
+  indexNode: AstNode,
+  targetNode: AstNode | null,
+  context: LowerContext,
+): boolean {
+  const position = constantValue(indexNode);
+  if (typeof position !== "number" || !Number.isInteger(position) || position < 0) return false;
+  const key = targetNode?.kind === "variable" ? bindingKey(targetNode, context.bindings) : null;
+  if (key === null) return false;
+  return (context.assignedValues.get(key) ?? []).slice(1).some((value) => {
+    const length = value.kind === "list" ? nodeArray(value.items).length : 0;
+    return length > 0 && position >= length;
+  });
+}
+
 /**
  * Whether a list write's position is a number: proven so, or arithmetic whose operands are numbers or of unknown type,
  * `join[i + offset]`, since Groovy failed on a list position of another type.
@@ -14185,12 +14250,24 @@ function growingListWrite(
     typeof position === "number" &&
     literalLists.length > 0 &&
     literalLists.every((node) => node.kind === "list" && position >= nodeArray(node.items).length);
+  const literalLengths = new Set(
+    literalLists.map((node) => (node.kind === "list" ? nodeArray(node.items).length : -1)),
+  );
+  const literalLength = literalLengths.size === 1 ? [...literalLengths][0]! : null;
+  // A loop that fills a literal list by position up to a bound that may exceed its length, `dice = 7` then
+  // `for (i = 0; i < dice; i++) values[i] = …` over six values, appends past the end.
+  const loop = sequentialBounds.get(targetNode);
+  const loopPast =
+    loop !== undefined &&
+    literalLength !== null &&
+    literalLength > 0 &&
+    mayExceed(loop.bound, loop.inclusive ? literalLength - 1 : literalLength, context);
   if (
     target.kind !== "index" ||
     target.dict === true ||
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
-    !(startsEmpty || pastLiteral) ||
+    !(startsEmpty || pastLiteral || loopPast) ||
     // A write that reads the same position first, `map[i] = map[i] % 1000`, needs the position to exist already.
     (listNode !== null && readsPosition(valueNode, listNode, indexNode)) ||
     !listGrowthIndex(indexNode, context)
@@ -14210,10 +14287,6 @@ function growingListWrite(
   // A position that may lie beyond the end, which Groovy padded up to: the list gets padding values first.
   // A write at the end grows the list by appending where the position counts up with the writes, or is the length of
   // the literal list the variable starts as.
-  const literalLengths = new Set(
-    literalLists.map((node) => (node.kind === "list" ? nodeArray(node.items).length : -1)),
-  );
-  const literalLength = literalLengths.size === 1 ? [...literalLengths][0]! : null;
   const appends = sequentialWrites.has(targetNode) || (pastLiteral && position === literalLength);
   // Padding is null where the code compares the list's elements with null, else the empty value of the elements'
   // type; a list of elements of unknown type keeps growing by appending.
