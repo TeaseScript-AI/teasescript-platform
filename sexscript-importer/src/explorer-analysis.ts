@@ -749,29 +749,38 @@ export class DataFlow {
    */
   holdsStored(expression: unknown, key: string, at: number | undefined): boolean {
     type Need = "value" | "truth" | "integer";
-    // Each variable, temporary, and function is gone through once: one met again is being or was gone through without
-    // a value that is not the stored one, as the search stops at the first such. When none is found, all of them hold.
+    // Each variable, temporary, and function is gone through once: one met again is being or was gone through, and
+    // the question fails at the first value that is not the stored one. When none is found, all of them hold. A list
+    // of values to look through, not recursion, as chains of copies and helpers can be long.
     const visited = new Set<string>();
-    const node = (
-      name: string,
-      need: Need,
-      values: { value: unknown; at: number | undefined }[],
-    ) => {
-      const id = `${name}\u0000${key}\u0000${need}`;
-      if (this.#holds.has(id) || visited.has(id)) return true;
-      visited.add(id);
-      const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
-      return reading.length > 0 && reading.every((each) => holdsAt(each.value, each.at, need));
-    };
+    const pending: { value: unknown; at: number | undefined; need: Need }[] = [
+      { value: expression, at, need: "value" },
+    ];
     // A load's declared type that can hold the kind needed; an open one can.
     const fits = (type: Data, need: Need): boolean =>
       need === "value" ||
       typeof type.kind !== "string" ||
       type.kind === (need === "truth" ? "boolean" : "integer") ||
       (type.kind === "union" && list(type.members).some((member) => fits(member, need)));
-    const holdsAt = (expression: unknown, at: number | undefined, need: Need): boolean => {
+    // A variable, temporary, or function: its values that read the key, at least one, are looked through in turn.
+    const node = (
+      name: string,
+      need: Need,
+      values: { value: unknown; at: number | undefined }[],
+    ): boolean => {
+      const id = `${name}\u0000${key}\u0000${need}`;
+      if (this.#holds.has(id) || visited.has(id)) return true;
+      visited.add(id);
+      const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
+      for (const each of reading) pending.push({ ...each, need });
+      return reading.length > 0;
+    };
+    const step = (expression: unknown, at: number | undefined, need: Need): boolean => {
       const value = record(expression);
-      if (value.kind === "group") return holdsAt(value.expression, at, need);
+      if (value.kind === "group") {
+        pending.push({ value: value.expression, at, need });
+        return true;
+      }
       if (value.kind === "storageLoad")
         return fits(record(value.type), need) && keyText(value.key) === key;
       if (value.kind === "identifier" && typeof value.name === "string")
@@ -786,12 +795,9 @@ export class DataFlow {
       // A whole number is no truth.
       if (value.kind === "call" && calleeName(value) === "toInteger") {
         const [only, ...rest] = list(value.arguments);
-        return (
-          need !== "truth" &&
-          only !== undefined &&
-          rest.length === 0 &&
-          holdsAt(only.value, at, "integer")
-        );
+        if (need === "truth" || only === undefined || rest.length > 0) return false;
+        pending.push({ value: only.value, at, need: "integer" });
+        return true;
       }
       // A truth compared with `true` is that truth (`load(k) == true`).
       if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
@@ -803,7 +809,9 @@ export class DataFlow {
             : left.kind === "literal" && left.value === truth
               ? right
               : null;
-        return side !== null && holdsAt(side, at, "truth");
+        if (side === null) return false;
+        pending.push({ value: side, at, need: "truth" });
+        return true;
       }
       if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
         const held = this.heldAt(value.temporaryId, at);
@@ -830,9 +838,10 @@ export class DataFlow {
       }
       return false;
     };
-    const holds = holdsAt(expression, at, "value");
-    if (holds) for (const id of visited) this.#holds.add(id);
-    return holds;
+    for (let item = pending.pop(); item !== undefined; item = pending.pop())
+      if (!step(item.value, item.at, item.need)) return false;
+    for (const id of visited) this.#holds.add(id);
+    return true;
   }
 
   /**
@@ -947,9 +956,15 @@ export class DataFlow {
     if (!pattern.includes(KEY_PLACEHOLDER)) return pattern;
     const keys = new Set<string | null>();
     const followed = new Set<string>();
-    const walk = (value: unknown, at: number): void => {
-      if (Array.isArray(value)) value.forEach((item) => walk(item, at));
-      if (!isRecord(value)) return;
+    // A list of values to look through, not recursion, as chains of copies can be long.
+    const pending: { value: unknown; at: number }[] = [{ value: condition, at }];
+    for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+      const { value, at } = item;
+      if (Array.isArray(value)) {
+        for (const each of value) pending.push({ value: each, at });
+        continue;
+      }
+      if (!isRecord(value)) continue;
       if (value.kind === "storageLoad" && keyText(value.key) === pattern)
         keys.add(this.#keyNamed(value.key, new Map()));
       else if (value.kind === "storageLoad") {
@@ -957,22 +972,22 @@ export class DataFlow {
       } else if (value.kind === "identifier" && typeof value.name === "string") {
         const variable = this.#keyOf(value);
         if (this.#variableFlow(variable)?.keys.has(pattern) !== true || followed.has(variable))
-          return;
+          continue;
         followed.add(variable);
         for (const assigned of this.#assignmentsOf(variable)) {
           if (!this.flowOf(assigned.value).keys.has(pattern)) continue;
           const kind = assigned.value.kind;
           if (kind === "parameter" || kind === "element" || kind === "part") keys.add(null);
-          else walk(assigned.value, assigned.index);
+          else pending.push({ value: assigned.value, at: assigned.index });
         }
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
-        if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) return;
+        if (this.#temporaries.get(value.temporaryId)?.keys.has(pattern) !== true) continue;
         const call = this.#callBefore(value.temporaryId, at);
         const named = call === null ? [] : this.#keysCalled(call, pattern, new Map(), HELPER_DEPTH);
         if (named.length === 0) keys.add(null);
         for (const key of named) keys.add(key);
       } else if (value.kind === "callResult" && typeof value.call === "number") {
-        if (this.#functions.get(Number(value.functionId))?.keys.has(pattern) !== true) return;
+        if (this.#functions.get(Number(value.functionId))?.keys.has(pattern) !== true) continue;
         const named = this.#keysCalled(
           this.#instructions[value.call]!,
           pattern,
@@ -982,9 +997,9 @@ export class DataFlow {
         if (named.length === 0) keys.add(null);
         for (const key of named) keys.add(key);
       }
-      for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item, at);
-    };
-    walk(condition, at);
+      for (const [key, each] of Object.entries(value))
+        if (key !== "span") pending.push({ value: each, at });
+    }
     const [key] = keys;
     return keys.size === 1 && typeof key === "string" ? key : pattern;
   }

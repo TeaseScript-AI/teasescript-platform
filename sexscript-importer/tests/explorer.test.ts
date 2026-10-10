@@ -1012,6 +1012,10 @@ test(
     for (let index = 1; index <= 24; index += 1)
       copies += `let x${index} = x${index - 1}\nx${index} = x${index - 1}\n`;
     assert.deepEqual(compared(`${copies}if x24 > 7 {\n  say "Yes"\n}\nexit\n`), ["n > 7"]);
+    // A long chain of copies, also of a template's load, is looked through without running out of stack.
+    let chain = 'let item = "a"\nlet y0 = load("deep.${item}", default: 0)\n';
+    for (let index = 1; index < 6000; index += 1) chain += `let y${index} = y${index - 1}\n`;
+    assert.deepEqual(compared(`${chain}if y5999 > 7 {\n  say "Deep."\n}\nexit\n`), ["deep.a > 7"]);
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",
