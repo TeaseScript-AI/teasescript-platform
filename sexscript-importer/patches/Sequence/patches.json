@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "currentChoices holds the action names offered in a round, and then the position of the chosen action, which the rest of the round reads. A TeaseScript variable keeps one type, so the position goes into its own variable, chosenAction, which starts at 0 for a choice that names no action (the list itself then, which the lookups that follow could not use).",
       "diff": "chosen-action.diff"
+    },
+    {
+      "id": "list-parameter",
+      "layer": "source",
+      "category": "b",
+      "reason": "updateNumbers takes the three number lists as an untyped parameter, so the conversion cannot prove it a list and dropped `nums=nums+(nums.last()+5)`: the list shrank each round, and the next `nums[1..4]` read past its end. Every caller passes a list, so the parameter is declared List, which Groovy treats the same for these calls.",
+      "diff": "list-parameter.diff"
     }
   ]
 }
