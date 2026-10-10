@@ -20,6 +20,41 @@
       "category": "e",
       "reason": "The pick-or-dick choice skips to the failure while an orgasm denial runs, but tests true==loadInteger(\"Jewell.deny_Orgasm\"): nothing saves that capitalised key (the scripts save jewell.deny_Orgasm, an expiry time in seconds), and a number never equals true, so a denial never applied. Test the expiry as trainStrapon does: loadInteger(\"jewell.deny_Orgasm\")!=null && loadInteger(\"jewell.deny_Orgasm\")>getTime().",
       "diff": "deny-orgasm-check.diff"
+    },
+    {
+      "id": "masturbation-cases",
+      "layer": "source",
+      "category": "e",
+      "reason": "The masturbation session draws getRandom(12) and maps 0 to 9 to the blocks mast0 to mast9, but 10 and 11 to mast8 and mast9 again, so the mast10 and mast11 blocks, which nothing else reaches, never ran: map 10 and 11 to mast10 and mast11.",
+      "diff": "masturbation-cases.diff"
+    },
+    {
+      "id": "punishment-time-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Punishment sections 81 and 112 save their minutes under \"punishments.mood(\" and \"punishments.random(\", keys with a stray parenthesis that nothing reads, while their text reads punishments.mood and punishments.random, as every other section saves them: so they told a time left over from an earlier punishment, or none. Save the keys the text reads.",
+      "diff": "punishment-time-keys.diff"
+    },
+    {
+      "id": "assignment-gates",
+      "layer": "source",
+      "category": "e",
+      "reason": "The assignment draw rules out DeepPuppy1 unless jewell.levelonesissy is set and AdvancedSissy1 unless jewell.leveltwopuppy is set, the two gates swapped: DeepPuppy1 goes to puppy level three, which requires jewell.leveltwopuppy, and AdvancedSissy1 to sissy level two, which requires jewell.levelonesissy, as the other two gates and the training menu pair them. So a sissy-trained player got puppy training past their level, and a puppy-trained player sissy level two with its cheater penalty. Swap the gates.",
+      "diff": "assignment-gates.diff"
+    },
+    {
+      "id": "torture-cock1",
+      "layer": "source",
+      "category": "e",
+      "reason": "In the torture session, the cock3 step without clothespins falls back to block \"clock1\", for which there is no case, so the session ended with \"Unfinished ? (clock1)\"; the sibling fallbacks of cock2 and cock5 go to \"cock1\". Fall back to cock1.",
+      "diff": "torture-cock1.diff"
+    },
+    {
+      "id": "sissy-errors-count",
+      "layer": "source",
+      "category": "e",
+      "reason": "Sissy level one counts each mismatched answer in errors (def errors = 0), but the plug-or-dildo mismatch adds to error, a variable that does not exist, so Groovy failed there and the conversion left the statement out as a TODO. Count it in errors.",
+      "diff": "sissy-errors-count.diff"
     }
   ]
 }

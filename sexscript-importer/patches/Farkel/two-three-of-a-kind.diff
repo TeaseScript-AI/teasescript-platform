@@ -1,0 +1,11 @@
+--- a/scripts/Farkel.groovy
++++ b/scripts/Farkel.groovy
+@@ -703,7 +703,7 @@
+ 	}
+ 	if (pairs == 3) {threePairs = true}
+ 	if (	(ones == 4 && (twos == 2 || threes == 2 || fours == 2 || fives == 2 || sixes == 2))|| (twos == 4 && (ones == 2 || threes == 2 || fours == 2 || fives == 2 || sixes == 2)) || (threes == 4 && (twos == 2 || ones == 2 || fours == 2 || fives == 2 || sixes == 2)) || (fours == 4 && (twos == 2 || threes == 2 || ones == 2 || fives == 2 || sixes == 2))|| (fives == 4 && (twos == 2 || threes == 2 || fours == 3 || ones == 2 || sixes == 2))|| (sixes == 4 && (twos == 2 || threes == 2 || fours == 3 || fives == 2 || sixes == 2))){fourOfAKindAndPair = true}
+-	if (threeSet == 2) {twoThree == true} 
++	if (threeSet == 2) {twoThree = true} 
+ 
+ 	if(sixOfAKind == true){
+ 		diceResult = "six of a kind, worth 3,0000 points\n"

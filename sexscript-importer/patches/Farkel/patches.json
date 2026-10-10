@@ -6,6 +6,27 @@
       "category": "b",
       "reason": "The picture the player picks to see is a letter (a, b, p, bo, f) kept in choice, which held the menu's number before; Groovy's 5 + choice + n joined them into a name such as 5a2, which the package's victory5a2.jpg pictures carry. The sum starts with the text \"5\", which gives the same name and lets the converter see the joining.",
       "diff": "victory-picture-name.diff"
+    },
+    {
+      "id": "ruined-lower-limit",
+      "layer": "source",
+      "category": "e",
+      "reason": "For a ruined orgasm the punishment limits are placeholders, and the lower one is 0, which the bet algorithm divides by (50/minPunish) when the agreed chance to cum is below 50, which any chance is allowed to be: Groovy failed with a division by zero there. For this choice the calculated punishment and its calculated minimum are discarded, and the negotiation uses a random one: make the placeholder 1.",
+      "diff": "ruined-lower-limit.diff"
+    },
+    {
+      "id": "denial-seconds",
+      "layer": "source",
+      "category": "e",
+      "reason": "The denial end is stored in seconds, to compare with getTime(), as (int) denialUntil.getTime()/1000, which casts the milliseconds to an int before dividing, so the value wrapped around and the stored end always lay in the past: a remembered denial never held. Divide before the cast.",
+      "diff": "denial-seconds.diff"
+    },
+    {
+      "id": "two-three-of-a-kind",
+      "layer": "source",
+      "category": "e",
+      "reason": "Scoring tests two sets of three of a kind with {twoThree == true}, a comparison where the assignment twoThree = true was meant, so the 2,500-point score for two sets of three never applied. Assign it.",
+      "diff": "two-three-of-a-kind.diff"
     }
   ]
 }

@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/fourheroes.groovy
++++ b/scripts/Banjo/fourheroes.groovy
+@@ -1228,7 +1228,7 @@
+ 	def spanksHeavy = coinsOpponent * spankMultiplierHeavy
+ 	def spanks = 0
+ 	def implementArray = [lightImplement,heavyImplement]
+-	for(i in 0..2)
++	for(i in 0..1)
+ 	{
+ 		x = 0
+ 		setImageGame()

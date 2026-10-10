@@ -5,6 +5,8 @@
  * - `list[choice - 1]` after `choice = getSelectedValue(text, ["Back"] + list)`, where a test such as `choice > 0`
  *   rules out the written options before the list, or after a menu of a list that a loop built with one option for each
  *   element of the read list after its written options (`names = ["New"]; for (c in configs) names.add(c.name)`);
+ * - `list[choice]` after `choice = getSelectedValue(text, list + ["Back"])`, where a test such as
+ *   `choice == list.size()` rules out the one written option after the list, as DisciplineClinic's mistress menus;
  * - `list[i]` where `i` started at a whole number of at least 0, only grew by whole numbers since, and a test such as
  *   `i < list.size()` holds, as in `while (i < list.size()) { ... list[i] ...; i++ }`.
  *
@@ -224,12 +226,17 @@ function learn(expression: AstNode, facts: Facts, shared: ReadonlySet<string>): 
   const options = list(asNode(value.arguments)?.items)[1];
   if (options === undefined) return;
   let menu: { list: string; offset: number } | null = null;
-  // `["Back"] + list`: the written options, then the list's elements.
+  // `["Back"] + list`: the written options, then the list's elements; `list + ["Back"]`: the list's elements, whose
+  // positions stay below its size plus the written options'.
   if (options.kind === "binary" && options.operator === "+") {
     const prefix = writtenOptions(asNode(options.left));
     const menuList = variableName(options.right);
+    const suffix = writtenOptions(asNode(options.right));
+    const listedFirst = variableName(options.left);
     if (prefix !== null && menuList !== null && !shared.has(menuList))
       menu = { list: menuList, offset: prefix };
+    else if (suffix !== null && listedFirst !== null && !shared.has(listedFirst))
+      menu = { list: listedFirst, offset: suffix };
   } else {
     const built = facts.options.get(variableName(options) ?? "");
     if (built !== undefined && built.list !== null)
@@ -326,6 +333,10 @@ function guarded(facts: Facts, condition: AstNode, holds: boolean): Facts {
       // `i < list.size()`, or `i <= list.size() - 1`.
       if (holds && relation === "<" && sized.minus === 0) below(inside, name, sized.list, 0);
       if (holds && relation === "<=" && sized.minus === 1) below(inside, name, sized.list, 0);
+      // `i != list.size()` where `i` stays below the size plus one, as after one written option behind the list.
+      const unequal = (holds && relation === "!=") || (!holds && relation === "==");
+      if (unequal && sized.minus === 0 && inside.below.get(name)?.get(sized.list) === 1)
+        below(inside, name, sized.list, 0);
       continue;
     }
     const number = other?.value;

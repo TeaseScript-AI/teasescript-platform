@@ -30,6 +30,16 @@ function sexscriptLegacyTokenize(text, delimiters) {
   }
   return tokens
 }
+function sexscriptLegacySplit(text, separator) {
+  let partsValue = text.split(separator)
+  if text == "" {
+    return partsValue
+  }
+  while partsValue.length > 0 and partsValue.last == "" {
+    partsValue.removeLast()
+  }
+  return partsValue
+}
 // Text handling with text operations.
 let line = "  write this line  "
 let typed = line.trim()
@@ -40,11 +50,9 @@ if typed.startsWith("write") and not typed.endsWith("!") {
   say typed.replace("line", "sentence")
 }
 say typed.replace(" ", "_")
-// NOTE SX_SPLIT_TRAILING_EMPTY line 11: Java split() drops trailing empty parts; TeaseScript split() keeps them.
 let parts = "red,green,blue".split(",")
 say "${parts[1]} ${typed.substring(0, 5)}"
 // A separator with its regular-expression metacharacters escaped splits at the plain text.
-// NOTE SX_SPLIT_TRAILING_EMPTY line 14: Java split() drops trailing empty parts; TeaseScript split() keeps them.
 let opponent = "Alexis|26".split("|")
 say opponent[0]
 if "Yes".lowercase() == "YES".lowercase() {
@@ -75,4 +83,12 @@ let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")
 // NOTE SX_FORMAT line 36: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
 let stamp = "07:05, ${sexscriptLegacyFixed(12.345, 1, 10)}%"
 say "${fields.length} fields at ${stamp}"
+// Java split() dropped the empty part after a last separator, as in Baccarat's picture lists; a part read at a fixed
+// position is the same either way.
+let pictures = load "game.pictures", default: ""
+if pictures == "" or pictures == "" {
+  pictures = "a.jpg|b.jpg|"
+}
+let pictureList = sexscriptLegacySplit(pictures, "|")
+say "${pictureList.length} pictures, first ${pictures.split("|")[0]}"
 exit

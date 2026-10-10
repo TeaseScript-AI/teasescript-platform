@@ -372,6 +372,8 @@ test(
         "sounds/Beats/c.mp3",
         "images/Decks/Red/1.png",
         "images/Decks/Blue/1.png",
+        // A file beside the subfolders, as Baccarat's opponent folders have, which the walk's test skips.
+        "images/Decks/cover.jpg",
         "sounds/Deep/a.mp3",
         "sounds/Deep/Sub/b.mp3",
       ];

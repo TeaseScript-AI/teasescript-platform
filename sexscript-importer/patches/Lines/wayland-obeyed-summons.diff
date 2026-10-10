@@ -1,0 +1,10 @@
+--- a/scripts/Lines/Choice.groovy
++++ b/scripts/Lines/Choice.groovy
+@@ -41,6 +41,7 @@
+ 		wait(10)
+ 		if(getBoolean("Do you want to go straight to her now slave?", "Yes, of course", "No, I want to see another Mistress"))
+ 			{
++			if (Summon <= 0) save("Wayland.Summon", -1)
+ 			show("OK, off you go then.")
+ 			wait(5)
+ 			return "Lines/Wayland"

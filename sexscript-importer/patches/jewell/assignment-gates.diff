@@ -1,0 +1,16 @@
+--- a/scripts/jewell/assignments.groovy
++++ b/scripts/jewell/assignments.groovy
+@@ -749,11 +749,11 @@
+ 	}
+ 	if(!loadBoolean("jewell.levelonepuppy"))
+ 		impossibleSections["Random-AdvancedPuppy1"] = true
+-	if(!loadBoolean("jewell.levelonesissy"))
++	if(!loadBoolean("jewell.leveltwopuppy"))
+ 		impossibleSections["Random-DeepPuppy1"] = true
+ 	if(!loadBoolean("jewell.leveltwosissy"))
+ 		impossibleSections["Random-DeepSissy1"] = true
+-	if(!loadBoolean("jewell.leveltwopuppy"))
++	if(!loadBoolean("jewell.levelonesissy"))
+ 		impossibleSections["Random-AdvancedSissy1"] = true		
+ 	while(block==null) {
+ 		def nRandom = (Calendar.getInstance().get(Calendar.DAY_OF_YEAR)*13+

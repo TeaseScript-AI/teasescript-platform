@@ -8,6 +8,16 @@ function sexscriptLegacyArray(size, value) {
   }
   return items
 }
+function sexscriptLegacySplit(text, separator) {
+  let parts = text.split(separator)
+  if text == "" {
+    return parts
+  }
+  while parts.length > 0 and parts.last == "" {
+    parts.removeLast()
+  }
+  return parts
+}
 let seen = sexscriptLegacyArray(3, null)
 seen[1] = true
 if seen[0] != true {
@@ -29,8 +39,7 @@ let letters = []
 // The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
 function review(key) {
   let record = load key, default: "20,1,Mandy"
-  // NOTE SX_SPLIT_TRAILING_EMPTY line 18: Java split() drops trailing empty parts; TeaseScript split() keeps them.
-  let parts = record.split(",")
+  let parts = sexscriptLegacySplit(record, ",")
   if parts[0] == "20" {
     parts[0] = "${parts.length - 6}"
   }

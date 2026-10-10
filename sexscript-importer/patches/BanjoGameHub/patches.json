@@ -6,6 +6,34 @@
       "category": "b",
       "reason": "A match holds its die value, or the text X once it is matched, so the round totals add values that may be text; TeaseScript + adds numbers or joins texts, not both. The totals are taken right after both sides rolled, when every match is a number, so each value goes through toInteger().",
       "diff": "matchem-totals.diff"
+    },
+    {
+      "id": "four-heroes-rounds",
+      "layer": "source",
+      "category": "e",
+      "reason": "Four Heroes pays a lost game out with for(i in 0..2) over its two implements, [lightImplement, heavyImplement], so a third round told the player to grab \"null\" and repeated the heavy implement's swats (Groovy read null past the end; TeaseScript stops the script there). Its siblings loop over exactly their lists, Rock Paper Scissors 0..2 over three implements and Hit or Stay 0..3 over four: loop 0..1. The corpus's other loops over a constant range stay within the lists they index.",
+      "diff": "four-heroes-rounds.diff"
+    },
+    {
+      "id": "hit-or-stay-played-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Hit or Stay tells whether the player already played it against an opponent by Banjo.fourheroes.played_<opponent>, Four Heroes' per-game flag, while its own reset clears Banjo.hitorstay.played_<opponent> and every other game keeps its own played flag: so after a Four Heroes game against an opponent, Hit or Stay skipped its first-game greeting for them, and its reset did not bring the greeting back. Use Banjo.hitorstay.played_.",
+      "diff": "hit-or-stay-played-key.diff"
+    },
+    {
+      "id": "penalty-box-tie",
+      "layer": "source",
+      "category": "e",
+      "reason": "Penalty Box's three-player finale has a result for every order of the scores except the two AI opponents tying above the player, which left winner and loser null: the host announced a winner \"null\" and nobody was spanked. Add that case as its sibling ties have it: a draw, with the player the loser.",
+      "diff": "penalty-box-tie.diff"
+    },
+    {
+      "id": "jokari-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Four Heroes, Game of Chance and Guess the Number list the light implement toys.bat_battledore, which nothing saves: the implements form, these games' own cases for the battledore bat, and the other games all use toys.bat_jokari. So an owned battledore bat was never picked in these three games. List toys.bat_jokari.",
+      "diff": "jokari-key.diff"
     }
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "saved-settings-default",
+      "layer": "source",
+      "category": "e",
+      "reason": "Settings the rules menu turns off and saves come back on at the next start: they are read as loadBoolean(key) ?: true, and Groovy elvis treats a saved false like a missing value. Read the saved value, and take true only where nothing is saved.",
+      "diff": "saved-settings-default.diff"
+    }
+  ]
+}

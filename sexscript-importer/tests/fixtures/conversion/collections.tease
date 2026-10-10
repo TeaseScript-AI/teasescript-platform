@@ -186,7 +186,6 @@ for item in 0..=2 {
 }
 say "Positions ${positions.length}"
 let rows = []
-// NOTE SX_SPLIT_TRAILING_EMPTY line 62: Java split() drops trailing empty parts; TeaseScript split() keeps them.
 let collectResult = []
 for item in "a,b".split(",") {
   collectResult.add(item)
@@ -228,4 +227,45 @@ for stroke in 1..=2 {
   }
 }
 say "Speed ${drainSpeed}"
+// A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
+// board of shots.
+let shots = [
+  [0, 0],
+  [0, 0]
+]
+let letters = "AB"
+let column = -1
+let cell = askText("Shoot (A1 to B2):", prefill: "A1").replace("\n", " ")
+if cell.length == 2 {
+  column = letters.indexOf(cell.substring(0, 1))
+}
+if column < 0 {
+  column = 0
+}
+shots[column][0] = 1
+say "Shot ${shots[0][0]}"
+// A loop that fills a literal list by position up to a count that can be more than its length grows the list, as
+// Farkel's cheating roll of seven dice into six values.
+let rolled = [0, 0, 0]
+let throwCount = 3
+if askBoolean "Cheat?" {
+  throwCount = 4
+}
+for i in 0..throwCount {
+  // NOTE SX_LIST_GROWTH line 101: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+  if i < rolled.length {
+    rolled[i] = randomInteger(0..6) + 1
+  } else {
+    rolled.add(randomInteger(0..6) + 1)
+  }
+}
+say "Rolled ${rolled.length}"
+// A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
+// after a bracket of one.
+let finalists = ["Anna", "Bea"]
+if askBoolean "Bye?" {
+  finalists = ["Anna"]
+}
+// NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
+say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}"
 exit

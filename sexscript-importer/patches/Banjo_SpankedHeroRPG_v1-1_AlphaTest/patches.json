@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "The shop's \"already own that item\" check for the cave and forest maps tests hasMap, which is never defined, so Groovy failed when the player tried to buy either map; the purchases set hasMapCave and hasMapForest, like every other item's check-and-set pair. Test the matching flag, in all three retained versions.",
       "diff": "map-owned-flags.diff"
+    },
+    {
+      "id": "alchemy-dust-stage",
+      "layer": "source",
+      "category": "e",
+      "reason": "The alchemist's quest runs flowers (1), ferns (2), mushrooms (3), then Fairy Dust (4), as its declaration, the item names, the mushroom step (which sets 4) and the loot (dust drops at stage 4) all have it, but the Fairy Dust delivery tests questAlchemy==2. So at stage 4 handing in the dust did nothing and the quest could not be completed, while at stage 2 dust without ferns completed it early. Test questAlchemy==4.",
+      "diff": "alchemy-dust-stage.diff"
     }
   ]
 }

@@ -1,0 +1,35 @@
+--- a/scripts/Lines/WaylandB.groovy
++++ b/scripts/Lines/WaylandB.groovy
+@@ -525,8 +525,8 @@
+ 			def error = 0
+ 			int ansorder = getRandom(2)
+ 			def answers = ["Chastity Slut", "Chastity Bitch"]
+-			switch (getSelectedValue("Do you think you are my...", [answers[~ansorder], answers[ansorder]])) {
+-				case {it^ansorder}:
++			switch (getSelectedValue("Do you think you are my...", [answers[1-ansorder], answers[ansorder]])) {
++				case {it != ansorder}:
+ 					show("Excellent. You were paying attention... at least subconsciously anyway. One hour removed from your sentence.")
+ 					CTime=CTime-1
+ 					break
+@@ -538,8 +538,8 @@
+ 			wait(10)
+ 			ansorder = getRandom(2)
+ 			answers = ["Ache", "Please You"]
+-			switch (getSelectedValue("What do your blue balls do for me slave...", [answers[~ansorder], answers[ansorder]])) {
+-				case {it^ansorder}:
++			switch (getSelectedValue("What do your blue balls do for me slave...", [answers[1-ansorder], answers[ansorder]])) {
++				case {it != ansorder}:
+ 					show("Good memory slave. You have such a malleable mind. I think it shows some promise for future experiments. One hour removed from your sentence.")
+ 					CTime=CTime-1
+ 					break
+@@ -551,8 +551,8 @@
+ 			wait(10)
+ 			ansorder = getRandom(2)
+ 			answers = ["Goddess", "Mistress"]
+-			switch (getSelectedValue("Am I your...", [answers[~ansorder], answers[ansorder]])) {
+-				case {it^ansorder}:
++			switch (getSelectedValue("Am I your...", [answers[1-ansorder], answers[ansorder]])) {
++				case {it != ansorder}:
+ 					show("Fantastic. I knew I was on the right track with this method. I am so happy at this result, I am going to remove one hour from your sentence.")
+ 					CTime=CTime-1
+ 					break

@@ -83,3 +83,25 @@ int drainSpeed = 0
 	}
 }
 show("Speed " + drainSpeed)
+// A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
+// board of shots.
+def shots = [[0, 0], [0, 0]]
+def letters = "AB"
+def column = -1
+def cell = getString("Shoot (A1 to B2):", "A1")
+if (cell.length() == 2) column = letters.indexOf(cell[0])
+if (column < 0) column = 0
+shots[column][0] = 1
+show("Shot " + shots[0][0])
+// A loop that fills a literal list by position up to a count that can be more than its length grows the list, as
+// Farkel's cheating roll of seven dice into six values.
+def rolled = [0, 0, 0]
+def throwCount = 3
+if (getBoolean("Cheat?")) throwCount = 4
+for (def i = 0; i < throwCount; i++) rolled[i] = getRandom(6) + 1
+show("Rolled " + rolled.size())
+// A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
+// after a bracket of one.
+def finalists = ["Anna", "Bea"]
+if (getBoolean("Bye?")) finalists = ["Anna"]
+show("Final: " + finalists[0] + " and " + finalists[1])

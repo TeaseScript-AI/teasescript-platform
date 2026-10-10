@@ -280,6 +280,8 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
+  /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
+  indexedSplits: Set<AstNode>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -1481,6 +1483,7 @@ export function lowerParsedFile(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
+    indexedSplits: new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -2633,6 +2636,7 @@ function lowerHelperMethod(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
+    indexedSplits: new Set(),
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -3285,7 +3289,9 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
             context,
             node,
             "SX_LABELLED_JUMP",
-            `${node.kind} ${node.label} leaves an outer labelled loop; TeaseScript ${node.kind} affects only the innermost loop. Restructure the loops, for example with a flag.`,
+            node.kind === "continue"
+              ? `continue ${node.label} jumps to a labelled loop or statement, which Groovy also allowed outside any loop as a jump back to that statement; TeaseScript continue affects only the innermost loop. Restructure the code, for example with a loop and a flag.`
+              : `break ${node.label} leaves an outer labelled loop; TeaseScript break affects only the innermost loop. Restructure the loops, for example with a flag.`,
           ),
         ];
       }
@@ -6102,16 +6108,16 @@ function lowerAssignment(
               },
             };
     } else {
-      context.writeTargets.add(targetNode);
+      const written = writeChain(targetNode, context);
       target = lowerExpression(targetNode, context);
-      context.writeTargets.delete(targetNode);
+      for (const part of written) context.writeTargets.delete(part);
     }
     if (target !== null) noteSharedListWrite(asNode(targetNode.left), node, context);
     if (target?.kind === "index" && target.dict === true) noteSharedMapWrite(node.span, context);
   } else if (operator === "=" && targetNode.kind === "property") {
-    context.writeTargets.add(targetNode);
+    const written = writeChain(targetNode, context);
     target = lowerExpression(targetNode, context);
-    context.writeTargets.delete(targetNode);
+    for (const part of written) context.writeTargets.delete(part);
     if (target !== null) noteSharedMapWrite(node.span, context);
   }
   if (target === null) {
@@ -6366,9 +6372,9 @@ function lowerPostfix(
     (index !== null && negativeConstantIndex(index) !== null)
   )
     return [unsupportedPostfix(node, context)];
-  context.writeTargets.add(targetNode);
+  const written = writeChain(targetNode, context);
   let target = lowerExpression(targetNode, context);
-  context.writeTargets.delete(targetNode);
+  for (const part of written) context.writeTargets.delete(part);
   if (target === null) return [];
   const before: IrStatement[] = [];
   if (computed && !isPure(index, context)) {
@@ -9052,10 +9058,17 @@ function plainCharacters(
 }
 
 /**
- * Whether a list position can be one past the end: a random position plus a positive number, `getRandom(n) + 1` for a
- * 1-based pick, a list's size, or a variable assigned one of these.
+ * Whether a position in the list `target` can be one past its end: a random position plus a positive number,
+ * `getRandom(n) + 1` for a 1-based pick, a list's size, a menu choice from the list followed by written options
+ * (DungeonTrials' `getSelectedValue(text, weapons + ["No weapon"])`, whose last option is past the end), or a variable
+ * assigned one of these.
  */
-function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+function mayIndexPastEnd(
+  node: AstNode,
+  context: LowerContext,
+  target: AstNode | null = null,
+  seen = new Set<string>(),
+): boolean {
   if (node.kind === "binary" && text(node.operator) === "+") {
     const [left, right] = [asNode(node.left), asNode(node.right)];
     const random = (side: AstNode | null): boolean =>
@@ -9070,12 +9083,24 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
   if (node.kind === "methodCall" && constantString(node.method) === "size") return true;
   if (node.kind === "property" && ["size", "length"].includes(constantString(node.property) ?? ""))
     return true;
+  if (node.kind === "methodCall" && legacyApiCall(node, context)?.name === "getSelectedValue") {
+    const options = nodeArray(asNode(node.arguments)?.items)[1];
+    const written =
+      options?.kind === "binary" && text(options.operator) === "+" ? asNode(options.right) : null;
+    const listName = target === null ? null : variableName(target);
+    return (
+      written?.kind === "list" &&
+      nodeArray(written.items).length > 0 &&
+      listName !== null &&
+      variableName(asNode(options!.left)) === listName
+    );
+  }
   if (node.kind === "variable") {
     const key = bindingKey(node, context.bindings);
     if (key === null || seen.has(key)) return false;
     seen.add(key);
     return (context.assignedValues.get(key) ?? []).some((value) =>
-      mayIndexPastEnd(value, context, seen),
+      mayIndexPastEnd(value, context, target, seen),
     );
   }
   return false;
@@ -10312,6 +10337,26 @@ function onlyRead(root: AstNode, target: AstNode, name: string): boolean {
   return others === 0;
 }
 
+/**
+ * Marks a written place and the lists and objects it lies in as write targets, so that `shots[x][y] = 1` writes into
+ * `shots` itself rather than into a copy that a reading helper returned (TeaseScript lists are values). Returns them,
+ * for the caller to unmark after lowering.
+ */
+function writeChain(target: AstNode, context: LowerContext): AstNode[] {
+  const written: AstNode[] = [];
+  for (let part: AstNode | null = target; part !== null;) {
+    const index = part.kind === "binary" && part.operator === "[";
+    // A range or a list of positions read a new list, as Groovy did, so a write into it stays there.
+    const position = index ? asNode(part.right) : null;
+    if (part !== target && (position?.kind === "range" || position?.kind === "list")) break;
+    if (part !== target && !index && part.kind !== "property") break;
+    context.writeTargets.add(part);
+    written.push(part);
+    part = asNode(index ? part.left : part.object);
+  }
+  return written;
+}
+
 function incrementsAfterStatement(
   root: AstNode,
   target: AstNode,
@@ -10692,6 +10737,18 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
+    // A part of a split read at a fixed position, `text.split(",")[1]`, is the same with or without trailing empty parts
+    // where Java had it; within the trailing empty parts Java dropped, where Java failed, TeaseScript reads an empty
+    // part, and farther positions fail in both.
+    const fixed = indexNode === null ? undefined : constantValue(indexNode);
+    if (
+      targetNode?.kind === "methodCall" &&
+      constantString(targetNode.method) === "split" &&
+      typeof fixed === "number" &&
+      Number.isInteger(fixed) &&
+      fixed >= 0
+    )
+      context.indexedSplits.add(targetNode);
     // A map literal indexed in place is a lookup table (#536).
     const inlineTable = targetNode?.kind === "map";
     const target =
@@ -10880,13 +10937,23 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     // position for null.
     if (
       !context.writeTargets.has(node) &&
-      (mayIndexPastEnd(indexNode, context) || nullComparedReads.has(node))
+      (mayIndexPastEnd(indexNode, context, targetNode) || nullComparedReads.has(node))
     ) {
       addDiagnostic(
         context,
         "SX_INDEX_PAST_END",
         "warning",
         "This position can be one past the end of the list, where Groovy read null; a helper reads null there too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
+    if (!context.writeTargets.has(node) && pastShorterLiteral(indexNode, targetNode, context)) {
+      addDiagnostic(
+        context,
+        "SX_INDEX_PAST_END",
+        "warning",
+        "This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.",
         node.span,
       );
       return useHelper(context, "itemAt", [target, index]);
@@ -13324,20 +13391,26 @@ function textOperation(
       if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
       // Plain characters, and metacharacters escaped as in the patterns `\|` or `\.`, match themselves.
       if (!/^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator)) return undefined;
+      const target = lowerExpression(targetNode, context);
+      if (target === null) return null;
+      const plain: IrExpression = { kind: "literal", value: separator.replace(/\\(.)/gu, "$1") };
+      // A part read at a fixed position is the same where Java had it, and a written text that does not end with the
+      // separator has no trailing empty part; elsewhere a helper drops the trailing empty parts that Java dropped.
+      const written = literalText(targetNode);
+      const separatorText = String(plain.value);
+      if (
+        context.indexedSplits.has(node) ||
+        (written !== null && written !== "" && !written.endsWith(separatorText))
+      )
+        return member("split", [plain], target);
       addDiagnostic(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
-        "warning",
-        "Java split() drops trailing empty parts; TeaseScript split() keeps them.",
+        "info",
+        "Java split() dropped trailing empty parts, which TeaseScript split() keeps; a helper drops them.",
         node.span,
       );
-      const target = lowerExpression(targetNode, context);
-      if (target === null) return null;
-      return member(
-        "split",
-        [{ kind: "literal", value: separator.replace(/\\(.)/gu, "$1") }],
-        target,
-      );
+      return useHelper(context, "split", [target, plain]);
     }
     case "substring":
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;
@@ -13889,6 +13962,8 @@ function closureContains(closure: AstNode, node: AstNode): boolean {
 
 /** Positions of list writes that count up with the writes (markSequentialWrites), as the `list[i]` target nodes. */
 const sequentialWrites = new WeakSet<AstNode>();
+/** The bound of the C-style loop whose counter is the position of a sequential write: `i < bound` or `i <= bound`. */
+const sequentialBounds = new WeakMap<AstNode, { bound: AstNode; inclusive: boolean }>();
 /** Writes at a literal position that a straight-line block shows to be the list's length, or inside it. */
 const literalAppends = new WeakSet<AstNode>();
 const literalSets = new WeakSet<AstNode>();
@@ -13941,7 +14016,11 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
   };
   const expressionOf = (statement: AstNode): AstNode | null =>
     statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-  const mark = (statements: readonly AstNode[], counters: Set<string>): void => {
+  const mark = (
+    statements: readonly AstNode[],
+    counters: Set<string>,
+    loop: { counter: string; bound: AstNode; inclusive: boolean } | null = null,
+  ): void => {
     for (const statement of statements) {
       const key = countsUp(expressionOf(statement));
       if (key !== null) counters.add(key);
@@ -13961,7 +14040,11 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       const position = left === null ? undefined : constantValue(asNode(left.right) ?? undefined);
       if (left !== null) {
         const key = bindingKey(asNode(left.right), keys);
-        if (key !== null && counters.has(key) && counts(key)) sequentialWrites.add(left);
+        if (key !== null && counters.has(key) && counts(key)) {
+          sequentialWrites.add(left);
+          if (loop !== null && key === loop.counter)
+            sequentialBounds.set(left, { bound: loop.bound, inclusive: loop.inclusive });
+        }
       }
       if (listKey !== null && typeof position === "number" && lengths.has(listKey)) {
         const length = lengths.get(listKey)!;
@@ -13999,10 +14082,17 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
     walkAst(loopBody, (child) => {
       if (child.kind === "continue") skips = true;
     });
+    const condition = parts[1];
+    const comparison = condition?.kind === "binary" ? text(condition.operator) : null;
+    const bound =
+      (comparison === "<" || comparison === "<=") && bindingKey(condition!.left, keys) === counter
+        ? asNode(condition!.right)
+        : null;
     if (!skips)
       mark(
         loopBody.kind === "block" ? nodeArray(loopBody.statements) : [loopBody],
         new Set([counter]),
+        bound === null ? null : { counter, bound, inclusive: comparison === "<=" },
       );
   });
 }
@@ -14073,6 +14163,44 @@ function listPadding(
   return null;
 }
 
+/** Whether a loop bound may be more than a limit: a larger number, or a variable that is set to one somewhere. */
+function mayExceed(
+  bound: AstNode,
+  limit: number,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const value = constantValue(bound);
+  if (typeof value === "number") return value > limit;
+  if (bound.kind !== "variable") return false;
+  const key = bindingKey(bound, context.bindings);
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  return (context.assignedValues.get(key) ?? []).some((assigned) =>
+    mayExceed(assigned, limit, context, seen),
+  );
+}
+
+/**
+ * Whether a literal position of a list variable lies past the end of a shorter non-empty literal list the variable is
+ * set to again later, `contestants = [winner1]` beside `contestants[1]`, where Groovy read null. The first value, which
+ * the code may grow before reading, as `rules = ["Kneel"]` then `rules.add(…)`, does not count.
+ */
+function pastShorterLiteral(
+  indexNode: AstNode,
+  targetNode: AstNode | null,
+  context: LowerContext,
+): boolean {
+  const position = constantValue(indexNode);
+  if (typeof position !== "number" || !Number.isInteger(position) || position < 0) return false;
+  const key = targetNode?.kind === "variable" ? bindingKey(targetNode, context.bindings) : null;
+  if (key === null) return false;
+  return (context.assignedValues.get(key) ?? []).slice(1).some((value) => {
+    const length = value.kind === "list" ? nodeArray(value.items).length : 0;
+    return length > 0 && position >= length;
+  });
+}
+
 /**
  * Whether a list write's position is a number: proven so, or arithmetic whose operands are numbers or of unknown type,
  * `join[i + offset]`, since Groovy failed on a list position of another type.
@@ -14122,12 +14250,24 @@ function growingListWrite(
     typeof position === "number" &&
     literalLists.length > 0 &&
     literalLists.every((node) => node.kind === "list" && position >= nodeArray(node.items).length);
+  const literalLengths = new Set(
+    literalLists.map((node) => (node.kind === "list" ? nodeArray(node.items).length : -1)),
+  );
+  const literalLength = literalLengths.size === 1 ? [...literalLengths][0]! : null;
+  // A loop that fills a literal list by position up to a bound that may exceed its length, `dice = 7` then
+  // `for (i = 0; i < dice; i++) values[i] = …` over six values, appends past the end.
+  const loop = sequentialBounds.get(targetNode);
+  const loopPast =
+    loop !== undefined &&
+    literalLength !== null &&
+    literalLength > 0 &&
+    mayExceed(loop.bound, loop.inclusive ? literalLength - 1 : literalLength, context);
   if (
     target.kind !== "index" ||
     target.dict === true ||
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
-    !(startsEmpty || pastLiteral) ||
+    !(startsEmpty || pastLiteral || loopPast) ||
     // A write that reads the same position first, `map[i] = map[i] % 1000`, needs the position to exist already.
     (listNode !== null && readsPosition(valueNode, listNode, indexNode)) ||
     !listGrowthIndex(indexNode, context)
@@ -14147,10 +14287,6 @@ function growingListWrite(
   // A position that may lie beyond the end, which Groovy padded up to: the list gets padding values first.
   // A write at the end grows the list by appending where the position counts up with the writes, or is the length of
   // the literal list the variable starts as.
-  const literalLengths = new Set(
-    literalLists.map((node) => (node.kind === "list" ? nodeArray(node.items).length : -1)),
-  );
-  const literalLength = literalLengths.size === 1 ? [...literalLengths][0]! : null;
   const appends = sequentialWrites.has(targetNode) || (pastLiteral && position === literalLength);
   // Padding is null where the code compares the list's elements with null, else the empty value of the elements'
   // type; a list of elements of unknown type keeps growing by appending.
@@ -18176,6 +18312,27 @@ function askedMembers(body: AstNode, variable: string): Set<string> {
 const LISTED_MEDIA_FOLDERS = new Set(["images", "sounds", "videos"]);
 
 /**
+ * The kind of entry a walk's closure acts on when its body is one `if` without `else` on the entry's kind:
+ * `if (file.isDirectory()) {...}` or `if (file.isFile()) {...}`; null for any other body.
+ */
+function guardedKind(body: AstNode, variable: string): "folder" | "file" | null {
+  const statements = nodeArray(body.statements);
+  const only = statements.length === 1 ? statements[0]! : null;
+  if (only?.kind !== "if" || branchStatements(only.else).length > 0) return null;
+  const condition = asNode(only.condition);
+  const member =
+    condition?.kind === "methodCall" && nodeArray(asNode(condition.arguments)?.items).length === 0
+      ? constantString(condition.method)
+      : condition?.kind === "property"
+        ? constantString(condition.property)
+        : null;
+  if (condition === null || variableName(asNode(condition.object)) !== variable) return null;
+  if (member === "isDirectory" || member === "directory") return "folder";
+  if (member === "isFile" || member === "file") return "file";
+  return null;
+}
+
+/**
  * A walk through a package folder of images, sounds, or videos whose path the script fixes, as a loop over the
  * package's files or subfolders there, listed at conversion time: `eachFile`, which also visited subfolders, and
  * `eachFileRecurse`, also only through files (`FileType.FILES`). A walk through the images of one folder stays with
@@ -18237,9 +18394,12 @@ function listedFolderWalk(
   visit("");
   const files = walked.filter((entry) => !entry.folder);
   const folders = walked.filter((entry) => entry.folder);
-  if (tellsKinds && files.length > 0 && folders.length > 0) return undefined;
+  // A closure that only acts on one kind, as Baccarat's `if (file.isDirectory()) names << file.getName()`, goes
+  // through that kind: the entries of the other one did nothing.
+  const guarded = guardedKind(body, variable);
+  if (tellsKinds && guarded === null && files.length > 0 && folders.length > 0) return undefined;
   // A walk that tells files from subfolders goes through the kind the folder holds.
-  const listsFolders = tellsKinds && folders.length > 0;
+  const listsFolders = tellsKinds && (guarded === null ? folders.length > 0 : guarded === "folder");
   // A walk through the images the package holds in one folder finds them by the folder's tag (imageFolderWalk).
   if (root === "images" && recursive === null && !listsFolders && files.length > 0)
     return undefined;
