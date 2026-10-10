@@ -3925,7 +3925,8 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `absoluteDateTime` values, their conversions,
 fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, exact and calendar
 durations ([ADR 0026](../decisions/0026-unified-time-semantics.md)), and date and time input
-([§20](#date-and-time-input)).
+([§20](#date-and-time-input)). [Time zones and calendar moves](#time-zones-and-calendar-moves) are pending owner
+acceptance.
 
 TeaseScript has two kinds of time:
 
@@ -3988,7 +3989,8 @@ let local = started.toDateTime()
 ```
 
 A local time that the spring daylight-saving change skips moves forward by the gap; a local time that the autumn
-change repeats takes the earlier moment. A `date` or `time` alone cannot become an `absoluteDateTime`.
+change repeats takes the earlier moment. `zone:` and `disambiguation:` choose otherwise
+([below](#time-zones-and-calendar-moves)). A `date` or `time` alone cannot become an `absoluteDateTime`.
 
 ### Fields
 
@@ -4067,7 +4069,7 @@ No operator reads a time zone.
 Every other combination is an error that names a route that works: `date ± duration` uses calendar units, as in
 `getDate() + 1 calendar day`; `datetime ± duration` and `datetime - datetime` convert to `absoluteDateTime` for elapsed
 time, as in `(dinner.toAbsoluteDateTime() + 2 h).toDateTime()`, or use calendar units or `toDate(...)`;
-`absoluteDateTime ± calendar duration` converts to a `datetime` first. Exact time added to an
+`absoluteDateTime ± calendar duration` uses `add(...)` ([below](#time-zones-and-calendar-moves)). Exact time added to an
 `absoluteDateTime` is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
 milliseconds. Arithmetic on `time` is not available.
 
@@ -4079,6 +4081,42 @@ compile errors; others are runtime errors.
 Local comparisons can reverse after the autumn daylight-saving change or after travelling west, and a day counter counts
 calendar-date boundaries. Measure elapsed time with `absoluteDateTime`: across the spring daylight-saving night,
 `(dinner.toAbsoluteDateTime() + 24 h).toDateTime()` is 19:00 the next day while `dinner + 1 calendar day` is 18:00.
+
+### Time zones and calendar moves
+
+**Status:** Pending owner acceptance
+([ADR 0026 §9](../decisions/0026-unified-time-semantics.md#9-anchored-conversion-and-explicit-time-zones)).
+
+```text
+let unlock = getAbsoluteDateTime().add(1 calendar month)
+let midnight = toDateTime("2026-12-31T00:00").toAbsoluteDateTime(zone: "Europe/Amsterdam")
+let there = getAbsoluteDateTime().toDateTime(zone: "UTC")
+let month = (1 calendar month).toDuration(from: getDateTime())
+let later = toDateTime("2026-10-25T02:30").toAbsoluteDateTime(disambiguation: "later")
+let strict = toDate("2027-01-31").add(1 calendar month, overflow: "reject")   // an error
+```
+
+`add(...)` moves a value as `+` does: a `date` or a `datetime` by a calendar duration, and an `absoluteDateTime` by a
+duration, or by a calendar duration counted in a time zone: its months, then its days, to the same clock time there,
+then its exact time. `toDuration(from: start)` gives the exact length of a calendar duration from `start`, a `datetime`
+or an `absoluteDateTime`: the time to the moment that `add(...)` moves `start` to. A calendar day or month has a length
+only from a start, so `from:` is required.
+
+These methods, `toAbsoluteDateTime()`, and `toDateTime()` count in the player's zone, or in the zone that `zone:` names:
+an IANA name such as `"Europe/Amsterdam"`, written as text, or `"UTC"`. A name the compiler does not know, or one
+computed while the script runs, is a compile error, because the Player records the rules of each zone a script names
+when the session starts and continues. A named zone stays fixed when the player travels.
+
+`disambiguation:` decides a local time that the zone skips or repeats, at a `datetime` start and at a result alike:
+`"compatible"`, the default, moves a skipped time forward by the gap and takes the earlier of a repeated time,
+`"earlier"` moves it back and takes the earlier, `"later"` moves it forward and takes the later, and `"reject"` makes
+both an error. `overflow:` decides a day that the target month lacks: `"constrain"`, the default, takes the month's last
+day, and `"reject"` makes it an error. `date.add(...)` and `datetime.add(...)` take only `overflow:`, and `add` with a
+duration takes no options.
+
+From `toDateTime("2026-03-29T02:30")` in Amsterdam, which the spring change skips,
+`start.toAbsoluteDateTime().add(1 calendar day)` resolves the start to 03:30 first and gives 03:30 the next day, while
+`(start + 1 calendar day).toAbsoluteDateTime()` keeps 02:30, which exists the next day.
 
 ### Display and technical conversion
 
