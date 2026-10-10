@@ -372,7 +372,9 @@ it passes `name` to, is the one key it names), the clock, or a variable the code
 function's own variable, a file's own, also as a function of that file reads it, and otherwise one name for the
 package, as a `global function` reads the variables of whichever file calls it); a call's arguments are the values of
 its parameters, and the result of a call is read with that call's own arguments for the parameters the function returns
-as they are. Its
+as they are, and with only the returns its constant arguments can reach (a helper `owns(item)` whose `if item == KNIFE
+... else if item == ROPE` loads one key per branch reads one key for `owns(ROPE)`, also through a helper that passes its
+parameter on, three calls deep). Its
 comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
 the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
 that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage

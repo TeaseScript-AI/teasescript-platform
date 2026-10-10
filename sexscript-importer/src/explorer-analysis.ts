@@ -406,6 +406,8 @@ export class DataFlow {
   readonly #defaults = new Map<string, Data>();
   /** The variable keys the code assigns or declares, apart from a call's arguments and a parameter's default. */
   readonly #assignedInCode = new Set<string>();
+  /** {@link #returnsFor}, by function and constant arguments. */
+  readonly #returnsByConstants = new Map<string, number[]>();
   /** {@link setInPlay} by scope key. */
   readonly #inPlay = new Map<string, boolean>();
   /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
@@ -830,13 +832,14 @@ export class DataFlow {
           )
         );
       }
-      // A call's result: what the function returns.
+      // A call's result: what the function returns, for this call's constant arguments when it is known.
       if (value.kind === "callResult" && typeof value.functionId === "number") {
         const id = value.functionId;
+        const call = typeof value.call === "number" ? value.call : null;
         return node(
-          `function ${id}`,
+          call === null ? `function ${id}` : `call ${call}`,
           need,
-          (this.#returns.get(id) ?? []).map((index) => ({
+          (call === null ? (this.#returns.get(id) ?? []) : this.#returnsFor(call)).map((index) => ({
             value: this.#instructions[index]!.value,
             at: index,
           })),
@@ -892,10 +895,13 @@ export class DataFlow {
         for (const store of this.heldAt(value.temporaryId, at) ?? [])
           pending.push({ value: store.value, at: store.index });
       } else if (value.kind === "callResult" && typeof value.functionId === "number") {
-        const id = `function ${value.functionId}`;
+        const id =
+          typeof value.call === "number" ? `call ${value.call}` : `function ${value.functionId}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        for (const index of this.#returns.get(value.functionId) ?? [])
+        for (const index of typeof value.call === "number"
+          ? this.#returnsFor(value.call)
+          : (this.#returns.get(value.functionId) ?? []))
           pending.push({ value: this.#instructions[index]!.value, at: index });
       } else
         for (const [key, each] of Object.entries(value))
@@ -1462,10 +1468,15 @@ export class DataFlow {
   /**
    * The flow of a call's result: what the function returns, with the parameters it returns as they are (`return
    * whenMissing`) read as this call's arguments, not as every call's, and a parameter the call leaves out as its default;
-   * not a parameter the function assigns. One level deep: a value the function computes from a parameter keeps every
-   * call's.
+   * not a parameter the function assigns. Only the returns this call's constant arguments can reach count
+   * ({@link #returnsFor}). The helpers it calls in what it returns are read the same way with the constants `bound`
+   * passes on, `depth` calls deep; a value the function computes otherwise from a parameter keeps every call's.
    */
-  #callFlow(call: number): Flow {
+  #callFlow(
+    call: number,
+    bound: ReadonlyMap<string, SavedScalar> = new Map(),
+    depth = HELPER_DEPTH,
+  ): Flow {
     const instruction = this.#instructions[call]!;
     const id = Number(instruction.functionId);
     const entry = this.#entryOf.get(id);
@@ -1479,13 +1490,180 @@ export class DataFlow {
         // A parameter the function assigns holds more than what the call passed.
         if (this.#assignedInCode.has(key)) continue;
         const value = given.has(name) ? given.get(name) : this.#defaults.get(key);
-        if (value !== undefined) substitute.set(key, this.flowOf(value));
+        if (value !== undefined) substitute.set(key, this.flowOf(value, this.#substituted(bound)));
       }
     }
+    const constants = this.#constantArguments(call, bound);
     const flow = emptyFlow();
-    for (const index of this.#returns.get(id) ?? [])
-      merge(flow, this.flowOf(this.#instructions[index]!.value, substitute));
+    for (const index of this.#returnsFor(call, bound))
+      merge(
+        flow,
+        this.#flowAt(this.#instructions[index]!.value, index, substitute, constants, depth),
+      );
     return flow;
+  }
+
+  /** Bound constants as flows to substitute: a constant reads nothing. */
+  #substituted(bound: ReadonlyMap<string, SavedScalar>): ReadonlyMap<string, Flow> {
+    return new Map([...bound.keys()].map((key) => [key, emptyFlow()]));
+  }
+
+  /**
+   * An expression's flow at instruction `at` of a function's code, as {@link flowOf} with `substitute`, where a
+   * temporary holding a helper call's result is read as that call's result with the `bound` constants
+   * ({@link #callFlow}), `depth` calls deep.
+   */
+  #flowAt(
+    expression: unknown,
+    at: number,
+    substitute: ReadonlyMap<string, Flow>,
+    bound: ReadonlyMap<string, SavedScalar>,
+    depth: number,
+  ): Flow {
+    const flow = emptyFlow();
+    const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
+    for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+      const { value, at } = item;
+      if (Array.isArray(value)) {
+        for (const each of value) pending.push({ value: each, at });
+        continue;
+      }
+      if (!isRecord(value)) continue;
+      const held =
+        value.kind === "temporary" && typeof value.temporaryId === "number" && depth > 0
+          ? this.heldAt(value.temporaryId, at)
+          : null;
+      if (held !== null) {
+        for (const store of held)
+          if (store.value.kind === "callResult" && typeof store.value.call === "number")
+            merge(flow, this.#callFlow(store.value.call, bound, depth - 1));
+          else pending.push({ value: store.value, at: store.index });
+        continue;
+      }
+      if (
+        value.kind === "temporary" ||
+        value.kind === "identifier" ||
+        value.kind === "callResult"
+      ) {
+        merge(flow, this.flowOf(value, substitute));
+        continue;
+      }
+      if (value.kind === "storageLoad" || value.kind === "call") {
+        // A load's key and a clock read, as flowOf finds them, and what they are given.
+        merge(
+          flow,
+          this.flowOf({ ...value, key: undefined, arguments: undefined, default: undefined }),
+        );
+        if (value.kind === "storageLoad")
+          merge(flow, this.flowOf({ kind: "storageLoad", key: value.key }));
+      }
+      for (const [key, each] of Object.entries(value))
+        if (key !== "span") pending.push({ value: each, at });
+    }
+    return flow;
+  }
+
+  /** The arguments of a call that are constants, by the scope key of the parameter they give (see {@link #returnsFor}). */
+  #constantArguments(
+    call: number,
+    bound: ReadonlyMap<string, SavedScalar>,
+  ): Map<string, SavedScalar> {
+    const instruction = this.#instructions[call]!;
+    const entry = this.#entryOf.get(Number(instruction.functionId));
+    const constants = new Map<string, SavedScalar>();
+    if (entry === undefined) return constants;
+    for (const argument of list(instruction.arguments)) {
+      if (typeof argument.parameterName !== "string") continue;
+      const key = this.scopeKey(argument.parameterName, entry);
+      const constant = this.#constantIn(argument.value, bound);
+      if (constant !== undefined && !this.#assignedInCode.has(key)) constants.set(key, constant);
+    }
+    return constants;
+  }
+
+  /** A literal's value, or a variable's that only ever holds one literal or that `bound` gives one. */
+  #constantIn(
+    expression: unknown,
+    bound: ReadonlyMap<string, SavedScalar>,
+  ): SavedScalar | undefined {
+    const value = record(expression);
+    if (value.kind === "literal") return scalar(value.value);
+    if (value.kind !== "identifier") return undefined;
+    const key = this.#keyOf(value);
+    return bound.get(key) ?? this.#literalOf(key) ?? undefined;
+  }
+
+  /**
+   * The returns of a call's function that can run for its constant arguments: a parameter the function does not
+   * assign, passed a literal or a variable that only holds one (or that `bound` gives one), decides the conditions that
+   * compare it with a constant (`if item == KNIFE ... else if item == ROPE`); all of the function's returns otherwise.
+   */
+  #returnsFor(call: number, bound: ReadonlyMap<string, SavedScalar> = new Map()): number[] {
+    const instruction = this.#instructions[call]!;
+    const id = Number(instruction.functionId);
+    const all = this.#returns.get(id) ?? [];
+    const entry = this.#entryOf.get(id);
+    if (entry === undefined) return all;
+    const constantOf = (expression: unknown): SavedScalar | undefined =>
+      this.#constantIn(expression, new Map());
+    const constants = this.#constantArguments(call, bound);
+    if (constants.size === 0) return all;
+    const memo = `${id} ${JSON.stringify([...constants])}`;
+    const known = this.#returnsByConstants.get(memo);
+    if (known !== undefined) return known;
+    // A comparison of such a parameter with a constant: its value, or undefined.
+    const decided = (condition: unknown): boolean | undefined => {
+      const value = record(condition);
+      if (value.kind !== "binary" || (value.operator !== "==" && value.operator !== "!="))
+        return undefined;
+      const [left, right] = [record(value.left), record(value.right)];
+      const pair =
+        left.kind === "identifier" && constants.has(this.#keyOf(left))
+          ? [constants.get(this.#keyOf(left)), constantOf(right)]
+          : right.kind === "identifier" && constants.has(this.#keyOf(right))
+            ? [constants.get(this.#keyOf(right)), constantOf(left)]
+            : null;
+      if (pair === null || pair[1] === undefined) return undefined;
+      return (pair[0] === pair[1]) === (value.operator === "==");
+    };
+    const reached = new Set<number>();
+    const pending = [entry];
+    for (let index = pending.pop(); index !== undefined; index = pending.pop()) {
+      if (reached.has(index) || this.functionAt(index) !== id) continue;
+      reached.add(index);
+      const step = this.#instructions[index]!;
+      const target = Number(step.target);
+      switch (step.kind) {
+        case "returnValue":
+        case "returnVoid":
+        case "exit":
+        case "end":
+          break;
+        case "jumpIfFalse": {
+          const value = decided(step.condition);
+          if (value !== false) pending.push(index + 1);
+          if (value !== true) pending.push(target);
+          break;
+        }
+        case "jump":
+        case "goto":
+        case "loopControl":
+          pending.push(target);
+          break;
+        case "loopStart":
+        case "prepareParameterDefault":
+          pending.push(index + 1, target);
+          break;
+        case "callFunction":
+          pending.push(Number(step.returnInstruction));
+          break;
+        default:
+          pending.push(index + 1);
+      }
+    }
+    const found = all.filter((index) => reached.has(index));
+    this.#returnsByConstants.set(memo, found);
+    return found;
   }
 
   #variable(name: string): Flow {

@@ -1295,6 +1295,23 @@ test(
         '  return answer\n}\nif readAnswer() == 1234 {\n  say "Matched."\n}\nexit\n',
     ).find((condition) => condition.line === 8);
     assert.deepEqual(echoed?.sources, ["ask"]);
+    // A helper that picks a stored value by comparing its parameter with constants reads only the one a constant
+    // argument picks.
+    const picked = analyzed(
+      'global KNIFE = "knife"\nglobal ROPE = "rope"\nfunction owns(item) {\n  if item == KNIFE {\n' +
+        '    let saved: boolean? = load "kit.knife", default: null\n    return saved\n  } else if item == ROPE {\n' +
+        '    return load("kit.rope", default: false)\n  }\n  return false\n}\nif owns(ROPE) == true {\n' +
+        '  say "Rope."\n}\nexit\n',
+    ).find((condition) => condition.line === 12);
+    assert.deepEqual(picked?.sources, ["kit.rope"]);
+    // Also through a helper that passes its own parameter on to that one.
+    const nestedPick = analyzed(
+      'global KNIFE = "knife"\nglobal ROPE = "rope"\nfunction owns(item) {\n  if item == KNIFE {\n' +
+        '    return load("kit.knife", default: false)\n  } else if item == ROPE {\n' +
+        '    return load("kit.rope", default: false)\n  }\n  return false\n}\nfunction has(thing) {\n' +
+        '  return owns(thing) == true\n}\nif not has(KNIFE) {\n  say "No knife."\n}\nexit\n',
+    ).find((condition) => condition.line === 14);
+    assert.deepEqual(nestedPick?.sources, ["kit.knife"]);
     // A helper's result is what this call passed it, not what every call passed.
     const passed = analyzed(
       'function orElse(text, missing) {\n  return missing\n}\nlet a = load("game.a", default: 0)\n' +
