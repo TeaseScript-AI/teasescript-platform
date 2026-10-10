@@ -319,8 +319,8 @@ function optionValues(options: unknown): unknown[] | null {
 }
 
 /**
- * How many steps the searches for what may carry a stored key's value take in all, per plan, before every value that
- * reads another counts as one (conservative, so that the work stays bounded).
+ * How many steps the searches for what may carry a stored key's value take in all, per plan, after which no stored-value
+ * proof that needs them holds (conservative, so that the work stays bounded).
  */
 const CARRIER_WORK = 2_000_000;
 
@@ -912,13 +912,14 @@ export class DataFlow {
    * (a helper's own variable set from a parameter): its flow reads the key, or it reads a variable, a temporary, or a
    * function's result that a value reading the key may reach, a parameter taking every call's argument
    * ({@link #carriers}). Flow-insensitive, over the whole plan, and without a limit of rounds, so that it misses none.
+   * Null when it is not known, past the work the carriers may take: a value that reads nothing carries nothing.
    */
-  #mayCarry(value: unknown, at: number | undefined, key: string): boolean {
+  #mayCarry(value: unknown, at: number | undefined, key: string): boolean | null {
     if (this.flowOf(value).keys.has(key)) return true;
-    const carriers = this.#carriers(key);
     const reads = this.#readsOf(value, at ?? 0);
-    // Past the work the carriers may take, anything that reads a value may carry the key.
-    if (carriers === null) return reads.length > 0;
+    if (reads.length === 0) return false;
+    const carriers = this.#carriers(key);
+    if (carriers === null) return null;
     const shared = carriers.saved ? this.#savedReach() : null;
     return reads.some((each) => carriers.own.has(each) || shared?.has(each) === true);
   }
@@ -926,7 +927,8 @@ export class DataFlow {
   /**
    * What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what (`own`),
    * and when that reaches a saved value (`saved`), all that saved values reach ({@link #savedReach}), as what any save
-   * stores may be what any load reads. Null once all keys' searches took {@link CARRIER_WORK} steps.
+   * stores may be what any load reads. Null once all keys' searches took {@link CARRIER_WORK} steps: then no stored-value
+   * proof that needs them holds.
    */
   #carriers(key: string): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
     const known = this.#carriersOf.get(key);
@@ -1227,9 +1229,14 @@ export class DataFlow {
         if (this.#flowIn(each.value, each.at, each.context).keys.has(key)) {
           pending.push({ ...each, need, loose: false, from: id });
           reading += 1;
-        } else if (this.#mayCarry(each.value, each.at, key)) {
-          pending.push({ ...each, need, loose: true, from: id });
-          reading += 1;
+        } else {
+          const may = this.#mayCarry(each.value, each.at, key);
+          // What may carry the key no longer known: the question is not proven.
+          if (may === null) return false;
+          if (may) {
+            pending.push({ ...each, need, loose: true, from: id });
+            reading += 1;
+          }
         }
       return reading > 0 || loose;
     };
