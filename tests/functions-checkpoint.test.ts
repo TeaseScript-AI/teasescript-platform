@@ -646,6 +646,43 @@ test("restores retained prepared list items across structural index shifts", () 
   );
 });
 
+test("restores a prepared timer state read after the call removes or replaces its list item", () => {
+  // The receiver `rows[0].state` names the running timer; `f` moves or assigns the paused one to that position. A
+  // timer's state is read when it is used, after `f` returns, still from the running timer.
+  for (const change of ["rows.removeFirst()", "rows[0] = paused"]) {
+    const { boundaries, events } = assertRuntimeResumeEquivalent(
+      [
+        "let running = timer async 10 s",
+        "let paused = timer async 10 s",
+        "paused.pause()",
+        "let rows = [running, paused]",
+        `function f {\n    ${change}\n    return "running"\n}`,
+        "say rows[0].state.contains(f())",
+        "exit",
+      ].join("\n"),
+    );
+
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["true"],
+      change,
+    );
+    // Some boundary inside `f` holds the receiver after the change detached it.
+    assert.ok(
+      boundaries.some((snapshot) =>
+        snapshot.callFrames.some((frame) =>
+          frame.callerTemporaries.some(
+            (temporary) =>
+              serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+              serializedObjectProperty(temporary.value, "detached") === true,
+          ),
+        ),
+      ),
+      change,
+    );
+  }
+});
+
 test("rejects malformed prepared-reference state in active and suspended temporaries", () => {
   const compiled = plan(
     [
