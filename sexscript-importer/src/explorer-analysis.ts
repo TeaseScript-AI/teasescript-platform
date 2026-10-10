@@ -410,6 +410,9 @@ export class DataFlow {
   readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
   readonly #returnsByConstants = new Map<string, number[]>();
+  /** {@link #constantsId} by the set of constants, and by its text. */
+  readonly #constantsIds = new WeakMap<ReadonlyMap<string, SavedScalar>, string>();
+  readonly #constantsByText = new Map<string, string>();
   /** {@link setInPlay} by scope key. */
   readonly #inPlay = new Map<string, boolean>();
   /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
@@ -560,23 +563,12 @@ export class DataFlow {
                 this.flowOf(instruction.value),
               ) || changed;
             break;
-          case "callFunction": {
+          case "callFunction":
             if (typeof instruction.destinationTemporary === "number")
               changed =
                 merge(this.#temporary(instruction.destinationTemporary), this.#callFlow(index)) ||
                 changed;
-            // The arguments are the values of the function's parameters.
-            const entry = this.#entryOf.get(Number(instruction.functionId));
-            if (entry !== undefined)
-              for (const argument of list(instruction.arguments))
-                if (typeof argument.parameterName === "string")
-                  changed =
-                    merge(
-                      this.#variable(this.scopeKey(argument.parameterName, entry)),
-                      this.flowOf(argument.value),
-                    ) || changed;
             break;
-          }
           case "returnValue": {
             const owner = functionOf.get(index);
             if (owner !== undefined)
@@ -621,6 +613,8 @@ export class DataFlow {
       });
       if (!changed) break;
     }
+    // The last round, if the limit cut it off, may have grown the flows after it worked out its calls' results.
+    this.#callFlows.clear();
   }
 
   /**
@@ -783,7 +777,7 @@ export class DataFlow {
       values: { value: unknown; at: number | undefined }[],
       bound: Bound,
     ): boolean => {
-      const id = `${name}\u0000${key}\u0000${need}\u0000${bound.size === 0 ? "" : JSON.stringify([...bound])}`;
+      const id = `${name}\u0000${key}\u0000${need}\u0000${this.#constantsId(bound)}`;
       if (this.#holds.has(id) || visited.has(id)) return true;
       visited.add(id);
       const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
@@ -904,7 +898,7 @@ export class DataFlow {
         continue;
       }
       if (!isRecord(value)) continue;
-      const context = bound.size === 0 ? "" : ` ${JSON.stringify([...bound])}`;
+      const context = ` ${this.#constantsId(bound)}`;
       if (value.kind === "identifier") {
         if (this.setInPlay(value)) return true;
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
@@ -1426,20 +1420,6 @@ export class DataFlow {
         if (typeof parameter.name === "string")
           assigned(parameter.name, { kind: "parameter" }, Number(definition.entryInstruction));
     instructions.forEach((instruction, index) => {
-      // A call's arguments, as evaluated where it is, are values of the function's parameters.
-      const entry =
-        instruction.kind === "callFunction"
-          ? this.#entryOf.get(Number(instruction.functionId))
-          : undefined;
-      if (entry !== undefined)
-        for (const argument of list(instruction.arguments))
-          if (typeof argument.parameterName === "string")
-            assigned(
-              argument.parameterName,
-              record(argument.value),
-              index,
-              this.scopeKey(argument.parameterName, entry),
-            );
       if (instruction.kind === "bindDefaultParameter") {
         const name = this.#parameterNames.get(Number(instruction.functionId))?.[
           Number(instruction.parameterIndex)
@@ -1497,7 +1477,7 @@ export class DataFlow {
     bound: ReadonlyMap<string, SavedScalar> = new Map(),
     depth = HELPER_DEPTH,
   ): Flow {
-    const memo = `${call} ${depth} ${bound.size === 0 ? "" : JSON.stringify([...bound])}`;
+    const memo = `${call} ${depth} ${this.#constantsId(bound)}`;
     const known = this.#callFlows.get(memo);
     if (known !== undefined) return known;
     const found = this.#callFlowOf(call, bound, depth);
@@ -1611,6 +1591,21 @@ export class DataFlow {
     return constants;
   }
 
+  /**
+   * A short id of a set of constants, the same for equal sets; so that what is kept by it does not repeat the constants
+   * (a long text) for each variable or call it is kept for.
+   */
+  #constantsId(constants: ReadonlyMap<string, SavedScalar>): string {
+    if (constants.size === 0) return "";
+    const known = this.#constantsIds.get(constants);
+    if (known !== undefined) return known;
+    const text = JSON.stringify([...constants]);
+    const id = this.#constantsByText.get(text) ?? String(this.#constantsByText.size + 1);
+    this.#constantsByText.set(text, id);
+    this.#constantsIds.set(constants, id);
+    return id;
+  }
+
   /** A literal's value, or a variable's that only ever holds one literal or that `bound` gives one. */
   #constantIn(
     expression: unknown,
@@ -1638,7 +1633,7 @@ export class DataFlow {
       this.#constantIn(expression, new Map());
     const constants = this.#constantArguments(call, bound);
     if (constants.size === 0) return all;
-    const memo = `${id} ${JSON.stringify([...constants])}`;
+    const memo = `${id} ${this.#constantsId(constants)}`;
     const known = this.#returnsByConstants.get(memo);
     if (known !== undefined) return known;
     // A comparison of such a parameter with a constant: its value, or undefined.

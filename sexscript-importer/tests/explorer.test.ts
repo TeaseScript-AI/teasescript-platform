@@ -1267,7 +1267,7 @@ test(
       assert.ok(about(path, line).includes(own), about(path, line));
       assert.ok(!about(path, line).includes(other), about(path, line));
     }
-    // A block sees the variables where it was set up; a call's arguments are its parameters' values; and a value set in
+    // A block sees the variables where it was set up; a call's result is read with its own arguments; and a value set in
     // play is found also through the temporary a `switch` compares.
     const analyzed = (written: string) => {
       const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
