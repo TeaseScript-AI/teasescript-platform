@@ -99,4 +99,24 @@ if lastRun != "" and (toDate(sexscriptLegacyDateFromText(thisRun, "/", 0, 1, 2))
 let savedDay = "${getDateTime().year}-${getDateTime().month}-${getDateTime().day}"
 let savedCopy = savedDay
 save savedCopy as "game.savedDay"
+// A Date the script moves by days stays a Date: its month counts from 0, and `date` is its day of the month.
+let tomorrow = getDateTime()
+tomorrow += 1 * 1 calendar day
+if tomorrow.month == 10 and tomorrow.day == 31 {
+  say "Halloween tomorrow"
+}
+// A conditional of the moved Date or a text holds either.
+let visible = randomInteger(0..2) == 0
+let counted = randomInteger(0..2) == 0
+// NOTE SX_UNION_TYPE line 62: Groovy let 'conditional' hold values of several types; TeaseScript declares it 'string | datetime' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if conditional is string { ... }
+let conditional: string | datetime = "?"
+if visible {
+  conditional = tomorrow + 2 * 1 calendar day
+}
+// NOTE SX_UNION_TYPE line 62: Groovy let 'conditional2' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if conditional2 is string { ... }
+let conditional2: string | integer = "some"
+if counted {
+  conditional2 = 2
+}
+say "Until ${conditional}, ${conditional2} days"
 exit

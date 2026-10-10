@@ -541,6 +541,8 @@ Concrete points the migration surfaced in TeaseScript itself:
   becomes `n * 1 calendar day` (or a `calendar` month or year; #763), also on a `date`, which moves by calendar units
   only; `Calendar.add` of a time field was elapsed time, which moves the moment:
   `c = (c.toAbsoluteDateTime() + n * 1 min).toDateTime()`. A difference of dates counts calendar days, `(a - b).days`.
+  A variable whose values are Dates is one, also where a value moves the variable itself, `today = today + 1` after
+  `today = new Date()`, so its `month` and `date` read as Groovy's did (ChastityRoulette).
   One step differs: a calendar step that lands in the hour the spring change skips. Java moved it back by that hour
   (02:30 a day before the change, plus one day, gave 01:30), while TeaseScript keeps 02:30, a local time no moment has,
   which becomes 03:30 where it is made a moment (ChastityRoulette's `today + Total` days from the current time).

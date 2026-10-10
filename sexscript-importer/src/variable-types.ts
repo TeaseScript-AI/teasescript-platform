@@ -2003,6 +2003,15 @@ function arithmeticType(
     (fractional(left) || fractional(right))
   )
     return scalar("number");
+  // A date, a datetime, or a moment moved by a duration stays one, `today + 1 calendar day`.
+  if (
+    left.kind === "temporal" &&
+    left.name !== "time" &&
+    right.kind === "scalar" &&
+    right.name === "duration" &&
+    (operator === "+" || operator === "-")
+  )
+    return left;
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {

@@ -108,26 +108,58 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
   const fields = new Map<string, TemporalKind>();
   const analysis: TemporalAnalysis = { variables, fields, writable: new Set() };
   // Variables and record fields whose every value is a Calendar, or every value a Date.
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [name, values] of tree.assignments) {
-      if (tree.parameters.has(name)) continue;
-      const kind = commonKind(values, analysis);
-      if (kind !== (variables.get(name) ?? null)) {
-        if (kind === null) variables.delete(name);
-        else variables.set(name, kind);
-        changed = true;
+  const settle = (): void => {
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const [name, values] of tree.assignments) {
+        if (tree.parameters.has(name)) continue;
+        const kind = commonKind(values, analysis);
+        if (kind !== (variables.get(name) ?? null)) {
+          if (kind === null) variables.delete(name);
+          else variables.set(name, kind);
+          changed = true;
+        }
+      }
+      for (const [key, values] of mapEntries(tree)) {
+        const kind = commonKind(values, analysis);
+        if (kind !== (fields.get(key) ?? null)) {
+          if (kind === null) fields.delete(key);
+          else fields.set(key, kind);
+          changed = true;
+        }
       }
     }
-    for (const [key, values] of mapEntries(tree)) {
-      const kind = commonKind(values, analysis);
-      if (kind !== (fields.get(key) ?? null)) {
-        if (kind === null) fields.delete(key);
-        else fields.set(key, kind);
-        changed = true;
-      }
-    }
+  };
+  settle();
+  // A value made from the variable itself, `today = today + 1` after `today = new Date()`, is of its kind only if the
+  // variable is: a variable with a value of a known kind, whose other values are not of another, is taken to be of it,
+  // and dropped again where a value then is of none.
+  const assumed: string[] = [];
+  for (const [name, values] of tree.assignments) {
+    if (tree.parameters.has(name) || variables.has(name)) continue;
+    const kinds = new Set(
+      values.flatMap((value) =>
+        value === null || isNullConstant(value) ? [] : [temporalKind(value, analysis)],
+      ),
+    );
+    kinds.delete(null);
+    const [kind] = kinds;
+    if (kinds.size !== 1 || kind === undefined || kind === null) continue;
+    assumed.push(name);
+    variables.set(name, kind);
   }
+  for (let changed = assumed.length > 0; changed;) {
+    changed = false;
+    for (const name of assumed)
+      if (
+        variables.has(name) &&
+        commonKind(tree.assignments.get(name) ?? [], analysis) !== variables.get(name)
+      ) {
+        variables.delete(name);
+        changed = true;
+      }
+  }
+  if (assumed.length > 0) settle();
   const formatters = dateFormatters(tree);
   return {
     variables,
