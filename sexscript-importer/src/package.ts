@@ -1554,6 +1554,19 @@ function classFiles(
     const fields = program.statements.flatMap((statement) =>
       statement.kind === "let" && isLiteralValue(statement.value) ? [statement] : [],
     );
+    // A static computed otherwise, which may fail, is no global: Groovy computed it when the class was first used.
+    const computed = program.statements.flatMap((statement): IrStatement[] =>
+      statement.kind === "let" && !isLiteralValue(statement.value)
+        ? [
+            {
+              kind: "comment",
+              text: `// NOTE SX_CLASS_STATIC${statement.span === null ? "" : ` line ${statement.span.line}`}: Groovy computed the static ${statement.name} when the class was first used; it is no global, since computing it may fail at session start, so only a script that copies a method reading it computes it, and a failure of computing it happens there or not at all.`,
+              trailing: false,
+              span: statement.span,
+            },
+          ]
+        : [],
+    );
     const methods = program.statements.flatMap((statement) =>
       statement.kind === "function" && helperDefinitionOrder(statement) < 0 ? [statement] : [],
     );
@@ -1578,6 +1591,7 @@ function classFiles(
       renameConflictingIdentifiers({
         ...program,
         statements: [
+          ...computed,
           ...fields.map((statement): IrStatement => ({ ...statement, global: true })),
           ...helpers.filter(({ name }) => global.has(name)),
           ...kept.map((statement): IrStatement =>

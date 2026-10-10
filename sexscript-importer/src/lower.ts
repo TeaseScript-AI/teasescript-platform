@@ -1366,11 +1366,12 @@ function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
   walkAst(body, (node) => {
     if (node.kind === "declaration") {
       const left = asNode(node.left);
-      for (const target of left?.kind === "arguments" ? nodeArray(left.items) : [left]) {
+      const several = left?.kind === "arguments" || left?.kind === "tuple";
+      for (const target of several ? nodeArray(left.items) : [left]) {
         declarationTargets.add(target);
         bind(bindingKey(target, context.bindings));
       }
-      const key = left?.kind === "arguments" ? null : bindingKey(node.left, context.bindings);
+      const key = several ? null : bindingKey(node.left, context.bindings);
       // `int count` starts at 0, `boolean ready` at false, and `char c` at character 0, not null.
       const type = text(left?.originType) ?? "";
       const primitive = PRIMITIVE_DEFAULTS.has(type) || type === "char";
@@ -1380,7 +1381,7 @@ function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
     } else if (
       node.kind === "binary" &&
       node.operator === "=" &&
-      asNode(node.left)?.kind === "arguments"
+      ["arguments", "tuple"].includes(asNode(node.left)?.kind ?? "")
     ) {
       // A multiple assignment, `(x, y) = values`, gives each target a value.
       for (const target of nodeArray(asNode(node.left)?.items)) {
@@ -4714,6 +4715,14 @@ function lowerDeclaration(
   if (collectionLoop !== null) return collectionLoop;
   // `def x` without an initializer starts as null in Groovy; primitive declarations start at 0 or false.
   const declaredType = text(asNode(node.left)?.originType) ?? "";
+  if (declaredType === "char" && isEmptyGroovyExpression(right))
+    addDiagnostic(
+      context,
+      "SX_CHAR_DEFAULT",
+      "warning",
+      `Groovy started the char ${name} at character 0, which TeaseScript text has no value for; it starts at null here, so a test of it for null passes where Groovy's did not.`,
+      span,
+    );
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: PRIMITIVE_DEFAULTS.get(declaredType) ?? null }
     : right.kind === "map"

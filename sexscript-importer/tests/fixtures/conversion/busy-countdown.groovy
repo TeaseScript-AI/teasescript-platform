@@ -51,3 +51,24 @@ while (getTime() < paced) {
 	show("Tick")
 	wait(1)
 }
+// A pass that may continue, or whose wait may not run, waits at its start, so no pass skips it; a number it shows is
+// the message's text.
+def polls = 0
+def pollEnd = getTime() + 1
+while (getTime() < pollEnd) {
+	polls++
+	show(polls)
+	if (polls < 0) wait(1)
+	if (polls % 2 == 0) continue
+	show("Odd " + polls)
+}
+// The clock read through a function, and a wait in a function the loop calls, count too; that wait stays.
+def clockNow = { -> getTime() }
+def beat = { -> show("Beat"); wait(1) }
+def beatEnd = clockNow() + 2
+while (clockNow() < beatEnd) beat()
+// A new message's name stays apart from a loop's variable.
+def frameEnd = getTime() + 1
+while (getTime() < frameEnd) {
+	for (frame in [1, 2]) show("Frame")
+}

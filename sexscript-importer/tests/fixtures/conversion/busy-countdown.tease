@@ -36,33 +36,83 @@ addPoints(1000000)
 let rollUntil = getAbsoluteDateTime().toSeconds() + 2
 let rolled = 0
 let now = getAbsoluteDateTime().toSeconds()
-let frame: messageHandle? = null
+let frame2: messageHandle? = null
 while now < rollUntil {
-  rolled = randomInteger(0..6) + 1
-  if frame == null {
-    frame = say "Rolling ${rolled}", instant
-  } else {
-    frame.text = "Rolling ${rolled}"
-  }
   wait 0.1 s
+  rolled = randomInteger(0..6) + 1
+  if frame2 == null {
+    frame2 = say "Rolling ${rolled}", instant
+  } else {
+    frame2.text = "Rolling ${rolled}"
+  }
   now = getAbsoluteDateTime().toSeconds()
 }
 say "You rolled ${rolled}"
 // So does one whose condition reads the clock itself, as Nim's closing window.
 let windowEnd = getAbsoluteDateTime().toSeconds() + 3
-let frame2: messageHandle? = null
+let frame3: messageHandle? = null
 while getAbsoluteDateTime().toSeconds() < windowEnd {
-  if frame2 == null {
-    frame2 = say "Now's your chance!", instant
-  } else {
-    frame2.text = "Now's your chance!"
-  }
   wait 0.1 s
+  if frame3 == null {
+    frame3 = say "Now's your chance!", instant
+  } else {
+    frame3.text = "Now's your chance!"
+  }
 }
 // A loop whose body waits already is left as it is.
 let paced = getAbsoluteDateTime().toSeconds() + 2
 while getAbsoluteDateTime().toSeconds() < paced {
   say "Tick"
   wait 1 s
+}
+// A pass that may continue, or whose wait may not run, waits at its start, so no pass skips it; a number it shows is
+// the message's text.
+let polls = 0
+let pollEnd = getAbsoluteDateTime().toSeconds() + 1
+let frame4: messageHandle? = null
+while getAbsoluteDateTime().toSeconds() < pollEnd {
+  wait 0.1 s
+  polls += 1
+  if frame4 == null {
+    frame4 = say polls, instant
+  } else {
+    frame4.text = "${polls}"
+  }
+  if polls < 0 {
+    wait 1 s
+  }
+  if polls % 2 == 0 {
+    continue
+  }
+  if frame4 == null {
+    frame4 = say "Odd ${polls}", instant
+  } else {
+    frame4.text = "Odd ${polls}"
+  }
+}
+// The clock read through a function, and a wait in a function the loop calls, count too; that wait stays.
+function clockNow {
+  return getAbsoluteDateTime().toSeconds()
+}
+function beat {
+  say "Beat"
+  wait 1 s
+}
+let beatEnd = clockNow() + 2
+while clockNow() < beatEnd {
+  beat()
+}
+// A new message's name stays apart from a loop's variable.
+let frameEnd = getAbsoluteDateTime().toSeconds() + 1
+let frame5: messageHandle? = null
+while getAbsoluteDateTime().toSeconds() < frameEnd {
+  wait 0.1 s
+  for frame in [1, 2] {
+    if frame5 == null {
+      frame5 = say "Frame", instant
+    } else {
+      frame5.text = "Frame"
+    }
+  }
 }
 exit
