@@ -1,0 +1,126 @@
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacySendImage(reference) {
+  let codeValue = "image-${randomInteger(0..1000000000)}"
+  save reference as "sexscript.image.${codeValue}"
+  return codeValue
+}
+let sexscriptLegacySwitchButton = null
+function sexscriptLegacyShowSwitch(command) {
+  let last = command.trim().split(" ").last.lowercase()
+  if ["on", "ein", "an"].contains(last) {
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
+    }
+  }
+  if ["off", "aus"].contains(last) {
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
+    }
+  }
+}
+// The legacy online service becomes the package's storage, and isConnected() is always true.
+// NOTE SX_ONLINE_STORAGE line 2: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+// NOTE SX_ONLINE_STORAGE line 2: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+if true {
+  save 12 as "game.highscore"
+}
+// NOTE SX_ONLINE_STORAGE line 3: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let best = sexscriptLegacyLoadInteger("game.highscore")
+// A sent image keeps its photo reference under the code sendImage() gives.
+// NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+let photo = askImage("Take a picture of yourself and choose it")
+// NOTE SX_ONLINE_STORAGE line 6: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let code = sexscriptLegacySendImage(photo)
+// NOTE SX_ONLINE_STORAGE line 7: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+save code as "game.photo"
+// NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+// NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let back = load "sexscript.image.${load("game.photo", default: "")}", default: null
+if back != null {
+  showImage back
+}
+// useFile() plays an audio file; a program cannot start from a package.
+// NOTE SX_USE_FILE_AUDIO line 11: useFile() opened this audio file in the system's player; it plays in the session here, without waiting.
+playAudio async "bell.mp3"
+// NOTE SX_EXTERNAL_PROGRAM_NOTICE line 12: useFile() started the program tools/device.exe on the player's computer, which a package cannot do; a system notice says so.
+say as system "The program device.exe that the original started is not available here."
+// A device switch program shows the switch state.
+let switchOn = "SwitchBox.exe 7 ein"
+// NOTE SX_SWITCH_BUTTON line 15: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch(switchOn)
+// NOTE SX_SWITCH_BUTTON line 16: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch("SwitchBox.exe 7 aus")
+say "Best score ${best}"
+// Deleting the file of a photo the script took clears the reference.
+// NOTE SX_CAMERA_FALLBACK line 19: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let selfie: string? = takePhoto()
+if selfie != null {
+  showImage selfie
+}
+// NOTE SX_PHOTO_DELETE line 21: The legacy script deleted the file of a photo it took; the reference is cleared instead, and the Player removes a photo that nothing references any more (V30 §33).
+selfie = null
+// A video opened in the system player plays in the session; a format browsers lack becomes an MP4 at import.
+// NOTE SX_USE_FILE_VIDEO line 23: useFile() opened this video in the system's player; it plays in the session here, without waiting.
+playVideo async "videos/intro.mp4"
+// NOTE SX_USE_FILE_VIDEO line 24: useFile() opened this video in the system's player; it plays in the session here, without waiting. The package holds it as an MP4 converted at import, since browsers do not play this format.
+playVideo async "clips/scene.mp4"
+// A prefill that may be blank opens the input without a default then, as the legacy empty field did.
+let draft = ""
+let answer = askText("Your name?", prefill: draft).replace("\n", " ")
+say "Hello ${answer}"
+// A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
+function checkPhoto(snapfile) {
+  if snapfile != null {
+    // NOTE SX_PHOTO_SIZE line 33: Legacy code read the byte size of a file, which photo code compared with a threshold to detect a broken webcam picture; a package cannot read file sizes, and a photo the player took counts as valid, so the size reads as 1000000 bytes.
+    if 1000000 < 15000 {
+      return false
+    }
+    return true
+  }
+  return false
+}
+// NOTE SX_CAMERA_FALLBACK line 38: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+if checkPhoto(takePhoto()) {
+  say "Nice photo"
+}
+// The system language, which TeaseScript cannot query yet, reads as English.
+// NOTE SX_LOCALE_WORKAROUND line 40: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
+if "en" == "de" {
+  say "Hallo"
+} else {
+  say "Hello"
+}
+// Java SimpleDateFormat of the current moment shows the local time.
+// NOTE SX_DATE_FORMAT line 42: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "You report at ${getTime().formatTime()}."
+// A photo copied to a package image path is shown wherever the script shows that path.
+// NOTE SX_FILE_PHOTO line 44: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+let proof = askImage("Upload the picture?")
+// NOTE SX_FILE_DELETE line 45: delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.
+delete "sexscript.image.images/proof/photo.jpg"
+// NOTE SX_PHOTO_COPY line 46: Legacy code copied this photo to images/proof/photo.jpg, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.
+save proof as "sexscript.image.images/proof/photo.jpg"
+// NOTE SX_PHOTO_COPY line 47: A script copied the player's photo to images/proof/photo.jpg; showing the path shows that photo.
+showImage load("sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
+// getImage() and getFile() without a message take the photo without a title.
+let bare: string? = takePhoto()
+if bare != null {
+  showImage bare
+}
+exit

@@ -1,0 +1,31 @@
+--- a/scripts/toy/tease.groovy
++++ b/scripts/toy/tease.groovy
+@@ -320,7 +320,7 @@
+ 		if (!can(EDGE)) return false;
+ 		preRelease();
+ 		def soft = getRandom(8) ? true : teaseSoften();
+-		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
++		if (soft) if (!harden(["$TITS|$PUSSY|$ASS"])) return false;
+ 		strokes(15, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
+ 		return true;
+ 	};
+@@ -329,7 +329,7 @@
+ 		if (!can(EDGE)) return false;
+ 		preRelease();
+ 		def soft = getRandom(8) ? true : teaseSoften();
+-		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
++		if (soft) if (!harden(["$TITS|$PUSSY|$ASS"])) return false;
+ 		edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
+ 		return true;
+ 	};
+--- a/scripts/toy/orgasmControl.groovy
++++ b/scripts/toy/orgasmControl.groovy
+@@ -87,7 +87,7 @@
+ 
+ 	toy.metaClass.cumChanceEdge { probCum=20, probRuin=33 ->
+ 		def soft = getRandom(8) ? true : teaseSoften();
+-		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
++		if (soft) if (!harden(["$TITS|$PUSSY|$ASS"])) return false;
+ 		return edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"], true, probCum, probRuin);
+ 	};
+ 

@@ -1,0 +1,52 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyArray(size, value) {
+  let items = []
+  repeat size {
+    items.add(value)
+  }
+  return items
+}
+function sexscriptLegacySplit(text, separator) {
+  let parts = text.split(separator)
+  if text == "" {
+    return parts
+  }
+  while parts.length > 0 and parts.last == "" {
+    parts.removeLast()
+  }
+  return parts
+}
+let seen = sexscriptLegacyArray(3, null)
+seen[1] = true
+if seen[0] != true {
+  say "First time"
+}
+let notes = sexscriptLegacyArray(2, null)
+notes[0] = "Kneel"
+say "Count ${notes.length}"
+// Integer arrays truncated written values; character arrays have no list equivalent.
+// NOTE SX_JAVA_ARRAY_CONVERSION line 8: A Java int[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+let counts = sexscriptLegacyArray(2, 0)
+counts[0] = counts[0] + 1
+// A number stored in an element is cut to a whole number, as the Integer[] did.
+counts[1] = toInteger(counts[0] + 2.5)
+say "Counts ${counts[1]}"
+// TODO SX_JAVA_ARRAY_TYPE line 13: A Java char[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.
+// | def letters = new char[2]
+let letters = []
+// The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
+function review(key) {
+  let record = load key, default: "20,1,Mandy"
+  let parts = sexscriptLegacySplit(record, ",")
+  if parts[0] == "20" {
+    parts[0] = "${parts.length - 6}"
+  }
+  if parts[1] == "null" {
+    parts[1] = "0"
+  }
+  say "Progress ${parts[0]}"
+}
+review("mandy.record")
+exit

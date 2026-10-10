@@ -1,0 +1,14 @@
+// A package with one script: it becomes the package's main.tease.
+say "Kneel."
+// The file chooser asks for a photo, which the Player answers with an image.
+// NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+showImage askImage("Show me how you kneel.")
+// A read whose key nothing types keeps its null through a generated helper, which main.tease defines.
+// NOTE SX_LOAD_OPEN_NULL line 7: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let kneeled = load "kneel.done", default: sexscriptLegacyValue(null)
+if kneeled == null {
+  say "First time."
+}
+// The legacy player found no such script and ended the chain.
+// NOTE SX_MISSING_SCRIPT line 10: Legacy chained to the script "outro.groovy", which is not part of this package; the legacy player ended the chain when it found no such file, so the script exits here.
+exit

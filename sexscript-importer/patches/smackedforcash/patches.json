@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "implement-texts",
+      "layer": "source",
+      "category": "b",
+      "reason": "The nine implements start as null and setImplements gives each a toy name from the toy box before it builds the implement list, which the envelope pick reads. The converter keeps a null start that a list takes, so the list held text or null, which the picked implement's text variable cannot take. The implements start as empty text instead; every one is a name by the time the list is built.",
+      "diff": "implement-texts.diff"
+    }
+  ]
+}

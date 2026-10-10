@@ -1,0 +1,48 @@
+speaker system {
+  title: "System"
+}
+// Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
+// getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
+let toys = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
+let clothes = [false]
+let owned = [{ label: "Collar" }]
+let collectResult = []
+for it in owned {
+  collectResult.add(it.label)
+}
+let answers: boolean[]? = askBooleans "What do you own?", texts: collectResult, prefill: clothes, cancel: "Cancel"
+if answers != null {
+  clothes = answers
+  save clothes[0] as "clothes.collar"
+} else {
+  say "Nothing changed"
+}
+let gags: boolean[]? = askBooleans "Which gags do you have?", texts: ["Ball gag"], prefill: [false], cancel: "Cancel"
+if gags == null or gags[0] == false {
+  say "No gag today"
+}
+if toys[0] == true {
+  say "Fetch the paddle"
+}
+// showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
+// NOTE SX_POPUP_WORKAROUND line 13: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+say "Time for a break"
+showButton "OK"
+// NOTE SX_POPUP_ELAPSED line 14: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_WORKAROUND line 14: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+let popupStart = getAbsoluteDateTime().toSeconds()
+say "Kneel until you close this"
+showButton "OK"
+let seconds = getAbsoluteDateTime().toSeconds() - popupStart
+say "You knelt ${seconds} seconds"
+// useUrl: the link in the chat and a button to continue.
+// NOTE SX_OPEN_URL_WORKAROUND line 17: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
+say as system "Open this link: https://example.com/rules"
+showButton "Continue"
+// getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
+// NOTE SX_FILE_PHOTO line 19: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+let photo = askImage("Pick a photo of yourself")
+if photo == null {
+  say "No photo, then"
+}
+exit

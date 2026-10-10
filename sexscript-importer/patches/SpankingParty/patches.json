@@ -1,0 +1,28 @@
+{
+  "patches": [
+    {
+      "id": "spanker-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "The six spanker names are declared without a value and appended to the seating list after the pairing sets them; TeaseScript sees possibly null names and cannot add them to a text list. They start as ERROR, the placeholder the script already gives the other names (host, redholder, greenholder) before they are set.",
+      "diff": "spanker-start.diff"
+    },
+    {
+      "id": "implement-slots",
+      "layer": "source",
+      "category": "b",
+      "reason": "The six draws took implement1 ... implement6 from toyboxArray and removed each pick with minus, which removed every equal entry; when the player owns fewer than six toys.* implements the draws ran out and gave null, and the play's picks from implementArray ran out the same way. The draws now start from at least six implements, the owned ones repeated as needed or the script's own toyboxDefault list when none is owned, pick from the implements left, and every pick removes only its own entry (list.remove(list.indexOf(pick))), so repeated implements stay. In the goodbye line, a spankee beyond the number of guests takes an implement of implementArrayGoodbye in turn instead of null.",
+      "diff": "implement-slots.diff"
+    },
+    {
+      "id": "warmup-p3-seat",
+      "layer": "source",
+      "category": "e",
+      "reason": "The warm-up seating adds each player's spanker to the seating only when that player was spanked (p1spanked, p2spanked, p4spanked to p6spanked), but adds the third player's spanker under p2spanked again. With two players in gauntlet mode the third spanker, never set, joined the seating as the placeholder \"ERROR\" and could be paired with a player. Test p3spanked.",
+      "diff": "warmup-p3-seat.diff"
+    }
+  ],
+  "heldStandAlone": {
+    "Banjo/DLC/spankparty-pp02.groovy": "Party Pack #2 is internal like its siblings pp00, pp01 and pp03: its own text says it cannot be run alone and only adds players to Spanking Party. unit.json not listing it in internalScripts is an author omission."
+  }
+}

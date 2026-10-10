@@ -1,0 +1,13 @@
+--- a/scripts/toy/toys.groovy
++++ b/scripts/toy/toys.groovy
+@@ -73,8 +73,8 @@
+ 	toy.metaClass.backgroundRemoveAllToys {
+ 		// Assume toy will release himself
+ 		toys.findAll { s, t -> stateIs(s) }.each {
+-			removeEvent("$RELEASEFROM-$it");
+-			set(it, false);
++			removeEvent("$RELEASEFROM-${it.key}");
++			set(it.key, false);
+ 		};
+ 	}
+ 

@@ -1,0 +1,3 @@
+// The legacy player chose this variant of chapters/first for German players.
+say "Kapitel eins."
+goto "chapters/second.tease"

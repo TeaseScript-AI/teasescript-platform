@@ -1,0 +1,11 @@
+--- a/scripts/toy/lines.groovy
++++ b/scripts/toy/lines.groovy
+@@ -477,7 +477,7 @@
+ 		for (i=0; i<n; i++) {
+ 	// 		line = "This is an exemplary line for ${dommeTitle()}";
+ 			while (linenr==lastline) linenr = getRandom(lines.size());
+-			line = compose(lines[linenr]).capitalize();
++			line = compose(lines[linenr]) ?: "";
+ 			lastline = linenr;
+ 			cpm = writeLine([nDRESSED, "$TITS|$PUSSY|$ASS"], line);
+ 			if (Math.abs(cpm) > cpmGoal*2.5) {

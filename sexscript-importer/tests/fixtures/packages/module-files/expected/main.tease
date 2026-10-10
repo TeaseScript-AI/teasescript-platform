@@ -1,0 +1,14 @@
+global function sexscriptLegacyRandom(limit) {
+  if limit == null {
+    return randomInteger(0..100)
+  }
+  let bound = limit - limit % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
+goto "demo.tease"

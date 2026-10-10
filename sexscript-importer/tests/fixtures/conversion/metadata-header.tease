@@ -1,0 +1,17 @@
+---
+title: "Night shift"
+author: "Anna"
+description: "A short session for the evening."
+keywords: "femaledom", "chores"
+---
+// Legacy setInfos(): API version 9, color 0x2A52BE, language "en"
+// Legacy setInfos() status, computed when the script ran: "draft-" + build
+
+// setInfos() becomes the file header; written text joined with + is written too, also through a variable that the script
+// assigns it once, and a computed value, or a number through a variable, whose declared type may change it, stays a
+// comment.
+let name = "Night shift"
+let build = 3
+// NOTE SX_METADATA_DYNAMIC line 6: setInfos() computed its status when the script ran; a file header holds only written values, so it stays a comment after the header.
+say "Ready."
+exit

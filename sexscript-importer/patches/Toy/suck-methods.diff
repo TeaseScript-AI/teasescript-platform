@@ -1,0 +1,55 @@
+--- a/scripts/toy/humiliation.groovy
++++ b/scripts/toy/humiliation.groovy
+@@ -49,20 +49,23 @@
+ 		return kneelTime / 20.0;
+ 	};
+ 
+-	toy.metaClass.playSuck {
+-		final playWait = { file, time ->
+-				playBackgroundSound(file);
+-				pause(time);
+-				playBackgroundSound(null);
+-		};
+-		final suck = { file, n, delay ->
+-			n.times {
+-				playWait(file, delay);
+-			};
+-		};
+-		final suckBeat = { beat, n ->
+-			suck("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	toy.metaClass.suckPlayWait { file, time ->
++		playBackgroundSound(file);
++		pause(time);
++		playBackgroundSound(null);
++	};
++
++	toy.metaClass.suckRepeat { file, n, delay ->
++		n.times {
++			suckPlayWait(file, delay);
+ 		};
++	};
++
++	toy.metaClass.suckBeat { beat, n ->
++		suckRepeat("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	};
++
++	toy.metaClass.playSuck {
+ 		def completed = loadInteger("toy.deepthroat.completed") ?: 0;
+ 		if (completed >= 4) {
+ 			preStrip();
+@@ -112,13 +115,13 @@
+ 		def session = 0;
+ 
+ 		pause(randRange(10, 20));
+-		playWait("bell.wav", randRange(10, 40)); // Head
++		suckPlayWait("bell.wav", randRange(10, 40)); // Head
+ 		while (session < target) {
+ 			suckBeat(30, randRange(5, 15)); // Slow
+ 			suckBeat(90, randRange(10, 30)); // Quick
+ 			pause(0.5);
+ 			final deep = randRange(target / 4, target / 2);
+-			suck("shortwhip.wav", deep, 2.5); // Deep
++			suckRepeat("shortwhip.wav", deep, 2.5); // Deep
+ 			session += deep;
+ 		}
+ 		suckBeat(30, randRange(5, 15)); // Slow

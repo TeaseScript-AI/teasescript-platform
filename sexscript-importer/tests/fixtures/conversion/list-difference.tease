@@ -1,0 +1,62 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
+// Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
+// NOTE SX_LOAD_OPEN_NULL line 2: Legacy read null for a missing text, the empty text here; the script gives this variable values of a type the compiler cannot tell too, so the read keeps an open type, checked where it is used.
+let picked = sexscriptLegacyValue(load("picked", default: ""))
+function pickToy {
+  let toys = ["paddle", "crop", "cane"]
+  if askBoolean "Add the strap?" {
+    toys.add("strap")
+  }
+  if picked != null and picked != "" {
+    toys = sexscriptLegacyListMinus(toys, [picked])
+  }
+  picked = toys.random
+}
+pickToy()
+say "Use the ${picked}"
+let rounds = [1, 2, 3, 4]
+rounds = sexscriptLegacyListMinus(rounds, [2])
+rounds = sexscriptLegacyListMinus(rounds, [1, 4])
+say "Rounds left: ${rounds.length}"
+// A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
+function pickOwned(itemKeys) {
+  for key in itemKeys {
+    if load(key, default: false) != true {
+      itemKeys = sexscriptLegacyListMinus(itemKeys, [key])
+    }
+  }
+  // NOTE SX_LENGTH_RECEIVER line 20: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  if itemKeys.length > 0 {
+    return itemKeys.random
+  } else {
+    return null
+  }
+}
+say "Bring the ${pickOwned(["toys.paddle", "toys.crop"])}"
+// A list whose type is not proven, such as a closure result, read with the legacy size property.
+function collected {
+  let found = []
+  found.add("a")
+  return found
+}
+let got = collected()
+if got.length > 0 {
+  say "Found ${got.length}"
+}
+// A list appended to and assigned to itself, list = list << value, appends once.
+let lessons = []
+lessons.add("Spelling")
+lessons.add("Manners")
+say "Lessons: ${lessons.length}"
+exit

@@ -1,0 +1,38 @@
+// A text or a flag declared as null, or without a value, whose later values all have one type starts empty: no code
+// compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
+def name = null
+def ask = { -> name = getString("Your name?", "") }
+def finished
+if (!name) ask()
+if (getBoolean("Finished?")) finished = true
+if (!finished) show("Keep going, ${name}")
+// A text that a function can show before its first value showed null in Groovy; it shows nothing now.
+def mood = null
+def report = { -> show("Mood: ${mood}") }
+report()
+mood = "calm"
+report()
+// A text whose value the code passes on, or that a switch matches against null, keeps its null start.
+def toy = null
+toy = "paddle"
+def chosen = toy
+def room = null
+room = "hall"
+switch (room) {
+	case null: show("Nowhere"); break
+	default: show("In the ${room}")
+}
+show("Using the ${chosen}")
+// So does one that the code compares with a value that may be empty, or that a parameter takes as its default, and one
+// that a String cast copies, which keeps null as Groovy's did.
+def nick = null
+def copied = (String) nick
+nick = "Kim"
+if (copied.equals(nick)) show("Same nick")
+def answer = null
+if (answer == "") show("No answer")
+answer = getString("Answer?", "")
+def hint = null
+def remind = { text = hint -> show("Hint: ${text}") }
+hint = "Look up"
+remind()

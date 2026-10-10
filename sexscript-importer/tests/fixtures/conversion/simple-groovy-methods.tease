@@ -1,0 +1,151 @@
+function sexscriptLegacyRandom(limit) {
+  if limit == null {
+    return randomInteger(0..100)
+  }
+  let bound = limit - limit % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let positionValue = first
+  for text in texts {
+    options.add({ value: positionValue, text: text })
+    positionValue += 1
+  }
+  return options
+}
+function sexscriptLegacyItems(value) {
+  if value == null {
+    return []
+  }
+  if value is string {
+    return value.split("")
+  }
+  return value
+}
+function sexscriptLegacyItemAt(listValue, positionValue2) {
+  if positionValue2 < 0 {
+    return listValue[listValue.length + positionValue2]
+  }
+  if positionValue2 >= listValue.length {
+    return null
+  }
+  return listValue[positionValue2]
+}
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+function sexscriptLegacyReplaceChars(text, chars, keep, replacement, runs) {
+  let result = ""
+  let inRun = false
+  for character in text.split("") {
+    if chars.contains(character) == keep {
+      result = "${result}${character}"
+      inRun = false
+    } else {
+      if not (runs and inRun) {
+        result = "${result}${replacement}"
+      }
+      inRun = true
+    }
+  }
+  return result
+}
+// equals() compares values like ==.
+let name = "Anna"
+if name == "Anna" {
+  say "Hello Anna"
+}
+// A list returned by a closure is not proven to be a list; clone() and toArray() give the list itself, since lists
+// copy on assignment, and remove() with a position removes and returns that element.
+function deal {
+  let cards = [3, 5, 7]
+  return cards
+}
+let hand = deal()
+let copy = hand
+let asArray = hand
+let position = 1
+let removed = hand.removeAt(position)
+// NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+// NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Removed ${removed}, ${copy.length} copied, ${asArray.length} in the array"
+// A compound assignment used as a value changes the variable first.
+let points = 10
+points -= 3
+save points as "game.points"
+// A labelled block runs in place; one that declares a variable keeps it in its own scope.
+let ready = false
+if true {
+  let answer = askBoolean "Ready?"
+  if answer {
+    ready = true
+  }
+}
+say "Ready: ${ready}, points ${points}"
+// Groovy iterated text by character; a value not proven to be text or a list goes through a helper.
+let word = "abc"
+for letter in word.split("") {
+  say letter
+}
+function spell(text) {
+  let shown = ""
+  for c in sexscriptLegacyItems(text) {
+    shown = "${shown}${c}"
+  }
+  return shown
+}
+say spell(word)
+// Groovy read null one past the end of a list, which a 1-based random pick relies on.
+let positions = [" ", "otk"]
+let pick = sexscriptLegacyRandom(positions.length) + 1
+// NOTE SX_INDEX_PAST_END line 39: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(positions, pick) == "otk" {
+  say "Over my knee"
+}
+// Java replaceAll() with a regular expression that text operations express.
+let serial = "ab12-x|[y]"
+// NOTE SX_SAY_MARKUP line 42: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
+say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}"
+// Menu options from a value not proven to be a list are offered as one, as Groovy required.
+function rooms {
+  return ["Hall", "Garden"]
+}
+let roomList = rooms()
+say "Where to?"
+let room = choose sexscriptLegacyMenuOptions(roomList, 0)
+say "Going to ${roomList[room]}"
+// A call that passes null for a parameter whose default gives it a type: the parameter takes null too.
+function afterLock(pre: boolean? = false) {
+  if sexscriptLegacyTruth(pre) {
+    say "Before"
+  } else {
+    say "After"
+  }
+}
+afterLock(null)
+exit

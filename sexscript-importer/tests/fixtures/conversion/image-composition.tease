@@ -1,0 +1,26 @@
+// MIGRATION INCOMPLETE: 2 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// A function that only composes an image in memory shows the base image it read, until TeaseScript composes images.
+// NOTE SX_IMAGE_COMPOSITION line 2: The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the image it was given, or else the first image it read.
+function showTiles(picture, spacing) {
+  showImage picture
+}
+showTiles("puzzle/cat.jpg", 2)
+say "Solve the puzzle"
+// A zoom-in that draws the image it was given into growing frames shows the image itself.
+function zoomIn(picture) {
+  for step in 1..=3 {
+    // TODO SX_DYNAMIC_OR_OBJECT_CALL line 16: Object/dynamic Groovy method calls are not lowered by the first slice.
+    // | def sprite = javax.imageio.ImageIO.read(new File("images/" + picture))
+    let sprite = null
+    // TODO SX_JAVA_CONSTRUCTOR line 17: Java object construction (new java.awt.image.BufferedImage) has no TeaseScript equivalent.
+    // | def frame = new java.awt.image.BufferedImage(10 * step, 10 * step, 6)
+    let frame = null
+    // NOTE SX_IMAGE_COMPOSITION line 18: The legacy function drew the image it was given into a frame in memory and showed the frame; TeaseScript cannot compose images yet, so the image itself is shown.
+    showImage picture
+    wait 0.1 s
+  }
+}
+zoomIn("puzzle/cat.jpg")
+exit

@@ -1,0 +1,76 @@
+// MIGRATION INCOMPLETE: 3 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "again" {
+    again(args[0], args[1])
+    return
+  }
+  if action == "scriptCallback4" {
+    scriptCallback4()
+    return
+  }
+}
+function announceCallback1(t) {
+  say "Count ${t}"
+}
+// A closure kept in a local of a function becomes a function, which its calls call directly while nothing assigns
+// the local again; one that captures the function's locals cannot convert
+// and stays declared without an action, so the code that calls it still compiles.
+function countdown(n) {
+  // TODO SX_CAPTURING_CLOSURE line 6: This closure value captures local announce, n of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | final twice = { t -> announce(t); announce(t + n) }
+  let twice = null
+  announceCallback1(n)
+  sexscriptLegacyCall(twice, [1])
+}
+countdown(2)
+function scriptCallback2 {
+  return { low: 1, high: 3 }
+}
+// A closure called where it is written calls its function directly.
+let limits = scriptCallback2()
+say "Up to ${limits.high}"
+// A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
+// functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
+// outside the block, where it meant something else.
+let punish = null
+say "Estim connected?"
+function shock(message, shocks) {
+  say message
+  // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
+  for it in 1..=floor(shocks) {
+    wait 1 s
+  }
+}
+function scriptCallback4 {
+  return shock("Ouch", 2)
+}
+if askBoolean {
+  let note = "Careful"
+  // TODO SX_CLOSURE_DISCOVERY line 24: Closure warn is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
+  // | def warn = { -> show(note) }
+  punish = "scriptCallback4"
+}
+if punish != null and punish != "" {
+  sexscriptLegacyCall(punish, [])
+}
+if askBoolean "Hurry?" {
+  // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
+  // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
+}
+wait 1 s
+// A closure that gets itself as its parameter, and calls it, calls itself directly, as every call passes it.
+function again(againValue, times) {
+  while true {
+    if times > 0 {
+      say "Again ${times}"
+      times -= 1
+      continue
+    }
+    return
+  }
+}
+again("again", 2)
+exit

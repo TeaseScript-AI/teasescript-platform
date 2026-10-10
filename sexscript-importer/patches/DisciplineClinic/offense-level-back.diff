@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic/OffenseSelect.groovy
++++ b/scripts/DisciplineClinic/OffenseSelect.groovy
+@@ -1686,7 +1686,7 @@
+ 			else offenseChoice = 1
+ 			while(offenseChoice > 0) {
+ 				offenseChoice = getSelectedValue("Which offense level would you like to change?", ["Back"]+offenseTextArray)
+-				if (offenseArray[offenseChoice - 1][0] == "offenseDisobeyClinic") {
++				if (offenseChoice > 0 && offenseArray[offenseChoice - 1][0] == "offenseDisobeyClinic") {
+ 					show("Sorry, this offense belongs the the clinic.  It's the only offense we don't allow you to change.")
+ 					wait(5)
+ 				}

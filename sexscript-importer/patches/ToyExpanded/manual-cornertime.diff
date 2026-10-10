@@ -1,0 +1,311 @@
+--- a/scripts/toy/cornertime.groovy
++++ b/scripts/toy/cornertime.groovy
+@@ -1,120 +1,4 @@
+ { toy ->
+-	toy.metaClass.readCTfile {file ->
+-		// read lines not starting with -----
+-		def lines = []
+-		new File(file).eachLine {
+-				line -> if (!line.startsWith("-----")) lines += line }
+-		return lines.join()
+-	}
+-
+-	toy.metaClass.parseCTreport {report ->
+-		try {
+-			//base64 decode
+-			byte[] decoded = report.decodeBase64()
+-			def json = new String(decoded)
+-			//json decode, return structure
+-			def jsonSlurper = new groovy.json.JsonSlurper()
+-			return jsonSlurper.parseText(json)
+-		}
+-		catch(Exception e) {
+-			if (stateIs("DEBUG")) showPopup("Error in corner time report parsing:\n\n${e}")
+-			return null
+-		}
+-	}
+-
+-	toy.metaClass.encodeCTpunishment {input ->
+-		//json conversion
+-		def json = groovy.json.JsonOutput.toJson(input)
+-		//base64 encode
+-		return json.bytes.encodeBase64().toString()
+-	}
+-
+-	toy.metaClass.writeCTfile {punishment, filename ->
+-		def file = new File(filename)
+-		def newLine = System.getProperty("line.separator")
+-		//write header, input, and footer
+-		file.write("-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----" + newLine)
+-		file.append(punishment + newLine)
+-		file.append("-----END CORNERTIME CUSTOM PUNISHMENT-----")
+-	}
+-
+-	toy.metaClass.setupCornertime {tmin=300, tmax=600, context="play" ->
+-		return [
+-			title: "Toy-ID-"+randRange(1e6, 1e7-1).toString()+"-"+(getTime()-16e8).toString(),
+-			durationRange: [minimum: tmin, maximum: tmax],
+-			penaltyRange: [minimum: 30, maximum: 60],
+-			penaltyProbabilities: [0, 1],
+-			encouragementProbability: context=="training"?0.2:0.1,
+-			phrases: [
+-				getReady: [compose([["Get ready,", "Get in position,", "Position!"],
+-						["toy!", "slave!", "slut!", ""]])],
+-				start: [compose([["You better not move!", "Stand still!", "Now freeze!"],
+-						["I'm starting your cornertime now.", "I'm watching you!", "Your cornertime starts now."]])],
+-				encourage: ["Just a few more minutes.", "Keep it up, you're doing well.", "Just a little longer.", 
+-						"I'm still watching!"] +
+-						context=="training"?(getProp("${TRAINING}.require", loadB)?["Regular cornertime is good for you!", "This is where you belong once a day!"]:["Cornertime is good for you!", "This is where you belong once a day!"]):["You should train that each day! Ask me for it!"],
+-				scold: ["Do I see you moving?", "Hey, don't move!", "I said no moving!", 
+-						"Stop it, I see every movement!"],
+-				penalize: ["I warned you not to move. I'm adding some more time to the clock.",
+-						"Stay still or this will last forever!",
+-						"Stop moving! You're only making it worse for you!",
+-						"Stand still, bitch!"],
+-				end: [compose([["Toy,", "Slave,"],
+-						["you can come", "you may come"],
+-						["out of the corner now.", "back to me now."]])]
+-			]
+-		];
+-	}
+-	
+-	toy.metaClass.webCornertime {ctconfig, postext ->	
+-			present([DRESSED], [
+-					["Get your device with webcam and go to cornertime.github.io,"],
+-					["or I can open the website for you. Then select 'Carry Out a Custom Punishment'."],
+-					["I will show you the input text right away."]]);
+-			if (getBoolean(null, "Open website", "Continue")) {
+-				useUrl("cornertime.github.io");
+-			}
+-			def inputfile = "toy_ct_input.txt";
+-			writeCTfile(encodeCTpunishment(ctconfig), inputfile);
+-			useFile(inputfile);
+-			present([DRESSED], [
+-					["Here's the input, copy it into the field but do NOT start yet."]]);
+-			pause(7);
+-			showButtonG("Done, ${dommeTitle()}.", "done");
+-			present([DRESSED], [
+-					["Reminder:"],
+-					[postext],
+-					["Position your device or webcam accordingly,"],
+-					["start the punishment, get in position quickly, and"],
+-					["stay there without a single move", "don't move"],
+-					["until I call you back.", "until you're summoned."]]);
+-			showButtonG("OK, ${dommeTitle()}", "ok");
+-			pause(30);
+-			show(null);
+-			pause(ctconfig.durationRange.minimum-20);
+-			showButtonG("Back, ${dommeTitle()}", "back");
+-			def ctoutput = null
+-			def getreport = true
+-			while (getreport) {
+-				present([DRESSED], [
+-						["Now copy the punishment report and insert it here."]]);
+-				ctoutput = parseCTreport(getString(null, "").tokenize("-----")
+-						.findAll {l -> !l.endsWith("CORNERTIME PUNISHMENT REPORT")}.join())
+-				if (!ctoutput) {
+-					present([DRESSED], [
+-							["Something went wrong with your report,"],
+-							["toy,", "slave,"],
+-							["I am not able to read it."],
+-							["Make sure you correctly copy the output!\n\n"],
+-							["Do you want to try again?"]]);
+-					getreport = getBooleanG(null);
+-				}
+-				else getreport = false
+-			}
+-			new File(inputfile).delete();
+-			return ctoutput;
+-		}
+-	
+ 	toy.metaClass.playCornertime {
+ 		present([DRESSED], [
+ 				["Right,", "OK,"],
+@@ -165,70 +49,26 @@
+ 		def postext = getRandomListItem(positions);
+ 		postext += "\n\n";
+ 
+-		if (has(WEBCT)) {
+-			present([DRESSED], [
+-					[postext],
+-					["I will however make sure you really stand still."]]);
+-			showButtonG("Yes, ${dommeTitle()}.", "ok");
+-
+-			def ctconfig = setupCornertime(ctmin, ctmax, context)
+-			def ctoutput = webCornertime(ctconfig, postext)
+-			
+-			if (!ctoutput) {
+-				present([DRESSED], [
+-						["Oh well,"],
+-						["toy.", "slave."],
+-						["I said I am not able to read your report. And"],
+-						["I told you", "I warned you"],
+-						["that I will not tolerate any errors!"],
+-						["You are going to regret this!"]]);
+-				adjustPunish(150);
+-				setSessionAbort(DISAPPOINT);
+-				pause(5);
+-				showButtonG("Sorry, ${dommeTitle()}", "sorry");
+-				return 0;
+-			}
+-			if (ctconfig.title != ctoutput.presetTitle) {
+-				present([DRESSED], [
+-						["What?", "Are you trying to cheat?"],
+-						["That is not the"],
+-						["punishment", "corner time"],
+-						["I ordered!", "I told you!"],
+-						["You are going to regret this!"]]);
+-				adjustPunish(200);
+-				setSessionAbort(DISAPPOINT);
+-				pause(5);
+-				showButtonG("Sorry, ${dommeTitle()}", "sorry");
+-				return 0;
+-			}
+-			if (ctoutput.violations > 1) {
+-				toysucceeded = false;
+-			}
+-			adjustPunish(ctoutput.violations * 8);
+-			cTime = ctoutput.totalDuration;
+-		}
+-		else {
+-			present([DRESSED], [
+-					[postext],
+-					["When I ring my bell"],
+-					["you'll stay there without a single move", "you won't move"],
+-					["until I call you back.", "until you're summoned."]]);
+-			showButtonG("Yes, ${dommeTitle()}.", "ok");
+-			snapFinger();
+-			present([DRESSED], [["Ok, go!", "Off you go.", "Get in position!"]]);
+-			pause(10+getRandom(3));
+-			playBackgroundSound("bell.wav");
+-			pause(3);
+-			present(null, [["I'm watching you!", "Don't move!"]]);
+-			pause(5);
+-			show(null);
+-			pause(cTime-8);
+-			while (playBackgroundSound("bell.wav") || true) {
+-				if (showButtonG("Back, ${dommeTitle()}", "back", 20) != 20) break;
+-			}
+-			present([DRESSED], [["Did you move or fail?"]]);
+-			toysucceeded = getBooleanG(null, gagText("No, ${dommeTitle()}", "no"), gagText("I failed, ${dommeTitle()}", "failed"))
++		present([DRESSED], [
++				[postext],
++				["When I ring my bell"],
++				["you'll stay there without a single move", "you won't move"],
++				["until I call you back.", "until you're summoned."]]);
++		showButtonG("Yes, ${dommeTitle()}.", "ok");
++		snapFinger();
++		present([DRESSED], [["Ok, go!", "Off you go.", "Get in position!"]]);
++		pause(10+getRandom(3));
++		playBackgroundSound("bell.wav");
++		pause(3);
++		present(null, [["I'm watching you!", "Don't move!"]]);
++		pause(5);
++		show(null);
++		pause(cTime-8);
++		while (playBackgroundSound("bell.wav") || true) {
++			if (showButtonG("Back, ${dommeTitle()}", "back", 20) != 20) break;
+ 		}
++		present([DRESSED], [["Did you move or fail?"]]);
++		toysucceeded = getBooleanG(null, gagText("No, ${dommeTitle()}", "no"), gagText("I failed, ${dommeTitle()}", "failed"))
+ 
+ 		if (toysucceeded) {
+ 			orderPosition(KNEELING, [DRESSED], [["Good boy.", "Very good."],
+--- a/scripts/toy/misc.groovy
++++ b/scripts/toy/misc.groovy
+@@ -525,85 +525,6 @@
+ 			}
+ 		}
+ 
+-		if (type==3 | type==0) { //webcam cornertime verification
+-			present([DRESSED,TEASE], [
+-					["When I give you corner time, I can use an utility to check if you are moving."],
+-					["I'm talking about cornertime.github.io, maybe you've already heard of it."],
+-					["You need a device with a webcam and modern browser."],
+-					["Don't worry, no pictures are sent anywhere, it is only done locally.\n\n"],
+-					["Should I do that?"]]);
+-			if (getBooleanG(null)) {
+-				setProp("toys.${WEBCT}", true);
+-			}
+-			else {
+-				present([DRESSED,nTEASE], [
+-						["Awwww, too bad!"]]);
+-				setProp("toys.${WEBCT}", false);
+-				pause(4);
+-			}
+-			if (has(WEBCT)) {
+-				present([DRESSED,TEASE], [
+-						["Perfect! I'm looking forward to it!\n\n"],
+-						["Make sure you know how it works, I will show no mercy for errors later on! Do you want to try it out now?"]]);
+-				def tryct = getBooleanG(null);
+-				while (tryct) {
+-					present([DRESSED,nTEASE], [
+-							["Very well! I will set up a short test between 30 and 45 seconds."],
+-							["I don't care if you really stand in the picture, this is for you to learn how it works.\n\n"],
+-							["I will give you a text which you have to enter on that page."],
+-							["Either copy it directly if you use this computer, or mail it to yourself if you are using a different device.\n\n"],
+-							["After completion, you will be shown a cryptic report which you have to copy back to me for verification."]]);
+-					showButtonG("Understood, ${dommeTitle()}.", "ok");
+-
+-					def ctconfig = setupCornertime(30, 35)
+-					def ctoutput = webCornertime(ctconfig, "You don't need to be in the picture for a test. Just make sure it finishes right.\n\n")
+-					
+-					def toysucceeded = true
+-					def failtext = []
+-					if (!ctoutput) failtext = 
+-								["I told you, I am not able to read the report. This will result in failing my order!"];
+-					else if (ctconfig.title != ctoutput.presetTitle) failtext = 
+-								["Something went wrong, toy, this is not the report for what I said."];					
+-					if (failtext) {
+-						present([DRESSED,nTEASE], [
+-								failtext,
+-								["Make sure you correctly copy the output and save the file!"]]);
+-						showButtonG("OK, ${dommeTitle()}", "ok");
+-						toysucceeded = false;
+-					}
+-					else {
+-						present([DRESSED,nTEASE], [
+-								["Good toy, seems like you master it."]]);
+-						if (ctoutput.violations > 1) {
+-							pause(4);
+-							present([DRESSED,nTEASE], [
+-									["To let you know, I see more than one forbidden movement."],
+-									["This would become a problem for you in a session."]]);
+-						}
+-						showButtonG("OK, ${dommeTitle()}", "ok");
+-					}
+-
+-					if (!toysucceeded) present([DRESSED,nTEASE], [
+-								["It did not work as expected. Do you want to try again?"]]);
+-					else present([DRESSED,nTEASE], [["Do you want to try again?"]]);
+-					tryct = getBooleanG(null);
+-					if (!toysucceeded & !tryct) {
+-						present([DRESSED,nTEASE], [
+-								["Do you want to disable the webcam thing altogether and let me give you normal corner time?"]]);
+-						if (getBooleanG(null)) {
+-							setProp("toys.${WEBCT}", true);
+-							present([DRESSED,nTEASE], [["OK, as you want!"]]);
+-							pause(4);
+-						}
+-						else {
+-							present([DRESSED,nTEASE], [["OK, but I've warned you! I will not tolerate any mistakes!"]]);
+-							pause(7);
+-						}
+-					}
+-				}
+-			}
+-		}
+-		
+ 		if (type==5 | type==0) { //daily training
+ 			def actslist = [];
+ 			actslist += ["spanking"];
+@@ -820,8 +741,7 @@
+ 			def opts = [
+ 					[ lbl: "Extra toys", ID: 1 ],
+ 					[ lbl: "Fetishes", ID: 4 ],
+-					[ lbl: "Daily training", ID: 5],
+-					[ lbl: "Cornertime with webcam", ID: 3 ]
++					[ lbl: "Daily training", ID: 5]
+ 					];
+ 			if (canTalk())
+ 				opts.add([ lbl: "Voice output", ID: 2 ]);

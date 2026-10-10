@@ -1,0 +1,148 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyItems(value) {
+  if value == null {
+    return []
+  }
+  if value is string {
+    return value.split("")
+  }
+  return value
+}
+function sexscriptLegacyPlainText(value) {
+  let text = "${value}".replace("**", "").replace("~~", "").replace("[u]", "").replace("[/u]", "").replace("[/color]", "")
+  let start = text.indexOf("[color=")
+  while start >= 0 {
+    let endValue = text.indexOf("]")
+    if endValue < start {
+      return text.replace("*", "")
+    }
+    text = "${text.substring(0, start)}${text.substring(endValue + 1)}"
+    start = text.indexOf("[color=")
+  }
+  return text.replace("*", "")
+}
+function sexscriptLegacyTextMinus(text, part) {
+  let position = text.indexOf(part)
+  if position < 0 {
+    return text
+  }
+  return "${text.substring(0, position)}${text.substring(position + part.length)}"
+}
+function sexscriptLegacySlice(value, from, to, exclusive = false) {
+  let start = from
+  let finish = to
+  if not (from is integer and to is integer) and from > to {
+    start = to
+    finish = from
+  }
+  let first = toInteger(start)
+  if first < 0 {
+    first += value.length
+  }
+  let last = toInteger(finish)
+  if last < 0 {
+    last += value.length
+  }
+  let runsBack = first > last
+  let low = first
+  let high = last + 1
+  if exclusive {
+    high = last
+  }
+  if runsBack {
+    low = last
+    if exclusive {
+      low = last + 1
+    }
+    high = first + 1
+  }
+  let position = low
+  let stop = high
+  let step = 1
+  if runsBack {
+    position = high - 1
+    stop = low - 1
+    step = -1
+  }
+  let part = value
+  if value is string {
+    let text = ""
+    while position != stop {
+      text += value.substring(position, position + 1)
+      position += step
+    }
+    part = text
+  } else {
+    let items = []
+    while position != stop {
+      items.add(value[position])
+      position += step
+    }
+    part = items
+  }
+  return sexscriptLegacyValue(part)
+}
+let name = "Anna"
+let count = 3
+// NOTE SX_PLUS_OPERAND_TYPE line 3: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Hello ${name}, you have ${count + 1} tasks."
+say "Literal \${not interpolated} and \"quotes\""
+say "Path C:\\temp\tTab"
+// Text with HTML that a variable keeps or a function receives becomes markup where it is written.
+let rulesTitle = """
+  # Rules
+
+
+"""
+function announce(message) {
+  say "${rulesTitle}${message}"
+}
+announce("You may **not** touch")
+// A text shown character by character, as a typewriter effect, goes through its characters without markup markers.
+function reveal(message) {
+  let appeared = ""
+  for c in sexscriptLegacyItems(sexscriptLegacyPlainText(message)) {
+    appeared = "${appeared}${c}"
+    say appeared
+  }
+}
+reveal("You may **not** touch")
+// A variable that starts as text joins every later part as text, also where a part's type is not proven.
+let dialog = ""
+let counts = [3, 5]
+// NOTE SX_LOAD_KEEPS_VALUE line 22: Groovy stored null in 'dialog' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+dialog = load "training.greeting", default: dialog
+dialog += """
+  ${counts[1]} swats
+
+"""
+say dialog
+// A text read by a range is the part from its first through its last position, also counted from the end; text minus a
+// part drops its first occurrence; text times a count of unknown type repeats it.
+let code = "ABCDOEFO"
+let cut = 3
+function stars(countValue) {
+  return "*".repeat(toInteger(countValue))
+}
+say "${code.substring(0, 3)}${code.substring(code.length - 2)}${sexscriptLegacySlice(code, 1, cut, true)}${sexscriptLegacySlice(code, cut, -1)}${sexscriptLegacyTextMinus(code, "O")}${stars(cut)}"
+// Groovy iterated null zero times.
+say "Pick one?"
+let picked: string? = "red"
+if (choose 0: "none", 1: "red") == "none" {
+  picked = null
+}
+for c in sexscriptLegacyItems(picked) {
+  say c
+}
+// Removing a part from text in place drops its first occurrence (Banjo's gear).
+let gear = " Torch. Rope. Torch. "
+function loadGear {
+  // NOTE SX_LOAD_KEEPS_VALUE line 36: Groovy stored null in 'gear' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  gear = load "game.gear", default: gear
+}
+gear = sexscriptLegacyTextMinus(gear, " Torch. ")
+gear = sexscriptLegacyTextMinus(gear, " Rope. ")
+say "Gear:${gear}"
+exit

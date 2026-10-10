@@ -1,0 +1,26 @@
+// Each script repeats the same table, reads the mistress from storage, and defines the same helpers.
+let phrases = ["Kneel.", "Wait."]
+let mistress = load "mistress", default: ""
+function image {
+  showImage "room.jpg"
+}
+function taunt {
+  say phrases.random
+}
+function greet {
+  say "Welcome to ${mistress}'s house."
+}
+function enter {
+  image()
+  say "Come in."
+}
+let level = 1
+function report {
+  say "Level ${level}"
+}
+save "Vera" as "mistress"
+enter()
+report()
+taunt()
+greet()
+goto "rooms/hall.tease"

@@ -1,0 +1,4 @@
+// A script nothing chains to, which a player opened directly in the legacy player: the way out of a running sentence.
+delete "lines.wayland"
+say "Your sentence is over, ${load("intro.name", default: "")}"
+exit

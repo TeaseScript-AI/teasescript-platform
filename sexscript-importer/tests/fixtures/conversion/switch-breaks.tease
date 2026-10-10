@@ -1,0 +1,168 @@
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskProfile {
+  let profileToysFields = dict{}
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.crop", "toys.paddle"] {
+    if load(profileToysKey, default: null) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["crop / cane", "paddle"][profileToysIndex] }
+    }
+    profileToysIndex += 1
+  }
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+sexscriptLegacyAskProfile()
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+let n = randomInteger(0..3)
+let days = sexscriptLegacyLoadInteger("x.days")
+switch n {
+  case 0 {
+    say "Zero"
+    if sexscriptLegacyCompare(days, 5) < 0 {
+      say "Too early"
+    } else {
+      say "Changing"
+    }
+  }
+  case 1 {
+    say "One"
+    say "or two"
+  }
+  case 2 {
+    say "One or two"
+  }
+}
+// A switch case that ends with break returns its last value from the function.
+function labelValue(kind) {
+  switch kind {
+    case 1 {
+      return "one"
+    }
+    default {
+      return "many"
+    }
+  }
+}
+say labelValue(1)
+// A case expression with effects needs the switch value kept; a list variable case tests membership.
+let subject = 1
+subject = randomInteger(0..3)
+let options = [1, 2]
+let switchValue1 = subject
+if switchValue1 == randomInteger(0..3) {
+  say "drawn"
+} else if options.contains(switchValue1) {
+  say "listed"
+} else {
+  say "other"
+}
+// A range bound known only at runtime may make the range run in either direction.
+let top = 3
+if (subject >= top and subject <= 1) or (subject <= top and subject >= 1) {
+  say "in range"
+}
+// A list case matches any of its elements, as a case with several values.
+switch n {
+  case 0, 1 {
+    say "low"
+  }
+  case 2..=3 {
+    say "high"
+  }
+}
+// A descending range matched in Groovy too, which a range case cannot express.
+if n <= 3 and n >= 1 {
+  say "one to three"
+} else if n == 0 {
+  say "zero"
+}
+// A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
+switch randomInteger(0..2) {
+  case 0 {
+    if load("toys.paddle", default: false) == true {
+      say "Fetch the paddle"
+    } else if load("toys.crop", default: false) == true {
+      say "Fetch the crop"
+    }
+  }
+  default {
+    if load("toys.crop", default: false) == true {
+      say "Fetch the crop"
+    }
+  }
+}
+// A case whose if and else both return does not run on into the next case, as in Domme3's main menu.
+function implement(choice) {
+  switch choice {
+    case 0 {
+      if load("toys.paddle", default: false) == true {
+        return "paddle"
+      } else {
+        return "hand"
+      }
+    }
+    case 1 {
+      return "crop"
+    }
+  }
+  return "none"
+}
+say "Fetch the ${implement(randomInteger(0..2))}"
+// A switch on a number that may be null ran its default for null, which a case of its own runs too.
+let picked = null
+if randomInteger(0..2) == 0 {
+  picked = randomInteger(0..3)
+}
+if picked == null {
+  say "Nothing picked"
+}
+if picked == null {
+  say "Other"
+} else {
+  switch picked {
+    case 0 {
+      say "Zero ${picked + 1}"
+    }
+    case 1 {
+      say "One ${picked + 1}"
+    }
+    default {
+      say "Other"
+    }
+  }
+}
+exit

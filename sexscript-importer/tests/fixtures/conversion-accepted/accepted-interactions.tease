@@ -1,0 +1,72 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyShowButton(text, timeout) {
+  if timeout == 0 {
+    showButton text, timeout: 10 ms
+    return 0
+  }
+  return (showButton text, timeout: timeout * 1 s) / 1 s
+}
+let ready = askBoolean "Are you ready?"
+let sure = askBoolean "Really?", yesText: "Yes, Mistress"
+let count = askInteger "How many?", prefill: 10
+showPopup "Session starts now"
+showButton "Quick!", timeout: 3 s
+// A zero timeout showed the button for its 10 ms safety margin and returned 0.
+// NOTE SX_BUTTON_TIMEOUT line 7: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Flash", timeout: 10 ms
+// NOTE SX_BUTTON_TIMEOUT line 8: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Blink", timeout: 10 ms
+let instant = 0
+// A timeout known to be zero before the script runs keeps the margin too; a computed one may be zero only at runtime.
+let noWait = 0
+// NOTE SX_BUTTON_TIMEOUT line 11: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Now", timeout: 10 ms
+// NOTE SX_BUTTON_TIMEOUT line 12: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Again", timeout: 10 ms
+let pause = randomInteger(0..3) + 1
+sexscriptLegacyShowButton("Later", pause)
+let elapsed = showButton "Done", timeout: 30 s
+if elapsed >= 30 s or instant > 0 {
+  say "Too slow"
+}
+openUrl("https://example.com")
+let start = getAbsoluteDateTime().toSeconds()
+if ready and sure {
+  say "Starting ${count} rounds at ${start}"
+}
+// showPopup() returned the seconds until the player closed it.
+// NOTE SX_POPUP_ELAPSED line 21: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
+let popupStart = getAbsoluteDateTime().toSeconds()
+showPopup "Come here!"
+let late = getAbsoluteDateTime().toSeconds() - popupStart
+if late > 60 {
+  say "What took you so long?"
+}
+function title {
+  wait 1 s
+  return "Ready?"
+}
+// NOTE SX_POPUP_ELAPSED line 24: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
+let popupMessage2 = title()
+let popupStart2 = getAbsoluteDateTime().toSeconds()
+showPopup popupMessage2
+let slow = getAbsoluteDateTime().toSeconds() - popupStart2
+// getImage() took a webcam picture and returned its path, or null.
+// NOTE SX_CAMERA_FALLBACK line 26: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let photo: string? = takePhoto()
+if photo != null {
+  showImage photo
+}
+// With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
+let kit = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
+if kit[1] == true {
+  say "Bring the crop"
+}
+// NOTE SX_FILE_TITLE line 31: getFile() titled its file chooser with this message; chooseFile() has no title.
+let picture = chooseFile()
+if picture == null {
+  say "No photo"
+}
+exit

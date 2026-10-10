@@ -1,0 +1,75 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskProfile {
+  if load("intro.name", default: "") == "" {
+    save (askText as system ("What is your name?", prefill: "Slave").replace("\n", " ")) as "intro.name"
+  }
+  let savedFemale: boolean? = load "intro.female", default: null
+  if savedFemale == null {
+    save (askBoolean as system "Are you a woman ?") as "intro.female"
+  }
+  let savedLikemale: boolean? = load "intro.likemale", default: null
+  if savedLikemale == null {
+    // NOTE SX_LOAD_OPEN_NULL: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+    if load("intro.likefemale", default: sexscriptLegacyValue(null)) == true {
+      save (askBoolean as system "Are you also attracted to men ?") as "intro.likemale"
+    } else {
+      save true as "intro.likemale"
+    }
+  }
+  let profileToysFields = dict{}
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.dildo"] {
+    if load(profileToysKey, default: null) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
+    }
+    profileToysIndex += 1
+  }
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
+    }
+  }
+  let profileClothesFields = dict{}
+  let profileClothesIndex = 0
+  for profileClothesKey in ["clothes.panties"] {
+    if load(profileClothesKey, default: null) == null {
+      profileClothesFields[profileClothesKey] = { value: false, text: ["panties"][profileClothesIndex] }
+    }
+    profileClothesIndex += 1
+  }
+  if profileClothesFields.length > 0 {
+    let profileClothesAnswers = askForm as system "What do you own ?", fields: profileClothesFields
+    for profileClothesKey in profileClothesAnswers {
+      save profileClothesAnswers[profileClothesKey] as profileClothesKey
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (clothes.panties, intro.female, intro.likemale, intro.name, toys.dildo) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+sexscriptLegacyAskProfile()
+// The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
+let gender = "boy"
+if load("intro.female", default: false) == true {
+  gender = "girl"
+}
+say "Hello, ${load("intro.name", default: "")}, my good ${gender}"
+if load("intro.likemale", default: false) == true {
+  say "You like men too"
+}
+if load("toys.dildo", default: false) != true {
+  say "A dildo or dildo alternative is needed"
+}
+// A save of an owned item corrects the answer, so the item is still asked first.
+let conditional = load("clothes.panties", default: false) == true
+if conditional {
+  conditional = not askBoolean("Are you wearing your panties?")
+}
+if conditional {
+  save false as "clothes.panties"
+}
+exit

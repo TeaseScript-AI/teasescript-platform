@@ -1,0 +1,11 @@
+say "The end."
+// The legacy player counted the starts of each script; this one reads how often the story began.
+let savedNb: integer? = load "Story.start.launch.nb", default: null
+if savedNb != null {
+  say "You began ${sexscriptLegacyLoadInteger("Story.start.launch.nb")} times."
+}
+// A text read of the count, as ScarlettsBlackmail tags its reports with it, reads the whole number's text.
+// NOTE SX_LOAD_STRING_TEXT line 5: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
+let run = "${load("Story.start.launch.nb", default: sexscriptLegacyValue(""))}"
+say "Run ${run}"
+exit

@@ -1,0 +1,20 @@
+---
+title: "script-chain"
+---
+
+// NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to. The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: chapters/first_de.tease.
+say "Which script do you want to start?"
+let picked = choose extra: "extra",
+  intro: "intro",
+  intro_de: "intro (Deutsch)"
+switch picked {
+  case "extra" {
+    goto "extra.tease"
+  }
+  case "intro" {
+    goto "intro.tease"
+  }
+  default {
+    goto "intro_de.tease"
+  }
+}

@@ -1,0 +1,13 @@
+---
+title: "Part"
+---
+// Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
+
+if askBoolean "Bonus?" {
+  goto "addon.tease"
+}
+if askBoolean "Again?" {
+  goto "tease.tease"
+}
+say "The end"
+exit

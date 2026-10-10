@@ -1,0 +1,460 @@
+// MIGRATION INCOMPLETE: 4 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyArray(size, valueValue) {
+  let itemsValue = []
+  repeat size {
+    itemsValue.add(valueValue)
+  }
+  return itemsValue
+}
+function sexscriptLegacyShuffled(itemsValue2) {
+  let shuffled = itemsValue2
+  let index = shuffled.length - 1
+  while index > 0 {
+    let other = randomInteger(0..=index)
+    let swap = shuffled[index]
+    shuffled[index] = shuffled[other]
+    shuffled[other] = swap
+    index -= 1
+  }
+  return shuffled
+}
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let position = first
+  for text in texts {
+    options.add({ value: position, text: text })
+    position += 1
+  }
+  return options
+}
+function sexscriptLegacyListMax(itemsValue3) {
+  if itemsValue3.length == 0 {
+    return null
+  }
+  let best = itemsValue3.first
+  for item in itemsValue3 {
+    if item > best {
+      best = item
+    }
+  }
+  return best
+}
+function sexscriptLegacyTextSum(itemsValue4) {
+  if itemsValue4.length == 0 {
+    return null
+  }
+  if itemsValue4.length == 1 {
+    return itemsValue4[0]
+  }
+  if itemsValue4[0] == null {
+    return itemsValue4[0] + "${itemsValue4[1]}"
+  }
+  return itemsValue4.join("")
+}
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
+function sexscriptLegacyListText(valueValue2) {
+  if valueValue2 is list or valueValue2 is set {
+    let partsValue: string[] = []
+    for item in valueValue2 {
+      partsValue.add(sexscriptLegacyListText(item))
+    }
+    return "[${partsValue.join(", ")}]"
+  }
+  if valueValue2 is dict {
+    let entries: string[] = []
+    for key, item in valueValue2 {
+      entries.add("${key}:${sexscriptLegacyListText(item)}")
+    }
+    if entries.length == 0 {
+      return "[:]"
+    }
+    return "[${entries.join(", ")}]"
+  }
+  return "${valueValue2}"
+}
+function sexscriptLegacyCastText(valueValue3): string? {
+  if valueValue3 == null {
+    return null
+  }
+  return toString(valueValue3)
+}
+function sexscriptLegacySplit(text, separator) {
+  let partsValue2 = text.split(separator)
+  if text == "" {
+    return partsValue2
+  }
+  while partsValue2.length > 0 and partsValue2.last == "" {
+    partsValue2.removeLast()
+  }
+  return partsValue2
+}
+function sexscriptLegacyReversed(itemsValue5) {
+  let result = []
+  let index = itemsValue5.length - 1
+  while index >= 0 {
+    result.add(itemsValue5[index])
+    index -= 1
+  }
+  return result
+}
+let items = ["kneel", "wait", "count"]
+let upper = []
+for it in items {
+  upper.add("${it}!")
+}
+let longOnes = []
+for item in items {
+  if item.length > 4 {
+    longOnes.add(item)
+  }
+}
+let found = null
+for it in items {
+  if it == "wait" {
+    found = it
+    break
+  }
+}
+let anyCount = false
+for it in items {
+  if it == "count" {
+    anyCount = true
+    break
+  }
+}
+let total = 0
+for item in [1, 2, 3] {
+  total += item
+}
+for it in 0..3 {
+  say "Round ${it}"
+}
+repeat 2 {
+  say "Again"
+}
+for i in 0..items.length {
+  let item = items[i]
+  say "${i}: ${item}"
+}
+items = sexscriptLegacyShuffled(items)
+items.removeAt(0)
+items.remove("wait")
+let pairs = [
+  [1, 2],
+  [3, 4]
+]
+pairs.remove([1, 2])
+let numbers = [5, 6]
+say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}"
+say "Best: ${sexscriptLegacyListMax([3, 7, 5])}"
+let bigger = max(total, 4)
+if items.length == 0 {
+  say "Nothing left"
+}
+// A loop that reads its own target keeps the old value until the result is complete.
+let again = true
+let anyResult = false
+for it in [1, 2] {
+  if again {
+    anyResult = true
+    break
+  }
+}
+again = anyResult
+let rounds = 2
+for it in 0..rounds {
+  say "Round"
+}
+say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}"
+// A position compared with null reads null past the end, as Groovy did.
+let hand = ["Ace", "King"]
+// NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(hand, 2) != null {
+  say "Third card"
+} else {
+  say "Two cards"
+}
+// A list that only ever starts empty grows at its end, also by a computed position.
+let shoe = []
+for d in 0..2 {
+  for c in 0..2 {
+    // NOTE SX_LIST_PADDING line 31: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with 0, which Groovy truth treats like null, since nothing compares its elements with null.
+    while shoe.length <= d * 2 + c {
+      shoe.add(0)
+    }
+    shoe[d * 2 + c] = c
+  }
+}
+say "Shoe ${shoe.length}"
+// A division of values not proven numbers sets a number.
+let odds: number = 0
+let parts = [3, 4]
+odds = parts[0] / parts[1]
+say "Odds ${odds}"
+// Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
+function joinDecks(first, second, offset) {
+  let joined = []
+  for i in 0..2 {
+    // NOTE SX_LIST_GROWTH line 41: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i < joined.length {
+      joined[i] = first[i]
+    } else {
+      joined.add(first[i])
+    }
+  }
+  for i in 0..2 {
+    // NOTE SX_PLUS_OPERAND_TYPE line 42: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i + offset < joined.length {
+      joined[i + offset] = second[i]
+    } else {
+      joined.add(second[i])
+    }
+  }
+  return joined
+}
+let labels = ["< Previous", "Next >"]
+labels.add("Exit")
+say "Decks ${joinDecks([1, 2], [3, 4], 2).length} ${labels.length}"
+// A list filled from its end, or past its end, gets padding up to the position, as Groovy padded it with null: 0 where
+// nothing compares its elements with null, and null where something does.
+let slots = []
+let k = 2
+while k >= 0 {
+  // NOTE SX_LIST_PADDING line 51: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with 0, which Groovy truth treats like null, since nothing compares its elements with null.
+  while slots.length <= k {
+    slots.add(0)
+  }
+  slots[k] = k * 10
+  k -= 1
+}
+let seats = []
+// NOTE SX_LIST_PADDING line 53: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it the same way.
+while seats.length <= 1 {
+  seats.add(null)
+}
+seats[1] = "Ann"
+// NOTE SX_INDEX_PAST_END line 54: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(seats, 0) == null {
+  say "Seat 0 is free"
+}
+// A write that reads the same position first needs no padding: the position exists already.
+k = 0
+while k < 3 {
+  slots[k] = slots[k] + 1
+  k += 1
+}
+say "Slots ${slots.length} ${seats.length}"
+// collect() without a closure collects each element as it is.
+let positions = []
+for item in 0..=2 {
+  positions.add(item)
+}
+say "Positions ${positions.length}"
+let rows = []
+let collectResult = []
+for item in "a,b".split(",") {
+  collectResult.add(item)
+}
+rows.add(collectResult)
+say "Rows ${rows.length}"
+// A list of positions sets each of them to the one value (campdrain), and reads the list of their elements
+// (Concentration).
+let stages = ["warm", "warm", "warm", "warm"]
+for position in [1, 3] {
+  stages[position] = "slow"
+}
+let paces = [240, 240, 240]
+let value = 100 + randomInteger(0..20)
+for position2 in [0, 2] {
+  paces[position2] = value
+}
+function firstPaces(all) {
+  return [all[0], all[1]]
+}
+// NOTE SX_LENGTH_RECEIVER line 71: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces(paces).length}"
+// A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
+let replies = []
+if replies.length == 0 {
+  say "No replies yet"
+}
+// An any() whose result goes unused is a loop: a true result, returned or last, stops it, as in campdrain's drains.
+let drainSpeed = 0
+for stroke in 1..=2 {
+  say "Stroke ${stroke}"
+  if load("training.edge", default: false) == true {
+    if askBoolean "Over the edge?" {
+      break
+    }
+    save false as "training.edge"
+    drainSpeed = 5
+    break
+  }
+}
+say "Speed ${drainSpeed}"
+// A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
+// board of shots.
+let shots = [
+  [0, 0],
+  [0, 0]
+]
+let letters = "AB"
+let column = -1
+let cell = askText("Shoot (A1 to B2):", prefill: "A1").replace("\n", " ")
+if cell.length == 2 {
+  column = letters.indexOf(cell.substring(0, 1))
+}
+if column < 0 {
+  column = 0
+}
+shots[column][0] = 1
+say "Shot ${shots[0][0]}"
+// A loop that fills a literal list by position up to a count that can be more than its length grows the list, as
+// Farkel's cheating roll of seven dice into six values.
+let rolled = [0, 0, 0]
+let throwCount = 3
+if askBoolean "Cheat?" {
+  throwCount = 4
+}
+for i in 0..throwCount {
+  // NOTE SX_LIST_GROWTH line 101: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+  if i < rolled.length {
+    rolled[i] = randomInteger(0..6) + 1
+  } else {
+    rolled.add(randomInteger(0..6) + 1)
+  }
+}
+say "Rolled ${rolled.length}"
+// A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
+// after a bracket of one.
+let finalists = ["Anna", "Bea"]
+if askBoolean "Bye?" {
+  finalists = ["Anna"]
+}
+// NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
+say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}"
+// A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
+// OwlSays' owned implements.
+let owned = []
+let ownedCount = 0
+for toy in ["paddle", "cane"] {
+  if askBoolean "Own a ${toy}?" {
+    // NOTE SX_LIST_GROWTH line 114: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if ownedCount < owned.length {
+      owned[ownedCount] = toy
+    } else {
+      owned.add(toy)
+    }
+    ownedCount += 1
+  }
+}
+owned = sexscriptLegacyReversed(owned)
+say "Owned ${owned.length}"
+// A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
+// check.
+let marks = []
+for entry in ["a|re", "b|ok"] {
+  let partsValue3 = sexscriptLegacySplit(entry, "|")
+  if partsValue3[1] == "re" {
+    marks.add("${partsValue3[0]}|ex")
+    continue
+  }
+  marks.add(entry)
+}
+// NOTE SX_LIST_JOIN line 129: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Marks ${marks.join(",")}"
+// A list of lists shows as Groovy showed it (PainWaveGen's shock list); one that may be null, which the conversion may
+// start empty, or that holds maps, which it may make objects, stays a TODO.
+let shocks: (number | integer[] | string)[][] = []
+shocks.add([1.5, [100, 100], "SINE"])
+// NOTE SX_COLLECTION_TEXT_NESTED line 134: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
+let collectResult2 = []
+for it in shocks {
+  collectResult2.add("${sexscriptLegacyListText(it)}")
+}
+say "Remove:"
+let chosen = choose sexscriptLegacyMenuOptions(collectResult2 + ["Back"], 0)
+// NOTE SX_COLLECTION_TEXT_NESTED line 135: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
+say "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}"
+let spare = []
+if askBoolean "Spare?" {
+  spare = [1, 2]
+}
+// TODO SX_COLLECTION_TEXT line 138: Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.
+// | show("Spare ${spare}")
+// TODO SX_COLLECTION_TEXT line 139: Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.
+// | show("Settings " + [[speed: 2], [:]])
+// A declaration whose value cannot be converted keeps its variable, also where a part of it is computed first.
+// TODO SX_DYNAMIC_OR_OBJECT_CALL line 141: Object/dynamic Groovy method calls are not lowered by the first slice.
+// | int kept = getSelectedValue("Keep:", shocks.collect { Eval.me(it.toString()) } + ["Back"])
+let collectResult3 = []
+let kept = 0
+if kept < shocks.length {
+  say "Kept"
+}
+// A position that add() calls before it show inside the list, or at its end, is written in place or appended.
+let picks = []
+if askBoolean "Pick?" {
+  picks.add("a")
+  picks[0] = "b"
+  if picks.length == 1 {
+    picks.add("c")
+  } else {
+    picks[1] = "c"
+  }
+}
+say "Picks ${picks.length}"
+// A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
+let finallyCount = 0
+// TODO SX_UNSUPPORTED_LIST_METHOD line 153: Groovy list method collect() is not safely mapped yet.
+// | def finallyKept = [1, 2].collect { item ->
+// | 	try {
+// | 		if (item == 1) return item
+// | 	} finally {
+// | 		finallyCount++
+// | 	}
+// | 	return item + 1
+// | }
+let finallyKept = []
+say "Kept ${finallyKept.length} ${finallyCount}"
+// A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
+let fixedSlots = []
+let fixedFilled = 0
+// NOTE SX_JAVA_ARRAY_CONVERSION line 165: A Java int[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+if askBoolean "Fixed?" {
+  fixedSlots = sexscriptLegacyArray(2, 0)
+}
+fixedSlots[fixedFilled] = 5
+fixedFilled += 1
+say "Slots ${fixedSlots.length}"
+// A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
+let entryParts = sexscriptLegacySplit(load("game.entries", default: ""), ",")
+let entryCopy = entryParts
+// NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
+entryParts[0] = "x"
+say "Copy ${entryCopy.length}"
+// The sum of texts joins them, so an answer compares with the digits a game showed (ToyExpanded's number memory game).
+let digits = []
+for it in 0..3 {
+  digits.add(sexscriptLegacyCastText(it))
+}
+let sumResult = sexscriptLegacyTextSum(digits)
+if "012" == sumResult {
+  say "All digits"
+}
+// The sum is text, so a text variable takes it without a variable of its own for a number.
+let answer = ""
+answer = sexscriptLegacyTextSum(digits)
+say "Answer ${answer}"
+exit

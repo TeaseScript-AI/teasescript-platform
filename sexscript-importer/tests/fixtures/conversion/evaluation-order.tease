@@ -1,0 +1,66 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+let flag = false
+function change {
+  flag = true
+  return ""
+}
+let earlier = change()
+let conditional = "no"
+if flag {
+  conditional = "yes"
+}
+say "${earlier}${conditional}"
+let conditional2 = false
+if conditional2 {
+  if flag {
+    conditional2 = true
+  } else {
+    conditional2 = false
+  }
+}
+say conditional2
+let conditional3 = false
+if conditional3 {
+  conditional3 = askText("Never ask").replace("\n", " ") != ""
+}
+if conditional3 {
+  say "yes"
+}
+let value = "old"
+let answer = "yes"
+if flag != true {
+  answer = value
+}
+let conditional4 = "C"
+if flag {
+  conditional4 = "B"
+}
+let combined = "A${conditional4}"
+say "${combined}${answer}"
+let n = 0
+function bump {
+  n += 1
+  return "prefill"
+}
+let prefill = bump()
+let typed = askText("Question", prefill: prefill).replace("\n", " ")
+if askBoolean "Strict?" {
+  say "Strict"
+} else {
+  say "Gentle"
+}
+let i: number = 0
+while i < 2 {
+  say "Round"
+  i = askNumber "Next"
+}
+// An increment used as a value follows the statement when nothing else in it reads the variable.
+let rules = ["Kneel", "Wait"]
+let r = 0
+say rules[r]
+r += 1
+// TODO SX_INCREMENT_POSITION line 19: This ++/-- result is used where the increment cannot simply follow the statement: the variable is used again in the statement, the increment is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the increment to its own statement.
+// | show(rules[r++] + " " + r)
+exit

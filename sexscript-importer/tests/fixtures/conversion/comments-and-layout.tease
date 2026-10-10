@@ -1,0 +1,14 @@
+// Intro scene
+say "Welcome" // greeting
+
+/* Ask how the session
+   should continue */
+let roundValue = randomInteger(0..3)
+if roundValue == 0 {
+  // easy path
+  say "Easy"
+} else {
+  say "Hard"
+  // nothing else yet
+}
+exit

@@ -1,0 +1,12 @@
+// Both scripts share these functions; one reads the script's lastTime, the other keeps a local of that name.
+let lastTime = getAbsoluteDateTime().toSeconds()
+function elapsed {
+  return getAbsoluteDateTime().toSeconds() - lastTime
+}
+function remember {
+  let lastTimeValue = getAbsoluteDateTime().toSeconds()
+  save lastTimeValue as "demo.lastTime"
+}
+remember()
+say "Elapsed ${elapsed()}"
+goto "second.tease"

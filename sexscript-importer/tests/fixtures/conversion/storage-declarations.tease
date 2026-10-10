@@ -1,0 +1,106 @@
+function sexscriptLegacyCastText(valueValue2) {
+  if valueValue2 == null {
+    return null
+  }
+  return toString(valueValue2)
+}
+// NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
+global function sexscriptLegacyKeyTypes {
+  let savedMarked: integer? = load "game.marked", default: null
+  let savedWho: integer? = load "game.who", default: null
+}
+function sexscriptLegacyValue(valueValue) {
+  return valueValue
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let valueValue2 = load key, default: null
+  if valueValue2 == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(valueValue2))
+}
+// A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
+// that variable.
+let payload: boolean | integer[] | string | null = load "game.payload", default: null
+if askBoolean "A list?" {
+  payload = [1]
+} else {
+  payload = "text"
+}
+save true as "game.payload"
+save payload == null as "game.payloadMissing"
+// A null test that `and` may skip keeps its read where it is, so its key is declared once at the top of the file, by a
+// read whose value nothing uses.
+function mark {
+  save 1 as "game.marked"
+}
+if askBoolean("Check?") and load("game.marked", default: null) == null {
+  say "Not marked."
+}
+// A number key's empty value is a number.
+function keep {
+  save 1.5 as "game.ratio"
+}
+let ratio = load "game.ratio", default: 0.0
+// NOTE SX_PLUS_OPERAND_TYPE line 15: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Ratio ${ratio + 1}"
+// A read in a parameter's default keeps its null too, declared so as well.
+function greet(who = load("game.who", default: null)) {
+  say "Hello ${who}"
+}
+function remember {
+  save 2 as "game.who"
+}
+greet()
+// The helper's parameter takes a name apart from the script's own variable.
+save 3 as "game.count"
+// NOTE SX_LOAD_OPEN_NULL line 22: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
+let value = load "game.count", default: sexscriptLegacyValue(null)
+while value == null {
+  value = askInteger "A number?", prefill: 1
+}
+// NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Value ${value + 1}"
+// A variable that the script also gives a value of a type the importer cannot tell holds the read open to it.
+function fill(answer) {
+  return answer
+}
+let savedFilled: boolean? = load "game.filled", default: null
+let filled = sexscriptLegacyValue(savedFilled)
+filled = fill(askText("Fill?", prefill: "text").replace("\n", " "))
+save true as "game.filled"
+say "Filled ${filled == null}"
+// A read of a key whose type nothing tells, which a list of a known type takes as a new item, reads the items' empty
+// value where missing.
+let tags = ["new"]
+// NOTE SX_LOAD_OPEN_NULL line 34: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps an open type, and a missing value is the empty value of the list's items, which cannot hold null.
+tags.add(load("game.tag", default: sexscriptLegacyValue("")))
+say "Tags ${tags.length}"
+// So does such a read into an item of a list of a known type.
+let labels = ["first"]
+// NOTE SX_LOAD_OPEN_NULL line 38: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps an open type, and a missing value is the empty value of the list's items, which cannot hold null.
+labels[0] = load "game.label", default: sexscriptLegacyValue("")
+say "Label ${labels[0]}"
+// A whole-number read that arithmetic turns into a fraction saves a number, so its key holds numbers.
+let savedPoints: number? = load "game.points", default: null
+if savedPoints == null {
+  save 80 as "game.points"
+}
+let points = sexscriptLegacyLoadInteger("game.points")
+if askBoolean "Halve the distance to 90?" {
+  points = 90 + (points - 90) / 2
+}
+save 7 + points as "game.points"
+// A value of unknown type that such a variable gets too, such as the parameter of a function whose calls give it a
+// number and a text, may be of any type, so the key the result is saved under stays open, and its text read reads
+// whatever is stored.
+function echo(n) {
+  return n
+}
+say echo("Echo")
+let score = sexscriptLegacyLoadInteger("game.points")
+score = echo(1.5)
+save 7 + score as "game.score"
+// NOTE SX_LOAD_STRING_TEXT line 53: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
+say "Score ${sexscriptLegacyCastText(load("game.score", default: sexscriptLegacyValue("")))}"
+exit

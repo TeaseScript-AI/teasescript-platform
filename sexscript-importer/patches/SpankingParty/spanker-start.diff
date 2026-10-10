@@ -1,0 +1,31 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -206,22 +206,22 @@
+ def greenholder = "ERROR"
+ def host = "ERROR"
+ def summary = ""
+-def p1spanker
++def p1spanker = "ERROR"
+ def p1swats
+ def p1implement
+-def p2spanker
++def p2spanker = "ERROR"
+ def p2swats
+ def p2implement
+-def p3spanker
++def p3spanker = "ERROR"
+ def p3swats
+ def p3implement
+-def p4spanker
++def p4spanker = "ERROR"
+ def p4swats
+ def p4implement
+-def p5spanker
++def p5spanker = "ERROR"
+ def p5swats
+ def p5implement
+-def p6spanker
++def p6spanker = "ERROR"
+ def p6swats
+ def p6implement
+ def p1fate = ""

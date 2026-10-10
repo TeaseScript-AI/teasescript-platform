@@ -1,0 +1,169 @@
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let position = first
+  for text in texts {
+    options.add({ value: position, text: text })
+    position += 1
+  }
+  return options
+}
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+// Conditional expressions inside larger expressions compute into a temporary first, in Groovy's evaluation order.
+function likes(kink) {
+  return kink == "rope"
+}
+function level {
+  return 3
+}
+let earlier = randomInteger(0..100)
+let earlier2 = level()
+let conditional = 20
+if likes("rope") {
+  conditional = 40
+}
+if earlier >= earlier2 * conditional {
+  say "Tie up"
+}
+let missed = 3
+if missed > 1 {
+  say "Wrong again!"
+} else {
+  say "Wrong!"
+}
+let conditional2 = 3
+if likes("tape") {
+  conditional2 = 2
+}
+let total = 1 + conditional2
+// An input on the right of && asks only when the left side allows it.
+let conditional3 = missed > 1
+if conditional3 {
+  conditional3 = askBoolean "Continue?"
+}
+if conditional3 {
+  say "Continuing"
+}
+// Groovy's & on booleans evaluates both sides, so a right side with effects runs first.
+function asked {
+  say "Asked"
+  return true
+}
+let earlier3 = likes("tape")
+let conditional4 = asked()
+let both = earlier3 and conditional4
+// A stored flag of unknown type and a comparison are both tested as conditions.
+let helpmode = load "help", default: false
+if helpmode == true or missed < 0 {
+  say "Help"
+}
+// A list method with a closure becomes a loop before the statement.
+let toys = ["rope", "tape", "gag"]
+let findAllResult = []
+for t in toys {
+  if likes(t) {
+    findAllResult.add(t)
+  }
+}
+say "Liked: ${findAllResult.join(", ")}"
+let anyResult = false
+for t in toys {
+  if t == "gag" {
+    anyResult = true
+    break
+  }
+}
+if anyResult and total > 2 {
+  say "Gagged"
+}
+// isEmpty() on text, a list, or a dict tests the length.
+function empty(items) {
+  // NOTE SX_LENGTH_RECEIVER line 21: Groovy isEmpty() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  return items.length == 0
+}
+if not empty(toys) {
+  say "Total ${total}, both ${both}"
+}
+// A menu built inside a larger expression asks first; a return in times() continues with the next round.
+let opts = []
+opts.add({ lbl: "Stop", ID: 1 })
+opts.add({ lbl: "Back", ID: 0 })
+let menuTexts = []
+for it in opts {
+  menuTexts.add(it.lbl)
+}
+let picked = opts[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].ID
+let rounds = randomInteger(0..3) + 1
+// NOTE SX_EACH_RETURN_CONTINUE line 29: Groovy return inside each() or times() ended only the current iteration and discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.
+for it in 0..rounds {
+  if it == 1 {
+    continue
+  }
+  say "Round ${it}"
+}
+let order = [3, 1, 2]
+order.sort()
+say "Picked ${picked}, first ${order[0]}"
+// A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
+function weeks(punishment) {
+  return toInteger(punishment / 20)
+}
+let squared = pow(3, 2)
+let named = "Ann" != ""
+say "Weeks ${weeks(45)}, ${squared}, ${named}"
+// An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
+function describe(given) {
+  let elvisValue = given
+  let mood = "calm"
+  if elvisValue != null and sexscriptLegacyTruth(elvisValue) {
+    mood = elvisValue
+  }
+  // NOTE SX_LENGTH_RECEIVER line 41: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  say "Mood ${mood.length}"
+}
+describe(null)
+// A collected value with a ternary inside its text computes the ternary first, in the loop.
+let amounts = [1, 3]
+let labels = []
+for it in amounts {
+  let conditional5 = ""
+  if it > 1 {
+    conditional5 = "s"
+  }
+  let value = "${it} stroke${conditional5}"
+  labels.add(value)
+}
+// NOTE SX_LIST_JOIN line 47: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say labels.join(", ")
+// An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
+function pick {
+  let savedPick: string? = load "x.pick", default: null
+  return savedPick
+}
+let word = "none"
+let elvisValue2 = pick()
+word = ""
+if elvisValue2 != null and elvisValue2 != "" {
+  word = elvisValue2
+}
+say "Word ${word.length}"
+exit

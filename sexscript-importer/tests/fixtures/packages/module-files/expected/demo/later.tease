@@ -1,0 +1,13 @@
+global function loadLaterModule {
+  // Loaded after greeting.groovy, so this greet replaces the earlier one.
+}
+global function greet {
+  say "Hello again"
+  if title == "" {
+    save "Guest" as "demo.title"
+  }
+  pause()
+}
+global function setupLaterModule(times = 2) {
+  say "Setup ${times}"
+}

@@ -1,0 +1,95 @@
+--- a/scripts/wodahs/8Puzzle.groovy
++++ b/scripts/wodahs/8Puzzle.groovy
+@@ -17,7 +17,35 @@
+ def endTime
+ def usedTime
+ def text = ""
+-def local
++def local = [
++  left: "Left",
++  right: "Right",
++  up: "Up",
++  down: "Down",
++  quit: "Quit",
++  yes: "Yes",
++  no: "No",
++  bye: "Bye!",
++  again: "Play again?",
++  shuffle: "shuffle",
++  showShuffle: "spectate at shuffle",
++  chooseImage: "Choose Image",
++  selSize: "Select Size",
++  gratz: "Congratulations!",
++  slides: "Slides",
++  time: "Time",
++  min: "minutes",
++  s3: "3 (beginner)",
++  s4: "4 (standard)",
++  s5: "5 (advanced)",
++  s6: "6 (expert)",
++  s7: "7 (professional)",
++  imageQuestion: "Do you want to play with it?",
++  chooseDir: "Choose direction",
++  score: "Your Score",
++  highscore: "Your Highscore",
++  newHighscore: "New Highscore!"
++]
+ 
+ 
+ switch(System.getProperty("user.language")) {
+@@ -52,37 +80,6 @@
+       newHighscore: "Neuer Highscore!"
+     ]
+     break
+-  default:
+-    local = [
+-      left: "Left",
+-      right: "Right",
+-      up: "Up",
+-      down: "Down",
+-      quit: "Quit",
+-      yes: "Yes",
+-      no: "No",
+-      bye: "Bye!",
+-      again: "Play again?",
+-      shuffle: "shuffle",
+-      showShuffle: "spectate at shuffle",
+-      chooseImage: "Choose Image",
+-      selSize: "Select Size",
+-      gratz: "Congratulations!",
+-      slides: "Slides",
+-      time: "Time",
+-      min: "minutes",
+-      s3: "3 (beginner)",
+-      s4: "4 (standard)",
+-      s5: "5 (advanced)",
+-      s6: "6 (expert)",
+-      s7: "7 (professional)",
+-      imageQuestion: "Do you want to play with it?",
+-      chooseDir: "Choose direction",
+-      score: "Your Score",
+-      highscore: "Your Highscore",
+-      newHighscore: "New Highscore!"
+-    ]
+-    break
+ }
+ 
+ def init = { key, value ->
+@@ -222,7 +219,7 @@
+ 
+     // mögliche nachtbaren finden und merken
+     def possibleNeighbours = getpossibleNeighbours(freeTileIndex, size)
+-    if (debuginfo) debugText += "<br>pn: " + possibleNeighbours
++    if (debuginfo) debugText += "<br>pn: " + possibleNeighbours.size()
+ 
+ 
+     // einen nachtbaren auswählen und feld tauschen
+@@ -279,7 +276,7 @@
+   def freeTileIndex = getFreeTileIndex(arr)
+   def swapPartnerIndex = -1
+   def possibleNeighbours = getpossibleNeighbours(freeTileIndex, size)
+-  if (debuginfo) debugText += "<br>pn: " +possibleNeighbours
++  if (debuginfo) debugText += "<br>pn: " +possibleNeighbours.size()
+ 
+   switch(direction) {
+     case 0:

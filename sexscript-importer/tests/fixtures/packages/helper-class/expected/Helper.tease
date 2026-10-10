@@ -1,0 +1,35 @@
+global tau = 2 * 3.141592653589793
+// The shared functions of this helper class are static closures that the scripts call like methods.
+global function showWait(msg, tmo = 5) {
+  say msg
+  wait tmo s
+}
+// A default before a required parameter applies only to calls that leave it out; these calls pass it.
+global function rounds(count, msg) {
+  for it in 0..count {
+    showWait(msg, 1)
+  }
+}
+global function twice(it = null) {
+  return it * 2
+}
+// A static that operators compute from literals is a global, so the method that reads it is a global function too.
+global function turns(count) {
+  return count * tau
+}
+// A method that the scripts call keeps its parameter's type open, also where its own calls give it a number.
+global function check(n) {
+  let value = n
+  if n == 0 {
+    value = null
+  }
+  say "Result ${value}"
+}
+global function start {
+  check(1.5)
+}
+// Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
+global function percentChance(percent) {
+  let switchValue1 = randomInteger(0..99) + 1
+  return (switchValue1 >= 0 and switchValue1 <= percent) or (switchValue1 <= 0 and switchValue1 >= percent)
+}

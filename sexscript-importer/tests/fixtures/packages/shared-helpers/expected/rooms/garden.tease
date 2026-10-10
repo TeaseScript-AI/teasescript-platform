@@ -1,0 +1,23 @@
+let phrases = ["Kneel.", "Wait."]
+let mistress = load "mistress", default: ""
+// Another picture under the same name stays in this script.
+function image {
+  showImage "garden.jpg"
+}
+function greet {
+  say "Welcome to ${mistress}'s house."
+}
+// The same text calls each script's own picture, so it stays in each script.
+function enter {
+  image()
+  say "Come in."
+}
+// This script keeps its level as text, so the helper that shows it stays in each script.
+let level = "high"
+function report {
+  say "Level ${level}"
+}
+enter()
+report()
+greet()
+goto "rooms/cellar.tease"

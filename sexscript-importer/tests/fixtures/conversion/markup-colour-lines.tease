@@ -1,0 +1,14 @@
+// NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, ALIGN, and FONT FACE with the size an editor writes beside it (1 text in this file).
+// PainStacks: a colour around several paragraphs colours each of them, so each paragraph is a message of its own.
+say "**status**"
+say "[color=#696969]waiting for signal[/color]"
+say "[color=#696969]countdown to end[/color]"
+say "[color=#696969]concluded[/color]"
+// interrogation: a colour that closes before the bold inside it closes the bold first.
+let prompt = "Kneel"
+prompt = """
+  # [color=red]**${prompt}**[/color]
+
+"""
+say prompt
+exit

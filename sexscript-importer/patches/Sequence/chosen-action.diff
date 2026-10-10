@@ -1,0 +1,38 @@
+--- a/scripts/Sequence.groovy
++++ b/scripts/Sequence.groovy
+@@ -428,14 +428,15 @@
+ 
+ 		currentChoices=getCurrentActivity(TotalList,ChoiceNumb,actions[RunningList[i]][1])
+ 		NextOption=getSelectedValue("What action is "+roundtext[i]+"?",currentChoices)
++		def chosenAction = 0
+ 		for (def j=0;j<actions.size();j++) {
+ 			if (currentChoices[NextOption]==actions[j][1]) {
+-				currentChoices=j
++				chosenAction=j
+ 				break
+ 			}
+ 		}
+ 
+-		switch (actions[currentChoices][2]) {
++		switch (actions[chosenAction][2]) {
+ 			case "stroking":
+ 				currentTime=getInteger("How many?",0)
+ 				break
+@@ -450,13 +451,13 @@
+ 				break
+ 		}
+ 
+-		if (currentChoices!=0) {
+-			RunAction(currentChoices,currentTime)
++		if (chosenAction!=0) {
++			RunAction(chosenAction,currentTime)
+ 		} else {
+-			cum(currentChoices==RunningList[i])
++			cum(chosenAction==RunningList[i])
+ 			if (!gamerunning) {break}
+ 		}			
+-		if (currentChoices==RunningList[i]) {
++		if (chosenAction==RunningList[i]) {
+ 			if (currentTime==TimingList[i]) {
+ 				show("Correct")
+ 				addCum=true

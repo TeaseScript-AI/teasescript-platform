@@ -1,0 +1,222 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+// Closures that call themselves or each other as their last step: a call in tail position leaves nothing of its
+// caller to run, so a function that calls itself so loops, and functions that call each other so run as steps of a
+// driver, without growing the call stack; a call that is not in tail position stays a call.
+
+// These functions called each other or themselves as their last step, each call inside the one before, which the
+// legacy runtime allowed without end: ping and pong; isEven and isOdd; retry; countUp and countDown. They run one
+// after another instead: a step records the next one and returns, and sexscriptLegacyRunSteps,
+// sexscriptLegacyRunSteps2, sexscriptLegacyRunSteps3 and sexscriptLegacyRunSteps4 run the steps of each.
+let sexscriptLegacyStep: string? = null
+let sexscriptLegacyStepArguments = [sexscriptLegacyValue(null)]
+function sexscriptLegacyRunSteps(firstStep, firstArguments) {
+  sexscriptLegacyStep = firstStep
+  sexscriptLegacyStepArguments = firstArguments
+  while sexscriptLegacyStep != null {
+    let step: string? = sexscriptLegacyStep
+    let stepArguments = sexscriptLegacyStepArguments
+    sexscriptLegacyStep = null
+    switch step {
+      case "ping" {
+        ping(stepArguments[0])
+      }
+      case "pong" {
+        pong(stepArguments[0])
+      }
+    }
+  }
+}
+function sexscriptLegacyRunSteps2(firstStep, firstArguments): boolean? {
+  sexscriptLegacyStep = firstStep
+  sexscriptLegacyStepArguments = firstArguments
+  while sexscriptLegacyStep != null {
+    let step: string? = sexscriptLegacyStep
+    let stepArguments = sexscriptLegacyStepArguments
+    sexscriptLegacyStep = null
+    switch step {
+      case "isEven" {
+        let result: boolean? = isEven(stepArguments[0])
+        if sexscriptLegacyStep == null {
+          return result
+        }
+      }
+      case "isOdd" {
+        let result: boolean? = isOdd(stepArguments[0])
+        if sexscriptLegacyStep == null {
+          return result
+        }
+      }
+    }
+  }
+  return null
+}
+function sexscriptLegacyRunSteps3(firstStep, firstArguments) {
+  sexscriptLegacyStep = firstStep
+  sexscriptLegacyStepArguments = firstArguments
+  while sexscriptLegacyStep != null {
+    let step: string? = sexscriptLegacyStep
+    let stepArguments = sexscriptLegacyStepArguments
+    sexscriptLegacyStep = null
+    switch step {
+      case "retry" {
+        retry(stepArguments[0])
+      }
+    }
+  }
+}
+function sexscriptLegacyRunSteps4(firstStep, firstArguments) {
+  sexscriptLegacyStep = firstStep
+  sexscriptLegacyStepArguments = firstArguments
+  while sexscriptLegacyStep != null {
+    let step: string? = sexscriptLegacyStep
+    let stepArguments = sexscriptLegacyStepArguments
+    sexscriptLegacyStep = null
+    switch step {
+      case "countUp" {
+        let result = countUp(stepArguments[0])
+        if sexscriptLegacyStep == null {
+          return result
+        }
+      }
+      case "countDown" {
+        let result = countDown(stepArguments[0])
+        if sexscriptLegacyStep == null {
+          return result
+        }
+      }
+    }
+  }
+  return null
+}
+
+function fib(a, b, steps) {
+  while true {
+    // Returns the call of itself: the parameters take the arguments, which read the old values, and the loop goes on.
+    if steps == 0 {
+      return a
+    }
+    // NOTE SX_PLUS_OPERAND_TYPE line 22: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+    let aNext = b
+    let bNext = a + b
+    let stepsNext = steps - 1
+    a = aNext
+    b = bNext
+    steps = stepsNext
+    continue
+  }
+}
+
+function countdown(n) {
+  while true {
+    // Calls itself as its last statement and returns nothing.
+    if n > 0 {
+      say "Count ${n}"
+      n -= 1
+      continue
+    }
+    return
+  }
+}
+
+function unwind(n) {
+  // A call that more code follows is not in tail position, so it stays a call.
+  if n > 0 {
+    unwind(n - 1)
+    say "Back at ${n}"
+  }
+}
+
+function ping(n) {
+  // Two closures that call each other as their last step.
+  if n > 0 {
+    say "Ping ${n}"
+    sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+    sexscriptLegacyStep = "pong"
+    return
+  }
+}
+
+function pong(n) {
+  if n > 0 {
+    say "Pong ${n}"
+    sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+    sexscriptLegacyStep = "ping"
+    return
+  }
+}
+function isEven(n) {
+  // Two closures that return each other's result, called where the value is used.
+  if n == 0 {
+    return true
+  }
+  sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+  sexscriptLegacyStep = "isOdd"
+  return
+}
+
+function isOdd(n) {
+  if n == 0 {
+    return false
+  }
+  sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+  sexscriptLegacyStep = "isEven"
+  return
+}
+function retry(n) {
+  // The call of itself inside a loop of its own returns from the loop, so it runs as a step.
+  for i in 0..2 {
+    if n > 0 {
+      sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+      sexscriptLegacyStep = "retry"
+      return
+    }
+  }
+  say "Retried"
+}
+
+function countUp(n) {
+  // Cycles whose functions return different types each run on their own driver, so a number stays a number.
+  if n >= 3 {
+    return n
+  }
+  // NOTE SX_PLUS_OPERAND_TYPE line 80: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+  sexscriptLegacyStepArguments = [sexscriptLegacyValue(n + 2)]
+  sexscriptLegacyStep = "countDown"
+  return
+}
+
+function countDown(n) {
+  if n >= 3 {
+    return n
+  }
+  sexscriptLegacyStepArguments = [sexscriptLegacyValue(n - 1)]
+  sexscriptLegacyStep = "countUp"
+  return
+}
+function first(n, limit = n) {
+  // A call that leaves out a default that reads another parameter cannot record its values, so this cycle nests.
+  if n > 0 {
+    return second(n - 1, limit)
+  }
+  return limit
+}
+
+function second(n, limit = n) {
+  if n > 0 {
+    return first(n - 1, limit)
+  }
+  return limit
+}
+
+say "Fibonacci 10: ${fib(0, 1, 10)}"
+countdown(3)
+unwind(2)
+sexscriptLegacyRunSteps("ping", [sexscriptLegacyValue(4)])
+say "7 is even: ${sexscriptLegacyValue(sexscriptLegacyRunSteps2("isEven", [sexscriptLegacyValue(7)]))}"
+sexscriptLegacyRunSteps3("retry", [sexscriptLegacyValue(3)])
+// NOTE SX_PLUS_OPERAND_TYPE line 106: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Counted to ${sexscriptLegacyValue(sexscriptLegacyRunSteps4("countUp", [sexscriptLegacyValue(0)])) + 1}"
+say "Limit ${first(0)} and ${second(2)}"
+exit

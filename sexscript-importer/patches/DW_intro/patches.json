@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "show-button-case",
+      "layer": "source",
+      "category": "e",
+      "reason": "The wrap-up task's confirmation calls showbutton(...) in lower case, which is not a SexScript function, so Groovy failed after showing the code; every other confirmation uses showButton.",
+      "diff": "show-button-case.diff"
+    },
+    {
+      "id": "dice-codes-punishment",
+      "layer": "source",
+      "category": "e",
+      "reason": "Three author errors in the tasks. The spanking dice roll getRandom(5)+1, 1 to 5, while each roll offers six numbered options, so the sixth never came up: the belt and standing upright never, and naked (5 and 6) one roll in five instead of two in six: roll getRandom(6)+1. The \"you can't read\" punishment saves DareWiliam.punishment, which nothing reads, while every other punishment is saved and read as the text \"1\" under DareWiliam.Punshishment: save that. A second code below 0 passed the code checks (only 0 was rejected) and reached Math.sqrt, which gave NaN spanks, or a wedgie code that passed with 0 wedgies: reject codes of 0 or less as the 0 code was, and take the wedgie code's square root of no less than 0, which the false-code check then rejects. Where legacy Math.sqrt() of a negative number gave NaN, TeaseScript's sqrt() stops the script; a corpus search found no other Math.sqrt(), Math.log() or fractional-exponent Math.pow() on a value that can go negative while the clock runs forward (exercise's sqrt(day - firstDay) can after the clock is set back).",
+      "diff": "dice-codes-punishment.diff"
+    }
+  ]
+}

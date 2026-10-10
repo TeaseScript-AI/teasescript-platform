@@ -1,0 +1,274 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
+// Registries keyed by runtime strings become dicts (#536); maps with fixed names stay objects.
+let COLLAR = "collar"
+let GAG = "gag"
+let toyNames = dict{ [COLLAR]: "leather collar", [GAG]: "ball gag" }
+let owned = dict{}
+let chosen = COLLAR
+// NOTE SX_SHARED_MAP_WRITE line 7: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if not owned.contains(chosen) {
+  owned[chosen] = 1
+}
+// NOTE SX_SHARED_MAP_WRITE line 8: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned[GAG] = 2
+// NOTE SX_SHARED_MAP_WRITE line 9: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned["plug"] = 3
+// NOTE SX_DICT_MISSING_KEY line 10: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say "You wear the ${toyNames[chosen]}"
+for name in owned.keys {
+  say "${name}: ${owned[name]}"
+}
+for name, count in owned {
+  say "${name} counted ${count}"
+}
+say "Toys: ${owned.length}"
+// NOTE SX_SHARED_MAP_WRITE line 16: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if owned.contains(GAG) {
+  owned.remove(GAG)
+}
+// NOTE SX_SHARED_MAP_WRITE line 17: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if owned.contains("missing") {
+  owned.remove("missing")
+}
+if not owned.contains(GAG) {
+  say "No gag"
+}
+if owned.contains("plug") and owned["plug"] != 0 {
+  say "Plug in use"
+}
+if owned.length != 0 {
+  say "Still owned: ${owned.values[0]}"
+}
+// NOTE SX_SHARED_MAP_WRITE line 21: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned.clear()
+if not owned.length > 0 {
+  say "Nothing owned"
+}
+// Number keys become text, and a repeated key keeps its first position and last value.
+// NOTE SX_DICT_DUPLICATE_KEY line 24: Groovy kept the first position and the last value of the repeated key "1"; a dict literal may not repeat a key (#536), so the entries are merged.
+// NOTE SX_DICT_KEY_TEXT line 24: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+let levels = dict{ "1": "gentle", "2": "hard" }
+say "${levels["1"]} / ${levels["2"]}"
+let tier = 2
+// NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+// NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+say "Tier ${dict{ "1": "low", "2": "high" }["${tier}"]}"
+// A lookup whose key is not proven present gets a note; a tested, written, or looped-over key needs none.
+let stock = dict{ rope: 1 }
+let wanted = "tape"
+// NOTE SX_SHARED_MAP_WRITE line 31: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if not stock.contains(wanted) {
+  stock[wanted] = 0
+}
+say "Wanted ${stock[wanted]}, rope ${stock["rope"]}"
+if not stock.contains("cuffs") {
+  say "No cuffs"
+}
+function countOf(item) {
+  // NOTE SX_DICT_MISSING_KEY line 34: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+  return stock[item]
+}
+say "Rope count ${countOf("rope")}"
+// Values that may be null: a null test reads the value only for a present key.
+let moods = dict{ calm: null, tense: "yes" }
+let mood = "calm"
+if not moods.contains(mood) or moods[mood] == null {
+  say "No mood"
+}
+if moods.contains(mood) and moods[mood] != null {
+  say "Mood set"
+}
+// Fallbacks for a missing key read with a default (#536).
+let counts = dict{}
+let toy = "rope"
+// NOTE SX_SHARED_MAP_WRITE line 44: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+counts[toy] = counts.get(toy, default: 0) + 1
+let times = counts.get(toy, default: 5)
+let labels = dict{ rope: "Rope" }
+// NOTE SX_DICT_DEFAULT line 47: Groovy also used the fallback for a stored null, or with ?: for a stored false, 0, or empty value; get(key, default:) uses it only for a missing key (#536).
+let labelValue = labels.get(toy, default: "Unknown")
+let level = counts.get(toy, default: 1)
+say "Counted ${counts[toy]}, ${times}, ${labelValue}, level ${level}"
+// A map compared with a dict is a dict too, since a dict never equals an object.
+let expected = dict{ rope: 1, tape: 0 }
+if stock == expected {
+  say "Stock as expected"
+}
+if stock == dict{ tape: 0, rope: 1 } {
+  say "Stock as written"
+}
+// A number key and a text key that Groovy kept apart become the same text key, with a note.
+let table = dict{ "1": "one" }
+// NOTE SX_DICT_KEY_TEXT line 57: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+say "Text key ${table["1"]}, number key ${table["1"]}"
+// A closure's own map is a variable apart from a script map of the same name.
+function tally {
+  let seenValue = dict{}
+  let item = "rope"
+  // NOTE SX_SHARED_MAP_WRITE line 62: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+  seenValue[item] = true
+  return seenValue.length
+}
+let seen = { name: "outer" }
+say "Seen ${tally()}, ${seen.name}"
+// A map with fixed names is an object: fields set later are declared, and clear() empties them.
+let session = { mood: null, aborted: null }
+session.mood = "calm"
+// NOTE SX_SHARED_MAP_WRITE line 69: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session.aborted = false
+// NOTE SX_SHARED_MAP_WRITE line 70: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session = { mood: null, aborted: null }
+// NOTE SX_SHARED_MAP_WRITE line 71: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session.mood = "tense"
+say "Mood ${session.mood}, aborted ${session.aborted}"
+// Records of a list in which only some give a field a value: Groovy read each record's own field.
+let exercises: object[] = [
+  { kind: "counted", text: "Push-ups" },
+  { kind: "posture", text: null }
+]
+let exercise = exercises[randomInteger(0..2)]
+// NOTE SX_LENGTH_RECEIVER line 76: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+if exercise.kind == "counted" {
+  say "Do ${exercise.text} (${exercise.text.length} letters)"
+}
+// A record that leaves out a key the others have read it as null.
+let permissions: object[] = [
+  { title: "Rest", chance: 75, flag: null },
+  { title: "Play", chance: 55, flag: "deny.play" }
+]
+let permission = permissions[randomInteger(0..2)]
+if permission.flag != null and load(permission.flag, default: null) != null {
+  say "Not now"
+}
+// A null test of a computed key of a dict without stored nulls asks for the key once.
+let skipped = dict{}
+// NOTE SX_SHARED_MAP_WRITE line 83: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+skipped["Random-Thong"] = true
+let sections = ["Random-Thong", "Random-Panties"]
+let section = randomInteger(0..2)
+if not skipped.contains(sections[section]) {
+  say "Section ${sections[section]}"
+}
+// A loop over a map's entries visits a dict's keys: entry.key is the key and entry.value its value.
+let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
+let missing = ""
+for toyValue, value in needed {
+  if load("toys.${toyValue}", default: false) != true {
+    missing += "${value} "
+  }
+}
+say "Missing: ${missing}"
+// A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
+// NOTE SX_LOAD_OPEN_NULL line 95: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let remembered = load "toy.remembered", default: sexscriptLegacyValue(null)
+let slot = "first"
+// NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+if remembered != null and remembered.length > 0 {
+  say "Remembered ${remembered[slot]}"
+}
+// A map read entry by entry goes through its keys with their values.
+for entry, value in owned {
+  say "${entry}: ${value}"
+}
+// A value that the loop body sets again is a variable of its own, apart from the key.
+for name, count in owned {
+  if count > 2 {
+    count = 2
+  }
+}
+// ToyExpanded toys: a key that a stored read may leave null is text, so a stored toy finds its entry.
+function getStateToy(s) {
+  return load "toy.state.${s}-toy", default: null
+}
+let wornToys = dict{}
+// NOTE SX_SHARED_MAP_WRITE line 105: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+wornToys[GAG] = { name: "ball gag" }
+let stateToy = getStateToy("gagged")
+// NOTE SX_DICT_MISSING_KEY line 107: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+if stateToy != null and stateToy != "" {
+  say "Remove your ${wornToys["${stateToy}"].name}"
+}
+// A closure every return of which builds a map with computed keys gives a dict, also to a variable set from it.
+let SIDES = { left: "left", right: "right" }
+function sides {
+  if randomInteger(0..2) == 0 {
+    return dict{ [SIDES.left]: "you", [SIDES.right]: "me" }
+  } else {
+    return dict{ [SIDES.left]: "me", [SIDES.right]: "you" }
+  }
+}
+let both = sides()
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say "Left is ${both["left"]}, right is ${sides()["right"]}"
+// A field of a map with fixed names that every write keeps a list appends and removes as Groovy's List did.
+let STATE = { choices: [], level: 1 }
+// NOTE SX_SHARED_MAP_WRITE line 121: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices.add("Spank")
+// NOTE SX_SHARED_MAP_WRITE line 122: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices.add("Tickle")
+// NOTE SX_SHARED_MAP_WRITE line 123: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices = sexscriptLegacyListMinus(STATE.choices, ["Spank"])
+say "Choices ${STATE.choices.length} at level ${STATE.level}"
+STATE.choices.clear()
+say "Choices after clearing: ${STATE.choices.length}"
+// A list parameter that clear() empties was the caller's list too, which a TeaseScript parameter is not.
+function emptyAll(all) {
+  // TODO SX_PARAMETER_LIST_WRITE line 128: Groovy changed the list that all refers to, which the caller or the iterated collection shares; in TeaseScript all holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
+  // | def emptyAll = { List all -> def emptied = all.clear(); show("Emptied " + all.size()) }
+  let emptied = null
+  say "Emptied ${all.length}"
+}
+emptyAll(["x"])
+// A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
+let TABLE_KEY = "human"
+// NOTE SX_LOAD_OPEN_NULL line 132: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let storedTable = load "game.table", default: sexscriptLegacyValue(null)
+function lookupTable {
+  // NOTE SX_DICT_MISSING_KEY line 133: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+  return storedTable[TABLE_KEY]
+}
+function tableOrRecord(flag) {
+  if sexscriptLegacyTruth(flag) {
+    return storedTable
+  } else {
+    return { human: "record" }
+  }
+}
+say "Record ${tableOrRecord(false) == { human: "record" }}"
+exit

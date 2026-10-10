@@ -1,0 +1,16 @@
+---
+title: "Hero"
+author: "Anna"
+---
+
+// NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
+say "Which script do you want to start?"
+let picked = choose hero: "Hero (hero)", crawl__sha256_4bcc7f413976: "Hero (alternate version of crawl, 4bcc7f)"
+switch picked {
+  case "hero" {
+    goto "hero.tease"
+  }
+  default {
+    goto "crawl__sha256_4bcc7f413976.tease"
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "patches": [
+    {
+      "id": "harmony-free-session-exit",
+      "layer": "source",
+      "category": "e",
+      "reason": "Harmony refuses an unpaid session (\"Are you trying to get a free session?\") and then calls lowercase system.exit(0); no system object exists, so Groovy failed there. The author meant to quit, which the SexScript API spells exit().",
+      "diff": "harmony-free-session-exit.diff"
+    },
+    {
+      "id": "flank-series-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "The flank-spanking loop tests an undefined s (\"Do not alternate when spanking flanks\"); the series just drawn is thisSeries, and series 3-5 alternate sides. Groovy failed whenever the spot was a flank.",
+      "diff": "flank-series-typo.diff"
+    },
+    {
+      "id": "assignment-time-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "if (tmpTime == null) tmp = 0 defaults a stray name instead of tmpTime, unlike the same default a few lines above (tmpTime = 0); restore tmpTime.",
+      "diff": "assignment-time-typo.diff"
+    },
+    {
+      "id": "repeat-offense-credit-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "Spending a repeat-offense credit sets and decrements repeatOffense (true, then --), which fails on a boolean; every sibling case sets <kind>Protected and decrements <kind>Protection, and repeatOffenseProtection is the saved counter. Use those names and declare repeatOffenseProtected beside its siblings, which the author left out.",
+      "diff": "repeat-offense-credit-typo.diff"
+    },
+    {
+      "id": "claire-clothespins-case",
+      "layer": "source",
+      "category": "e",
+      "reason": "Claire's session 3 calls scene3clothespins(), but the scene is defined as scene3Clothespins, and its pictures (clothespinPics) are set for that session.",
+      "diff": "claire-clothespins-case.diff"
+    },
+    {
+      "id": "claire-unwritten-scenes",
+      "layer": "source",
+      "category": "e",
+      "reason": "Claire's session 3 ends with scene3CBT, scene3Pegging and scene3Estim, copied from another persona: Claire defines none of them and her session 3 sets no pictures for them, so Groovy failed right after the anal-dildo scene. Comment the unwritten scenes out in the author's style; the session then returns to the clinic menu as her other sessions do.",
+      "diff": "claire-unwritten-scenes.diff"
+    },
+    {
+      "id": "discarded-rating-round",
+      "layer": "source",
+      "category": "e",
+      "reason": "aveRating.round(2) discards its result, so it never changed the rating; the rating is shown through String.format(\"%5.2f\"), which rounds it. Comment out the no-op.",
+      "diff": "discarded-rating-round.diff"
+    },
+    {
+      "id": "scene-rating-record",
+      "layer": "source",
+      "category": "e",
+      "reason": "calculateSceneRating returns a Groovy tuple of a number, a count and three flags ([aveRating, numRatings, hasLimits, recentScene, hasToys]) that the callers read back by position; return a map with those names and read the fields by name, so each value keeps its own type (the sceneScore, numRatings and button-label errors came from the mixed list). The testing-only debug button lists the five values as the list did.",
+      "diff": "scene-rating-record.diff"
+    },
+    {
+      "id": "random-mistress-index",
+      "layer": "source",
+      "category": "e",
+      "reason": "selectRandomSession collects the indexes of eligible disciplinarians (availableMistressList.add(x)) but then assigns the drawn index itself to mistress, so setMistressSession matched no name and the random session ran for disciplinarian \"2\"; look the name up in mistressArray, at all four draws.",
+      "diff": "random-mistress-index.diff"
+    },
+    {
+      "id": "harmony-hold-text-argument",
+      "layer": "source",
+      "category": "e",
+      "reason": "fullHold(totalTime, chanceTongue=true, text=\"\") is called twice with the line \"Grind it in there, really push it deep\" as its second argument, which Groovy took as a truthy chanceTongue, showing a random line instead; pass the default true and the line as the text it was meant to be.",
+      "diff": "harmony-hold-text-argument.diff"
+    },
+    {
+      "id": "madison-whipped-flag",
+      "layer": "source",
+      "category": "e",
+      "reason": "Madison's first scene sets whipped = true() after the optional whipping; true() is not callable, so Groovy failed whenever the 50% whipping happened. Set the flag.",
+      "diff": "madison-whipped-flag.diff"
+    },
+    {
+      "id": "enable-menu-choices",
+      "layer": "source",
+      "category": "b",
+      "reason": "The disciplinarian on/off menu reuses the text variable dialog for its option list ([\"Back\"]+mistressArray); give the list its own variable.",
+      "diff": "enable-menu-choices.diff"
+    },
+    {
+      "id": "offense-level-integer",
+      "layer": "source",
+      "category": "b",
+      "reason": "offenseArray holds [name, level] pairs, so a level read back by position is a name-or-number to the converter; the three reads that set offenseLevel and systemOffenseLevel take it as int, which it always is.",
+      "diff": "offense-level-integer.diff"
+    },
+    {
+      "id": "loyalty-wheel-default",
+      "layer": "source",
+      "category": "b",
+      "reason": "pointsBonus is declared without a value and always set by the wheel loop before it is added to the points; declare it as 0 so it is a number from the start.",
+      "diff": "loyalty-wheel-default.diff"
+    },
+    {
+      "id": "tempo-change-fraction",
+      "layer": "source",
+      "category": "b",
+      "reason": "spank() sets numTempoChangeStrokes to spanks + 2, and callers pass halves and other fractions of numSpanks (numSpanks / 2, numSpanks * 1.25), so the count can be a fraction, as Groovy kept it; it starts as 0.0 so that it holds a number.",
+      "diff": "tempo-change-fraction.diff"
+    },
+    {
+      "id": "offense-level-back",
+      "layer": "source",
+      "category": "b",
+      "reason": "Choosing Back in the offense level menu gives 0, and the clinic-offense test read offenseArray[-1] before the loop ended: the last offense of the category, which could wrongly show the clinic's refusal, and an error where the category has no offenses, such as the one for offenses not in the list, which failed in Groovy too. The test now runs only for a chosen offense, as resetOffense already did, so Back leaves the menu.",
+      "diff": "offense-level-back.diff"
+    },
+    {
+      "id": "stale-dialog-questions",
+      "layer": "source",
+      "category": "b",
+      "reason": "Three questions in Punish ask getSelectedValue(dialog, …) with a dialog that an earlier pick set for another text: the mercy question after the mumble question (\"Please Stop\" …), the reply after a mercy answer that show(dialog) has just shown (\"Yes, Miss\" …), and the repeat-offense reply (\"I understand.\" …), where dialog still holds a text shown long before or in another function. Legacy showed that older text again above the buttons; the author meant the buttons under the text just shown, which a null question gives. Unread, the leftover dialog no longer keeps the clinic's random dialog lists whole (the paragraph rule).",
+      "diff": "stale-dialog-questions.diff"
+    },
+    {
+      "id": "counting-span-line",
+      "layer": "source",
+      "category": "b",
+      "reason": "In a long series that the player counts, spank() switches to \"Center cheek, Alternate sides\" and adds \"\\nKeep counting!\\n\" to that text, which each show then wraps in <font size='10'><b>. A message markup span ends at a line break, and this one only comes at runtime, so the converted say showed the size and bold markers as text. Keep the added line in its own variable, in the same font and bold, after the span; legacy rendered the same two lines.",
+      "diff": "counting-span-line.diff"
+    },
+    {
+      "id": "reboot-dots-span",
+      "layer": "source",
+      "category": "b",
+      "reason": "The account-manipulation reboot animation starts dialog with an opening <font size='20'><b> and shows dialog + \"</b></font>\" as the dots grow, so neither part of a show holds a whole span and the converted dots lost their size and bold. Grow only the dots and wrap each show in the font and bold, as legacy rendered it.",
+      "diff": "reboot-dots-span.diff"
+    }
+  ]
+}

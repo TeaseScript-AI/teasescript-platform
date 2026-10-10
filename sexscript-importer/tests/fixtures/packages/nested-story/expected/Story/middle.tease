@@ -1,0 +1,2 @@
+say "The middle part."
+goto "Story/end.tease"

@@ -1,0 +1,32 @@
+---
+title: "Lines"
+author: "CBT"
+---
+
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskProfile {
+  if load("intro.name", default: "") == "" {
+    save (askText as system ("What is your name?", prefill: "Slave").replace("\n", " ")) as "intro.name"
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (intro.name) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+// NOTE SX_ENTRY_EXTRAS: The legacy player also listed Lines/Reset/KittyReset.tease, Lines/Reset/WaylandReset.tease for the player to open directly; the start offers them after the main story (owner decision 2026-10-10).
+say "Which script do you want to start?"
+let picked = choose Lines: "Lines (main story)",
+  KittyReset: "Extra, not part of the story: KittyReset",
+  WaylandReset: "Extra, not part of the story: WaylandReset"
+switch picked {
+  case "KittyReset" {
+    goto "Lines/Reset/KittyReset.tease"
+  }
+  case "WaylandReset" {
+    sexscriptLegacyAskProfile()
+    goto "Lines/Reset/WaylandReset.tease"
+  }
+  default {
+    sexscriptLegacyAskProfile()
+    goto "Lines.tease"
+  }
+}

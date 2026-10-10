@@ -1,0 +1,20 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -652,12 +652,12 @@
+ def $wr2
+ def $wr3
+ def $pen
+-def $icb
+-def $ict
+-def $cpt
++def $icb=0
++def $ict=0
++def $cpt=0
+ def $ice
+-def $cpb
+-def $cp3
++def $cpb=0
++def $cp3=0
+ def $cp
+ def $too
+ def $soa

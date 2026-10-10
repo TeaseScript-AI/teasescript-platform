@@ -1,0 +1,34 @@
+function sexscriptLegacyCount(items, value) {
+  let matches = 0
+  for item in items {
+    if item == value {
+      matches += 1
+    }
+  }
+  return matches
+}
+function sexscriptLegacyCountText(text, part) {
+  if part == "" {
+    return text.length + 1
+  }
+  let count = 0
+  let rest = text
+  let found = rest.indexOf(part)
+  while found >= 0 {
+    count += 1
+    rest = rest.substring(found + 1)
+    found = rest.indexOf(part)
+  }
+  return count
+}
+// Groovy count() counts every occurrence in text and equal elements in a list.
+let outfit = "Bikini top and bikini bottom".lowercase()
+if outfit.split("bikini").length - 1 > 1 {
+  say "Two pieces"
+}
+say "Words: ${outfit.split(" ").length - 1 + 1}"
+let rolls = [6, 2, 6]
+say "Sixes: ${sexscriptLegacyCount(rolls, 6)}"
+// "aa" overlaps itself: Groovy counts 2 in "aaa", the parts between occurrences only 1.
+say "Pairs: ${sexscriptLegacyCountText("aaa", "aa")}"
+exit

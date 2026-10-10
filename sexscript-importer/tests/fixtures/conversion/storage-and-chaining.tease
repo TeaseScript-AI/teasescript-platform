@@ -1,0 +1,123 @@
+---
+title: "Training"
+author: "Anna"
+description: "A short session"
+keywords: "training"
+---
+// Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
+
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
+function sexscriptLegacyBooleanText(value) {
+  return "${value}".lowercase() == "true"
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+let visits = load "training.visits", default: 0
+save visits + 1 as "training.visits"
+let title = load "training.title", default: ""
+if title == "" or title == "" {
+  title = "pet"
+}
+if load("training.finished", default: false) == true {
+  say "Welcome back, ${title}"
+  goto "finished.tease"
+}
+delete "training.old"
+say "Visit ${visits + 1}"
+// A read into a variable whose type cannot hold null keeps its value where the key is missing.
+let greeting = "Mistress"
+// NOTE SX_LOAD_KEEPS_VALUE line 14: Groovy stored null in 'greeting' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+greeting = load "training.greeting", default: greeting
+say "Hello ${greeting}"
+// Groovy ordered a missing storage value, null, below every value.
+if sexscriptLegacyCompare(sexscriptLegacyLoadInteger("training.level"), 3) < 0 {
+  say "Still a beginner"
+}
+// So did a function that returns a stored value.
+function rank {
+  return sexscriptLegacyLoadInteger("training.rank")
+}
+if sexscriptLegacyCompare(rank(), 2) >= 0 {
+  say "Ranked"
+}
+// A read from the legacy online service, too.
+// NOTE SX_ONLINE_STORAGE line 22: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let record = sexscriptLegacyLoadInteger("training.record")
+if sexscriptLegacyCompare(record, 10) >= 0 {
+  say "A new record"
+}
+// A variable of a block keeps its own null tests: the first streak is never compared with null.
+if askBoolean "Keep the streak?" {
+  let streak = 0
+  // NOTE SX_LOAD_KEEPS_VALUE line 27: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  streak = load "training.streak", default: streak
+  say "Streak ${streak + 1}"
+} else {
+  let streak: integer? = 0
+  streak = sexscriptLegacyLoadInteger("training.streak")
+  if streak == null {
+    say "No streak"
+  }
+}
+// loadString() read a stored number as text.
+save 2 as "training.version"
+// NOTE SX_LOAD_STRING_TEXT line 36: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+if "${load("training.version", default: sexscriptLegacyValue(""))}" == "2" {
+  say "Version 2"
+}
+// An online read with a default for a missing value reads with that default.
+// NOTE SX_ONLINE_STORAGE line 38: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+let best = load "training.best", default: 0
+// NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Best ${best + 1}"
+// Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
+// default that a read in between uses stays a test.
+let shocks = load "training.shocks", default: 3
+let tempo = load "training.tempo", default: 0.5
+let suffix = load "training.suffix", default: ""
+let keyed = load "training.key.${suffix}", default: ""
+if suffix == "" {
+  suffix = "a"
+}
+say "Settings ${shocks} ${tempo} ${suffix} ${keyed}"
+// loadBoolean() read a stored value as text, true only for "true"; where the package saves a number under a key of the
+// same form, the read keeps that rule.
+let chosen = [false, false]
+for p in 0..2 {
+  // NOTE SX_LOAD_BOOLEAN_TEXT line 54: loadBoolean() read the stored value as text, true only for "true", and the package saves a number or a text under this key, so the value is read the same way; a missing value, null in Groovy, reads as false.
+  chosen[p] = sexscriptLegacyBooleanText(load("training.punishment${p}.chosen", default: null))
+}
+save 0 as "training.punishment${1}.chosen"
+say "Chosen ${chosen[0]}"
+exit

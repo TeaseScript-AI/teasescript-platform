@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "set-image-name",
+      "layer": "source",
+      "category": "e",
+      "reason": "Days 1 and 2 show the closing picture with showImage(...), which is not a SexScript function (Groovy failed there); every other picture in the scripts uses setImage.",
+      "diff": "set-image-name.diff"
+    }
+  ]
+}

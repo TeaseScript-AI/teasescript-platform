@@ -1,0 +1,53 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+// Settings asked one after the other and saved right away become one form, each question the field's description.
+let takePics = load("game.takePics", default: false) == true
+let tries = sexscriptLegacyLoadInteger("game.tries")
+if tries == null or tries == 0 {
+  tries = 3
+}
+// NOTE SX_SETTINGS_FORM line 4: The legacy script asked these 2 settings one after the other and saved each; one form asks them together, with each question as the field's description.
+let conditional = "off"
+if takePics {
+  conditional = "on"
+}
+let description = "Take a picture when a ship is hit? Currently ${conditional}."
+let settings = askForm fields: {
+  takePics: { type: "boolean", value: takePics, text: "Take pics", options: [
+    { value: true, text: "on" },
+    { value: false, text: "off" }
+  ], description: description },
+  tries: { type: "integer", value: tries, text: "Tries", description: "How hard should the computer think?" }
+}
+takePics = settings.takePics
+save takePics as "game.takePics"
+tries = settings.tries
+save tries as "game.tries"
+say "Pictures ${takePics}, tries ${tries}"
+// A menu that switches settings until the player leaves becomes one form of toggles; a reset to fixed values is a
+// choice before the form.
+let showPics = true
+let showDays = true
+let menu = 1
+// NOTE SX_MENU_FORM line 14: The legacy menu switched 2 settings one click at a time until "Back"; one form of toggles asks them together, after a choice that offers "Reset to default" first, since that sets fixed values.
+if (choose change: "Change", reset: "Reset to default") == "reset" {
+  showPics = true
+  showDays = true
+}
+let settings2 = askForm "Visibility", fields: {
+  showPics: { type: "boolean", value: showPics, text: "Pictures" },
+  showDays: { type: "boolean", value: showDays, text: "Days" }
+}, submit: "Back"
+showPics = settings2.showPics
+showDays = settings2.showDays
+menu = 0
+say "Visible ${showPics} ${showDays}"
+exit

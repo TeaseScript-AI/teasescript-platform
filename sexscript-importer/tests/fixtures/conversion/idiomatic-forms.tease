@@ -1,0 +1,62 @@
+// Shortened from corpus scripts: forms a creator would write by hand where the legacy logic allows them.
+// trick_or_treat_poker: a counter loop goes through a range.
+function draw_card {
+  return randomInteger(0..52)
+}
+function deal_hand {
+  let hand = []
+  for i in 0..5 {
+    let card = draw_card()
+    hand.add(card)
+  }
+  return hand
+}
+say "Cards ${deal_hand().length}"
+// BanjoGameHub rockpaperscissors: a ladder of tests of one choice is a switch.
+let opponent = ""
+say "Select your opponent:"
+let pick_opponent = choose 0: "Anna",
+  1: "Bella",
+  2: "Cleo",
+  3: "Dora"
+switch pick_opponent {
+  case 0 {
+    opponent = "Anna"
+  }
+  case 1 {
+    opponent = "Bella"
+  }
+  case 2 {
+    opponent = "Cleo"
+  }
+  case 3 {
+    opponent = "Dora"
+  }
+}
+say "Against ${opponent}"
+// teachertrouble: a bound known before the script runs draws natively.
+let swats = randomInteger(0..20 - 10 + 1) + 10
+say "Swats ${swats}"
+// dontjuge: a bound drawn anew on every pass keeps the loop a while.
+let swat = 0
+while swat < 20 + randomInteger(0..50) {
+  playAudio "swat.wav"
+  swat += 1
+}
+// Baccarat: a bound read from an item of a list goes through a range where nothing in the loop changes that list.
+function drawTable(cards) {
+  let total = 0
+  for i in 0..cards.length {
+    for j in 0..cards[i].length {
+      // NOTE SX_PLUS_OPERAND_TYPE line 33: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+      total += cards[i][j]
+    }
+  }
+  return total
+}
+say "Total ${drawTable([[1, 2], [3]])}"
+// teachertrouble: a script that never stops its background sounds plays each one plainly, without keeping a handle.
+let spankSound = "hand"
+let spankSoundLimit = 3
+playAudio async "spanks/${spankSound}${1 + randomInteger(0..spankSoundLimit)}.wav"
+exit

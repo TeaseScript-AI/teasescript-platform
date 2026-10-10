@@ -1,0 +1,306 @@
+import type { HostFunction } from "./runtime-check.ts";
+import { emitTease } from "./emit-tease.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import { isRecord } from "./ast.ts";
+import type { MediaFile } from "./workarounds.ts";
+
+/**
+ * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
+ * feasibility report compiles a shimmed copy in which these become placeholder host calls, so a remaining
+ * compiler error points at importer output rather than at a known TeaseScript implementation gap. Generated
+ * packages never contain the shims.
+ */
+const PENDING_CALLS = new Map<string, string>([
+  ["openUrl", "openUrl()"],
+  ["chooseFile", "chooseFile()"],
+  ["showBackgroundImage", "layered scene"],
+  ["showOverlayImage", "layered scene"],
+]);
+
+const SHIM_PREFIX = "sxPending";
+
+export interface PendingShim {
+  program: MigrationProgram;
+  /** The shimmed program as TeaseScript. */
+  source: string;
+  /** Placeholder names to register as host builtins when compiling the shimmed program. */
+  builtins: string[];
+  /** Placeholder name to the TeaseScript operation it stands for (`openUrl`, `chooseFile`, ...). */
+  operations: Map<string, string>;
+  /** Accepted-but-unimplemented capabilities the program uses, by display name. */
+  capabilities: Set<string>;
+}
+
+export function shimPendingCapabilities(generated: MigrationProgram): PendingShim {
+  const builtins = new Set<string>();
+  const capabilities = new Set<string>();
+  const program = generated;
+  // Placeholder names must not collide with names the generated program already uses.
+  const used = new Set<string>();
+  collectNames(program.statements, used);
+  const shimNames = new Map<string, string>();
+  const operations = new Map<string, string>();
+  const shimName = (base: string): string => {
+    const existing = shimNames.get(base);
+    if (existing !== undefined) return existing;
+    let candidate = base;
+    for (let suffix = 2; used.has(candidate); suffix += 1) candidate = `${base}${suffix}`;
+    used.add(candidate);
+    shimNames.set(base, candidate);
+    return candidate;
+  };
+  const call = (
+    capability: string,
+    name: string,
+    positional: IrExpression[],
+    named: Record<string, IrExpression> = {},
+  ): IrExpression => {
+    capabilities.add(capability);
+    // Operation names become identifier-safe shim names.
+    const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
+    const shim = shimName(
+      `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
+    );
+    operations.set(shim, name);
+    builtins.add(shim);
+    return { kind: "call", name: shim, positional, named };
+  };
+
+  const expression = (value: IrExpression): IrExpression => {
+    switch (value.kind) {
+      case "load":
+        return value.defaultValue === undefined
+          ? { ...value, key: expression(value.key) }
+          : { ...value, key: expression(value.key), defaultValue: expression(value.defaultValue) };
+      case "call": {
+        const capability = PENDING_CALLS.get(value.name);
+        const positional = value.positional.map(expression);
+        const named = Object.fromEntries(
+          Object.entries(value.named).map(([name, child]) => [name, expression(child)]),
+        );
+        return capability === undefined
+          ? { ...value, positional, named }
+          : call(capability, value.name, positional, named);
+      }
+      case "list":
+        return { ...value, items: value.items.map(expression) };
+      case "object":
+        return {
+          ...value,
+          properties: value.properties.map((property) => ({
+            ...property,
+            ...(property.key === undefined ? {} : { key: expression(property.key) }),
+            value: expression(property.value),
+          })),
+        };
+      case "index":
+        return { ...value, target: expression(value.target), index: expression(value.index) };
+      case "property":
+        return { ...value, target: expression(value.target) };
+      case "methodCall":
+        return {
+          ...value,
+          target: expression(value.target),
+          arguments: value.arguments.map(expression),
+        };
+      case "choice":
+        return { ...value, options: value.options.map(expression) };
+      case "listChoice":
+        return {
+          ...value,
+          options: value.options.map((option) =>
+            option.kind === "list"
+              ? { ...option, list: expression(option.list) }
+              : { ...option, text: expression(option.text) },
+          ),
+        };
+      case "range":
+        return { ...value, from: expression(value.from), to: expression(value.to) };
+      case "unary":
+      case "typeTest":
+        return { ...value, value: expression(value.value) };
+      case "binary":
+        return { ...value, left: expression(value.left), right: expression(value.right) };
+      case "template":
+        return {
+          ...value,
+          parts: value.parts.map((part) =>
+            "text" in part ? part : { value: expression(part.value) },
+          ),
+        };
+      case "input":
+        return {
+          ...value,
+          ...(value.question === undefined ? {} : { question: expression(value.question) }),
+          ...(value.yesText === undefined ? {} : { yesText: expression(value.yesText) }),
+          ...(value.noText === undefined ? {} : { noText: expression(value.noText) }),
+          ...(value.fields === undefined ? {} : { fields: expression(value.fields) }),
+          ...(value.submit === undefined ? {} : { submit: expression(value.submit) }),
+          ...(value.outro === undefined ? {} : { outro: expression(value.outro) }),
+          ...(value.defaultValue === undefined
+            ? {}
+            : { defaultValue: expression(value.defaultValue) }),
+        };
+      case "button":
+        return {
+          ...value,
+          label: expression(value.label),
+          timeout: value.timeout === null ? null : expression(value.timeout),
+        };
+      case "message":
+        return { ...value, value: expression(value.value) };
+      case "literal":
+      case "duration":
+      case "variable":
+        return value;
+    }
+  };
+
+  const statements = (items: IrStatement[]): IrStatement[] => items.flatMap(statement);
+  const callStatement = (value: IrExpression, span: IrStatement["span"]): IrStatement => ({
+    kind: "expression",
+    expression: value,
+    span,
+  });
+
+  const statement = (item: IrStatement): IrStatement[] => {
+    switch (item.kind) {
+      case "save":
+        return [{ ...item, key: expression(item.key), value: expression(item.value) }];
+      case "delete":
+        return [{ ...item, key: expression(item.key) }];
+      case "goto":
+        return [
+          item.target.kind === "file"
+            ? item
+            : { ...item, target: { ...item.target, path: expression(item.target.path) } },
+        ];
+      case "showPopup":
+        return [
+          callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
+        ];
+      case "permanentButton":
+        return [{ ...item, label: expression(item.label) }];
+      case "showButton":
+        return [
+          {
+            ...item,
+            label: expression(item.label),
+            timeout: item.timeout === null ? null : expression(item.timeout),
+          },
+        ];
+      case "switch":
+        return [
+          {
+            ...item,
+            value: expression(item.value),
+            cases: item.cases.map((switchCase) => ({
+              ...switchCase,
+              matches: switchCase.matches.map(expression),
+              body: statements(switchCase.body),
+            })),
+            default: statements(item.default),
+          },
+        ];
+      case "function":
+        return [{ ...item, body: statements(item.body) }];
+      case "let":
+        return [{ ...item, value: expression(item.value) }];
+      case "assign":
+        return [{ ...item, target: expression(item.target), value: expression(item.value) }];
+      case "expression":
+        return [{ ...item, expression: expression(item.expression) }];
+      case "say":
+        return [{ ...item, value: expression(item.value) }];
+      case "speaker":
+        return [
+          {
+            ...item,
+            properties: item.properties.map((property) => ({
+              ...property,
+              value: expression(property.value),
+            })),
+          },
+        ];
+      case "wait":
+        return [{ ...item, duration: expression(item.duration) }];
+      case "showImage":
+        return [{ ...item, file: expression(item.file) }];
+      case "playAudio":
+        return [
+          {
+            ...item,
+            file: expression(item.file),
+            repeatCount: item.repeatCount === null ? null : expression(item.repeatCount),
+          },
+        ];
+      case "return":
+        return [{ ...item, value: item.value === null ? null : expression(item.value) }];
+      case "if":
+        return [
+          {
+            ...item,
+            condition: expression(item.condition),
+            then: statements(item.then),
+            else: statements(item.else),
+          },
+        ];
+      case "while":
+        return [{ ...item, condition: expression(item.condition), body: statements(item.body) }];
+      case "repeat":
+        return [{ ...item, count: expression(item.count), body: statements(item.body) }];
+      case "for":
+        return [{ ...item, collection: expression(item.collection), body: statements(item.body) }];
+      case "hideImage":
+      case "stopAudio":
+      case "break":
+      case "continue":
+      case "exit":
+      case "unsupported":
+      case "comment":
+      case "blank":
+        return [item];
+    }
+  };
+
+  const shimmed = { ...program, statements: statements(program.statements) };
+  return {
+    program: shimmed,
+    source: emitTease(shimmed),
+    builtins: [...builtins].sort(),
+    operations,
+    capabilities,
+  };
+}
+
+function collectNames(value: unknown, names: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectNames(item, names);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "name" || key === "variable") && typeof child === "string") names.add(child);
+    else collectNames(child, names);
+  }
+}
+
+export type { MediaFile } from "./workarounds.ts";
+
+/** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only. */
+export function pendingHostFunctions(shim: PendingShim): Record<string, HostFunction> {
+  const implementations = new Map<string, HostFunction>([
+    ["showPopup", () => null],
+    ["showBackgroundImage", () => null],
+    ["showOverlayImage", () => null],
+    ["openUrl", () => null],
+    // As when the player cancels the file chooser.
+    ["chooseFile", () => null],
+  ]);
+  const result: Record<string, HostFunction> = {};
+  for (const [shimName, operation] of shim.operations) {
+    const implementation = implementations.get(operation);
+    if (implementation !== undefined) result[shimName] = implementation;
+  }
+  return result;
+}

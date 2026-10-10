@@ -1,0 +1,305 @@
+{
+  "patches": [
+    {
+      "id": "menu-conditions",
+      "layer": "source",
+      "category": "b",
+      "reason": "The main menu filtered its option and request records by calling the closure stored in each record (it.cond()), which the converter cannot lower inside findAll, so the menu came out empty. Filter in plain loops that call each condition through a local variable, in the same order; the request menu builds its label list in its own loop and adds '...nevermind' to a new list instead of the caller's list, which the caller rebuilds before each menu anyway.",
+      "diff": "menu-conditions.diff"
+    },
+    {
+      "id": "storage-props",
+      "layer": "source",
+      "category": "b",
+      "reason": "getProp read a storage key through a Java method reference (this.&loadBoolean and the like, called with f.apply), which the converter cannot lower, so every toy.* property read its default. Read the key with load(), which returns the stored value whatever its type, and keep loadB, loadI, and loadS as names so that no call site changes; loadS returns the value as text, as loadString did (the version is saved as a number and read as text), while the boolean and integer keys are only ever saved with their own type.",
+      "diff": "storage-props.diff"
+    },
+    {
+      "id": "events-maps",
+      "layer": "source",
+      "category": "b",
+      "reason": "The scheduled events were Event and NamedEvent class instances, loaded with loadMap and collectEntries and found with a map each() loop, none of which converts, so no event was ever found and the main loop restarted the script forever. Keep each event as the plain map [time, func, arg] that was already saved, load it with load() into a new map, add it with put(), and find the next one in a loop over the keys, in the same order and with the same tie rule; the null checks of the result are written out as e != null.",
+      "diff": "events-maps.diff"
+    },
+    {
+      "id": "local-time",
+      "layer": "source",
+      "category": "b",
+      "reason": "localTimeOffset read the zone offset from java.time zone rules and getDayNum used Math.floorDiv, neither of which converts, so both returned null and every day and clock-time calculation failed. Take the offset from the local clock instead (local hour and minute minus the UTC time of day, rounded to the 15-minute steps that zone offsets use and folded into -12..+14 hours) and use intdiv, which equals floorDiv for the positive times involved.",
+      "diff": "local-time.diff"
+    },
+    {
+      "id": "session-random",
+      "layer": "source",
+      "category": "b",
+      "reason": "getRandomSession drew from a java.util.Random seeded with the session start, which has no TeaseScript equivalent, so it returned null and every list index built from it failed. Derive the number from the same seed with one Park-Miller step instead: it stays constant for the play session as before, but the numbers differ from Java's; a missing seed, where Java failed, gives 0.",
+      "diff": "session-random.diff"
+    },
+    {
+      "id": "text-helpers",
+      "layer": "source",
+      "category": "b",
+      "reason": "compose() built its sentence with a collect/join/capitalize chain and gagText() with String.toList() and a list sum(), which do not convert, so every composed line came out null. Pick one text per group in a loop and join the parts, write the consonant lists out, and join the gagged characters with join(\"\"), with the same results (an empty text gives \"\" where the legacy sum() gave \"null\").",
+      "diff": "text-helpers.diff"
+    },
+    {
+      "id": "trigger-handlers",
+      "layer": "source",
+      "category": "b",
+      "reason": "executeTrigger called each handler's closure as a record property inside forEach (th.func(...)), which does not convert, so no trigger handler ran (availability statistics and summon counters). Call each matching handler through a local variable in a loop, in the same order and with the same argument.",
+      "diff": "trigger-handlers.diff"
+    },
+    {
+      "id": "speech-ignored",
+      "layer": "source",
+      "category": "b",
+      "reason": "The script detected the operating system to speak texts with the Windows or macOS speech program (sayCommand(...).execute()); owner decision: speech output is ignored. Leave osName unset, so that canTalk() is false and the voice settings are not offered, make say() do nothing, and let sayCommand() return an empty command instead of null for an unknown system, which only the unreachable voice test reads.",
+      "diff": "speech-ignored.diff"
+    },
+    {
+      "id": "domme-data",
+      "layer": "source",
+      "category": "b",
+      "reason": "getDomme evaluated the Groovy data files images/toy/domme.groovy, images/toy/<domme>/person.groovy, and set.groovy at runtime (new File, Eval.me), which a package cannot do, so DOMME stayed null and every image lookup by DOMME.id failed. Write the title and the two person files out as a dict, with the id as before. The session plans in domme.groovy are left out: only sessionPlay reads them, and it evaluates their expression strings with Eval, which does not convert either.",
+      "diff": "domme-data.diff"
+    },
+    {
+      "id": "boolean-shuffle",
+      "layer": "source",
+      "category": "b",
+      "reason": "getBooleanG reused its boolean shuffle parameter for the number getRandom(2), which TeaseScript rejects because a variable keeps one type. Store getRandom(2) != 0, which is true exactly when the number was truthy.",
+      "diff": "boolean-shuffle.diff"
+    },
+    {
+      "id": "session-toy-count",
+      "layer": "source",
+      "category": "e",
+      "reason": "hasSessionToy returned false for a toy not yet fetched in the session and its count otherwise, but useSessionToy compared that with < and getRestraints subtracted it, which failed in Groovy for false. Return 0 for a missing toy (callers that test its truth see the same) and let getRestraints test for a missing toy with containsKey, which is what its == false meant.",
+      "diff": "session-toy-count.diff"
+    },
+    {
+      "id": "image-spec-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "An image spec lists tags that must all match, and an element that is itself a list ([TITS,PUSSY,ASS]) gives alternatives, so specs mixed texts and lists in one list, which TeaseScript rejects. Write each alternative group as one text \"tits|pussy|ass\", so that every spec is a list of texts; imagery-loops expands such a text into the same combinations that multiplexTags made from the nested list.",
+      "diff": "image-spec-lists.diff"
+    },
+    {
+      "id": "bondage-count",
+      "layer": "source",
+      "category": "b",
+      "reason": "playBondage kept its game choice in one variable that held false or the number 1 or 2, which TeaseScript rejects because a variable keeps one type. Use 0 for no game: the variable is only tested for truth, compared with 1, and switched on 1 and 2, where 0 behaves as false did, and the random draws happen in the same order.",
+      "diff": "bondage-count.diff"
+    },
+    {
+      "id": "chastity-answer",
+      "layer": "source",
+      "category": "b",
+      "reason": "postChastity stored the index of a forced choice in its boolean answer variable sh, which TeaseScript rejects because a variable keeps one type; nothing reads sh after that choice, so ask without storing the result.",
+      "diff": "chastity-answer.diff"
+    },
+    {
+      "id": "recent-availability",
+      "layer": "source",
+      "category": "b",
+      "reason": "getRecentAvail summed a collected list with sum(), which Groovy defines as null for an empty list, so its result may be null and the comparisons of setupInitial do not compile. Every caller asks for at least one day, so add the days in a loop from 0, in the same order, with the same result.",
+      "diff": "recent-availability.diff"
+    },
+    {
+      "id": "soft-wait-time",
+      "layer": "source",
+      "category": "b",
+      "reason": "getSoft keeps a wait time only when timing is set and guarded each change with timing, which a type checker cannot connect with the nullable wait time. Guard the changes with waitTime != null, which is true exactly when timing was set.",
+      "diff": "soft-wait-time.diff"
+    },
+    {
+      "id": "toys-loops",
+      "layer": "source",
+      "category": "b",
+      "reason": "anyToys, backgroundRemoveAllToys, and removeAllToys (the first two in the older Toy) filtered the toy map with key/value closures (any, findAll, collect), which do not convert, so anyToys returned null and worn toys were never removed. Use loops over the keys instead: anyToys stops at the first worn toy as any() did, and the other two first collect the worn toys and then act on them, in the same order.",
+      "diff": "toys-loops.diff"
+    },
+    {
+      "id": "domme-initial",
+      "layer": "source",
+      "category": "b",
+      "reason": "DOMME started as null until main() loads it, so every DOMME.id read was typed as possibly null. Start it as an empty map: main() loads the domme before anything reads it, so the value read never changes.",
+      "diff": "domme-initial.diff"
+    },
+    {
+      "id": "strokes-counter",
+      "layer": "source",
+      "category": "b",
+      "reason": "strokes counted its loop in it without a declaration, a script binding variable that the converter turns into a nullable global. No other code reads it, so count in a local variable instead; the case closure {it < 2} keeps its own parameter.",
+      "diff": "strokes-counter.diff"
+    },
+    {
+      "id": "sleep-locals",
+      "layer": "source",
+      "category": "b",
+      "reason": "bedtime and bedtimeCheck assigned imgSpec without a declaration, a script binding variable that the converter turns into a nullable global. Each sets it before reading it and no other code reads it, so declare it locally.",
+      "diff": "sleep-locals.diff"
+    },
+    {
+      "id": "plan-message",
+      "layer": "source",
+      "category": "e",
+      "reason": "beginPlan built its message as (hadtoys ? [...] : []) + naked ? [...] : [], where + binds before ?:, so the list plus a boolean was always true and the message was always only \"put your clothes back on.\" even when the toys had to come off. Group each choice as intended, so the message names the toys, the clothes, or both.",
+      "diff": "plan-message.diff"
+    },
+    {
+      "id": "suck-methods",
+      "layer": "source",
+      "category": "b",
+      "reason": "suckDildo (playSuck in the older Toy) kept its sound loops in local closures; suck and suckBeat capture other local closures, which TeaseScript cannot express, so those sounds were skipped, and a closure called with mixed text and number arguments does not convert either. Make the three closures toy methods (suckPlayWait, suckRepeat, suckBeat) with the same bodies, defined before it, and call them directly.",
+      "diff": "suck-methods.diff"
+    },
+    {
+      "id": "lines-compose",
+      "layer": "source",
+      "category": "b",
+      "reason": "writeLines capitalized the result of compose(), which may be null for an empty group list, so the call does not compile; compose() already capitalizes its result and the line groups are never empty, so use its result as it is, with an empty text for the null that never occurs.",
+      "diff": "lines-compose.diff"
+    },
+    {
+      "id": "perm-parameter",
+      "layer": "source",
+      "category": "e",
+      "reason": "perm(String i) passed it, which is not defined there, to can() instead of its parameter i; nothing calls perm, so pass i.",
+      "diff": "perm-parameter.diff"
+    },
+    {
+      "id": "imagery-loops",
+      "layer": "source",
+      "category": "b",
+      "reason": "The image catalogue was built at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and images were chosen with nested closures (matchTags, findAll, every, sum, flatten, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image or outfit choice stopped the script. Write the 31 tags files out as text (exactly as they are, two trailing spaces included) and build the same catalogue from them in loops; choose images and outfits with plain loops in the same order, with the same short-circuits and random draws; and pick a random matching tag for the comment instead of shuffling the intersection, the same choice. A spec alternative is now written \"a|b\" (see image-spec-lists), so every spec is a list of texts. A missing domme, set, or outfit gives null as the Groovy lookups did, also where the legacy random pick from an empty list gave null.",
+      "diff": "imagery-loops.diff"
+    },
+    {
+      "id": "menu-record-args",
+      "layer": "source",
+      "category": "b",
+      "reason": "The menus pass opts[opt].arg and reqs[req].arg to the chosen action, but only the \"May I...\" record has an arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any other entry stopped the script. Give the option and request records arg: null, the value Groovy read.",
+      "diff": "menu-record-args.diff"
+    },
+    {
+      "id": "training-last-play",
+      "layer": "source",
+      "category": "b",
+      "reason": "requestTraining compared the last play time with < while it may be missing; Groovy ordered null below every number, but TeaseScript stops at an ordering of null, and the converter guards only direct storage loads. Read it with the default 0, which compares the same way against the current time.",
+      "diff": "training-last-play.diff"
+    },
+    {
+      "id": "soon-text",
+      "layer": "source",
+      "category": "b",
+      "reason": "The calendar, the debug status, and the debug lounge line showed times with java.time (localTimeOf(s).format(soonFormatter), pattern \"EEEE 'at' h:mma\"), which does not convert, so they showed null; the calendar's collect over the plans did not convert either. Format the same text from the local time arithmetic of localTimeOffset (English day names and AM/PM, as the English pattern gave), and list the plans in a loop that skips a plan without an event, as before.",
+      "diff": "soon-text.diff"
+    },
+    {
+      "id": "native-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "sessionPlay ran the nine session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so no play session ever ran (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments, so randRange draws happen where the expressions drew them; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls a session by its theme. The runner in play.groovy keeps the rest: wildcards expand by tags in the same order with repetitions kept, the session dresses for the activities of all its phases first, take/repeat/sequence and the punishMultiply/punishApply uses run as before, and the session reads the punishment once at its start as the loaded toy.punishment was (0 when missing, where the legacy division failed). The DEBUG self-check of the expression strings is dropped, since no strings are left to check.",
+      "diff": "native-sessions.diff"
+    },
+    {
+      "id": "manual-cornertime",
+      "layer": "source",
+      "category": "b",
+      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
+      "diff": "manual-cornertime.diff"
+    },
+    {
+      "id": "tease-nipples-spec",
+      "layer": "source",
+      "category": "b",
+      "reason": "preTeaseNipples passed its image spec as teaseNipples(imgSpec=[DRESSED, TEASE]), a Groovy assignment to a script binding variable used as the argument, which the converter drops and declares as a top-level variable that makes toy/tease.tease fail to compile (TSV052). Pass the spec directly; nothing else reads that binding variable.",
+      "diff": "tease-nipples-spec.diff"
+    },
+    {
+      "id": "play-event-first",
+      "layer": "source",
+      "category": "b",
+      "reason": "playEvent tested its first flag with first.asBoolean(), a method call the converter does not lower, so after every successful summon the player was neither told to wait nor ordered to kneel. Test the flag directly, which is the same Groovy truth.",
+      "diff": "play-event-first.diff"
+    },
+    {
+      "id": "toy-release-requests",
+      "layer": "source",
+      "category": "b",
+      "reason": "addToy registered the request to remove a worn toy with closures that capture its toyState, which TeaseScript cannot express, so the converter dropped the request and no toy could be asked off. Give requestables an optional arg (null as before for the others) that the menu already passes to the action, pass it to the condition as well, and register the toy's state as arg with closures that take it; the custom request functions ignore the argument as before.",
+      "diff": "toy-release-requests.diff"
+    },
+    {
+      "id": "toys-liked-tags",
+      "layer": "source",
+      "category": "b",
+      "reason": "removeAllToys asked toys[stateToy].tags.any{tag -> likes(tag)}, a closure on a dynamic receiver the converter does not lower, so the loop body was dropped and toys were never removed or kept on at the end of a session. Ask a new likesAnyTag method that loops over the tags, once per toy before the random draw; likes() only reads storage, so the order does not matter.",
+      "diff": "toys-liked-tags.diff"
+    },
+    {
+      "id": "denial-square",
+      "layer": "source",
+      "category": "b",
+      "reason": "The cum-permit trigger computed its mean wait from dl**2, an operator the converter does not map, so the mean became 0 hours and the permission came far too early. Write dl*dl, the same value for the integer denial level.",
+      "diff": "denial-square.diff"
+    },
+    {
+      "id": "difficulty-menu",
+      "layer": "source",
+      "category": "b",
+      "reason": "The difficulty settings built the level overview with a collect over a GString holding a ternary and the choice list with (lmin..5).eachWithIndex, neither of which converts, so the overview was empty and only 'Cancel' could be chosen. Build both in loops with the same texts and IDs, and save the chosen level as the number it names: the defaults are numbers and getLevel reads a number, where the legacy saved the label text.",
+      "diff": "difficulty-menu.diff"
+    },
+    {
+      "id": "gag-text-type",
+      "layer": "source",
+      "category": "b",
+      "reason": "gagText reads its text parameter t by character (t[it]); untyped, the parameter cannot be proven text, so the conversion indexes it like a list, which stops the script. Every caller passes a text, so the parameter is declared String, and the characters convert to substring reads.",
+      "diff": "gag-text-type.diff"
+    },
+    {
+      "id": "harden-spec-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "image-spec-lists writes each alternative group of an image spec as one text \"tits|pussy|ass\", but missed the soft harden([[TITS,PUSSY,ASS]]) calls in playStrokes, playEdges and cumChanceEdge, whose spec then reached multiplexTags as a list and stopped the script; write them the same way.",
+      "diff": "harden-spec-lists.diff"
+    },
+    {
+      "id": "edge-handler-null",
+      "layer": "source",
+      "category": "b",
+      "reason": "executeTrigger(\"toyEdged\") without a hold time calls the handler with th.defaultArg, which is null, and Groovy passed that null to { d=0 -> toy.addEdge(d) } rather than the default; addEdge tests d for truth, so the handler's default is null, which the converted parameter can then hold.",
+      "diff": "edge-handler-null.diff"
+    },
+    {
+      "id": "end-plan-wake",
+      "layer": "source",
+      "category": "b",
+      "reason": "endPlan's arg is the map that beginPlan schedules ([friendName: ..., waketime: ...]), whose arg[0] Groovy read as null, so !arg[0] was always true (the comment refers to an older version that passed the friend's name); indexing the converted record stops the script, so sleep is the truth of arg.waketime.",
+      "diff": "end-plan-wake.diff"
+    },
+    {
+      "id": "profile-toys",
+      "layer": "source",
+      "category": "b",
+      "reason": "has(i) read the player's toy chest through a key built from the toy (\"toys.$i\"), so profile generation, which collects literal keys, never asked for the toy chest and every toy-gated branch stayed unreachable. Read the distribution's toys this script asks about by their own keys in ownsToy(i), keeping the built key for any other, and has(i) keeps its other checks (toy.toys.$i and DEFAULTTOYS).",
+      "diff": "profile-toys.diff"
+    },
+    {
+      "id": "lounge-wait-due",
+      "layer": "source",
+      "category": "e",
+      "reason": "When the next event falls due while the player is still at an earlier button, such as the introduction's (a second session that the player leaves waiting), the lounge loop passes showButton a negative wait, Math.min(cycleTime, e.event.time - getTime()); the legacy player's button.wait threw IllegalArgumentException on it, which nothing caught (MainFrame.showButtonFromScript), so the script failed, and TeaseScript rejects the timeout as well (TSR050). Wait at least 0, so the loop goes on to run the due event at once.",
+      "diff": "lounge-wait-due.diff"
+    },
+    {
+      "id": "availability-cleanup",
+      "layer": "source",
+      "category": "b",
+      "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which is slow to walk. Read the days from 20 days ago to two days ahead directly instead: availability is only ever saved for the day the session runs, which a later session in a time zone behind sees as a day or, across the date line, two days ahead; a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
+      "diff": "availability-cleanup.diff"
+    }
+  ]
+}

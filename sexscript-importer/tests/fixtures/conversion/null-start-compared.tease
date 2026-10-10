@@ -1,0 +1,110 @@
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskProfile {
+  let profileToysFields = dict{}
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.crop", "toys.paddle"] {
+    if load(profileToysKey, default: null) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["crop / cane", "paddle"][profileToysIndex] }
+    }
+    profileToysIndex += 1
+  }
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+sexscriptLegacyAskProfile()
+function sexscriptLegacyLoadFirstTrue(keys) {
+  for key in keys {
+    let value = load key, default: null
+    if value == true {
+      return key
+    }
+  }
+  return null
+}
+function sexscriptLegacyArray(size, value) {
+  let items = []
+  repeat size {
+    items.add(value)
+  }
+  return items
+}
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
+// A list that the code compares with null keeps its null start, since null and an empty list differ there.
+let answers: string[]? = null
+function fill {
+  answers = ["Yes", "No"]
+}
+if answers == null {
+  say "Nothing loaded yet"
+}
+fill()
+if answers != null {
+  say answers[0]
+}
+// loadFirstTrue gives null when no key holds true, so the variable it sets may hold null.
+let implement: string? = "hand"
+implement = sexscriptLegacyLoadFirstTrue(["toys.paddle", "toys.crop"])
+say "You get the ${implement}"
+// One list of keys, passed as a Java array, is the list of keys itself.
+let paddles = ["toys.paddle", "toys.hairbrush"]
+// NOTE SX_JAVA_ARRAY_CONVERSION line 13: A Java String[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+let noKeys = sexscriptLegacyArray(0, null)
+let spanker: string? = sexscriptLegacyLoadFirstTrue(paddles)
+say "Spanker ${spanker}"
+// A number that a restore may leave null orders below every value, which the comparison writes out, so it narrows.
+let square: integer? = -1
+// NOTE SX_NULL_ONLY_VARIABLE line 18: saved is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+function restore {
+  square = null
+}
+if randomInteger(0..2) == 0 {
+  restore()
+}
+let base: integer? = square
+if base == null or base < 0 {
+  base = 0
+}
+say "Base ${base + 1}"
+// A number set to null keeps the helper comparison, since after the null the compiler knows it holds null.
+let level = null
+if level == null {
+  say "No level"
+}
+level = 1
+level = null
+if sexscriptLegacyCompare(level, 0) < 0 {
+  say "Below"
+} else {
+  say "Not below"
+}
+let copiedLevel: integer? = level
+if sexscriptLegacyCompare(copiedLevel, 0) < 0 {
+  say "Copy below"
+} else {
+  say "Copy not below"
+}
+exit

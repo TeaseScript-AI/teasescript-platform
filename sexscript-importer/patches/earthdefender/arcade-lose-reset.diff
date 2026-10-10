@@ -1,0 +1,10 @@
+--- a/scripts/Banjo/earthdefender.groovy
++++ b/scripts/Banjo/earthdefender.groovy
+@@ -1612,6 +1612,7 @@
+ 	loadPlayer()
+ 	gameWon = false
+ 	gameOver = false
++	loseWave = false
+ 	cutsceneLaunch("sky")
+ 	playerAccel = 2
+ 	while(!gameOver) {

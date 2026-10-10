@@ -1,0 +1,38 @@
+// Background sounds overlap; playBackgroundSound(null) stops all of them.
+playAudio async "rain.wav"
+playAudio(file: "bell.wav", async: true, repeat: 2 times)
+let answer = 0
+while answer < 5 {
+  answer += 2
+}
+// The sound starts again before every round of the endless loop.
+while true {
+  playAudio async "tick.wav"
+  say "Tick"
+  if answer > 3 {
+    break
+  }
+}
+// A shock plays its sound once for each started ten seconds (PainStacks playShockSingle).
+let stime = 25
+let repetitions = toInteger(ceil(stime / 10))
+if repetitions >= 1 {
+  playAudio(file: "shock.mp3", async: true, repeat: repetitions times)
+}
+wait stime s
+stopAudio
+// playSound(null) stopped every background sound too (FirstTimeCuckold).
+playAudio async "orgasm.mp3"
+wait 10 s
+showButton "Continue when you heard enough"
+stopAudio
+// show() returns nothing, so Groovy discarded the appended text.
+// NOTE SX_DISCARDED_CONCATENATION line 23: Groovy appended text to the result of show(), which returns nothing, and discarded it; the appended text was never shown and is dropped here.
+say "Quiet now."
+function finish {
+  say "Bye"
+  // NOTE SX_SYSTEM_EXIT line 26: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
+  exit
+}
+finish()
+exit

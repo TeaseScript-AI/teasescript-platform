@@ -1,0 +1,25 @@
+// MIGRATION INCOMPLETE: 3 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Groovy changed the caller's list through a parameter and each element through a loop variable;
+// TeaseScript passes copies, so these changes stay reported.
+function addCard(cards, card) {
+  // TODO SX_PARAMETER_LIST_WRITE line 3: Groovy changed the list that cards refers to, which the caller or the iterated collection shares; in TeaseScript cards holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
+  // | def addCard = { cards, card -> cards.add(card) }
+}
+let queue = ["first"]
+addCard(queue, "second")
+let stacks = [
+  [1],
+  [2]
+]
+for stack in stacks {
+  // TODO SX_PARAMETER_LIST_WRITE line 7: Groovy changed the list that stack refers to, which the caller or the iterated collection shares; in TeaseScript stack holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
+  // | stacks.each { stack -> stack << 3 }
+}
+for stack in stacks {
+  // TODO SX_PARAMETER_LIST_WRITE line 9: Groovy changed the list that stack refers to, which the caller or the iterated collection shares; in TeaseScript stack holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
+  // | stack.clear()
+}
+say "Queue ${queue[0]}, stacks ${stacks[0][0]}"
+exit

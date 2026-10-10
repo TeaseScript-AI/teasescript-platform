@@ -1,0 +1,32 @@
+// A closure's local is a variable apart from a parameter of the same name in another closure.
+function describe(items) {
+  say "First: ${items[0]}"
+}
+function deal {
+  let items = ["ace", "king", "queen"]
+  items.removeAt(1)
+  return items
+}
+function first(a, b) {
+  return a
+}
+// A variable or parameter declared as a List or String holds only lists or text.
+let hand = first(deal(), ["ten"])
+hand.removeAt(0)
+let title = first("Miss", "Mister")
+function initials(name) {
+  return name.split("M").length - 1
+}
+say "Hand: ${hand[0]}, ${title} has ${initials(title)} M"
+// Loop variables and iteration closure parameters take the elements of a proven list.
+let outfits = ["red bikini", "blue bikini top"]
+for outfit in outfits {
+  if outfit.split("bikini").length - 1 > 0 {
+    say "Beach: ${outfit}"
+  }
+}
+for item in outfits {
+  say "Words: ${item.split(" ").length - 1 + 1}"
+}
+describe(hand)
+exit

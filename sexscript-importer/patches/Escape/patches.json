@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "clothes-lap-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "nclothes and nlap are declared without a value and set by initmf and initz before the game reads them in other functions, so TeaseScript sees values that may be null there. nclothes starts at 0, the count initmf starts from, and nlap at 5, the smallest value initz gives it.",
+      "diff": "clothes-lap-start.diff"
+    },
+    {
+      "id": "guess-digits",
+      "layer": "source",
+      "category": "b",
+      "reason": "getguess fills the caller's list guess digit by digit, guess[iinp]=..., which Groovy shared with bigloop; a TeaseScript parameter is a copy and an empty list has no position to write (TSR025 at the first guess). getguess checks each digit in its own variable, and bigloop fills guess from the answer getguess returns, which always has cfgdigits digits; the same digits reach the same comparisons.",
+      "diff": "guess-digits.diff"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+// The legacy display showed one text at a time, so a script repeated a message to extend it; the Player keeps earlier
+// messages, so a text says only what it adds to the one just before it, with whitespace, line breaks, and the earlier
+// text's final punctuation ignored.
+say "I will decide when you get to cum from now on."
+if askBoolean "Do you accept?" {
+  say "Good."
+}
+// Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
+let line = say "Deciding.", instant
+wait 1 s
+line.text += "."
+wait 1 s
+line.text += "."
+wait 1 s
+// A question that repeats the text before it asks without saying it again.
+let days = askInteger "How many days?", prefill: 3
+// Interpolations compare when they interpolate the same value; an image in between keeps the text.
+let name = askText("Your name?", prefill: "pet").replace("\n", " ")
+say "Hello ${name}."
+showImage "kneel.jpg"
+say "Kneel."
+say "Hello ${days}. Kneel."
+// A text that only shares the beginning of a word, or follows another statement, stays whole.
+say "Wait"
+say "Waiting for you"
+let count = days + 1
+say "Waiting for you, ${count} days"
+// A photo request whose title repeats the text before it says the title once, as its question.
+// NOTE SX_FILE_PHOTO line 31: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+showImage askImage("Show me how you kneel.")
+// An empty text only cleared the legacy display, so it is not said, also through a variable that stays empty.
+let pickedColor = choose 0: "Red", 1: "Blue"
+say "Color ${pickedColor}"
+// An exact repeat between waits goes, and the waits around it join.
+say "Processing.", instant
+wait 10 s
+exit

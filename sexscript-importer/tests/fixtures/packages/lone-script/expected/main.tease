@@ -1,0 +1,4 @@
+global function sexscriptLegacyValue(value) {
+  return value
+}
+goto "kneel.tease"

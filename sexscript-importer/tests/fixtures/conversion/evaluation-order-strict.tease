@@ -1,0 +1,34 @@
+let value = "old"
+function change {
+  value = "new"
+  return true
+}
+let earlier = value
+let conditional = "no"
+if change() == true {
+  conditional = "yes"
+}
+say "${earlier}${conditional}"
+function yesText {
+  say "Before"
+  return "Yes"
+}
+let option = yesText()
+let result = askBoolean "Question", yesText: option
+function getRandom(maxValue) {
+  return maxValue - 1
+}
+let xs = [1, 2, 3]
+say "Pick ${xs[getRandom(xs.length)]}"
+let count = 0
+let ready = false
+// NOTE SX_NULL_ONLY_VARIABLE line 11: question is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+let answer = askText().replace("\n", " ")
+let ignoredAnswer1 = askBoolean "Ready?"
+let match = 1
+if count == match {
+  say "matched"
+} else if [1, 2].contains(count) {
+  say "small"
+}
+exit

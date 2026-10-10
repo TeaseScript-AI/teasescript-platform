@@ -1,0 +1,11 @@
+--- a/scripts/hard_times_de.groovy
++++ b/scripts/hard_times_de.groovy
+@@ -51,7 +51,7 @@
+ 	show("Denkst du darüber nach?\nSpucke in deine Hand und schlag dein Gesicht HART\nDann kannst du wieder kommen!");
+ 	wait(8);
+ 
+-	return "Harte Zeiten";
++	return "hard_times_de";
+ 
+ }
+ 

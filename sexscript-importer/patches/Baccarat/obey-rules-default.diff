@@ -1,0 +1,22 @@
+--- a/scripts/Baccarat.groovy
++++ b/scripts/Baccarat.groovy
+@@ -37,7 +37,7 @@
+ //settings
+ def NoDecks = loadInteger("Baccarat.NoDecks")?: 6
+ def DeckName = loadString("Baccarat.DeckName")?: "StandardDeck1"
+-def ObeyRules = loadBoolean("Baccarat.ObeyRules")?: true
++def ObeyRules = loadBoolean("Baccarat.ObeyRules"); if(ObeyRules==null)ObeyRules = true
+ def OpponentName = loadString("Baccarat.OpponentName")?: "Alexis"
+ 
+ def EdgesSetup = false
+--- a/scripts/Baccarat-chemin-de-fer.groovy
++++ b/scripts/Baccarat-chemin-de-fer.groovy
+@@ -28,7 +28,7 @@
+ //settings
+ def NoDecks = loadInteger("Baccarat.NoDecks")?: 6
+ def DeckName = loadString("Baccarat.DeckName")?: "StandardDeck1"
+-def ObeyRules = loadBoolean("Baccarat.ObeyRules")?: true
++def ObeyRules = loadBoolean("Baccarat.ObeyRules"); if(ObeyRules==null)ObeyRules = true
+ 
+ //Closures (functions)######################################################################
+ 

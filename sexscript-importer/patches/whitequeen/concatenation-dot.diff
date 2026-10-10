@@ -1,0 +1,11 @@
+--- a/scripts/whitequeen.groovy
++++ b/scripts/whitequeen.groovy
+@@ -293,7 +293,7 @@
+ 	wait(10)
+ 	setImage(imPrefix+"10.jpg")
+ 	if(loadBoolean("intro.female"))
+-		show("Well, lets start with a few moves that you like and with ".
++		show("Well, lets start with a few moves that you like and with "+
+ 			"the good pressure, have this ready.")
+ 	else
+ 		show("Well, lets start with a few strokes.")

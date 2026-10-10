@@ -1,0 +1,11 @@
+// MIGRATION INCOMPLETE: 2 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+say "Before"
+// TODO SX_JAVA_REFLECTION line 2: Java reflection has no TeaseScript equivalent; reimplement the intended behavior manually.
+// | def toolkit = Class.forName("java.awt.Toolkit")
+let toolkit = null
+// TODO SX_JAVA_REFLECTION line 3: Java reflection has no TeaseScript equivalent; reimplement the intended behavior manually.
+// | toolkit.getMethod("beep").invoke(toolkit.getMethod("getDefaultToolkit").invoke(null))
+say "After"
+exit

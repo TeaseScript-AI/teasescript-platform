@@ -1,0 +1,20 @@
+--- a/scripts/guillotine.groovy
++++ b/scripts/guillotine.groovy
+@@ -197,7 +197,7 @@
+ 
+ 		// Delete invalid players
+ 		currentTime = new Date()
+-		if (((currentTime.time/1000) - liveTime > 3600) || (liveTime == 0) || (liveURL == null) || (liveURL == "")) {
++		if ((getTime() - liveTime > 3600) || (liveTime == 0) || (liveURL == null) || (liveURL == "")) {
+ 			livePlayer = ""
+ 			send("guillotine.name",livePlayer)
+ 		}
+@@ -660,7 +660,7 @@
+ 		+"\n\nTIP: If possible, broadcast your screen with both your video and the guillotine app visible."
+ 		+"\n\nStart your live stream now!")
+ 		currentTime = new Date()
+-		liveTime = currentTime.time/1000
++		liveTime = getTime()
+ 		send("guillotine.name",playerName)
+ 		send("guillotine.url",link)
+ 		send("guillotine.time",liveTime.toString())

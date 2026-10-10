@@ -1,0 +1,22 @@
+--- a/scripts/waitinggame.groovy
++++ b/scripts/waitinggame.groovy
+@@ -289,7 +289,7 @@
+ }
+ 
+ def shockCheck = {
+-	while (checkingLevel = true) {
++	while (checkingLevel == true) {
+ 		if (shocksGot >= shocksToGet) {
+ 			wait (1)
+ 		}
+--- a/scripts/waitinggame_de.groovy
++++ b/scripts/waitinggame_de.groovy
+@@ -289,7 +289,7 @@
+ }
+ 
+ def shockCheck = {
+-	while (checkingLevel = true) {
++	while (checkingLevel == true) {
+ 		if (shocksGot >= shocksToGet) {
+ 			wait (1)
+ 		}

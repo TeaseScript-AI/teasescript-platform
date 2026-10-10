@@ -1,0 +1,101 @@
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+let rounds = randomInteger(0..10)
+let mood = "playful"
+if rounds > 5 {
+  mood = "strict"
+}
+let bonus = 0
+if rounds > 8 {
+  bonus = randomInteger(0..3)
+}
+if rounds == 0 {
+  say "None"
+} else if rounds == 1 {
+  say "One round"
+} else {
+  say "Many rounds"
+}
+let labelValue = ""
+if labelValue == "" {
+  labelValue = "pet"
+}
+say "Mood ${mood}, bonus ${bonus}, ${labelValue}"
+// A value of unproven type, such as a parameter, is true as Groovy found it: not null, false, zero, or empty.
+function finish(message) {
+  if sexscriptLegacyTruth(message) {
+    say message
+  }
+}
+finish("Done")
+finish("")
+// A closure case is a condition on the switched value, which Groovy evaluated once.
+let switchValue1 = randomInteger(0..4)
+if switchValue1 < 2 {
+  say "Stop!"
+} else if switchValue1 == 2 {
+  say "Again"
+} else {
+  say "Go on"
+}
+// instanceof tests a value's type, which a Groovy map passes as a dict or an object.
+say "A number?"
+// NOTE SX_UNION_TYPE line 24: Groovy let 'given' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if given is string { ... }
+let given: string | integer = "five"
+if askBoolean {
+  given = 5
+}
+if given is number {
+  say "A number"
+}
+if given is string {
+  say "A text"
+}
+// Several conditional fragments in one text are computed first, so the text is written once.
+let leashed = askBoolean "Leashed?"
+let gagged = askBoolean "Gagged?"
+let conditional = ""
+if leashed {
+  conditional = " with the leash"
+}
+let conditional2 = ", mouth open"
+if gagged {
+  conditional2 = ""
+}
+say "Crawl to me${conditional}${conditional2}."
+// An update of one variable by a conditional value is written per branch.
+let dare = "Crawl. "
+if leashed {
+  dare += "On the leash."
+} else if gagged {
+  dare += "Free, quiet."
+} else {
+  dare += "Free, speaking."
+}
+say dare
+// A conditional used as a statement runs one call per branch.
+if leashed {
+  say "Leashed."
+} else {
+  showImage "free.jpg"
+}
+exit

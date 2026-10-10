@@ -1,0 +1,23 @@
+def seen = new Boolean[3]
+seen[1] = true
+if (!seen[0]) show("First time")
+def notes = new Object[2]
+notes[0] = "Kneel"
+show("Count " + notes.size())
+// Integer arrays truncated written values; character arrays have no list equivalent.
+def counts = new int[2]
+counts[0] += 1
+// A number stored in an element is cut to a whole number, as the Integer[] did.
+counts[1] = counts[0] + 2.5
+show("Counts " + counts[1])
+def letters = new char[2]
+// The texts split() gives are a Java String[], which kept a number written into it as its text (MandysBlackmail).
+def review = { key ->
+  def record = loadString(key)
+  if (record == null) record = "20,1,Mandy"
+  def parts = record.split(",")
+  if (parts[0] == "20") parts[0] = (parts.size() - 6)
+  if (parts[1] == "null") parts[1] = 0
+  show("Progress " + parts[0])
+}
+review("mandy.record")

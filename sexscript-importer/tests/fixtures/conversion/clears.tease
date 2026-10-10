@@ -1,0 +1,7 @@
+// show("") only cleared the legacy text area, and an empty or blank image path cleared the picture.
+showImage "room.jpg"
+say "Look at me"
+hideImage
+hideImage
+say "Gone"
+exit

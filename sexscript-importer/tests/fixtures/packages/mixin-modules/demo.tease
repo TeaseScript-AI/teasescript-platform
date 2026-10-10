@@ -1,0 +1,85 @@
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "pauseCycle" {
+    if args.length >= 2 {
+      pauseCycle(args[0], args[1])
+      return
+    }
+    pauseCycle(args[0])
+    return
+  }
+}
+function sexscriptLegacyRandom(limit) {
+  if limit == null {
+    return randomInteger(0..100)
+  }
+  let bound = limit - limit % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
+function loadGreetingModule {
+  // A module variable with the name of an object field stays separate from it.
+}
+let roundsInGreeting = 10
+function loadLaterModule {
+  // Loaded after greeting.groovy, so this greet replaces the earlier one.
+  // A module reads the loading script's field as a number.
+}
+function greet {
+  say "Hello again"
+  pause()
+}
+function report {
+  say "Took ${reaction + 1} seconds"
+}
+function setupLaterModule(times = 2) {
+  say "Setup ${times}"
+}
+// NOTE SX_BINDING_VARIABLE: Groovy kept lastPause, which functions assign without a declaration, in the script's binding that every function shares; it is declared here, before the script first uses it, with an empty value.
+let lastPause = 0
+function loadPauseModule {
+  // A variable that the module's methods assign without a declaration lives in the module's binding.
+  // Returning nothing on every path keeps the module's result fixed.
+  if not enabled {
+    return null
+  }
+  say "Pausing enabled"
+}
+function pause {
+  lastPause = sexscriptLegacyRandom(rounds - 2) + 1
+  wait lastPause s
+  stopAudio
+}
+// NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
+let DATAFOLDER = ""
+function loadModules {
+  // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 3 modules in file-name order, the order Windows lists them.
+  loadGreetingModule()
+  loadLaterModule()
+  return loadPauseModule()
+}
+let rounds = 2
+let enabled = false
+// A field that a module reads keeps the button's seconds.
+let reaction: number = 0
+function pauseCycle(delay, cycleValue = 60) {
+  wait (delay / cycleValue) s
+}
+loadModules()
+setupLaterModule()
+greet()
+let cycle = "pauseCycle"
+sexscriptLegacyCall(cycle, [120])
+say "Rounds: ${rounds}"
+reaction = (showButton "Go") / 1 s
+if reaction < 15 {
+  say "Quick"
+}
+report()
+say "Bye"
+exit

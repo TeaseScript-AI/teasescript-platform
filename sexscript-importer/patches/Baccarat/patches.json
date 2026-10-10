@@ -1,0 +1,32 @@
+{
+  "patches": [
+    {
+      "id": "swimsuit-image-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The shared clothing-image helper returns \"swipsuitF.png\" for a female swimsuit; the package ships images/Bclothes/swimsuitF.png, and the male entries next to it (speedosM.png, shortsM.png) are spelled correctly. Fix the misspelled file name.",
+      "diff": "swimsuit-image-name.diff"
+    },
+    {
+      "id": "deck-folders",
+      "layer": "source",
+      "category": "b",
+      "reason": "ChooseDeck listed the subfolders of images/Bcards with eachFile and isDirectory() to offer the card decks; TeaseScript cannot list folders, and the folder-listing rule only finds images by their folder's tag. DeckNames is the list of the deck folders the package holds.",
+      "diff": "deck-folders.diff"
+    },
+    {
+      "id": "obey-rules-default",
+      "layer": "source",
+      "category": "e",
+      "reason": "Settings the rules menu turns off and saves come back on at the next start: they are read as loadBoolean(key) ?: true, and Groovy elvis treats a saved false like a missing value. Read the saved value, and take true only where nothing is saved.",
+      "diff": "obey-rules-default.diff"
+    },
+    {
+      "id": "bikini-decks",
+      "layer": "source",
+      "category": "e",
+      "reason": "Two author errors. The female bikini top image is chosen when the clothes name contains \"bikini\" and no \"top\", so \"bikini top\" fell through to the bikini bottom image: test that the name contains \"top\". Chemin de fer accepts 0 or fewer decks and saves them under Baccarat.NoDecks, which both scripts read, so every later deal of either script failed on an empty shoe: replace them with six, as Baccarat.groovy does at the same question.",
+      "diff": "bikini-decks.diff"
+    }
+  ]
+}

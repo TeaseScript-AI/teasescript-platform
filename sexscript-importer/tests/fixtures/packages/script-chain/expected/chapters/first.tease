@@ -1,0 +1,8 @@
+save "chapters/last" as "chapter.after"
+say "Chapter one."
+let progress: integer | string | null = load "story.progress", default: null
+if progress == null {
+  say "Not started."
+}
+// The next script starts with the same text and button, which the legacy display showed once.
+goto "chapters/second.tease"

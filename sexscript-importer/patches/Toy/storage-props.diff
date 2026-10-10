@@ -1,0 +1,27 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -103,8 +103,9 @@
+ 		return Math.floorDiv(getTime() - localTimeOffset() - (4 * (int)HOUR), DAY)
+ 	}
+ 
+-	public <T> T getProp(String i, java.util.function.Function<String, T> f, T d = null) {
+-		final T v = f.apply("toy.$i".toString());
++	def getProp(String i, String f, d = null) {
++		final v = load("toy.$i".toString());
++		if (v != null && f == loadS) return v.toString();
+ 		if (v == null) return d;
+ 		return v;
+ 	}
+@@ -118,9 +119,9 @@
+ 
+ 	String dommeTitle() { getDommeProp("title", "Mistress") }
+ 	String dommeName() { getDommeProp("name", "") }
+-	final java.util.function.Function<String, Boolean> loadB = this.&loadBoolean;
+-	final java.util.function.Function<String, Integer> loadI = this.&loadInteger;
+-	final java.util.function.Function<String, String> loadS = this.&loadString;
++	final loadB = "loadBoolean";
++	final loadI = "loadInteger";
++	final loadS = "loadString";
+ 	void setProp(String i, Object v) { save("toy.$i".toString(), v) }
+ 	boolean has(String i) { loadBoolean("toys.$i") == true }
+ 	boolean likes(String i) { loadBoolean("fetish.$i") == true }

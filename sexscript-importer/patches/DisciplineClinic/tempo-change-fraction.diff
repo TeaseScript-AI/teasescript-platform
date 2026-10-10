@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -531,7 +531,7 @@
+ def severity = 1
+ def spankTempo = 1	//the time between the smacks
+ def tempoChange = false
+-def numTempoChangeStrokes = 0
++def numTempoChangeStrokes = 0.0
+ def anticipationPercent = 15
+ def longAnticipate = false
+ def positionsArray = [" "]

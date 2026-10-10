@@ -1,0 +1,122 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyListPart(value) {
+  if value is list {
+    return value
+  }
+  return [value]
+}
+function sexscriptLegacyDateFromText(textValue, separator, year, monthValue, day) {
+  let parts = textValue.split(separator)
+  return toDateTime(toDate("${parts[year].padStart(4, "0")}-${parts[monthValue].padStart(2, "0")}-${parts[day].padStart(2, "0")}"), toTime("00:00"))
+}
+function sexscriptLegacyRepeatList(items, times) {
+  let result = []
+  let roundValue = 0
+  while roundValue < times {
+    result += items
+    roundValue += 1
+  }
+  return result
+}
+let text = "Start"
+text += " and more"
+let menu = ["Back"]
+let extra = ["One", "Two"]
+menu = ["Back"] + extra + ["Last"]
+menu += extra
+menu.add("Tail")
+let n = 1
+n += 2
+let dateValue = getDateTime()
+let month = dateValue.month
+let hour = getDateTime().hour
+let dow = getDateTime().weekdayNumber % 7 + 1
+let dayOfYear = (getDate() - toDate("${getDate().year}-01-01")).days + 1
+let sameDay = (toDate(dateValue) - toDate("${toDate(dateValue).year}-01-01")).days + 1
+// NOTE SX_ROUNDING_TIES line 16: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
+let days = round(n / 2)
+// NOTE SX_SYSTEM_EXIT line 17: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
+if hour > 22 {
+  exit
+}
+// Java date patterns: the ISO date is a machine format, other patterns are shown in the player's local form.
+let stamp = getDate().toISO()
+// NOTE SX_DATE_FORMAT line 20: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear} ${sameDay}"
+// A pattern of number fields that is no whole date or time is written from the fields as Java wrote them.
+let today = "${toString(getDateTime().day).padStart(2, "0")}/${toString(getDateTime().month).padStart(2, "0")}"
+if today == "24/12" {
+  say "Merry Christmas"
+}
+// A date built from Unix seconds is the current moment minus the seconds since then, shown in the local date form.
+let lockedSince = load "training.lockedSince", default: 1790000000
+// NOTE SX_DATE_FROM_SECONDS line 27: Workaround: TeaseScript builds no absoluteDateTime from a Unix number (#532), so the moment is the current absoluteDateTime minus the seconds since then; Java's pattern "dd, MMM, yyyy" becomes the player's local date form.
+say "Locked since ${(getAbsoluteDateTime() - (getAbsoluteDateTime().toSeconds() - toInteger(lockedSince)) * 1 s).formatDate()}"
+// A list + a value that may be a list or one element appends at runtime what Groovy appended.
+function pickAll(impl) {
+  return ([] + sexscriptLegacyListPart(impl)).length
+}
+say "Picked ${pickAll(["paddle", "cane"])} ${pickAll("belt")}"
+// Groovy text * n and list * n repeat the text or the list's elements, a fractional n cut to whole times.
+let chant = sexscriptLegacyRepeatList(["toy"], 2) + ["pet"]
+let laughs = 2.5
+// NOTE SX_LIST_JOIN line 34: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "${chant.join(" ")} ${"ha".repeat(toInteger(laughs))}"
+// The sum of a list that may be empty adds up in a whole number, and is null without elements, as Groovy's was.
+let dayCount = askInteger "How many days?", prefill: 0
+let collectResult = []
+for day in 0..dayCount {
+  collectResult.add(day * 2)
+}
+let sumTotal = 0
+for item in collectResult {
+  sumTotal += item
+}
+let total: integer? = sumTotal
+if collectResult.length == 0 {
+  total = null
+}
+say "Total ${total}"
+// A Date's format(pattern) shows a time or date in the player's local form, and number fields exactly (Farkel's denial).
+let denialEnd = getDateTime()
+denialEnd = (denialEnd.toAbsoluteDateTime() + 30 * 1 min).toDateTime()
+let until = denialEnd
+// NOTE SX_DATE_FORMAT line 43: Java formatted this date with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "Wait until ${until.formatTime()} ${toString(until.day).padStart(2, "0")}/${toString(until.month).padStart(2, "0")}"
+// A formatter in a variable writes a date the script saves or parses again exactly, and parses it back, as jewell counts
+// the days since it last ran.
+let dayFormat = "y/M/d"
+let lastRun = load "game.lastRun", default: ""
+let thisRun = "${getDateTime().year}/${getDateTime().month}/${getDateTime().day}"
+save thisRun as "game.lastRun"
+// NOTE SX_DATE_PARSE line 50: Java's lenient parse of the pattern "y/M/d" also read a day or month past its end, which it carried into the next, a year of one or two digits in the current century, and spaces or text after the date; the conversion reads the date the pattern writes, and stops the script on other text or reads another year.
+if lastRun != "" and (toDate(sexscriptLegacyDateFromText(thisRun, "/", 0, 1, 2)) - toDate(sexscriptLegacyDateFromText(lastRun, "/", 0, 1, 2))).days > 2 {
+  say "You stayed away too long."
+}
+// So is a text the script saves through a copy of it.
+let savedDay = "${getDateTime().year}-${getDateTime().month}-${getDateTime().day}"
+let savedCopy = savedDay
+save savedCopy as "game.savedDay"
+// A Date the script moves by days stays a Date: its month counts from 0, and `date` is its day of the month.
+let tomorrow = getDateTime()
+tomorrow += 1 * 1 calendar day
+if tomorrow.month == 10 and tomorrow.day == 31 {
+  say "Halloween tomorrow"
+}
+// A conditional of the moved Date or a text holds either.
+let visible = randomInteger(0..2) == 0
+let counted = randomInteger(0..2) == 0
+// NOTE SX_UNION_TYPE line 62: Groovy let 'conditional' hold values of several types; TeaseScript declares it 'string | datetime' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if conditional is string { ... }
+let conditional: string | datetime = "?"
+if visible {
+  conditional = tomorrow + 2 * 1 calendar day
+}
+// NOTE SX_UNION_TYPE line 62: Groovy let 'conditional2' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if conditional2 is string { ... }
+let conditional2: string | integer = "some"
+if counted {
+  conditional2 = 2
+}
+say "Until ${conditional}, ${conditional2} days"
+exit

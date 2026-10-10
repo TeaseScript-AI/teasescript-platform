@@ -1,0 +1,10 @@
+--- a/scripts/Domme3/settings.groovy
++++ b/scripts/Domme3/settings.groovy
+@@ -12,6 +12,7 @@
+ 
+ def gender = "boy"
+ if(loadBoolean("intro.female")) gender = "girl"
++def DAY = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
+ def endReached = false
+ 
+ // Find how many complete Domme image packs are installed

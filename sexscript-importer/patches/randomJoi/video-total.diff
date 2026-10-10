@@ -1,0 +1,11 @@
+--- a/scripts/randomJoi.groovy
++++ b/scripts/randomJoi.groovy
+@@ -18,7 +18,7 @@
+ show( "Follow the instruction Bitch. Are you ready to goon?" );
+ showButton( "Ready" );
+ 
+-def videoTotal = 239 //please change this nummer when you add a link it must be always the last video number + 1
++def videoTotal = 240 //please change this nummer when you add a link it must be always the last video number + 1
+ def video = getRandom( videoTotal );
+ 
+ if ( video == 0 ) {
