@@ -100,6 +100,8 @@ interface PlayerState {
   foreground: string | null;
   site: string | null;
   delayMs: number | null;
+  /** The time left before the interaction's own time limit ends it, or null. */
+  deadlineMs: number | null;
   options: string[];
   composer: { type: string; mode: string } | null;
   file: string | null;
@@ -253,10 +255,13 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       (text) => parsePlayCheck(JSON.parse(text)),
       () => null,
     );
-    // A parked package is tried again when the step limit rises.
+    // A package whose runs ended at the step limit, parked or taken for a loop, is tried again when the limit rises.
+    const limited =
+      last !== null &&
+      last.runs.some((item) => item.stop.kind === "parked" || item.stop.kind === "loops");
     if (
       last?.contentHash === packageContentHash(sources) &&
-      !(last.verdict === "parked" && last.stepLimit < Number(values.steps))
+      !(limited && last.stepLimit < Number(values.steps))
     )
       return null;
   }
@@ -285,7 +290,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     // Each prompt the run answered, by place and options, to tell a long tease from a loop.
     const prompts: Prompt[] = [];
     // The run's answers and steps so far, which a run that ends by a time limit or a failure of the runner keeps.
-    const progress: Progress = { taken: [], steps: 0 };
+    const progress: Progress = { taken: [], steps: 0, stopped: false };
     const screenshot = `run-${run + 1}.png`;
     let page: Page | null = null;
     try {
@@ -293,6 +298,8 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       const opened = page;
       const timedOut = new Promise<RunResult>((resolve) => {
         timer = setTimeout(() => {
+          // A run that already chose its stop finishes with it; the time limit does not replace it.
+          if (progress.stopped) return;
           void opened
             .screenshot({ path: path.join(outFolder, screenshot), timeout: 5_000 })
             .then(
@@ -506,6 +513,8 @@ async function playOnce(
       code: null,
     },
   ): Promise<RunResult> => {
+    track.progress.stopped = true;
+    track.progress.steps = steps;
     const screenshot = `run-${run + 1}.png`;
     const shot = await page
       .screenshot({ path: path.join(outFolder, screenshot), timeout: 10_000 })
@@ -522,6 +531,18 @@ async function playOnce(
       lastText: state.lastText,
       screenshot: shot,
     };
+  };
+  // How a session that failed ended, with its runtime failure.
+  const failed = (step: number): Promise<RunResult> => {
+    const failure = state.failure;
+    return finish(
+      "error",
+      failure === null
+        ? "the session failed"
+        : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
+      step,
+      failure === null ? undefined : { file: failure.path, line: failure.line, code: failure.code },
+    );
   };
   // How a session that halted ended.
   const halted = (step: number): Promise<RunResult> => {
@@ -547,21 +568,32 @@ async function playOnce(
   // Answers whose control could not be used, in a row: the state is read again, as the session may have moved on.
   let missed = 0;
   let step = 0;
+  // The end of a session that ended or failed while the runner could not act, read afresh; else null.
+  const ended = async (): Promise<RunResult | null> => {
+    state = await readState(page).catch(() => state);
+    if (state.status === "halted") return halted(step);
+    if (state.status === "failed" || state.failure !== null) return failed(step);
+    return null;
+  };
   // Runs one answer; one whose control cannot be used is tried again after the state is read again.
   const answer = async (what: string, act: () => Promise<void>): Promise<RunResult | null> => {
     try {
       await act();
       missed = 0;
       step += 1;
+      track.progress.steps = step;
       return null;
     } catch (error) {
       missed += 1;
       taken.pop();
       if (missed < 4) return null;
-      return finish(
-        "harness",
-        `${what} could not be answered: ${error instanceof Error ? error.message.split("\n")[0]! : String(error)}`,
-        step,
+      return (
+        (await ended()) ??
+        finish(
+          "harness",
+          `${what} could not be answered: ${error instanceof Error ? error.message.split("\n")[0]! : String(error)}`,
+          step,
+        )
       );
     }
   };
@@ -572,19 +604,7 @@ async function playOnce(
       track.seen(state);
       if (state.file !== null) files.add(state.file);
       if (state.status === "halted") return await halted(step);
-      if (state.status === "failed" || state.failure !== null) {
-        const failure = state.failure;
-        return await finish(
-          "error",
-          failure === null
-            ? "the session failed"
-            : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
-          step,
-          failure === null
-            ? undefined
-            : { file: failure.path, line: failure.line, code: failure.code },
-        );
-      }
+      if (state.status === "failed" || state.failure !== null) return await failed(step);
       if (pageErrors.length > 0) return await finish("error", `page error: ${pageErrors[0]}`, step);
       if (state.progress === lastProgress) unchanged += 1;
       else {
@@ -624,20 +644,37 @@ async function playOnce(
           key === repeated.key
             ? { ...repeated, count: repeated.count + 1 }
             : { key, count: 1, waits: 0 };
+        // A wait must end before the prompt's own time limit, which would end the prompt instead of answering it.
+        const fits = (seconds: number): boolean =>
+          state.deadlineMs === null || seconds * 1_000 < state.deadlineMs;
+        let waited = false;
         if (
           repeated.count >= 3 &&
           repeated.waits < WAIT_STEPS_S.length &&
           (state.options.length > 0 || state.composer !== null)
         ) {
           const seconds = WAIT_STEPS_S[repeated.waits]!;
-          if (await pass(seconds)) taken.push(`[waited ${seconds} s]`);
+          if (fits(seconds) && (await pass(seconds))) {
+            taken.push(`[waited ${seconds} s]`);
+            waited = true;
+          }
           repeated = { key, count: 0, waits: repeated.waits + 1 };
         }
         // A button whose press the script times, or after a text that asks for a minimum time, is pressed after it.
         const minimum =
           kind === "button" ? buttonWait(state.recentText, track.timed.has(site)) : null;
-        if (minimum !== null && missed === 0 && (await pass(minimum)))
+        if (minimum !== null && missed === 0 && fits(minimum) && (await pass(minimum))) {
           taken.push(`[waited ${minimum} s]`);
+          waited = true;
+        }
+        // After time passed, the prompt may have changed; the next pass answers what is there now.
+        if (waited) {
+          const now = await readState(page);
+          if (now.site !== site || now.foreground !== state.foreground) {
+            await idle(300);
+            continue;
+          }
+        }
         let stopped: RunResult | null = null;
         if ((kind === "button" || kind === "choice") && state.options.length > 0) {
           const counts = track.tries.get(site) ?? new Array<number>(state.options.length).fill(0);
@@ -734,13 +771,14 @@ async function playOnce(
       }
     }
   } catch (error) {
-    // A step the runner could not take: the session may have ended meanwhile, which is then its result.
-    state = await readState(page).catch(() => state);
-    if (state.status === "halted") return await halted(step);
-    return await finish(
-      "harness",
-      error instanceof Error ? error.message.split("\n")[0]! : String(error),
-      step,
+    // A step the runner could not take: the session may have ended or failed meanwhile, which is then its result.
+    return (
+      (await ended()) ??
+      (await finish(
+        "harness",
+        error instanceof Error ? error.message.split("\n")[0]! : String(error),
+        step,
+      ))
     );
   }
   track.progress.steps = step;
@@ -754,10 +792,11 @@ interface Prompt {
   readonly text: string;
 }
 
-/** A run's answers and steps so far. */
+/** A run's answers and steps so far, and whether it chose its stop. */
 interface Progress {
   readonly taken: string[];
   steps: number;
+  stopped: boolean;
 }
 
 /**
@@ -824,9 +863,9 @@ function quotedAnswer(text: string): string | undefined {
 
 /**
  * An answer in the format that a prompt asks for, different on each visit `n`, or null: a cell in a range such as
- * "(A1 to G7)"; a number of "N digits", all different and without a leading 0 where the prompt rules that out; on an
- * optional field nothing every other visit; a URL; or, where the prompt names a number "to quit", one of the numbers it
- * names, so that the quit comes within a few visits.
+ * "(A1 to G7)", row by row; "N digits", from a range the prompt names, all different and without a leading 0 where the
+ * prompt rules that out; a URL; or, where the prompt names a number "to quit", one of the numbers it names, so that the
+ * quit comes within a few visits. An empty answer is never one, as the Player does not take it.
  */
 export function formatAnswer(text: string, n: number): string | null {
   const cells = /\b([A-Z])(\d{1,2})\s*(?:to|-|–)\s*([A-Z])(\d{1,2})\b/u.exec(text);
@@ -843,29 +882,37 @@ export function formatAnswer(text: string, n: number): string | null {
     }
   }
   const digits =
-    /\b(?:is|exactly|has|have|a|of|enter|input)\s+(\d{1,2})[\s-]*digits?\b/iu.exec(text) ??
+    /(?:\b(?:is|exactly|has|have|a|of|enter|input)|:)\s+(\d{1,2})[\s-]*digits?\b/iu.exec(text) ??
     /\b(\d{1,2})-digit\b/iu.exec(text);
   if (digits !== null) {
     const length = Number(digits[1]);
-    const noZero = /(?:begin|start)s?\s+with\s+(?:a\s+)?(?:0|zero)/iu.test(text);
+    const noZero =
+      /(?:begin|start)s?\s+with\s+(?:a\s+)?(?:0|zero)|first digit (?:cannot|can't|may not|must not) be (?:0|zero)/iu.test(
+        text,
+      );
+    // Digits differ only where the prompt rules out repeated ones.
+    const distinct = /repeat|different|unique|same digit/iu.test(text);
     // Digits that the prompt names a range of, "buttons are labeled 1 through 6", come from that range.
     const range = /\b(\d)\s*(?:through|to|-|–)\s*(\d)\b/u.exec(text);
     const [low, high] = range === null ? [0, 9] : [Number(range[1]), Number(range[2])];
     const choices = Array.from({ length: Math.max(0, high - low + 1) }, (_, index) =>
       String(low + index),
     );
-    if (length > 0 && length <= choices.length) {
-      // Different digits fit a rule against repeated ones too.
+    if (length > 0 && choices.length > 0 && (!distinct || length <= choices.length)) {
       let answer = "";
-      for (let index = 0; answer.length < length && index < 2 * choices.length; index += 1) {
+      for (
+        let index = 0;
+        answer.length < length && index < length + 2 * choices.length;
+        index += 1
+      ) {
         const digit = choices[(n + index) % choices.length]!;
-        if ((answer === "" && noZero && digit === "0") || answer.includes(digit)) continue;
+        if ((answer === "" && noZero && digit === "0") || (distinct && answer.includes(digit)))
+          continue;
         answer += digit;
       }
       if (answer.length === length) return answer;
     }
   }
-  if (/\(optional\)/iu.test(text) && n % 2 === 0) return "";
   if (/\burl\b|web\s*address/iu.test(text)) return "http://example.com/";
   if (/\b\d+\s+to\s+(?:quit|exit|stop|end)\b/iu.test(text)) {
     const named = [...new Set([...text.matchAll(/\b\d+\b/gu)].map((match) => match[0]))];
@@ -892,18 +939,16 @@ function buttonWait(text: string, timed: boolean): number | null {
 
 /**
  * The buttons, `file:line`, whose press a script times: the line that shows the button, or one of the two after it,
- * reads the clock, or the button's elapsed time is used as a value. A button with a timeout is left out, as waiting
- * would let it expire.
+ * reads the clock. A button with a timeout on those lines is left out, as waiting would let it expire.
  */
 function timedButtons(sources: ReadonlyArray<{ path: string; source: string }>): Set<string> {
   const sites = new Set<string>();
   for (const { path: file, source } of sources) {
     const lines = source.split("\n");
     lines.forEach((line, index) => {
-      if (!/\bshowButton\b/u.test(line) || /\btimeout:/u.test(line)) return;
       const following = [line, ...lines.slice(index + 1, index + 3)].join("\n");
-      if (/getAbsoluteDateTime\(|\(showButton\b[^)]*\)\s*\/|=\s*showButton\b/u.test(following))
-        sites.add(`${file}:${index + 1}`);
+      if (!/\bshowButton\b/u.test(line) || /\btimeout:/u.test(following)) return;
+      if (/getAbsoluteDateTime\(/u.test(following)) sites.add(`${file}:${index + 1}`);
     });
   }
   return sites;
@@ -990,6 +1035,10 @@ function readState(page: Page): Promise<PlayerState> {
       site,
       delayMs:
         action?.kind === "delay" && action.deadlineMs !== undefined && view !== undefined
+          ? action.deadlineMs - view.currentSessionTimeMs
+          : null,
+      deadlineMs:
+        action?.kind === "interaction" && action.deadlineMs !== undefined && view !== undefined
           ? action.deadlineMs - view.currentSessionTimeMs
           : null,
       options: [...document.querySelectorAll("[data-foreground-controls] button")].map(
