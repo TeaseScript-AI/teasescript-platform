@@ -32,7 +32,7 @@
       "id": "counted-appends",
       "layer": "source",
       "category": "b",
-      "reason": "startcorner writes cornerlist[ncornerlist] twice and stay[nstay] once, where the counter is always the list's length (newdeck and joindeck return exactly the counted entries), which appended in Groovy; a TeaseScript list writes only positions it has (TSR025 at the start), so these writes append.",
+      "reason": "startcorner writes cornerlist[ncornerlist] twice and inithost writes stay[nstay] once, where the counter is always the list's length (newdeck and joindeck return exactly the counted entries), which appended in Groovy; a TeaseScript list writes only positions it has (TSR025 at the start), so these writes append.",
       "diff": "counted-appends.diff"
     },
     {

@@ -18,7 +18,7 @@
       "id": "sld-map-without-gaps",
       "layer": "source",
       "category": "b",
-      "reason": "SlideLadderDare, as in the SlideLadderDare unit: The board setup writes `map` from position 1 on and sets `map[0]=0` only afterwards, and the end squares at `map[nmap+i]`, so Groovy's list grew with a null at position 0 until then; the list is therefore typed as holding null, and every later `map[i]` read needs a null test that the moves never make (22 compile errors). `map` is empty when the setup starts, the shuffled blocks hold exactly `nblock` squares each and `imap` ends at `nmap`, so setting `map[0]` first and appending each square in turn builds the same list; a Groovy run gives identical maps for every board size from 30 to 2000.",
+      "reason": "SlideLadderDare, as in the SlideLadderDare unit: The board setup writes `map` from position 1 on and sets `map[0]=0` only afterwards, and the end squares at `map[nmap+i]`, so Groovy's list grew with a null at position 0 until then; the list is therefore typed as holding null, and 22 later numeric reads from `map` are not proven non-null by TeaseScript. `map` is empty when the setup starts, the shuffled blocks hold exactly `nblock` squares each and `imap` ends at `nmap`, so setting `map[0]` first and appending each square in turn builds the same list; a Groovy run gives identical maps for every board size from 30 to 2000.",
       "diff": "sld-map-without-gaps.diff"
     },
     {
