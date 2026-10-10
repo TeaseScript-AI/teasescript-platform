@@ -128,3 +128,7 @@ while (sampleSlowly() < slowEnd) show("Slow")
 def copiedNow = { -> def first = getTime(); def second = first; return second }
 def copiedEnd = copiedNow() + 1
 while (copiedNow() < copiedEnd) show("Copied")
+// A copy taken before its variable is set from the clock holds no clock, so this loop only counts.
+def copiedEarly = { -> def first = 3; def second = first; first = getTime(); return second }
+def early = 0
+while (copiedEarly() > 0 && early < 3) { show("Early"); early++ }

@@ -28,15 +28,10 @@ export function withClockLoopTicks(
   for (const statement of [...allHelperStatements(), ...statements])
     if (statement.kind === "function") functions.set(statement.name, statement.body);
   // The functions whose results the clock gives, also through a local set from it: `def now = { -> getTime() }`.
-  const clockFunctions = fixedPoint(functions, (body, found) => {
-    const locals = clockVariables(body, found);
-    return some(
-      body,
-      (node) =>
-        node.kind === "return" &&
-        (readsClock(node.value, found) || [...locals].some((name) => reads(node.value, name))),
-    );
-  });
+  const clockFunctions = fixedPoint(
+    functions,
+    (body, found) => clockValues(body, found, "function").returns,
+  );
   // The functions whose calls may wait, also through others; a call of one the file does not define may.
   const mayWait = fixedPoint(functions, (body, found) =>
     some(body, (node) => mayWaitHere(node, found, functions)),
@@ -59,7 +54,7 @@ export function withClockLoopTicks(
     items.flatMap((item): IrStatement[] => {
       const nested = withNestedBlocks(item, block);
       if (nested.kind !== "while") return [nested];
-      const clocked = clockVariables(nested.body, clockFunctions);
+      const clocked = clockValues(nested.body, clockFunctions, "loop").held;
       if (
         !readsClock(nested.condition, clockFunctions) &&
         ![...clocked].some((name) => reads(nested.condition, name))
@@ -409,42 +404,82 @@ function inFrame(statements: IrStatement[], frame: string): IrStatement[] {
   });
 }
 
-/** The variables a loop or function body sets from the clock, also through another such variable (`b = a`). */
-function clockVariables(
+/**
+ * Where a clock value may be held, in assignment order: a variable holds one from a `let` or assignment whose value
+ * reads the clock or another variable that holds one (`b = a`), until it is set to something else. For a loop body,
+ * `held` is what a pass may end or continue with, over the passes; for a function body, `returns` whether a return
+ * may give a clock value.
+ */
+function clockValues(
   statements: readonly IrStatement[],
   clockFunctions: ReadonlySet<string>,
-): Set<string> {
-  const names = new Set<string>();
-  const fromClock = (value: IrExpression): boolean =>
-    readsClock(value, clockFunctions) || [...names].some((name) => reads(value, name));
-  const visit = (items: readonly IrStatement[]): boolean => {
-    let added = false;
+  as: "loop" | "function",
+): { held: Set<string>; returns: boolean } {
+  let returns = false;
+  const fromClock = (value: unknown, held: ReadonlySet<string>): boolean =>
+    readsClock(value, clockFunctions) || [...held].some((name) => reads(value, name));
+  type Jumps = { continued: Set<string>; broken: Set<string> };
+  // What the statements end with from what they start with, or null where they do not reach their end.
+  const walk = (
+    items: readonly IrStatement[],
+    before: ReadonlySet<string>,
+    jumps: Jumps,
+  ): Set<string> | null => {
+    let held: Set<string> | null = new Set(before);
     for (const item of items) {
+      if (held === null) break;
       const name =
         item.kind === "assign" && item.target.kind === "variable"
           ? item.target.name
           : item.kind === "let"
             ? item.name
             : null;
-      if (
-        name !== null &&
-        !names.has(name) &&
-        (item.kind === "assign" || item.kind === "let") &&
-        fromClock(item.value)
-      ) {
-        names.add(name);
-        added = true;
-      }
-      if (item.kind !== "function")
+      if (name !== null && (item.kind === "assign" || item.kind === "let")) {
+        const kept = item.kind === "assign" && item.operator !== "=" && held.has(name);
+        if (kept || fromClock(item.value, held)) held.add(name);
+        else held.delete(name);
+      } else if (item.kind === "return") {
+        if (fromClock(item.value, held)) returns = true;
+        held = null;
+      } else if (item.kind === "continue" || item.kind === "break") {
+        for (const value of held)
+          (item.kind === "continue" ? jumps.continued : jumps.broken).add(value);
+        held = null;
+      } else if (item.kind === "while" || item.kind === "repeat" || item.kind === "for") {
+        const passes = loop(item.body, held);
+        held = new Set([...passes.held, ...passes.broken]);
+      } else if (item.kind !== "function") {
+        // Each branch starts from the same values; what follows gets those of every branch that reaches its end.
+        const start: ReadonlySet<string> = held;
+        let branches = 0;
+        let after: Set<string> | null = null;
         withNestedBlocks(item, (body) => {
-          added = visit(body) || added;
+          branches += 1;
+          const end = walk(body, start, jumps);
+          if (end !== null) after = new Set([...(after ?? []), ...end]);
           return body;
         });
+        if (branches > 0) held = after;
+      }
     }
-    return added;
+    return held;
   };
-  while (visit(statements));
-  return names;
+  // A pass starts from what the passes before it left, until that no longer grows.
+  const loop = (
+    body: readonly IrStatement[],
+    before: ReadonlySet<string>,
+  ): { held: Set<string>; broken: Set<string> } => {
+    let start = new Set(before);
+    for (;;) {
+      const jumps: Jumps = { continued: new Set(), broken: new Set() };
+      const next = new Set([...start, ...(walk(body, start, jumps) ?? []), ...jumps.continued]);
+      if (next.size === start.size) return { held: next, broken: jumps.broken };
+      start = next;
+    }
+  };
+  if (as === "loop") return { held: loop(statements, new Set()).held, returns };
+  walk(statements, new Set(), { continued: new Set(), broken: new Set() });
+  return { held: new Set(), returns };
 }
 
 /** Whether a value reads the clock, directly or through a function that reads it (`clockFunctions`). */

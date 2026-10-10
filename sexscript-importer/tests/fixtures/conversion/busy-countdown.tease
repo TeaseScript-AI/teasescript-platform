@@ -281,4 +281,16 @@ while copiedNow() < copiedEnd {
     frame7.text = "Copied"
   }
 }
+// A copy taken before its variable is set from the clock holds no clock, so this loop only counts.
+function copiedEarly {
+  let first = 3
+  let second = first
+  first = getAbsoluteDateTime().toSeconds()
+  return second
+}
+let early = 0
+while copiedEarly() > 0 and early < 3 {
+  say "Early"
+  early += 1
+}
 exit
