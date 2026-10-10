@@ -1,0 +1,817 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -7382,7 +7382,6 @@
+ 				if(getBoolean("Quit to Menu. Are you sure?", "Yes", "No")) {
+ 					room = "quitmenu"
+ 					camped = false
+-					worldEnd("quitmenu")
+ 				}
+ 			} else if(campChoice==4)
+ 				showStatus()
+@@ -7443,7 +7442,7 @@
+ 				loadMusic()
+ 				titlemenu = false
+ 				loadingGame = false
+-				loadSavepoint()
++				return loadSavepoint()
+ 			}
+ 		}
+ 		else if(choice==4) {
+@@ -7633,7 +7632,7 @@
+ 	questTraining = 1
+ 	playMusic("town")
+ 	room = "town-guild"
+-	worldTown("town-guild")
++	return worldTown("town-guild")
+ 	break
+ 
+ default:
+@@ -7679,7 +7678,7 @@
+ 		skipTraining()
+ 	else if(locationChoice=="Skip Town") {
+ 		skipTown()
+-		worldWild("road-main")
++		return worldWild("road-main")
+ 	} else if(locationChoice=="Status")
+ 		showStatus()
+ 	break
+@@ -7706,7 +7705,7 @@
+ 			if(getBoolean("Quit to Menu. Are you sure?", "Yes", "No")) {
+ 				room = "quitmenu"
+ 				locationVisit = false
+-				worldEnd("quitmenu")
++				return worldEnd("quitmenu")
+ 			}
+ 		}
+ 		else if(locationChoice=="Status")
+@@ -7956,7 +7955,7 @@
+ 	else if(locationChoice=="Stables")
+ 		room = "town-stables"
+ 	else if(locationChoice=="Leave Town")
+-		worldWild("road-main")
++		return worldWild("road-main")
+ 	else if(locationChoice=="Status")
+ 		showStatus()
+ 	break
+@@ -8160,8 +8159,8 @@
+ 				cutsceneArrestedHouse()
+ 				sneakDetected = false
+ 				room = "arrested"
+-				worldEnd("arrested")
+ 				locationVisit = false
++				return worldEnd("arrested")
+ 			} else {
+ 				if(questRobHouse1==0) {
+ 					foundStolenGoods("You find a silver candlestick set that looks valuable.","low")
+@@ -8196,8 +8195,8 @@
+ 				cutsceneArrestedHouse()
+ 				sneakDetected = false
+ 				room = "arrested"
+-				worldEnd("arrested")
+ 				locationVisit = false
++				return worldEnd("arrested")
+ 			} else {
+ 				if(questRobHouse2==0) {
+ 					foundStolenGoods("You find some jewelry that looks valuable.","high")
+@@ -8232,8 +8231,8 @@
+ 				cutsceneArrestedHouse()
+ 				sneakDetected = false
+ 				room = "arrested"
+-				worldEnd("arrested")
+ 				locationVisit = false
++				return worldEnd("arrested")
+ 			} else {
+ 				if(questRobHouse3==0) {
+ 					foundStolenGoods("You find a small statue and an antique plate that both look valuable.", "medium")
+@@ -8257,7 +8256,7 @@
+ 		showButton("Continue")
+ 		encounterCheck()
+ 		if(gameOver)
+-			worldEnd("defeated")
++			return worldEnd("defeated")
+ 		else {
+ 			show("More enemies are coming!\n\nYou are forced to flee the temple.")
+ 			showButton("Escape")
+@@ -8315,7 +8314,7 @@
+ 		if(locationChoice=="Town") {
+ 			room = "town-gates"
+ 			locationVisit = false
+-			worldTown("town-gates")
++			return worldTown("town-gates")
+ 		}
+ 		else if(locationChoice=="Castle") {
+ 			locationDestination = "castle-exterior"
+@@ -8325,7 +8324,7 @@
+ 		else if(locationChoice=="Forest") {
+ 			room = "forest-a4"
+ 			locationVisit = false
+-			worldForest("forest-a4")
++			return worldForest("forest-a4")
+ 		}
+ 		else if(locationChoice=="Caves") {
+ 			room = "wild-mountains"
+@@ -8341,7 +8340,7 @@
+ //	ambushCheck()
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		room = locationDestination
+ 	}
+@@ -8374,7 +8373,7 @@
+ 		waveGuardsGate()
+ 	}
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		locationActions = ["Leave","Throne Room"]
+ 		locationVisit = true
+@@ -8412,7 +8411,7 @@
+ 		waveGuardsThrone()
+ 	}
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else if(questTraitor==4) {
+ 		locationActions = ["Exit","Status"]
+ 		locationVisit = true
+@@ -8452,7 +8451,7 @@
+ 	show("You journey into the mountains north of your village.")
+ 	showButton("Continue")
+ 	room = "cave-a3"
+-	worldCave("cave-a3")
++	return worldCave("cave-a3")
+ 	break
+ 
+ default:
+@@ -8491,7 +8490,7 @@
+ 			+"you've actually done it!")
+ 		exploring = false
+ 		room = "return-success"
+-		worldEnd("return-success")
++		return worldEnd("return-success")
+ 	} else {
+ 		if(getBoolean("You emerge from the cave entrance into the sunlight.\n\n"
+ 			+"What do you want to do?", "Enter","Leave")) {
+@@ -8500,7 +8499,7 @@
+ 		} else {
+ 			exploring = false
+ 			room = "road-main"
+-			worldWild("road-main")
++			return worldWild("road-main")
+ 		}
+ 	}
+ 	break
+@@ -8510,7 +8509,7 @@
+ 	area = "hot spring"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8539,7 +8538,7 @@
+ 	encounterCheck()
+ 	foundTreasure1()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8567,7 +8566,7 @@
+ 	area = "safe"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8597,7 +8596,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8626,7 +8625,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8656,7 +8655,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8686,7 +8685,7 @@
+ 	area = "bandit tunnel"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8715,7 +8714,7 @@
+ 	area = "golem guard"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8744,12 +8743,14 @@
+ 	area = "cavecamp"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		if(hasBedroll) {
+ 			if(getBoolean("You are inside a cave. There is an old campsite here."
+ 				+"\n\nDo you want to make camp here?", "Yes", "No")) {
+ 				makeCamp()
++				if(room=="quitmenu")
++					return worldEnd("quitmenu")
+ 			}
+ 		}
+ 		move = false
+@@ -8778,7 +8779,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8808,7 +8809,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8837,7 +8838,7 @@
+ 	area = "bandit tunnel"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8865,7 +8866,7 @@
+ 	area = "ruins"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8894,7 +8895,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8924,7 +8925,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8953,7 +8954,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -8982,7 +8983,7 @@
+ 	area = "bandit lair"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9010,7 +9011,7 @@
+ 	area = "ruins"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9039,7 +9040,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9073,7 +9074,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9102,7 +9103,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9132,7 +9133,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9161,7 +9162,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9191,7 +9192,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9220,7 +9221,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9249,7 +9250,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9278,7 +9279,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9307,7 +9308,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9336,7 +9337,7 @@
+ 	area = "witch coven"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9366,7 +9367,7 @@
+ 	encounterCheck()
+ 	foundTreasure2()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9394,7 +9395,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9424,7 +9425,7 @@
+ 	area = "cove"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9452,7 +9453,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9482,7 +9483,7 @@
+ 	encounterCheck()
+ 	foundAlchemyShrooms()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9510,7 +9511,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9538,7 +9539,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9572,7 +9573,7 @@
+ 	area = "slime pool"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9601,7 +9602,7 @@
+ 	area = "slime pool"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9631,7 +9632,7 @@
+ 	area = "slime pool"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9661,7 +9662,7 @@
+ 	area = "cave"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9690,7 +9691,7 @@
+ 	area = "harpy tunnel"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9723,7 +9724,7 @@
+ 	area = "slime spring"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9752,7 +9753,7 @@
+ 	encounterCheck()
+ 	foundTreasure3()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9780,7 +9781,7 @@
+ 	area = "harpy tunnel"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9811,7 +9812,7 @@
+ 	encounterCheck()
+ 	foundTreasure4()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9843,7 +9844,7 @@
+ 		encounterCheck()
+ 	}
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		locationActions = ["Exit"]
+ 		locationActions = locationActions + ["Status"]
+@@ -9895,7 +9896,7 @@
+ 			room = "road-main"
+ 			exploring = false
+ 			locationVisit = false
+-			worldWild("road-main")
++			return worldWild("road-main")
+ 		}
+ 	}
+ 	break
+@@ -9906,7 +9907,7 @@
+ 	encounterCheck()
+ 	foundAlchemyDust()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9934,7 +9935,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9963,7 +9964,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -9993,12 +9994,14 @@
+ 	area = "forestcamp"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		if(hasBedroll) {
+ 			if(getBoolean("You are in the forest. There is a campsite here."
+ 				+"\n\nDo you want to make camp here?", "Yes", "No")) {
+ 				makeCamp()
++				if(room=="quitmenu")
++					return worldEnd("quitmenu")
+ 			}
+ 		}
+ 		move = false
+@@ -10027,7 +10030,7 @@
+ 	area = "stone circle"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10055,7 +10058,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10085,7 +10088,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10114,7 +10117,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10145,7 +10148,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10175,7 +10178,7 @@
+ 	encounterCheck()
+ 	foundAlchemyFlowers()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10204,7 +10207,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10234,7 +10237,7 @@
+ 	area = "river"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10262,7 +10265,7 @@
+ 	area = "river"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10291,7 +10294,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10323,7 +10326,7 @@
+ 	encounterCheck()
+ 	foundAlchemyFerns()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10351,7 +10354,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10381,7 +10384,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10410,7 +10413,7 @@
+ 	area = "forest"
+ 	encounterCheck()
+ 	if(gameOver)
+-		worldEnd("defeated")
++		return worldEnd("defeated")
+ 	else {
+ 		move = false
+ 		while(!move) {
+@@ -10461,7 +10464,7 @@
+ 		showButton("Defend Yourself!")
+ 		encounterCheck()
+ 		if(gameOver)
+-			worldEnd("defeated")
++			return worldEnd("defeated")
+ 		else {
+ 			show("More enemies are coming!\n\nYou are forced to flee the village.")
+ 			showButton("Escape")
+@@ -10537,13 +10540,13 @@
+ 		area = "gameover"
+ 		show(null)
+ 		showButton("THE END")
+-		playerLost()
++		return playerLost()
+ 	} else {
+ 		showButton("Return to resting point")
+ 		healStats()
+ 		surrendered = false
+ 		gameOver = false
+-		loadSavepoint()
++		return loadSavepoint()
+ 	}
+ 	break
+ 
+@@ -10554,7 +10557,7 @@
+ 		+"\n\nUpon arrival back at the Adventurer's Guild, news of your attempted quest is already known.")
+ 	punishmentGuildmistress()
+ 	showButton("THE END")
+-	playerLost()
++	return playerLost()
+ 	break
+ 
+ case "return-success":
+@@ -10572,7 +10575,7 @@
+ 	showNarration("You have been thrown in the town dungeon as a thief.")
+ //	punishmentArrested()
+ 	showButton("THE END")
+-	playerLost()
++	return playerLost()
+ 	break
+ 
+ case "quitmenu":
+@@ -10581,7 +10584,7 @@
+ 	exploring = false
+ 	gameReset()
+ 	room = "title"
+-	worldStart("title")
++	return worldStart("title")
+ 	break
+ 
+ default:
