@@ -303,6 +303,11 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const left = inferType(asNode(node.left), environment);
   const right = inferType(asNode(node.right), environment);
   if (left === 0 || right === 0) return left | right;
+  // A side that so far holds only null: Groovy null + text is text and null + anything else failed, as did a number +
+  // null. Such a sum adds no other type, so a round of the fixed point in which a variable still holds only null, as
+  // `def total` before `total += each`, does not pin the result unknown.
+  if (left === NULL) return (right & STRING) !== 0 ? STRING : 0;
+  if (right === NULL && onlyOf(left, NUMBER | NULL)) return 0;
   // Groovy list + anything is list concatenation or append, even when the right side is a string.
   if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   // A number takes no list, so a list literal joins a left side that may be a list and is no text (Banjo's 0 start).
