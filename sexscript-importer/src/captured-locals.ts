@@ -507,21 +507,43 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
       typed(parameter) &&
       !TEXT_TYPES.has(parameter)
     );
-  const [declared] = declarations;
-  if (declarations.length !== 1 || declared === undefined || declared.nested) return false;
-  if (declared.node.multipleAssignment === true) return false;
-  const value = asNode(declared.node.right);
-  const left = asNode(declared.node.left);
-  const type = typeof left?.originType === "string" ? left.originType : "java.lang.Object";
-  if (value?.kind === "closure") return false;
-  if (type === "boolean") return false;
-  // A text without a value starts as the empty text, as the conversion starts such a local (liftLocal), except where the
-  // function tells null apart, which a local the conversion keeps as null shows.
-  if (value === null || isEmpty(value))
-    return ZERO_TYPES.has(type) || (TEXT_TYPES.has(type) && !nullTested(block, name));
-  // A text set to a computed value may be null where it is read after a call, as above.
-  if (TEXT_TYPES.has(type)) return literal(value);
-  return literal(value) || typed(type);
+  // Groovy lets a function declare a name again only in a block apart from the first, such as another `case`; each
+  // declaration then sets the one script variable where it stands (liftLocal), so they must agree on its type.
+  if (declarations.length === 0) return false;
+  const types = new Set(declarations.map(({ node }) => originType(node)));
+  if (types.size !== 1) return false;
+  return declarations.every(({ node, nested }) => {
+    if (nested || node.multipleAssignment === true) return false;
+    const value = asNode(node.right);
+    const type = originType(node);
+    if (value?.kind === "closure") return false;
+    if (type === "boolean") return false;
+    // A text without a value starts as the empty text, as the conversion starts such a local (liftLocal), except where
+    // the function tells null apart, which a local the conversion keeps as null shows.
+    if (value === null || isEmpty(value))
+      return ZERO_TYPES.has(type) || (TEXT_TYPES.has(type) && !nullTested(block, name));
+    // A text set to a computed value may be null where it is read after a call, as above.
+    if (TEXT_TYPES.has(type)) return literal(value);
+    if (typed(type)) return true;
+    // Untyped declarations agree where their values are constants of one kind.
+    return literal(value) && (declarations.length === 1 || constantKinds(declarations).size === 1);
+  });
+}
+
+/** The Groovy type a declaration gives its variable, `java.lang.Object` for `def`. */
+function originType(declaration: AstNode): string {
+  const left = asNode(declaration.left);
+  return typeof left?.originType === "string" ? left.originType : "java.lang.Object";
+}
+
+/** The kinds of the constant values that declarations give, `typeof` each constant, or `other`. */
+function constantKinds(declarations: ReadonlyArray<{ node: AstNode }>): Set<string> {
+  return new Set(
+    declarations.map(({ node }) => {
+      const value = asNode(node.right);
+      return value?.kind === "constant" ? typeof value.value : "other";
+    }),
+  );
 }
 
 /**

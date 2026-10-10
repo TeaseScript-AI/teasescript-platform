@@ -71,6 +71,31 @@ def choose = { ->
 }
 choose()
 choose()
+// A local that another block of its function declares again, such as another `case`, lifts where the declarations
+// agree on its type: each sets the one script variable where it stands (Farkel's Roxana challenge).
+def challenge = { String who ->
+	switch (who) {
+		case "a":
+			def mistakes = 0
+			def step = 0
+			def mistake = {
+				mistakes += 1
+				step = mistakes
+			}
+			mistake()
+			mistake()
+			show("Mistakes " + mistakes + " " + step)
+			break
+		case "b":
+			def mistakes = 5
+			mistakes++
+			show("Other " + mistakes)
+			break
+	}
+}
+challenge("a")
+challenge("b")
+challenge("a")
 // A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
 def tune = { ->
 	String note = "low"

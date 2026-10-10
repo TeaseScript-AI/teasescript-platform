@@ -100,11 +100,39 @@ function chooseValue {
 }
 chooseValue()
 chooseValue()
+// A local that another block of its function declares again, such as another `case`, lifts where the declarations
+// agree on its type: each sets the one script variable where it stands (Farkel's Roxana challenge).
+let challengeMistakes = 5
+let challengeStep = 0
+function mistakeCallback6(it = null) {
+  challengeMistakes += 1
+  challengeStep = challengeMistakes
+  return challengeStep
+}
+function challenge(who) {
+  switch who {
+    case "a" {
+      challengeMistakes = 0
+      challengeStep = 0
+      mistakeCallback6()
+      mistakeCallback6()
+      say "Mistakes ${challengeMistakes} ${challengeStep}"
+    }
+    case "b" {
+      challengeMistakes = 5
+      challengeMistakes += 1
+      say "Other ${challengeMistakes}"
+    }
+  }
+}
+challenge("a")
+challenge("b")
+challenge("a")
 // A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
 let tuneNote = "low"
 function tune {
   tuneNote = "low"
-  // TODO SX_CAPTURING_CLOSURE line 77: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // TODO SX_CAPTURING_CLOSURE line 102: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
   // | def raise = { -> note = note.unknownMethod() }
   let raise = null
   sexscriptLegacyCall(raise, [])
