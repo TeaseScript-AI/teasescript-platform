@@ -227,3 +227,10 @@ def recount = {
 	return amount
 }
 show(recount().intValue() + 1)
+// A typed declaration in another block is another variable, which does not type the binding the function returns.
+weight = "before"
+if (false) {
+	String weight = "nested"
+}
+def reweigh = { weight = 3; return weight }
+show(reweigh().intValue() + 1)

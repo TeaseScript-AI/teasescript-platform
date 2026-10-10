@@ -722,35 +722,39 @@ function enclosingTypedNames(body: AstNode): Map<AstNode, Set<string>> {
     if (node.kind === "closure") {
       result.set(node, new Set([...typed].flatMap(([name, isTyped]) => (isTyped ? [name] : []))));
       const own = new Map(typed);
-      for (const [name, isTyped] of ownDeclarations(node)) own.set(name, isTyped);
-      for (const child of astChildren(asNode(node.body))) visit(child, own);
+      for (const [name, isTyped] of parameterDeclarations(node)) own.set(name, isTyped);
+      visit(asNode(node.body) ?? node, own);
       return;
     }
-    for (const child of astChildren(node)) visit(child, typed);
+    // A block's own declarations are seen in it and in the blocks and closures within it.
+    const inner = node.kind === "block" ? new Map([...typed, ...blockDeclarations(node)]) : typed;
+    for (const child of astChildren(node)) visit(child, inner);
   };
-  visit(body, ownDeclarations(body));
+  visit(body, new Map());
   return result;
 }
 
-/**
- * The names a closure or the script declares in its own scope, outside the closures in it, and its parameters, each
- * with whether its declaration has a type.
- */
-function ownDeclarations(scope: AstNode): Map<string, boolean> {
+/** The parameters of a closure, each with whether it has a type. */
+function parameterDeclarations(closure: AstNode): Map<string, boolean> {
   const names = new Map<string, boolean>();
-  if (scope.kind === "closure")
-    for (const parameter of Array.isArray(scope.parameters) ? scope.parameters : [])
-      if (isRecord(parameter) && typeof parameter.name === "string")
-        names.set(parameter.name, hasDeclaredType(parameter.type));
-  const visit = (node: AstNode | null): void => {
-    if (node === null || node.kind === "closure") return;
-    const left = node.kind === "declaration" ? asNode(node.left) : null;
+  for (const parameter of Array.isArray(closure.parameters) ? closure.parameters : [])
+    if (isRecord(parameter) && typeof parameter.name === "string")
+      names.set(parameter.name, hasDeclaredType(parameter.type));
+  return names;
+}
+
+/** The names a block's own statements declare, each with whether its declaration has a type. */
+function blockDeclarations(block: AstNode): Map<string, boolean> {
+  const names = new Map<string, boolean>();
+  for (const statement of Array.isArray(block.statements) ? block.statements : []) {
+    const expression =
+      isAstNode(statement) && statement.kind === "expressionStatement"
+        ? asNode(statement.expression)
+        : null;
+    const left = expression?.kind === "declaration" ? asNode(expression.left) : null;
     const name = variableName(left);
     if (name !== null) names.set(name, hasDeclaredType(left?.originType));
-    for (const child of astChildren(node)) visit(child);
-  };
-  for (const child of astChildren(scope.kind === "closure" ? asNode(scope.body) : scope))
-    visit(child);
+  }
   return names;
 }
 
@@ -772,14 +776,19 @@ function closureReturnValues(closure: AstNode, outerTyped: ReadonlySet<string>):
   // value the variable holds elsewhere (trick_or_treat_poker's getRandomBetween). A variable declared with a type, in
   // the closure or around it, converts what it is set to (`String x = ""; x = 3` holds "3"), so its type stays the
   // result's.
-  const own = ownDeclarations(closure);
-  const typed = new Set([
-    ...[...own].flatMap(([name, isTyped]) => (isTyped ? [name] : [])),
-    ...[...outerTyped].filter((name) => !own.has(name)),
-  ]);
   const written = new Map<AstNode, AstNode>();
-  const markWrites = (node: AstNode): void => {
+  // Whether a name has a typed declaration where it is read: the innermost block of the closure that declares it, the
+  // closure's parameters, or the scopes around the closure.
+  const outer = new Map([...[...outerTyped].map((name): [string, boolean] => [name, true])]);
+  const markWrites = (node: AstNode, scope: ReadonlyMap<string, boolean>): void => {
     if (node.kind === "closure" && node !== closure) return;
+    const inner =
+      node === closure
+        ? new Map([...scope, ...parameterDeclarations(closure)])
+        : node.kind === "block"
+          ? new Map([...scope, ...blockDeclarations(node)])
+          : scope;
+    const typed = (name: string): boolean => inner.get(name) === true;
     if (node.kind === "block" && Array.isArray(node.statements)) {
       const statements = node.statements.filter(isAstNode);
       for (let index = 1; index < statements.length; index += 1) {
@@ -794,17 +803,17 @@ function closureReturnValues(closure: AstNode, outerTyped: ReadonlySet<string>):
           write.operator === "=" &&
           right !== null &&
           variableName(write.left) === variableName(value) &&
-          !typed.has(variableName(value) ?? "")
+          !typed(variableName(value) ?? "")
         )
           written.set(statements[index]!, right);
       }
     }
     for (const child of Object.values(node)) {
       for (const item of Array.isArray(child) ? child : [child])
-        if (isAstNode(item)) markWrites(item);
+        if (isAstNode(item)) markWrites(item, inner);
     }
   };
-  markWrites(closure);
+  markWrites(closure, outer);
   const visit = (node: AstNode): void => {
     if (node.kind === "closure") return;
     if (node.kind === "return") values.push(written.get(node) ?? asNode(node.value) ?? nullValue);

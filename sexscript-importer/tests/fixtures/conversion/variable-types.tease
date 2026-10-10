@@ -396,4 +396,15 @@ function recount {
 }
 // NOTE SX_INT_RANGE line 229: Java's intValue() dropped the bits of a whole number beyond the int range and capped a decimal number at it; toInteger() keeps the whole number.
 say toInteger(recount()) + 1
+// A typed declaration in another block is another variable, which does not type the binding the function returns.
+let weight = "before"
+if false {
+  let weightValue = "nested"
+}
+function reweigh {
+  weight = "3"
+  return weight
+}
+// NOTE SX_INT_RANGE line 236: Java's intValue() dropped the bits of a whole number beyond the int range and capped a decimal number at it; toInteger() keeps the whole number.
+say toInteger(reweigh()) + 1
 exit
