@@ -216,6 +216,8 @@ interface LowerContext {
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
   mixinModules: readonly MixinModuleInfo[];
+  /** Whether a mixin module shares the file's functions, which another file may then call (variable typing). */
+  sharesFunctions: boolean;
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
   /** Function lowered right now and its parameter/local names, for closure naming and capture checks. */
@@ -1652,6 +1654,7 @@ export function lowerParsedFile(
     copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
+    sharesFunctions: (options.mixinModules ?? []).length > 0,
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
@@ -1738,6 +1741,7 @@ export function lowerParsedFile(
 
   const rawBody = asNode(file.root.body);
   const mixin = rawBody === null ? null : desugarMixinModule(rawBody, file.sourceName);
+  if (mixin !== null) context.sharesFunctions = true;
   const desugared =
     mixin?.body ?? desugarObjectScript(rawBody, nodeArray(file.root.classes), context);
   let body = desugared;
@@ -2632,6 +2636,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const result = enforceVariableTypes(
     withFoldedListPicks(withLoopedTailCalls(statements)),
     helperResults,
+    !context.sharesFunctions,
   );
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
@@ -2904,6 +2909,7 @@ function lowerHelperMethod(
     copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
+    sharesFunctions: baseContext.sharesFunctions,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     resultUses: baseContext.resultUses,
     directoryFiles: baseContext.directoryFiles,
@@ -2979,7 +2985,11 @@ function lowerHelperMethod(
         method.span,
       );
     }
-    parameters.push({ name: parameterName, defaultValue });
+    parameters.push({
+      name: parameterName,
+      defaultValue,
+      ...(parameter.typed === true ? { typed: true as const } : {}),
+    });
   }
   return {
     kind: "function",
@@ -5247,6 +5257,7 @@ function lowerClosureDeclaration(
         name: record.name,
         defaultValue,
         ...(fractional ? { type: "number" } : {}),
+        ...(record.typed === true ? { typed: true as const } : {}),
       });
     }
   }

@@ -40,6 +40,8 @@ export interface ParsedGroovyFile {
 export interface GroovyParameter {
   name: string;
   defaultValue: AstNode | null;
+  /** Groovy declared the parameter's type, `int count`, rather than leaving it to `def`. */
+  typed?: true;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,7 +123,12 @@ export function groovyParameters(value: unknown): GroovyParameter[] | null {
   for (const item of value) {
     if (!isRecord(item) || typeof item.name !== "string") return null;
     const initial = item.initialExpression ?? item.default;
-    result.push({ name: item.name, defaultValue: isAstNode(initial) ? initial : null });
+    const typed = typeof item.type === "string" && !/^(java\.lang\.)?Object$/u.test(item.type);
+    result.push({
+      name: item.name,
+      defaultValue: isAstNode(initial) ? initial : null,
+      ...(typed ? { typed: true as const } : {}),
+    });
   }
   return result;
 }

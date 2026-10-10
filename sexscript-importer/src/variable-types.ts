@@ -154,7 +154,7 @@ function functionReturns(
   let results = new Map(knownResults);
   let returned = new Map<string, TeaseType[]>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings, results);
+    const analysis = analyse(statements, bindings, results, new Map(), false);
     // A known result stays where the analysis finds none of its own, such as a union it does not infer.
     const next = new Map(knownResults);
     for (const [name, type] of analysis.results)
@@ -282,6 +282,7 @@ interface Rounds {
 function runRounds(
   statements: IrStatement[],
   knownResults: ReadonlyMap<string, TeaseType>,
+  closedCalls: boolean,
 ): Rounds {
   const rounds: Rounds = {
     bindings: new Map(),
@@ -298,8 +299,9 @@ function runRounds(
     saved: new Map(),
   };
   let results = new Map(knownResults);
+  let parameters = new Map<IrFunctionParameter, TeaseType>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, rounds.bindings, results);
+    const analysis = analyse(statements, rounds.bindings, results, parameters, closedCalls);
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
     rounds.textAppends = analysis.textAppends;
@@ -316,7 +318,13 @@ function runRounds(
       next.size !== results.size ||
       [...next].some(([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN));
     results = next;
-    if (!analysis.changed && !resultsChanged) break;
+    const parametersChanged =
+      analysis.parameters.size !== parameters.size ||
+      [...analysis.parameters].some(
+        ([parameter, type]) => typeName(type) !== typeName(parameters.get(parameter) ?? UNKNOWN),
+      );
+    parameters = analysis.parameters;
+    if (!analysis.changed && !resultsChanged && !parametersChanged) break;
   }
   return rounds;
 }
@@ -325,8 +333,10 @@ export function enforceVariableTypes(
   statements: IrStatement[],
   /** Result types of functions defined elsewhere, such as the generated helpers. */
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+  /** Whether only this file calls its functions: no mixin module shares them (numberParameters). */
+  closedCalls = false,
 ): VariableTypeResult {
-  const accepted = runRounds(statements, knownResults);
+  const accepted = runRounds(statements, knownResults, closedCalls);
   const addedRecords = recordAdds(statements);
   const {
     bindings,
@@ -699,12 +709,16 @@ interface Analysis {
   loadDefaults: Set<IrStatement>;
   /** Saves under a key written as one literal, with the type of the value saved. */
   saved: Map<IrStatement, TeaseType>;
+  /** Parameters that the calls give numbers as of this round (numberParameters). */
+  parameters: Map<IrFunctionParameter, TeaseType>;
 }
 
 function analyse(
   statements: IrStatement[],
   bindings: Map<BindingKey, Binding>,
   results: ReadonlyMap<string, TeaseType>,
+  parameterTypes: ReadonlyMap<IrFunctionParameter, TeaseType>,
+  closedCalls: boolean,
 ): Analysis {
   const knownNull = knownNullCompares(statements);
   const analysis: Analysis = {
@@ -722,6 +736,7 @@ function analyse(
     unguarded: new Set(),
     loadDefaults: new Set(),
     saved: new Map(),
+    parameters: new Map(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
@@ -1102,8 +1117,22 @@ function analyse(
     });
   };
 
+  // The argument types of each direct call of a function of the file, by function (numberParameters).
+  const calls = closedCalls ? fileCalls(statements) : null;
+  const passed = new Map<string, TeaseType[][]>();
+  const passArguments = (value: IrExpression, scope: Scope): void => {
+    forEachExpression(value, (child) => {
+      if (child.kind !== "call" || calls?.counts.has(child.name) !== true || child.local !== true)
+        return;
+      const types = child.positional.map((argument) => typeOf(argument, scope));
+      passed.set(child.name, [...(passed.get(child.name) ?? []), types]);
+    });
+  };
   const statement = (item: IrStatement, scope: Scope): void => {
-    for (const value of ownExpressions(item)) findIndexes(value, scope);
+    for (const value of ownExpressions(item)) {
+      findIndexes(value, scope);
+      passArguments(value, scope);
+    }
     if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
@@ -1405,7 +1434,9 @@ function analyse(
   for (const item of functions) {
     const scope = new Scope(root);
     item.parameters.forEach((parameter: IrFunctionParameter) => {
-      scope.names.set(parameter.name, binding(parameter, parameter.name, null, UNKNOWN));
+      const found = binding(parameter, parameter.name, null, UNKNOWN);
+      found.fixed = parameterTypes.get(parameter) ?? UNKNOWN;
+      scope.names.set(parameter.name, found);
     });
     returns = [];
     walk(item.body, scope);
@@ -1414,6 +1445,40 @@ function analyse(
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
+  }
+  // A parameter without a Groovy type that some call gives a number that may be a fraction, `numSeries / 4`, and every
+  // other call a number or a whole number, holds numbers, so a variable it sets does too (DisciplineClinic's numSeries).
+  // That takes every call of the function: only this file's, each seen here, and no use of it as a value.
+  const scalarName = (type: TeaseType): string | null =>
+    type.kind === "scalar" ? type.name : null;
+  for (const item of functions) {
+    const types = passed.get(item.name) ?? [];
+    if (
+      calls === null ||
+      calls.open.has(item.name) ||
+      types.length === 0 ||
+      types.length !== calls.counts.get(item.name)
+    )
+      continue;
+    item.parameters.forEach((parameter, index) => {
+      if (
+        parameter.typed === true ||
+        parameter.type !== undefined ||
+        assignsVariable(item.body, parameter.name)
+      )
+        return;
+      const given = types.map((call) =>
+        scalarName(
+          call[index] ??
+            (parameter.defaultValue === null ? NULL : typeOf(parameter.defaultValue, root)),
+        ),
+      );
+      if (
+        given.every((name) => name === "integer" || name === "number") &&
+        given.includes("number")
+      )
+        analysis.parameters.set(parameter, scalar("number"));
+    });
   }
   // A variable that a whole-number or number read starts and that also gets a value of unknown type.
   const openRead = (found: Binding): boolean => {
@@ -1514,6 +1579,42 @@ function breaksLoop(body: readonly IrStatement[]): boolean {
 }
 
 /** Whether the statements assign or declare `name`, also in nested blocks. */
+/**
+ * The functions of a file with the number of direct calls of each (numberParameters); a function that is also used as a
+ * value, such as an action, called with named arguments or through another name, or defined twice, is open.
+ */
+function fileCalls(statements: readonly IrStatement[]): {
+  counts: Map<string, number>;
+  open: Set<string>;
+} {
+  const counts = new Map<string, number>();
+  const open = new Set<string>();
+  const visit = (value: unknown, found: (record: Record<string, unknown>) => void): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, found);
+      return;
+    }
+    if (!isRecord(value)) return;
+    found(value);
+    for (const child of Object.values(value)) visit(child, found);
+  };
+  visit(statements, (record) => {
+    if (record.kind !== "function" || typeof record.name !== "string") return;
+    if (counts.has(record.name)) open.add(record.name);
+    counts.set(record.name, 0);
+  });
+  visit(statements, (record) => {
+    const name = record.kind === "literal" && record.action === true ? record.value : record.name;
+    if (typeof name !== "string" || !counts.has(name) || record.kind === "function") return;
+    const named = isRecord(record.named) ? Object.keys(record.named).length : 0;
+    if (record.kind === "call" && record.local === true && named === 0)
+      counts.set(name, counts.get(name)! + 1);
+    else if (record.kind === "call" || record.kind === "variable" || record.kind === "literal")
+      open.add(name);
+  });
+  return { counts, open };
+}
+
 function assignsVariable(statements: readonly IrStatement[], name: string): boolean {
   return statements.some((statement) => {
     switch (statement.kind) {

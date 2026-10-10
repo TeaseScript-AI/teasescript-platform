@@ -63,6 +63,8 @@ export interface IrFunctionParameter {
   defaultValue: IrExpression | null;
   /** The declared type, where a call passes null for a parameter whose default gives it a type (V30 §17). */
   type?: string;
+  /** Groovy declared the parameter's type, which the calls do not then give it (variable typing). */
+  typed?: true;
 }
 
 export type IrStatement =

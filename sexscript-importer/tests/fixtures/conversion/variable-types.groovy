@@ -136,3 +136,16 @@ def image = 0
 image = [970, 807, 830]
 image = image[which]
 show("Image ${image + 1}")
+// A parameter that a call gives a number that may be a fraction holds numbers, and so does the variable it sets
+// (DisciplineClinic's punishExtraSwats(numSeries / 4, ...)).
+def numSeries = 0
+def swats = { sets ->
+	numSeries = sets
+	def done = 0
+	while (done < numSeries) done++
+	show("Sets ${done}")
+}
+numSeries = 12
+numSeries += 3
+swats(numSeries / 4)
+swats(2)
