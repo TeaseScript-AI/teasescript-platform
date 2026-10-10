@@ -318,6 +318,12 @@ function optionValues(options: unknown): unknown[] | null {
   return found;
 }
 
+/**
+ * How many steps the searches for what may carry a stored key's value take in all, per plan, before every value that
+ * reads another counts as one (conservative, so that the work stays bounded).
+ */
+const CARRIER_WORK = 2_000_000;
+
 /** How many stored keys' carriers ({@link DataFlow}) are kept at once, as each can reach much of a plan. */
 const CARRIER_KEYS = 32;
 
@@ -472,8 +478,9 @@ export class DataFlow {
     string,
     { readonly own: ReadonlySet<string>; readonly saved: boolean }
   >();
-  /** {@link #savedReach}, worked out when first needed. */
+  /** {@link #savedReach}, worked out when first needed; and the steps all {@link #carriers} searches took. */
   #saved: ReadonlySet<string> | null = null;
+  #carrierWork = 0;
   #carrierGraph: {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
@@ -909,18 +916,19 @@ export class DataFlow {
   #mayCarry(value: unknown, at: number | undefined, key: string): boolean {
     if (this.flowOf(value).keys.has(key)) return true;
     const carriers = this.#carriers(key);
+    const reads = this.#readsOf(value, at ?? 0);
+    // Past the work the carriers may take, anything that reads a value may carry the key.
+    if (carriers === null) return reads.length > 0;
     const shared = carriers.saved ? this.#savedReach() : null;
-    return this.#readsOf(value, at ?? 0).some(
-      (each) => carriers.own.has(each) || shared?.has(each) === true,
-    );
+    return reads.some((each) => carriers.own.has(each) || shared?.has(each) === true);
   }
 
   /**
    * What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what (`own`),
    * and when that reaches a saved value (`saved`), all that saved values reach ({@link #savedReach}), as what any save
-   * stores may be what any load reads.
+   * stores may be what any load reads. Null once all keys' searches took {@link CARRIER_WORK} steps.
    */
-  #carriers(key: string): { readonly own: ReadonlySet<string>; readonly saved: boolean } {
+  #carriers(key: string): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
     const known = this.#carriersOf.get(key);
     if (known !== undefined) {
       // The most recent last, as the oldest give way to new keys.
@@ -933,6 +941,7 @@ export class DataFlow {
     let saved = false;
     const pending = [...own];
     for (let read = pending.pop(); read !== undefined; read = pending.pop()) {
+      if ((this.#carrierWork += 1) > CARRIER_WORK) return null;
       if (read.startsWith("s ")) {
         saved = true;
         continue;
