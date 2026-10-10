@@ -469,7 +469,14 @@ export class DataFlow {
   readonly #clearsOf = new Map<number, number[]>();
   /** {@link #carriers} by stored key, and the graph they are reached in, worked out when first needed. */
   readonly #carriersOf = new Map<string, ReadonlySet<string>>();
-  #carrierGraph: { readers: Map<string, string[]>; seeds: Map<string, string[]> } | null = null;
+  #carrierGraph: {
+    readers: Map<string, string[]>;
+    seeds: Map<string, string[]>;
+    cells: string[];
+  } | null = null;
+  /** {@link #cellsMeeting} by cell, and the matchers of key patterns by pattern. */
+  readonly #meetings = new Map<string, readonly string[]>();
+  readonly #keyMatchers = new Map<string, (key: string) => boolean>();
   /** {@link #callFlow}, by call, constants, and depth; cleared each round of the fixpoint, kept after it. */
   readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
@@ -916,7 +923,10 @@ export class DataFlow {
     const reached = new Set<string>(graph.seeds.get(key) ?? []);
     const pending = [...reached];
     for (let read = pending.pop(); read !== undefined; read = pending.pop())
-      for (const reader of graph.readers.get(read) ?? [])
+      for (const reader of [
+        ...(graph.readers.get(read) ?? []),
+        ...(read.startsWith("s ") ? this.#cellsMeeting(read, graph.cells) : []),
+      ])
         if (!reached.has(reader)) {
           reached.add(reader);
           pending.push(reader);
@@ -932,7 +942,11 @@ export class DataFlow {
    * whose flow reads it. A variable, a temporary ({@link #temporaryNode}), a function's result (`r <function>`), and a
    * parameter, which every call's argument sets.
    */
-  #readersGraph(): { readers: Map<string, string[]>; seeds: Map<string, string[]> } {
+  #readersGraph(): {
+    readers: Map<string, string[]>;
+    seeds: Map<string, string[]>;
+    cells: string[];
+  } {
     const readers = new Map<string, string[]>();
     const seeds = new Map<string, string[]>();
     const define = (value: unknown, at: number, into: string) => {
@@ -976,33 +990,40 @@ export class DataFlow {
       else if (instruction.kind === "storageWrite")
         define(instruction.value, index, `s ${keyText(instruction.key) ?? "?"}`);
     });
-    // A stored value is read by the loads whose key can be the one saved: the same text, one a pattern matches, or
-    // either computed past knowing (`?`).
-    const cells = [...readers.keys(), ...[...readers.values()].flat()].filter((each) =>
-      each.startsWith("s "),
+    // The cells of saved values: those whose keys can meet are linked when one is reached (#cellsMeeting).
+    const cells = new Set(
+      [...readers.keys(), ...[...readers.values()].flat()].filter((each) => each.startsWith("s ")),
     );
-    // Cells of the same text are one; only a pattern or an unknown key can stand for another.
-    const written = [...new Set(cells)];
-    const wide = written.filter((cell) => cell === "s ?" || cell.includes(KEY_PLACEHOLDER));
-    const matchers = new Map<string, (key: string) => boolean>();
-    const matches = (pattern: string, text: string) =>
-      (matchers.get(pattern) ?? matchers.set(pattern, keyMatcher(pattern)).get(pattern)!)(text);
-    for (const pattern of wide) {
-      for (const other of written) {
-        const [saved, text] = [pattern.slice(2), other.slice(2)];
-        if (
-          other !== pattern &&
-          (saved === "?" ||
-            text === "?" ||
-            matches(saved, text) ||
-            (text.includes(KEY_PLACEHOLDER) && matches(text, saved)))
-        ) {
-          (readers.get(pattern) ?? readers.set(pattern, []).get(pattern)!).push(other);
-          (readers.get(other) ?? readers.set(other, []).get(other)!).push(pattern);
-        }
-      }
-    }
-    return { readers, seeds };
+    return { readers, seeds, cells: [...cells] };
+  }
+
+  /**
+   * The other cells of saved values whose key can be a cell's: one a pattern matches, either way, or any for a key
+   * computed past knowing (`s ?`). Cells of the same text are one; distinct literal keys never meet. Worked out once
+   * per cell, when a stored key's carriers first reach it.
+   */
+  #cellsMeeting(cell: string, cells: readonly string[]): readonly string[] {
+    const known = this.#meetings.get(cell);
+    if (known !== undefined) return known;
+    const text = cell.slice(2);
+    const wide = (other: string) => other === "?" || other.includes(KEY_PLACEHOLDER);
+    const matches = (pattern: string, key: string) =>
+      (
+        this.#keyMatchers.get(pattern) ??
+        this.#keyMatchers.set(pattern, keyMatcher(pattern)).get(pattern)!
+      )(key);
+    const found = cells.filter((other) => {
+      const key = other.slice(2);
+      if (other === cell || (!wide(text) && !wide(key))) return false;
+      return (
+        text === "?" ||
+        key === "?" ||
+        (wide(text) && matches(text, key)) ||
+        (wide(key) && matches(key, text))
+      );
+    });
+    this.#meetings.set(cell, found);
+    return found;
   }
 
   /**
