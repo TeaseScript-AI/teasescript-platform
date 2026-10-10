@@ -175,3 +175,19 @@ def stackItem = { level, time ->
 }
 def slots = stackItem(4, 2.5)
 show("Item " + slots[1] + " " + slots[2])
+// A function whose returns are pairs of a text and a number declares their union, also where dead code follows its
+// returning branches, and an element added with += is read open (ShockJack's rounds).
+def playRound = { int score ->
+	if (score > 21) {
+		return ["BUST", 0]
+	} else if (score == 21) {
+		return ["WIN", 2]
+	} else {
+		return ["STAND", 1]
+	}
+	show("never")
+}
+def shockTime = 0
+def outcome = playRound(21)
+shockTime += outcome[1]
+show(outcome[0] + " " + shockTime)

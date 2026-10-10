@@ -1,3 +1,6 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args): boolean | number | null {
   if action == "chanceOrFlag" {
@@ -287,4 +290,21 @@ function stackItem(level, timeValue) {
 }
 let slots = stackItem(4, 2.5)
 say "Item ${slots[1]} ${slots[2]}"
+// A function whose returns are pairs of a text and a number declares their union, also where dead code follows its
+// returning branches, and an element added with += is read open (ShockJack's rounds).
+function playRound(score): (string | integer)[] {
+  if score > 21 {
+    return ["BUST", 0]
+  } else if score == 21 {
+    return ["WIN", 2]
+  } else {
+    return ["STAND", 1]
+  }
+  say "never"
+}
+let shockTime = 0
+let outcome = playRound(21)
+// NOTE SX_PLUS_OPERAND_TYPE line 192: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+shockTime += sexscriptLegacyValue(outcome[1])
+say "${outcome[0]} ${shockTime}"
 exit

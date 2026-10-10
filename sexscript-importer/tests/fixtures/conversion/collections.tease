@@ -491,4 +491,18 @@ while sexscriptLegacyCompare(sexscriptLegacyListSum(shockTimes), 5) < 0 {
   shockTimes.add(2)
 }
 say "Shocks ${shockTimes.length}"
+// Arithmetic with the sum of no element failed in Groovy, whose sum() was null, so the session ends there (ShockJack).
+let shockTimeList = [3]
+let lastTime = 2
+// NOTE SX_SUM_EMPTY_ENDS line 189: Groovy sum() of no element was null, and the arithmetic with it failed, which stopped the script; the session ends there.
+let sumTotal = 0
+for item in shockTimeList {
+  sumTotal += item
+}
+let sumResult2 = sumTotal
+if shockTimeList.length == 0 {
+  exit
+}
+shockTimeList[shockTimeList.length - 1] = shockTimeList.last - (sumResult2 - lastTime)
+say "Times ${shockTimeList[0]}"
 exit

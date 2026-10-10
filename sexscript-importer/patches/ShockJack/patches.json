@@ -27,6 +27,13 @@
       "category": "b",
       "reason": "loadConfig read the stored shock time to start with and the player's and dealer's clothing counts, then called getEstimFileNames before it took the defaults of the missing ones. The script call between keeps the converter from joining each default to its read, so the three whole-number variables took 0 for a missing setting and a first game started with no shock time and nothing to strip. The three defaults move directly after their reads, which nothing between used, so a missing setting takes its default as before.",
       "diff": "settings-defaults.diff"
+    },
+    {
+      "id": "card-ranks",
+      "layer": "source",
+      "category": "b",
+      "reason": "Counting a hand's points, finding a queen and choosing the dealer's cheat card read a card's rank as the first character of its text, such as \"6S\"[0]. TeaseScript indexes only lists and dicts, and where the card came through a parameter the conversion could not tell it was text, so the play stopped at the first count. The rank is read as substring(0, 1), which is the same one-character text Groovy gave, so every count, test and pick stays the same.",
+      "diff": "card-ranks.diff"
     }
   ]
 }

@@ -4156,14 +4156,17 @@ function hoistDeferred(
     if (part === deferred && elements !== UNKNOWN) listElements.set(name, elements);
     context.types = { ...context.types, variables, listElements };
     const span = part.span ?? statement.span;
-    declarations.push(
-      syntheticAssignment(
-        true,
-        syntheticVariable(name, span),
-        substituteNodes(part, replacements),
-        span,
-      ),
-    );
+    const value = substituteNodes(part, replacements);
+    // Groovy failed on arithmetic with the null sum() of no element, `(list.sum() - stime)` (ShockJack).
+    const parent = path.at(-2);
+    if (
+      part === deferred &&
+      loop?.name === "sum" &&
+      parent?.kind === "binary" &&
+      ["-", "*", "/", "%"].includes(String(parent.operator))
+    )
+      value.failsWhenEmpty = true;
+    declarations.push(syntheticAssignment(true, syntheticVariable(name, span), value, span));
     replacements.set(part, syntheticVariable(name, span));
   }
   const result: IrStatement[] = [];
@@ -7820,7 +7823,7 @@ function lowerCollectionAssignment(
       : assign(initial);
   const loop: IrStatement = { kind: "for", variable, collection, body, span };
   const empty: IrStatement[] =
-    call.name === "sum" && !nonEmpty
+    call.name === "sum" && !nonEmpty && right.failsWhenEmpty === true
       ? [
           {
             kind: "if",
@@ -7830,20 +7833,43 @@ function lowerCollectionAssignment(
               left: { kind: "property", target: collection, name: "length" },
               right: { kind: "literal", value: 0 },
             },
-            then: [
-              {
-                kind: "assign",
-                target: { kind: "variable", name: target },
-                operator: "=",
-                value: { kind: "literal", value: null },
-                span,
-              },
-            ],
+            then: [{ kind: "exit", span }],
             else: [],
             span,
           },
         ]
-      : [];
+      : call.name === "sum" && !nonEmpty
+        ? [
+            {
+              kind: "if",
+              condition: {
+                kind: "binary",
+                operator: "==",
+                left: { kind: "property", target: collection, name: "length" },
+                right: { kind: "literal", value: 0 },
+              },
+              then: [
+                {
+                  kind: "assign",
+                  target: { kind: "variable", name: target },
+                  operator: "=",
+                  value: { kind: "literal", value: null },
+                  span,
+                },
+              ],
+              else: [],
+              span,
+            },
+          ]
+        : [];
+  if (right.failsWhenEmpty === true && empty.length > 0)
+    addDiagnostic(
+      context,
+      "SX_SUM_EMPTY_ENDS",
+      "warning",
+      "Groovy sum() of no element was null, and the arithmetic with it failed, which stopped the script; the session ends there.",
+      span,
+    );
   if (!readsTarget) return [start, loop, ...empty];
   const accumulated: IrExpression = { kind: "variable", name: accumulator };
   const store: IrStatement = declaration

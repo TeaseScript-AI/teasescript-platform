@@ -259,8 +259,8 @@ function declaredResult(
   const optional = all.length < types.length || all.some((type) => type.kind === "optional");
   // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
   // does (V30 §17).
-  if (shared.kind !== "union" && (unknowns || !(optional && returnsNull(statement.body))))
-    return null;
+  // A list whose elements mix types, `return ["WIN", 0]` (ShockJack), needs its union written as a union does.
+  if (!hasUnion(shared) && (unknowns || !(optional && returnsNull(statement.body)))) return null;
   const type: TeaseType = optional ? { kind: "optional", value: shared } : shared;
   const written = annotation(type);
   return written === null ? null : { type, written };
@@ -585,16 +585,19 @@ export function enforceVariableTypes(
             if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
             return rewritten;
           }
-          return {
-            ...statement,
-            operator: "=",
-            value: truncate({
-              kind: "binary",
-              operator: statement.operator === "+=" ? "+" : "-",
-              left: statement.target,
-              right: statement.value,
-            }),
-          };
+          return withIntegerIndexes(
+            {
+              ...statement,
+              operator: "=",
+              value: truncate({
+                kind: "binary",
+                operator: statement.operator === "+=" ? "+" : "-",
+                left: statement.target,
+                right: statement.value,
+              }),
+            },
+            indexes,
+          );
         }
         case "function":
           return { ...statement, body: rewrite(statement.body) };
@@ -1145,6 +1148,17 @@ function analyse(
       findIndexes(value, scope);
       passArguments(value, scope);
     }
+    // `total += pair[1]` adds the element as `total + pair[1]` does, so an element of several types is read open too.
+    if (
+      item.kind === "assign" &&
+      item.operator !== "=" &&
+      item.value.kind === "index" &&
+      item.value.dict !== true &&
+      isMixed(typeOf(item.value, scope))
+    ) {
+      openElements.add(item.value);
+      analysis.indexes.add(item.value);
+    }
     if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
@@ -1585,9 +1599,13 @@ function analyse(
  * endless loop (`while true` without a `break` of its own, as from Groovy `for (;;)`) keeps them from it.
  */
 function mayFallOff(statements: readonly IrStatement[]): boolean {
-  const last = statements.findLast(
+  const items = statements.filter(
     (statement) => !["comment", "blank", "function"].includes(statement.kind),
   );
+  // A statement that never ends normally, such as an `if` whose every branch returns, ends the block there too, also
+  // where unreachable code follows it (ShockJack's playBlackJackRound).
+  if (items.slice(0, -1).some((statement) => !mayFallOff([statement]))) return false;
+  const last = items.at(-1);
   switch (last?.kind) {
     case "return":
     case "exit":
