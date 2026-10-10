@@ -368,7 +368,8 @@ Directed search looks at each condition that a step reached but left only one wa
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a
 stored value (also by a key template such as `"script${i}.time"`; one whose computed parts are constants at the
 condition, such as the argument of `has(KNIFE)` for a helper `has(name)` that loads `"toys.${name}"`, also in a helper
-it passes `name` to, is the one key it names), the clock, or a variable the code assigns (told apart by scope: a
+it passes `name` to, is the one key it names; a helper's `load key` loads the text a call gives `key`, also in the
+helper's own variables computed from it), the clock, or a variable the code assigns (told apart by scope: a
 function's own variable, a file's own, also as a function of that file reads it, and otherwise one name for the
 package, as a `global function` reads the variables of whichever file calls it). A parameter does not take every
 caller's arguments as its values (that gave a helper's conditions all its callers' values, and cost coverage on the

@@ -522,6 +522,8 @@ export class DataFlow {
    * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
   readonly #assigned = new Map<string, { value: Data; index: number }[]>();
+  /** By a variable of a function's own, the parameters that name a load's key it holds ({@link #keyParameters}). */
+  #keyParametersOf: Map<string, Set<string>> | null = null;
   /**
    * The variables, temporaries, and functions that hold a stored key's value, by them, the key, and the kind needed;
    * with whether a load of the key was found through them (one that only holds values from elsewhere was not).
@@ -1161,7 +1163,8 @@ export class DataFlow {
 
   /**
    * Whether an expression's value is a stored key's value (`key` as {@link sourcesOf} names it, a pattern for a
-   * template): its load, a whole number of an integer load (`toInteger`), a truth of a boolean load compared with
+   * template): its load (in a helper, also one whose key a parameter the call gives a text names), the load's `+`, a
+   * whole number of an integer load (`toInteger`), a truth of a boolean load compared with
    * `true`, a variable whose every assignment that reads the key is such (a value from elsewhere, such as a random draw,
    * may also be assigned), a temporary that holds such at instruction `at` (a `switch` on a load), or a call's result
    * whose every returned value that reads the key is such, a parameter in it read as the argument the call gives it
@@ -1249,8 +1252,15 @@ export class DataFlow {
         return true;
       }
       if (value.kind === "storageLoad") {
-        if (!fits(record(value.type), need) || keyText(value.key) !== key) return false;
+        if (!fits(record(value.type), need) || this.#loadKey(value.key, context?.constants) !== key)
+          return false;
         loads.add(from);
+        return true;
+      }
+      // A number's `+` is that number; one of anything else stops the script.
+      if (value.kind === "unary" && value.operator === "+") {
+        if (need === "truth") return false;
+        pending.push({ value: value.operand, at, need, context, loose, from });
         return true;
       }
       if (value.kind === "identifier" && typeof value.name === "string")
@@ -2063,7 +2073,9 @@ export class DataFlow {
   /**
    * An expression's flow at instruction `at` of a function's code, as {@link flowOf} with `substitute`, where a helper
    * call's result, also in a temporary that holds it, is read as that call's result with the `bound` constants and
-   * `substitute` for its arguments ({@link #callFlow}), `depth` calls deep.
+   * `substitute` for its arguments ({@link #callFlow}), `depth` calls deep. With constants, a load's key that a
+   * parameter names is the text the call gives it ({@link #loadKey}), also for a variable of the function's own that
+   * holds such a load or a value computed from one ({@link #keyParameters}).
    */
   #flowAt(
     expression: unknown,
@@ -2073,6 +2085,7 @@ export class DataFlow {
     depth: number,
   ): Flow {
     const flow = emptyFlow();
+    const followed = new Set<string>();
     const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
       const { value, at } = item;
@@ -2099,6 +2112,20 @@ export class DataFlow {
         value.kind === "callResult"
       ) {
         merge(flow, this.flowOf(value, substitute));
+        // A variable of the function's own that holds a load whose key a parameter the call gives a text names is read
+        // as its assignments are, with the constants.
+        const key = value.kind === "identifier" && bound.size > 0 ? this.#keyOf(value) : "";
+        if (
+          key !== "" &&
+          !followed.has(key) &&
+          [...this.#keyParameters(key)].some(
+            (parameter) => typeof bound.get(parameter) === "string",
+          )
+        ) {
+          followed.add(key);
+          for (const each of this.#assigned.get(key) ?? [])
+            pending.push({ value: each.value, at: each.index });
+        }
         continue;
       }
       if (value.kind === "storageLoad" || value.kind === "call") {
@@ -2107,13 +2134,76 @@ export class DataFlow {
           flow,
           this.flowOf({ ...value, key: undefined, arguments: undefined, default: undefined }),
         );
-        if (value.kind === "storageLoad")
-          merge(flow, this.flowOf({ kind: "storageLoad", key: value.key }));
+        if (value.kind === "storageLoad") {
+          const key = this.#loadKey(value.key, bound);
+          merge(
+            flow,
+            this.flowOf({
+              kind: "storageLoad",
+              key: key === null ? value.key : { kind: "literal", value: key },
+            }),
+          );
+        }
       }
       for (const [key, each] of Object.entries(value))
         if (key !== "span") pending.push({ value: each, at });
     }
     return flow;
+  }
+
+  /**
+   * A load's key as {@link keyText} names it, or for a key a parameter gives (`load key` in a helper), the text that
+   * `bound` gives the parameter; null otherwise.
+   */
+  #loadKey(key: unknown, bound: ReadonlyMap<string, SavedScalar> = new Map()): string | null {
+    const text = keyText(key);
+    if (text !== null || record(key).kind !== "identifier") return text;
+    const constant = bound.get(this.#keyOf(key));
+    return typeof constant === "string" ? constant : null;
+  }
+
+  /**
+   * The parameters that name the key of a load (`load key`) that a variable of a function's own holds, also through the
+   * function's own variables it is computed from (`let more = value + 1`). Worked out for all such variables at once,
+   * as each one's parameters grow by those of the variables it reads.
+   */
+  #keyParameters(key: string): ReadonlySet<string> {
+    if (this.#keyParametersOf === null) {
+      const found = new Map<string, Set<string>>();
+      const readers = new Map<string, string[]>();
+      for (const [variable, assignments] of this.#assigned) {
+        if (!variable.includes("\u0001function ")) continue;
+        const own = new Set<string>();
+        found.set(variable, own);
+        const pending: unknown[] = assignments.map((each) => each.value);
+        for (let value = pending.pop(); value !== undefined; value = pending.pop()) {
+          if (Array.isArray(value)) {
+            pending.push(...value);
+            continue;
+          }
+          if (!isRecord(value)) continue;
+          if (value.kind === "storageLoad" && record(value.key).kind === "identifier")
+            own.add(this.#keyOf(value.key));
+          else if (value.kind === "identifier") {
+            const read = this.#keyOf(value);
+            if (read.includes("\u0001function "))
+              (readers.get(read) ?? readers.set(read, []).get(read)!).push(variable);
+          }
+          for (const [field, each] of Object.entries(value))
+            if (field !== "span") pending.push(each);
+        }
+      }
+      const pending = [...found.keys()].filter((variable) => found.get(variable)!.size > 0);
+      for (let variable = pending.pop(); variable !== undefined; variable = pending.pop())
+        for (const reader of readers.get(variable) ?? []) {
+          const into = found.get(reader)!;
+          const before = into.size;
+          for (const parameter of found.get(variable)!) into.add(parameter);
+          if (into.size > before) pending.push(reader);
+        }
+      this.#keyParametersOf = found;
+    }
+    return this.#keyParametersOf.get(key) ?? new Set();
   }
 
   /** The arguments of a call that are constants, by the scope key of the parameter they give (see {@link #returnsFor}). */

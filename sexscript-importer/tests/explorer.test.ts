@@ -1087,6 +1087,29 @@ test(
       ),
       ["score"],
     );
+    // A helper's load of the key a parameter names is of the key the call names, also through a variable of the
+    // helper's own, a copy of it, and `+`; not of another call's key, nor of a key the call does not name with a text;
+    // and a value the helper computes from it is not the stored value.
+    const named = (argument: string, body = "  return toInteger(value)", before = "") =>
+      compared(
+        `${before}function loadInteger(key, whenMissing = null) {\n  let value = load key, default: null\n` +
+          `  if value == null {\n    return whenMissing\n  }\n${body}\n}\n` +
+          `if toInteger(+loadInteger(${argument})) > 7 {\n  say "Yes"\n}\nexit\n`,
+      );
+    assert.deepEqual(named('"score"'), ["score > 7"]);
+    assert.deepEqual(named('"score"', "  let copy = value\n  return copy"), ["score > 7"]);
+    assert.deepEqual(named('"score"', "  return value + 1"), ["score"]);
+    assert.deepEqual(
+      named(
+        '"score"',
+        "  let more = value + 1\n  if more > 3 {\n    return more\n  }\n  return value",
+      ),
+      ["score"],
+    );
+    assert.deepEqual(named('"score"', undefined, 'let other = loadInteger("other")\n'), [
+      "score > 7",
+    ]);
+    assert.deepEqual(named("which", undefined, 'let which = askText "Which?"\n'), []);
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",
@@ -3234,9 +3257,11 @@ test(
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
-    // The only way to complete removes the save again, and the stored value is read through a function of the script.
+    // The only way to complete removes the save again, and the stored value is read through a function of the script,
+    // with a key the call computes.
     const source =
-      'function loadNumber(key) {\n  let value = load key, default: 0\n  return value\n}\nlet version = loadNumber("version")\n' +
+      'function loadNumber(key) {\n  let value = load key, default: 0\n  return value\n}\nlet name = "sion"\n' +
+      'let version = loadNumber("ver${name}")\n' +
       'if version > 0 {\n  say "Welcome back."\n  exit\n}\nshowButton "Start"\nsave 1 as "version"\n' +
       'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  delete "version"\n  exit\n}\n' +
       'while true {\n  showButton "Again"\n}\n';
