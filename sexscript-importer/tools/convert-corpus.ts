@@ -39,7 +39,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONVERTED_VIDEO_EXTENSIONS } from "../src/lower.ts";
+import { CONVERTED_VIDEO_EXTENSIONS, SOURCE_PATCHES_FILE } from "../src/lower.ts";
 import { selectTimeModel } from "../src/time-model.ts";
 import {
   applyOutputPatches,
@@ -477,7 +477,30 @@ async function patchedUnit(
     await copyFile(path.join(original, file), target);
   }
   await applySourcePatches(staged, patches);
+  // The lines each source patch took out of each script, so that the converter can name the patch where it notes what
+  // a script no longer does (cli.ts sourcePatches).
+  const removed = await Promise.all(
+    diffs.map(async (patch) => ({
+      id: patch.id,
+      removed: removedLines(await readFile(path.join(patches.folder, patch.diff), "utf8")),
+    })),
+  );
+  await writeFile(path.join(staged, SOURCE_PATCHES_FILE), `${JSON.stringify(removed)}\n`);
   return staged;
+}
+
+/** The lines a unified diff removes, by script path from the scripts folder (`a/scripts/toy.groovy` as `toy.groovy`). */
+function removedLines(diff: string): Record<string, string[]> {
+  const removed: Record<string, string[]> = {};
+  let file: string | null = null;
+  for (const line of diff.split(/\r?\n/u)) {
+    if (line.startsWith("--- ")) {
+      const name = line.slice(4).split("\t")[0]!.replace(/^a\//u, "");
+      file = name.startsWith("scripts/") ? name.slice("scripts/".length) : null;
+    } else if (file !== null && line.startsWith("-") && !line.startsWith("---"))
+      (removed[file] ??= []).push(line.slice(1));
+  }
+  return removed;
 }
 
 /** Hard-links a unit's media and the resource-pack files it names into its package; renders MIDI files to MP3. */

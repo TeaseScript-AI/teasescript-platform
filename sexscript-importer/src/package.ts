@@ -1,3 +1,4 @@
+import { withLegacyStorage } from "./legacy-storage.ts";
 import {
   constantString,
   isAstNode,
@@ -92,6 +93,14 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 ]);
 
 export interface PackageOptions {
+  /**
+   * The unit's source patches with the lines each took out of each script, by path from the scripts folder, so that a
+   * note on what a script no longer does names the patch (LowerOptions.patchedAssignments).
+   */
+  sourcePatches?: ReadonlyArray<{
+    id: string;
+    removed: Readonly<Record<string, readonly string[]>>;
+  }>;
   /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** Keeps texts with blank lines as one message each (LowerOptions.keepParagraphs). */
@@ -947,6 +956,7 @@ export function lowerPackage(
         info !== null && visible(index, other) ? [info] : [],
       ),
       packageFunctions: packageFunctionNames(groups[index]!),
+      patchedAssignments: patchedAssignments(file.sourceName, options.sourcePatches ?? []),
       stableNames,
       storageLiterals,
       nonTextKeys,
@@ -1058,13 +1068,16 @@ export function lowerPackage(
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withStorageDefaults(
-      withNullableParameters(
-        withClasses.map((program, index) =>
-          index === entryIndex ? withProfile(program, withClasses) : program,
+    const programs = withLegacyStorage(
+      withStorageDefaults(
+        withNullableParameters(
+          withClasses.map((program, index) =>
+            index === entryIndex ? withProfile(program, withClasses) : program,
+          ),
         ),
+        false,
       ),
-      false,
+      null,
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -1139,12 +1152,15 @@ export function lowerPackage(
       main: legacyMain === null ? 0 : legacyMain + 1,
     },
   );
+  // Legacy storage's elements go through helpers in main.tease, after the reads got their defaults and the profile its
+  // prompts, which read the native storage operations (legacy-storage.ts).
+  const stored = withLegacyStorage(nullable, legacyMain === null ? 0 : legacyMain + 1);
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
-  const chained = withoutRepeatedChainText(nullable.slice(1), paths);
+  const chained = withoutRepeatedChainText(stored.slice(1), paths);
   const [main, ...programs] =
     legacyMain === null
-      ? withoutUnusedHelpers([nullable[0]!, ...chained])
-      : [nullable[0]!, ...withoutUnusedHelpers(chained)];
+      ? withoutUnusedHelpers([stored[0]!, ...chained])
+      : [stored[0]!, ...withoutUnusedHelpers(chained)];
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
@@ -1623,6 +1639,8 @@ function freeNames(statement: FunctionStatement): { variables: Set<string>; call
     if (!isRecord(value)) return;
     if (value.kind === "let" && typeof value.name === "string") declared.add(value.name);
     if (value.kind === "for" && typeof value.variable === "string") declared.add(value.variable);
+    if (value.kind === "for" && typeof value.valueVariable === "string")
+      declared.add(value.valueVariable);
     if (value.kind === "variable" && typeof value.name === "string") variables.add(value.name);
     if (value.kind === "call" && typeof value.name === "string") calls.add(value.name);
     for (const child of Object.values(value)) visit(child);
@@ -1713,6 +1731,23 @@ function packageStorageLiterals(
       ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
     ),
   );
+}
+
+/** The variables that a line a source patch took out of the script assigned, `final osName = ...`, with the patch. */
+function patchedAssignments(
+  sourceName: string,
+  patches: NonNullable<PackageOptions["sourcePatches"]>,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  const name = sourceName.replaceAll("\\", "/");
+  for (const patch of patches)
+    for (const [file, lines] of Object.entries(patch.removed)) {
+      if (name !== file && !name.endsWith(`/${file}`)) continue;
+      for (const line of lines)
+        for (const match of line.matchAll(/\b([A-Za-z_]\w*)\s*=(?![=~])/gu))
+          if (!found.has(match[1]!)) found.set(match[1]!, patch.id);
+    }
+  return found;
 }
 
 /**

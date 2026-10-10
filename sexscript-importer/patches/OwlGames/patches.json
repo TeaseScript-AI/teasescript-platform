@@ -13,6 +13,20 @@
       "category": "b",
       "reason": "The same script as the Escape unit's TheSnowyOwl/Escape.groovy, with that unit's patch: nclothes and nlap are declared without a value and set by initmf and initz before the game reads them in other functions, so TeaseScript sees values that may be null there. nclothes starts at 0, the count initmf starts from, and nlap at 5, the smallest value initz gives it.",
       "diff": "escape-clothes-lap-start.diff"
+    },
+    {
+      "id": "sld-map-without-gaps",
+      "layer": "source",
+      "category": "b",
+      "reason": "SlideLadderDare, as in the SlideLadderDare unit: The board setup writes `map` from position 1 on and sets `map[0]=0` only afterwards, and the end squares at `map[nmap+i]`, so Groovy's list grew with a null at position 0 until then; the list is therefore typed as holding null, and 22 later numeric reads from `map` are not proven non-null by TeaseScript. `map` is empty when the setup starts, the shuffled blocks hold exactly `nblock` squares each and `imap` ends at `nmap`, so setting `map[0]` first and appending each square in turn builds the same list; a Groovy run gives identical maps for every board size from 30 to 2000.",
+      "diff": "sld-map-without-gaps.diff"
+    },
+    {
+      "id": "escape-guess-digits",
+      "layer": "source",
+      "category": "b",
+      "reason": "Escape, as in the Escape unit: getguess fills the caller's list guess digit by digit, guess[iinp]=..., which Groovy shared with bigloop; a TeaseScript parameter is a copy and an empty list has no position to write (TSR025 at the first guess). getguess checks each digit in its own variable, and bigloop fills guess from the answer getguess returns, which always has cfgdigits digits; the same digits reach the same comparisons.",
+      "diff": "escape-guess-digits.diff"
     }
   ]
 }

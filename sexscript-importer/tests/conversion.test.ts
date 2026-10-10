@@ -147,6 +147,35 @@ function registerFixtures(
   }
 }
 
+// A note on a variable that a unit's source patch took the value out of names that patch, not the legacy script.
+test(
+  "a null-only variable's note names the source patch that took its value out",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-patched-"));
+    try {
+      const sourcePath = path.join(directory, "toy.groovy");
+      writeFileSync(
+        sourcePath,
+        ["def osName = null", 'if (osName == "mac") show("Speaking")', 'show("Done")', ""].join(
+          "\n",
+        ),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
+        sourcePatches: [
+          { id: "speech-ignored", removed: { "toy.groovy": ["def osName = detectSystem()"] } },
+        ],
+      });
+      assert.match(
+        emitTease(program!),
+        /osName is given no value in the script as the unit's patch speech-ignored changed it/u,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // A legacy image count becomes a tag query: each package image carries a generated tag for its full folder path, so
 // the images with the listed folder's tag are exactly its images. A name filter keeps the conversion-time count.
 test(
@@ -851,7 +880,7 @@ test(
       // A range is a list in Groovy, so its elements are appended.
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
       // A value that may be a list or one element is decided at runtime; a function result is a list.
-      assert.match(output, /^ {2}items \+= sexscriptLegacyListPart\(more\)$/mu);
+      assert.match(output, /^ {2}items\.addAll\(sexscriptLegacyListPart\(more\)\)$/mu);
       assert.match(output, /^ {2}items \+= extra\(\)$/mu);
       // A list literal is checked element by element, as the compiler does; mixed elements need a union.
       assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
@@ -957,6 +986,9 @@ test(
       "global-locals",
       "entries",
       "module-files",
+      "module-list-append",
+      "stored-list",
+      "stored-main",
       "entry-hub",
       "entry-own-folder",
       "stand-alone",
@@ -1016,6 +1048,45 @@ test(
         // The entry holds the package's global helpers and goes straight to the story, with no menu.
         const menu = emitTease(unit.main.menu);
         assert.ok(menu.endsWith('\ngoto "Story/start.tease"\n') && !menu.includes("choose"), menu);
+      }
+      if (name === "stored-list") {
+        // The scene reads the elements of the list the club saved, each under its own key as legacy storage kept it.
+        const report = analyzeFeasibility(files, {
+          compiler: projectResult.compiler,
+          runner: projectResult.runner,
+        });
+        assert.deepEqual(
+          report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
+          [
+            {
+              start: "main.tease",
+              status: "halted",
+              visited: ["main.tease", "club.tease", "scene.tease"],
+            },
+          ],
+        );
+        // What the scene read, which it saves: every toy of the club's list.
+        const storage = new Map<string, RuntimeValue>();
+        const ran = projectResult.runner(
+          shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+          {},
+          { storage },
+        );
+        assert.equal(ran.status, "halted");
+        assert.equal(storage.get("scene.laid"), "clamps whip cane ");
+      }
+      if (name === "stored-main") {
+        // The legacy main script holds the storage helpers, and the next script reads both lists back, also the one
+        // saved under a key a closure computed.
+        const storage = new Map<string, RuntimeValue>();
+        const ran = projectResult.runner(
+          shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+          {},
+          { storage },
+        );
+        assert.equal(ran.status, "halted");
+        assert.equal(storage.get("next.notes"), 2);
+        assert.equal(storage.get("next.toy"), "whip");
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
@@ -1762,6 +1833,83 @@ test(
       }
       assert.equal(step.snapshot.status, "halted", tease);
       assert.deepEqual(said, ["5 5.1 5.1", "100 0.5 6.5 6.5 100", "no ratio", "100 1 6.1"], tease);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
+// The hierarchical storage fixture says what the same script said with legacy storage (PropertiesWorker, ported to
+// Groovy as an oracle): elements read and rebuilt, a key that is a value first, a shorter list, a null element, and the
+// subtree a null save removes.
+test(
+  "the hierarchical-storage fixture says what legacy storage gave the script",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const tease = readFileSync(
+      fileURLToPath(new URL("./fixtures/conversion/hierarchical-storage.tease", import.meta.url)),
+      "utf8",
+    );
+    const { plan } = compileSource(tease);
+    assert.ok(plan !== undefined);
+    const said: string[] = [];
+    const note = (events: readonly PacedEvent[]): void => {
+      for (const event of events) if (event.kind === "say") said.push(event.text ?? "");
+    };
+    let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+    note(step.events);
+    for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
+      const observed = observeTime(
+        plan,
+        step.snapshot,
+        step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+      );
+      note(observed.events);
+      step = run(plan, observed.snapshot);
+      note(step.events);
+    }
+    assert.equal(step.snapshot.status, "halted");
+    assert.deepEqual(said, [
+      "Lay out clamps whip cane ",
+      "Visits 2 3",
+      "Days 4 2 true",
+      "Level 3 5",
+      "Again 2 true null true",
+      "Reset true true true",
+    ]);
+  },
+);
+
+test(
+  "an input's question shows what it read before its pre-filled value was computed",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-question-"));
+    try {
+      const file = path.join(directory, "question.groovy");
+      writeFileSync(
+        file,
+        'def n = 1\ndef bump = { -> n += 1; return "prefill" }\ndef answer = getString("Question ${n}", bump())\nshow(answer)\n',
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      assert.equal(step.snapshot.foregroundAction?.interactionKind, "text", tease);
+      assert.deepEqual(
+        step.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        ["Question 1"],
+        tease,
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

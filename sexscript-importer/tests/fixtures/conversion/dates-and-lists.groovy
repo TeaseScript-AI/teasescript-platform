@@ -52,3 +52,11 @@ if (lastRun != null && dayFormat.parse(thisRun) - dayFormat.parse(lastRun) > 2) 
 def savedDay = new Date().format("y-M-d")
 def savedCopy = savedDay
 save("game.savedDay", savedCopy)
+// A Date the script moves by days stays a Date: its month counts from 0, and `date` is its day of the month.
+def tomorrow = new Date()
+tomorrow = tomorrow + 1
+if (tomorrow.month + 1 == 10 && tomorrow.date == 31) show("Halloween tomorrow")
+// A conditional of the moved Date or a text holds either.
+def visible = getRandom(2) == 0
+def counted = getRandom(2) == 0
+show("Until " + (visible ? (tomorrow + 2) : "?") + ", " + (counted ? 2 : "some") + " days")

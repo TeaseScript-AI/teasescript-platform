@@ -20,7 +20,7 @@ say "Roll ${getRandom(3, 6)}"
 // The same holds for a call with the closure's own number of arguments.
 function waitWithGauge(seconds) {
   if seconds > 0 {
-    timer seconds s
+    timer max(seconds, 0) s
   }
 }
 waitWithGauge(2)

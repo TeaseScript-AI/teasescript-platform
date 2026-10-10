@@ -1,0 +1,123 @@
+global function sexscriptLegacyValue(value) {
+  return value
+}
+// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key
+// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
+global function sexscriptLegacySave(key, value) {
+  let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+  let kept: string[] = []
+  let prefix = "${key}."
+  for name in stored {
+    if name == key or name.startsWith(prefix) {
+      delete name
+    } else {
+      kept.add(name)
+    }
+  }
+  delete key
+  if value is list or value is dict {
+    let names: string[] = [key]
+    let values: list = [value]
+    let position = 0
+    while position < names.length {
+      let name = names[position]
+      let item = values[position]
+      position += 1
+      if item is list {
+        let index = 0
+        for element in item {
+          names.add("${name}.${index}")
+          values.add(element)
+          index += 1
+        }
+      } else if item is dict {
+        for entry, inner in item {
+          names.add("${name}.${entry}")
+          values.add(inner)
+        }
+      } else {
+        if item == null {
+          save "null" as name
+        } else {
+          save item as name
+        }
+        kept.add(name)
+      }
+    }
+  } else if value != null {
+    save value as key
+    kept.add(key)
+  }
+  save kept as "sexscriptLegacy.storedKeys"
+}
+global function sexscriptLegacyLoad(key, whenMissing = null) {
+  let value = load key, default: null
+  let present = value != null
+  if value is string {
+    if value.lowercase() == "null" {
+      value = null
+    }
+  }
+  if not present {
+    let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+    let prefix = "${key}."
+    let parts: string[] = []
+    for name in stored {
+      if name.startsWith(prefix) {
+        let part = name.substring(prefix.length)
+        let dot = part.indexOf(".")
+        if dot >= 0 {
+          part = part.substring(0, dot)
+        }
+        if not parts.contains(part) {
+          parts.add(part)
+        }
+      }
+    }
+    let numbered = true
+    for part in parts {
+      if part.length == 0 {
+        numbered = false
+      }
+      let position = 0
+      while position < part.length {
+        if not "0123456789".contains(part.substring(position, position + 1)) {
+          numbered = false
+        }
+        position += 1
+      }
+    }
+    if parts.length > 0 and numbered {
+      let items: list = []
+      for part in parts {
+        let index = toInteger(part)
+        while items.length <= index {
+          items.add(null)
+        }
+        items[index] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = items
+    } else if parts.length > 0 {
+      let entries: dict = dict{}
+      for part in parts {
+        entries[part] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = entries
+    }
+  }
+  if value == null {
+    value = whenMissing
+  }
+  return value
+}
+// A package with its own main script keeps legacy storage's helpers there, for every script.
+sexscriptLegacySave("club.toys", ["clamps", "whip"])
+// A key that a closure computes may be any key, so every key keeps the layout legacy storage gave it.
+function notesKey {
+  return "club.notes"
+}
+sexscriptLegacySave(notesKey(), ["kneel", "wait"])
+if false {
+  sexscriptLegacySave("club", null)
+}
+goto "next.tease"

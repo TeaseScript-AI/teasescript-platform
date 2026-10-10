@@ -1,0 +1,38 @@
+--- a/scripts/ChastityRouletteAlt.groovy
++++ b/scripts/ChastityRouletteAlt.groovy
+@@ -121,7 +121,7 @@
+ 
+ def getAge = {
+ 	// load stored age
+-	def number = loadInteger("ChastityRouletteAlt.age")
++	int number = loadInteger("ChastityRouletteAlt.age") ?: 0
+ 	// If nothing stored, or number is too small, ask age and save it
+ 	if (number<18)
+ 	{
+@@ -133,7 +133,7 @@
+ 
+ def getWeight = {
+ 	// load stored weight
+-	def number = loadInteger("ChastityRouletteAlt.weight")
++	int number = loadInteger("ChastityRouletteAlt.weight") ?: 0
+ 	// If nothing stored, or number is too small, ask weight and save it
+ 	if (number<50)
+ 	{
+@@ -145,7 +145,7 @@
+ 
+ def getOrgasm = {
+ 	// load stored days since last orgasm
+-	def number = loadInteger("ChastityRouletteAlt.lastorgasm")
++	int number = loadInteger("ChastityRouletteAlt.lastorgasm") ?: 0
+ 	// If nothing stored, ask days and save it
+ 	if (!number)
+ 	{
+@@ -157,7 +157,7 @@
+ 
+ def getPSize = {
+ 	// load size of erection
+-	def number = loadInteger("ChastityRouletteAlt.psize")
++	int number = loadInteger("ChastityRouletteAlt.psize") ?: 0
+ 	// If nothing stored, ask days and save it
+ 	if (!number)
+ 	{

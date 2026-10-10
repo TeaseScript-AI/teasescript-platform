@@ -1,0 +1,50 @@
+// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key
+// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
+global function sexscriptLegacySave(key, value) {
+  let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+  let kept: string[] = []
+  let prefix = "${key}."
+  for name in stored {
+    if name == key or name.startsWith(prefix) {
+      delete name
+    } else {
+      kept.add(name)
+    }
+  }
+  delete key
+  if value is list or value is dict {
+    let names: string[] = [key]
+    let values: list = [value]
+    let position = 0
+    while position < names.length {
+      let name = names[position]
+      let item = values[position]
+      position += 1
+      if item is list {
+        let index = 0
+        for element in item {
+          names.add("${name}.${index}")
+          values.add(element)
+          index += 1
+        }
+      } else if item is dict {
+        for entry, inner in item {
+          names.add("${name}.${entry}")
+          values.add(inner)
+        }
+      } else {
+        if item == null {
+          save "null" as name
+        } else {
+          save item as name
+        }
+        kept.add(name)
+      }
+    }
+  } else if value != null {
+    save value as key
+    kept.add(key)
+  }
+  save kept as "sexscriptLegacy.storedKeys"
+}
+goto "club.tease"

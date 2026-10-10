@@ -5,4 +5,6 @@ say "Turns ${turns(2)}"
 if percentChance(40) {
   say "Lucky"
 }
+start()
+check("good")
 goto "next.tease"

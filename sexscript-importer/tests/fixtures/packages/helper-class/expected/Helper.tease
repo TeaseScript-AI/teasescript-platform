@@ -17,6 +17,17 @@ global function twice(it = null) {
 global function turns(count) {
   return count * tau
 }
+// A method that the scripts call keeps its parameter's type open, also where its own calls give it a number.
+global function check(n) {
+  let value = n
+  if n == 0 {
+    value = null
+  }
+  say "Result ${value}"
+}
+global function start {
+  check(1.5)
+}
 // Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
 global function percentChance(percent) {
   let switchValue1 = randomInteger(0..99) + 1

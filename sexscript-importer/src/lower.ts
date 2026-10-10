@@ -3,6 +3,8 @@ import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import { withLoopedTailCalls } from "./tail-calls.ts";
+import { withListAppends } from "./list-appends.ts";
+import { atLeastZero, withProvenGaugeWaits } from "./gauge-waits.ts";
 import {
   constantString,
   groovyParameters,
@@ -104,6 +106,8 @@ interface ClosureInfo {
   maxArgs: number;
   /** Declared in a block of the script, such as an `if` body, and lifted to the top as a script function. */
   nested?: boolean;
+  /** A read of a stored whole number with a default of its own (isIntegerLoadOr). */
+  integerLoadOr?: true;
 }
 
 export interface HelperFunctionInfo {
@@ -128,6 +132,11 @@ export interface LowerOptions {
   packageFunctions?: ReadonlySet<string>;
   /** Runtime-loaded mixin modules of the package. */
   mixinModules?: readonly MixinModuleInfo[];
+  /**
+   * Variables whose value a unit's source patch took out of this script, with the patch's ID, which a note on what the
+   * script no longer does names (the null-only variable).
+   */
+  patchedAssignments?: ReadonlyMap<string, string>;
   /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
   stableNames?: ReadonlySet<string>;
   /**
@@ -212,6 +221,8 @@ interface LowerContext {
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
   mixinModules: readonly MixinModuleInfo[];
+  /** Whether a mixin module shares the file's functions, which another file may then call (variable typing). */
+  sharesFunctions: boolean;
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
   /** Function lowered right now and its parameter/local names, for closure naming and capture checks. */
@@ -263,6 +274,8 @@ interface LowerContext {
   integerVariables: ReadonlySet<string>;
   /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
   integerArrays: ReadonlySet<string>;
+  /** Variables declared without a value that only C-style loops which set them first use (loopOnlyCounters). */
+  loopOnlyCounters: ReadonlySet<string>;
   /** Calls through a closure parameter that only ever holds one closure of the script, by call (fixedClosureCalls). */
   fixedClosureCalls: ReadonlyMap<AstNode, string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
@@ -289,6 +302,8 @@ interface LowerContext {
   indexedSplits: Set<AstNode>;
   /** Variables that only ever hold null, whose declarations are left out and whose reads read null (nullOnlyVariables). */
   nullOnly: ReadonlySet<string>;
+  /** LowerOptions.patchedAssignments. */
+  patchedAssignments: ReadonlyMap<string, string>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -345,7 +360,9 @@ const ONLINE_STORAGE_NOTE =
   "The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.";
 
 /** The storage key prefix under which a sent photo reference is kept, by its code (sendImage). */
-const SENT_IMAGE_PREFIX = "sexscript.image.";
+export const SENT_IMAGE_PREFIX = "sexscript.image.";
+/** The file of a staged unit with the lines its source patches took out of each script (convert-corpus, cli.ts). */
+export const SOURCE_PATCHES_FILE = ".source-patches.json";
 
 const DIRECT_STORAGE_LOADS = new Set([
   "load",
@@ -576,6 +593,8 @@ export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationP
 export interface MapUses {
   /** Maps used as lookup tables, which become dicts (#536). */
   dictionaries: Set<string>;
+  /** Closures every return of which gives such a map, whose calls are dicts too. */
+  dictionaryFunctions: Set<string>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -607,6 +626,8 @@ export interface MapUses {
    * false (owner decision 2026-10-08).
    */
   emptyStarts: Map<string, "" | false>;
+  /** Fields of script map records that hold a list wherever Groovy wrote them, as `binding.field` (recordListFields). */
+  recordListFields: Set<string>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -829,10 +850,15 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
 
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
-  for (const { body, types, keys } of bodies)
-    for (const name of dictionaryVariables(body, types, keys)) dictionaries.add(name);
+  const dictionaryFunctions = new Set<string>();
+  for (const { body, types, keys } of bodies) {
+    const found = dictionaryVariables(body, types, keys);
+    for (const name of found.variables) dictionaries.add(name);
+    for (const name of found.functions) dictionaryFunctions.add(name);
+  }
   const uses: MapUses = {
     dictionaries,
+    dictionaryFunctions,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -844,9 +870,11 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     shownEarly: new Set(),
     zeroStartNumbers: new Set(),
     emptyStarts: new Map(),
+    recordListFields: new Set(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
+  uses.recordListFields = recordListFields(bodies, dictionaries);
   for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
   // The names each body reads, as variables or as properties such as a module's `owner.field`: a variable of the
   // script that another body reads may pass its value on there.
@@ -992,6 +1020,115 @@ function collectEarlyDisplays({ body, keys }: MapBody, shownEarly: Set<string>):
   for (const { key, line, inFunction } of shown)
     if (inFunction || line < (firstAssigned.get(key) ?? Number.POSITIVE_INFINITY))
       shownEarly.add(key);
+}
+
+/**
+ * Fields of script map records that hold a list wherever Groovy could see them. A record is a variable declared with a
+ * map literal, assigned only map literals, and used only as the receiver of a named field (`X.f`, `X["f"]`), so no
+ * other name, call, or dynamic key reaches it. Its field holds a list when every literal gives it a list and every
+ * write gives it a list: a list value or a cast to an array or List, `+=` and `-=` (Groovy's List and array plus and
+ * minus give a list again), and no other compound operator, `++`, or `--`.
+ */
+function recordListFields(
+  bodies: readonly MapBody[],
+  dictionaries: ReadonlySet<string>,
+): Set<string> {
+  const declared = new Set<string>();
+  const rejected = new Set<string>(dictionaries);
+  const literalFields = new Map<string, Set<string>>();
+  const allowed = new Set<AstNode>();
+  const notList = new Set<string>();
+  const isListValue = (value: AstNode | null, types: TypeEnvironment): boolean => {
+    if (value === null) return false;
+    if (value.kind === "cast" && typeof value.type === "string")
+      return /\[\]$/u.test(value.type) || value.type === "List" || value.type === "java.util.List";
+    const type = inferType(value, types);
+    return type !== 0 && onlyOf(type, LIST);
+  };
+  for (const { body, types, keys } of bodies)
+    walkAst(body, (node) => {
+      const assigns =
+        node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+      const target = assigns ? asNode(node.left) : null;
+      const key = target?.kind === "variable" ? bindingKey(target, keys) : null;
+      if (key === null || target === null) return;
+      allowed.add(target);
+      const right = asNode(node.right);
+      if (node.kind === "declaration") declared.add(key);
+      if (right?.kind !== "map") {
+        rejected.add(key);
+        return;
+      }
+      const lists = new Set<string>();
+      for (const entry of nodeArray(right.entries)) {
+        const field = constantString(entry.key);
+        if (field !== null && isListValue(asNode(entry.value), types)) lists.add(field);
+      }
+      const earlier = literalFields.get(key);
+      literalFields.set(
+        key,
+        earlier === undefined ? lists : new Set([...earlier].filter((field) => lists.has(field))),
+      );
+    });
+  const candidate = (key: string | null): key is string =>
+    key !== null && literalFields.has(key) && declared.has(key) && !rejected.has(key);
+  for (const { body, types, keys } of bodies)
+    walkAst(body, (node) => {
+      // The record and field a node names: `X.f` or `X["f"]`.
+      const fieldOf = (access: AstNode | null): string | null => {
+        if (access === null) return null;
+        const receiver =
+          access.kind === "property" || (access.kind === "binary" && access.operator === "[")
+            ? asNode(access.kind === "property" ? access.object : access.left)
+            : null;
+        const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+        if (!candidate(key)) return null;
+        const field =
+          access.kind === "property"
+            ? constantString(access.property)
+            : constantString(access.right);
+        return field === null ? null : `${key}.${field}`;
+      };
+      if (node.kind === "property" || (node.kind === "binary" && node.operator === "[")) {
+        const receiver = asNode(node.kind === "property" ? node.object : node.left);
+        const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+        if (candidate(key) && receiver !== null) {
+          const named =
+            node.kind === "property"
+              ? constantString(node.property) !== null && node.spreadSafe !== true
+              : constantString(node.right) !== null;
+          if (named) allowed.add(receiver);
+          else rejected.add(key);
+        }
+      }
+      const operator = typeof node.operator === "string" ? node.operator : "";
+      if (node.kind === "binary" && /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(operator)) {
+        const field = fieldOf(asNode(node.left));
+        if (field === null) return;
+        if (
+          operator === "="
+            ? !isListValue(asNode(node.right), types)
+            : operator !== "+=" && operator !== "-="
+        )
+          notList.add(field);
+      }
+      if (node.kind === "postfix" || node.kind === "prefix") {
+        const field = fieldOf(asNode(node.expression) ?? asNode(node.value));
+        if (field !== null) notList.add(field);
+      }
+    });
+  // Any other use of the record, such as a call, an argument, or an alias, may reach its fields unseen.
+  for (const { body, keys } of bodies)
+    walkAst(body, (node) => {
+      if (node.kind !== "variable" || allowed.has(node)) return;
+      const key = bindingKey(node, keys);
+      if (candidate(key)) rejected.add(key);
+    });
+  const fields = new Set<string>();
+  for (const [key, lists] of literalFields)
+    if (candidate(key))
+      for (const field of lists) if (!notList.has(`${key}.${field}`)) fields.add(`${key}.${field}`);
+  return fields;
 }
 
 /**
@@ -1526,6 +1663,7 @@ export function lowerParsedFile(
     copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
+    sharesFunctions: (options.mixinModules ?? []).length > 0,
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
@@ -1549,6 +1687,7 @@ export function lowerParsedFile(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
@@ -1558,6 +1697,7 @@ export function lowerParsedFile(
     writeTargets: new Set(),
     indexedSplits: new Set(),
     nullOnly: new Set(),
+    patchedAssignments: options.patchedAssignments ?? new Map(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -1611,6 +1751,7 @@ export function lowerParsedFile(
 
   const rawBody = asNode(file.root.body);
   const mixin = rawBody === null ? null : desugarMixinModule(rawBody, file.sourceName);
+  if (mixin !== null) context.sharesFunctions = true;
   const desugared =
     mixin?.body ?? desugarObjectScript(rawBody, nodeArray(file.root.classes), context);
   let body = desugared;
@@ -1653,6 +1794,7 @@ export function lowerParsedFile(
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
+    context.loopOnlyCounters = loopOnlyCounters(body, context.bindings);
     context.fixedClosureCalls = fixedClosureCalls(body);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
@@ -1686,6 +1828,7 @@ export function lowerParsedFile(
       variables,
       listElements,
       ...(context.types.bindingTypes === undefined ? {} : { bindingTypes }),
+      recordFields: new Map([...context.mapUses.recordListFields].map((field) => [field, LIST])),
     };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
@@ -2118,6 +2261,8 @@ function lowerHelperCompilationUnit(
   if (root === null || root.kind !== "compilationUnit") {
     throw new Error("lowerHelperCompilationUnit requires a compilation unit");
   }
+  // A helper class's methods are there for the scripts, whose calls this file does not see.
+  baseContext.sharesFunctions = true;
   const topLevel = asNode(root.topLevel);
   if (topLevel !== null && topLevel.kind === "block" && nodeArray(topLevel.statements).length > 0) {
     addDiagnostic(
@@ -2405,6 +2550,91 @@ function withClosureMethods(helperClass: AstNode): boolean {
 const SHOWN_HTML_TAG =
   /<\/?(?:b|strong|i|em|u|s|strike|del|br|p|div|font|span|h[1-6]|li|ul|ol|center|textformat)\b[^<>]*>/iu;
 
+/**
+ * A variable set to a list literal and, in the next statement, to one of its elements, `x = [970, 807]; x = x[sub]`,
+ * held the list only between the two, so it is set to the element at once, `x = [970, 807][sub]`, and keeps one type.
+ * The position is a literal or a variable, which cannot fail between the two.
+ */
+function withFoldedListPicks(statements: IrStatement[]): IrStatement[] {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    const result: IrStatement[] = [];
+    for (const item of items.map((statement) => withNestedBlocks(statement, block))) {
+      // Comments between the two, such as a note on the element read, stay before the statement.
+      let at = result.length - 1;
+      while (at >= 0 && result[at]!.kind === "comment") at -= 1;
+      const previous = result[at];
+      const name = previous === undefined ? null : listLiteralTarget(previous);
+      const pick =
+        name !== null &&
+        item.kind === "assign" &&
+        item.operator === "=" &&
+        isVariable(item.target, name)
+          ? elementOf(item.value, name)
+          : null;
+      if (pick === null || (previous?.kind !== "let" && previous?.kind !== "assign")) {
+        result.push(item);
+        continue;
+      }
+      result.splice(at, 1);
+      result.push({ ...previous, value: pick(previous.value) });
+    }
+    return result;
+  };
+  return block(statements);
+}
+
+/** The variable a `let` without a written type, or a `=`, sets to a list literal, or null. */
+function listLiteralTarget(statement: IrStatement): string | null {
+  if (
+    statement.kind === "let" &&
+    statement.global !== true &&
+    statement.type === undefined &&
+    statement.value.kind === "list"
+  )
+    return statement.name;
+  return statement.kind === "assign" &&
+    statement.operator === "=" &&
+    statement.target.kind === "variable" &&
+    statement.value.kind === "list"
+    ? statement.target.name
+    : null;
+}
+
+function isVariable(value: IrExpression, name: string): boolean {
+  return value.kind === "variable" && value.name === name;
+}
+
+/** Whether IR statements or expressions read a variable of the name. */
+function readsVariable(value: unknown, name: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => readsVariable(item, name));
+  if (!isRecord(value)) return false;
+  if (value.kind === "variable" && value.name === name) return true;
+  return Object.values(value).some((child) => readsVariable(child, name));
+}
+
+/**
+ * For an element read of the variable at a literal or variable position, `x[sub]` or its helper for a position Groovy
+ * read differently, the same read of another list; null for another value.
+ */
+function elementOf(
+  value: IrExpression,
+  name: string,
+): ((list: IrExpression) => IrExpression) | null {
+  const settled = (position: IrExpression): boolean =>
+    position.kind === "literal" || (position.kind === "variable" && position.name !== name);
+  if (value.kind === "index" && isVariable(value.target, name) && settled(value.index))
+    return (list) => ({ ...value, target: list });
+  if (
+    value.kind === "call" &&
+    value.name === "sexscriptLegacyItemAt" &&
+    value.positional.length === 2 &&
+    isVariable(value.positional[0]!, name) &&
+    settled(value.positional[1]!)
+  )
+    return (list) => ({ ...value, positional: [list, value.positional[1]!] });
+  return null;
+}
+
 /** What the generated helpers return, computed once. */
 let helperResults: ReadonlyMap<string, TeaseType> | undefined;
 
@@ -2415,7 +2645,11 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
-  const result = enforceVariableTypes(withLoopedTailCalls(statements), helperResults);
+  const result = enforceVariableTypes(
+    withFoldedListPicks(withLoopedTailCalls(statements)),
+    helperResults,
+    !context.sharesFunctions,
+  );
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
@@ -2562,7 +2796,8 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
       },
     ]);
   }
-  if (replaced.size === 0 && staleText.size === 0) return result.statements;
+  if (replaced.size === 0 && staleText.size === 0)
+    return withListAppends(withProvenGaugeWaits(result.statements));
   const replace = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((statement): IrStatement[] => {
       if (isStale(statement)) return [];
@@ -2589,7 +2824,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
           return [statement];
       }
     });
-  return replace(result.statements);
+  return withListAppends(withProvenGaugeWaits(replace(result.statements)));
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
@@ -2686,6 +2921,7 @@ function lowerHelperMethod(
     copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
+    sharesFunctions: baseContext.sharesFunctions,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     resultUses: baseContext.resultUses,
     directoryFiles: baseContext.directoryFiles,
@@ -2706,6 +2942,7 @@ function lowerHelperMethod(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
@@ -2719,6 +2956,7 @@ function lowerHelperMethod(
     writeTargets: new Set(),
     indexedSplits: new Set(),
     nullOnly: new Set(),
+    patchedAssignments: baseContext.patchedAssignments,
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -2760,7 +2998,11 @@ function lowerHelperMethod(
         method.span,
       );
     }
-    parameters.push({ name: parameterName, defaultValue });
+    parameters.push({
+      name: parameterName,
+      defaultValue,
+      ...(parameter.typed === true ? { typed: true as const } : {}),
+    });
   }
   return {
     kind: "function",
@@ -4678,7 +4920,9 @@ function lowerDeclaration(
     const diagnostic: MigrationDiagnostic = {
       code: "SX_NULL_ONLY_VARIABLE",
       severity: "info",
-      message: `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
+      message: context.patchedAssignments.has(name)
+        ? `${name} is given no value in the script as the unit's patch ${context.patchedAssignments.get(name)!} changed it, so it only holds null; the conversion leaves it out and reads null where it was read.`
+        : `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
       span,
     };
     context.diagnostics.push(diagnostic);
@@ -4694,6 +4938,12 @@ function lowerDeclaration(
     ];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  // A counter that only its loops use is declared by each of them (loopOnlyCounters).
+  if (
+    isEmptyGroovyExpression(right) &&
+    context.loopOnlyCounters.has(bindingKey(asNode(node.left), context.bindings) ?? "")
+  )
+    return [];
   // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
   if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
   const java = javaDeclaration(name, right, span, javaHost(context));
@@ -5022,6 +5272,7 @@ function lowerClosureDeclaration(
         name: record.name,
         defaultValue,
         ...(fractional ? { type: "number" } : {}),
+        ...(record.typed === true ? { typed: true as const } : {}),
       });
     }
   }
@@ -7103,9 +7354,11 @@ function lowerCallStatement(
         span,
       }));
     case "waitWithGauge":
+      // Legacy counted the gauge up to the seconds and so did not wait at all for a negative number, where a timer stops
+      // the script; seconds not certain to be at least 0 count from 0 (atLeastZero).
       return oneArgumentStatement(args, context, node, (duration) => ({
         kind: "wait",
-        duration,
+        duration: atLeastZero(duration),
         visible: true,
         unit: "s",
         span,
@@ -9437,10 +9690,11 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
 }
 
 /**
- * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that starts
- * with one or with null.
+ * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that is set
+ * to one or to null, also through another variable; the null start of a variable that starts with 0, an empty text, or
+ * false instead (zeroStartNumbers, emptyStarts) is none.
  */
-function mayReadNull(node: AstNode, context: LowerContext): boolean {
+function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   if (node.kind === "methodCall") {
     const name = legacyApiCall(node, context)?.name ?? "";
     if (DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name)) return true;
@@ -9456,8 +9710,16 @@ function mayReadNull(node: AstNode, context: LowerContext): boolean {
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
-  const first = key === null ? undefined : context.assignedValues.get(key)?.[0];
-  return first !== undefined && (isNullConstant(first) || mayReadNull(first, context));
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  const values = context.assignedValues.get(key) ?? [];
+  const replacedStart =
+    context.mapUses.zeroStartNumbers.has(key) || context.mapUses.emptyStarts.has(key);
+  return values.some(
+    (value, position) =>
+      !(replacedStart && position === 0) &&
+      (isNullConstant(value) || mayReadNull(value, context, seen)),
+  );
 }
 
 /** Methods whose results are whole numbers. */
@@ -9573,10 +9835,26 @@ function lowerCStyleFor(
   }
 
   const step = [...updatePrelude, ...updateStatements];
+  // The loop declares a counter that only loops which set it first use (loopOnlyCounters), as `for (def i = ...)`.
+  const counter = cStyleCounter(node, context.bindings);
+  const declares = counter !== null && context.loopOnlyCounters.has(counter);
   return [
     ...initialPrelude,
     ...initialStatements.map((statement): IrStatement =>
-      statement.kind === "let" ? { ...statement, loopCounter: true } : statement,
+      statement.kind === "let"
+        ? { ...statement, loopCounter: true }
+        : declares &&
+            statement.kind === "assign" &&
+            statement.operator === "=" &&
+            statement.target.kind === "variable"
+          ? {
+              kind: "let",
+              name: statement.target.name,
+              value: statement.value,
+              span: statement.span,
+              loopCounter: true,
+            }
+          : statement,
     ),
     {
       kind: "while",
@@ -9779,8 +10057,24 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   });
   const closureCases = matchNodes.map((matchNode) => closureCaseTest(matchNode));
   if (closureCases.every((test) => test === null) && isAcceptedSwitch(valueCases)) {
+    // A variable that may be null matched none of its literal cases there and ran the default (nullFirst).
+    const subject = valueNode === null ? null : variableName(valueNode);
+    const nullFirst =
+      subject !== null &&
+      mayReadNull(valueNode!, context) &&
+      valueCases.every((switchCase) =>
+        switchCase.matches.every((match) => match.kind === "literal" && match.value !== null),
+      ) &&
+      valueCases.some((switchCase) => readsVariable(switchCase.body, subject));
     return [
-      { kind: "switch", value, cases: valueCases, default: defaultStatements, span: node.span },
+      {
+        kind: "switch",
+        value,
+        cases: valueCases,
+        default: defaultStatements,
+        span: node.span,
+        ...(nullFirst ? { nullFirst: true as const } : {}),
+      },
     ];
   }
   // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain when
@@ -13334,7 +13628,7 @@ function lowerObjectMethodCallExpression(
   }
   const changes =
     (name === "add" && argumentsNodes.length === 1) ||
-    (name === "pop" && argumentsNodes.length === 0) ||
+    ((name === "pop" || name === "clear") && argumentsNodes.length === 0) ||
     (name === "remove" &&
       argumentsNodes.length === 1 &&
       onlyOf(inferType(argumentsNodes[0]!, context.types), NUMBER));
@@ -13393,9 +13687,14 @@ function lowerObjectMethodCallExpression(
         return useHelper(context, "listMax", [target]);
       case "min":
         return useHelper(context, "listMin", [target]);
-      case "sum":
-        // Groovy sum() joins text; the helper adds numbers only.
-        if (!onlyOf(listElementType(targetNode, context), NUMBER)) {
+      case "sum": {
+        // Groovy sum() adds numbers and joins texts, so a list of texts sums with the helper that joins them as Groovy
+        // did, null elements included (ToyExpanded's number memory game).
+        const elements = listElementType(targetNode, context);
+        if ((elements & STRING) !== 0 && onlyOf(elements, STRING | NULL))
+          return useHelper(context, "textSum", [target]);
+        // The helper adds numbers only.
+        if (!onlyOf(elements, NUMBER)) {
           return unsupportedExpression(
             context,
             node,
@@ -13404,6 +13703,7 @@ function lowerObjectMethodCallExpression(
           );
         }
         return useHelper(context, "listSum", [target]);
+      }
       case "unique":
         // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
         return useHelper(context, "unique", [target]);
@@ -13421,6 +13721,9 @@ function lowerObjectMethodCallExpression(
   // `toArray(new String[0])` only names the array type.
   if (name === "toArray" && argumentsNodes.length === 1 && isPure(argumentsNodes[0]!, context))
     return target;
+  // A list that is not a variable, such as a record's field, empties in place as a variable's does.
+  if (name === "clear" && argumentsNodes.length === 0)
+    return { kind: "methodCall", target, name: "clear", arguments: [] };
   return unsupportedExpression(
     context,
     node,
@@ -14057,13 +14360,14 @@ const LOOKUP_METHODS = new Set([
  * Variables that hold a Groovy map used as a lookup table, which becomes a `dict` (#536): looked up by a runtime key,
  * given lookup methods or a loop, or built with computed or non-name keys. Other maps stay objects with fixed
  * properties. A map assigned to, from, or compared with a dict variable is a dict too, since a dict never equals an
- * object.
+ * object. So is the result of a closure every return of which gives one, `def get_fighters = { return [(TYPE.human):
+ * left] }`, and a variable set from its call: `functions`.
  */
 function dictionaryVariables(
   body: AstNode,
   types: TypeEnvironment,
   keys: BindingKeys,
-): Set<string> {
+): { variables: Set<string>; functions: Set<string> } {
   const names = new Set<string>();
   const keyOf = (node: unknown): string | null => bindingKey(node, keys);
   const typeOf = (node: unknown): number =>
@@ -14080,6 +14384,8 @@ function dictionaryVariables(
     return literal !== undefined || onlyOf(inferType(key, types), STRING);
   };
   const aliases: Array<[string, string]> = [];
+  // Variables set from a call of a closure of the script.
+  const calls: Array<[string, string]> = [];
   walkAst(body, (node) => {
     if (node.kind === "binary" && node.operator === "[") {
       const name = keyOf(node.left);
@@ -14120,15 +14426,57 @@ function dictionaryVariables(
     const target = assigns ? keyOf(node.left) : null;
     const value = assigns ? asNode(node.right) : null;
     if (target === null || value === null) return;
-    if (value.kind === "map") {
-      for (const entry of nodeArray(value.entries)) {
-        const key = constantString(entry.key);
-        if (key === null || !isTeaseObjectPropertyName(key)) names.add(target);
-      }
-    }
+    if (dictionaryLiteral(value)) names.add(target);
     const source = keyOf(value);
     if (source !== null) aliases.push([target, source]);
+    const called =
+      value.kind === "methodCall" && value.implicitThis === true
+        ? constantString(value.method)
+        : null;
+    if (called !== null) calls.push([target, called]);
   });
+  // The closures whose every return gives a dict literal or a dict variable, and that end in a return on every path,
+  // so that no last expression gives a value of its own (Groovy returned the value of a closure's last expression,
+  // also one at the end of an `if` or `else`).
+  const returns = new Map<string, AstNode[]>();
+  const endsInReturn = (node: AstNode | null): boolean => {
+    if (node === null) return false;
+    if (node.kind === "return") return true;
+    if (node.kind === "block") return endsInReturn(nodeArray(node.statements).at(-1) ?? null);
+    if (node.kind === "if") {
+      const otherwise = asNode(node.else);
+      return (
+        endsInReturn(asNode(node.then)) &&
+        otherwise !== null &&
+        otherwise.kind !== "empty" &&
+        endsInReturn(otherwise)
+      );
+    }
+    return false;
+  };
+  walkAst(body, (node) => {
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    const closure = asNode(node.right);
+    if (name === null || closure?.kind !== "closure") return;
+    const statements = nodeArray(asNode(closure.body)?.statements);
+    if (!endsInReturn(statements.at(-1) ?? null)) return;
+    const values: AstNode[] = [];
+    let open = false;
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!isAstNode(value) || value.kind === "closure") return;
+      if (value.kind === "return") {
+        const returned = asNode(value.value);
+        if (returned === null || isNullConstant(returned)) open = true;
+        else values.push(returned);
+        return;
+      }
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(statements);
+    if (!open && values.length > 0) returns.set(name, values);
+  });
+  const functions = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [target, source] of aliases) {
@@ -14138,8 +14486,31 @@ function dictionaryVariables(
         changed = true;
       }
     }
+    for (const [name, values] of returns) {
+      if (functions.has(name)) continue;
+      if (!values.every((value) => dictionaryLiteral(value) || names.has(keyOf(value) ?? "")))
+        continue;
+      functions.add(name);
+      changed = true;
+    }
+    for (const [target, called] of calls) {
+      if (!functions.has(called) || names.has(target)) continue;
+      names.add(target);
+      changed = true;
+    }
   }
-  return names;
+  return { variables: names, functions };
+}
+
+/** Whether a Groovy map literal has a key that is no TeaseScript property name, so that it becomes a dict. */
+function dictionaryLiteral(value: AstNode): boolean {
+  return (
+    value.kind === "map" &&
+    nodeArray(value.entries).some((entry) => {
+      const key = constantString(entry.key);
+      return key === null || !isTeaseObjectPropertyName(key);
+    })
+  );
 }
 
 /**
@@ -14160,6 +14531,17 @@ function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
   const types = context.types;
   const statements = nodeArray(body.statements);
   const kindOf = (value: AstNode | null): string | null => {
+    // The sum of a list variable of texts is text, as the helper that joins them gives (textSum).
+    const summed =
+      value?.kind === "methodCall" &&
+      constantString(value.method) === "sum" &&
+      nodeArray(asNode(value.arguments)?.items).length === 0
+        ? asNode(value.object)
+        : null;
+    if (summed?.kind === "variable") {
+      const elements = listElementType(summed, context);
+      if ((elements & STRING) !== 0 && onlyOf(elements, STRING | NULL)) return "Text";
+    }
     const type = inferType(value, types);
     if (onlyOf(type, STRING)) return "Text";
     if (onlyOf(type, BOOLEAN)) return "Boolean";
@@ -15254,6 +15636,96 @@ function fixedClosureCalls(body: AstNode): Map<AstNode, string> {
   return result;
 }
 
+/**
+ * Variables declared without a value, `def i`, that only C-style loops use which set them in their first part, `for (i
+ * = start; ...)`, none inside another of them nor in a closure: Groovy's null start is never read, and each loop's
+ * value ends with it, so each loop declares the counter itself.
+ */
+function loopOnlyCounters(body: AstNode, keys: BindingKeys): Set<string> {
+  const declared = new Set<string>();
+  walkAst(body, (node) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    const right = asNode(node.right);
+    if (left === null || right === null || !isEmptyGroovyExpression(right)) return;
+    if ((text(left.originType) ?? "java.lang.Object") !== "java.lang.Object") return;
+    const key = bindingKey(left, keys);
+    if (key !== null) declared.add(key);
+  });
+  if (declared.size === 0) return declared;
+  const outside = new Set<string>();
+  // The closure each counter is declared in; a use in another one, such as a closure inside the loop, is outside.
+  const declaredIn = new Map<string, AstNode | null>();
+  const visit = (value: unknown, inside: ReadonlySet<string>, closure: AstNode | null): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inside, closure);
+      return;
+    }
+    // A closure's parameters, with their defaults, are records of their own.
+    if (!isAstNode(value)) {
+      if (isRecord(value)) for (const child of Object.values(value)) visit(child, inside, closure);
+      return;
+    }
+    const node = value;
+    const declaration = node.kind === "declaration" ? bindingKey(asNode(node.left), keys) : null;
+    if (declaration !== null && declared.has(declaration)) {
+      declaredIn.set(declaration, closure);
+      return;
+    }
+    if (node.kind === "variable") {
+      const key = bindingKey(node, keys);
+      if (
+        key !== null &&
+        declared.has(key) &&
+        (!inside.has(key) || !declaredIn.has(key) || declaredIn.get(key) !== closure)
+      )
+        outside.add(key);
+      return;
+    }
+    const counter = cStyleCounter(node, keys);
+    let within = inside;
+    if (counter !== null && declared.has(counter)) {
+      if (inside.has(counter)) outside.add(counter);
+      within = new Set([...inside, counter]);
+    }
+    for (const child of Object.values(node))
+      visit(child, within, node.kind === "closure" ? node : closure);
+  };
+  visit(body, new Set(), null);
+  return new Set([...declared].filter((key) => !outside.has(key)));
+}
+
+/**
+ * The variable a C-style `for` sets in its first part, `for (i = start; ...)`, with a value that is one assignment
+ * and reads not the variable itself: no conditional, which becomes an `if` of assignments, and no question; or null.
+ */
+function cStyleCounter(node: AstNode, keys: BindingKeys): string | null {
+  const collection = asNode(node.collection);
+  if (
+    node.kind !== "for" ||
+    text(node.variable) !== "forLoopDummyParameter" ||
+    collection?.kind !== "list"
+  )
+    return null;
+  const [initial] = nodeArray(collection.items);
+  const counter =
+    initial?.kind === "binary" && text(initial.operator) === "="
+      ? bindingKey(asNode(initial.left), keys)
+      : null;
+  if (counter === null) return null;
+  let plain = true;
+  walkAst(asNode(initial!.right), (part) => {
+    if (
+      part.kind === "ternary" ||
+      part.kind === "elvis" ||
+      part.kind === "closure" ||
+      isPromptingCall(part) ||
+      (part.kind === "variable" && bindingKey(part, keys) === counter)
+    )
+      plain = false;
+  });
+  return plain ? counter : null;
+}
+
 /** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
 function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
   const names = new Set<string>();
@@ -16207,8 +16679,15 @@ function dictStatement(
   }
 }
 
-/** Whether an expression is a variable that holds a map used as a lookup table (#536). */
+/**
+ * Whether an expression is a variable that holds a map used as a lookup table (#536), or a call of a closure that
+ * returns one (dictionaryVariables).
+ */
 function isDictionary(node: AstNode, context: LowerContext): boolean {
+  const called =
+    node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
+  if (called !== null)
+    return context.mapUses.dictionaryFunctions.has(called) && context.functions.has(called);
   const key = bindingKey(node, context.bindings);
   return (
     key !== null && context.mapUses.dictionaries.has(key) && !context.shadowingReferences.has(node)
@@ -16326,6 +16805,18 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         `Call to ${call.name} has ${call.arguments.length} arguments; expected ${functionInfo.minArgs}..${functionInfo.maxArgs}.`,
       );
     }
+    // A read whose default is a whole number reads one, which the typed helper declares; Groovy evaluated the default
+    // before the call, as a helper argument is.
+    if (
+      functionInfo.integerLoadOr === true &&
+      !context.functions.has("loadInteger") &&
+      isWholeNumber(call.arguments[1]!, context)
+    ) {
+      const args = lowerArguments(call.arguments, context);
+      if (args === null) return null;
+      context.syntheticHelpers.add("loadIntegerOr");
+      return helperCall("loadIntegerOr", args);
+    }
     const args = lowerArguments(call.arguments, context);
     return args === null
       ? null
@@ -16383,7 +16874,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       return { kind: "load", key, read: "string" };
     if (call.name === "loadBoolean" || call.name === "receiveBoolean")
       return { kind: "load", key, read: "boolean" };
-    return { kind: "load", key };
+    // Legacy load() rebuilt a list or a map from the key's elements where the key itself was not stored.
+    return call.name === "load" ? { kind: "load", key, rebuilds: true } : { kind: "load", key };
   }
   if (call.name === "loadMap") {
     return unsupportedExpression(
@@ -16775,25 +17267,31 @@ function lowerSingleInput(
     );
   }
   const defaultNode = argumentNodes[1];
-  const prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
-  if (prefill !== null && !isPure(defaultNode!, context)) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_INPUT_PREFILL_EFFECT",
-      `${name}() computes its pre-filled value with side effects, which legacy ran before showing the question; the question becomes a say before the input, so compute the value explicitly before the question.`,
-    );
-  }
+  let prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
   // Legacy text input showed `String.valueOf(default)`; a text default is text in TeaseScript too (null shows "null"),
   // and a list shows as Groovy printed it, `[a, b]`.
   const defaultType = defaultNode === undefined ? UNKNOWN : inferType(defaultNode, context.types);
+  const shownCollection =
+    name === "getString" && defaultType !== UNKNOWN && (defaultType & (LIST | OBJECT)) !== 0;
+  // Groovy computed the pre-filled value after the question's text and before the input showed: one with effects goes
+  // into a temporary before the question's say, after its text. A list or map shown as text reads its parts again, so
+  // that one needs the value computed explicitly.
+  let prompted = false;
+  if (prefill !== null && !isPure(defaultNode!, context)) {
+    if (shownCollection)
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_INPUT_PREFILL_EFFECT",
+        `${name}() computes its pre-filled list or map with side effects, which legacy ran before showing the question; its text reads it again, so compute the value explicitly before the question.`,
+      );
+    const computed = { nodes: [defaultNode!], values: [prefill], base: "prefill" };
+    if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!, null, computed)) return null;
+    prefill = computed.values[0]!;
+    prompted = true;
+  }
   let textPrefill = prefill;
-  if (
-    prefill !== null &&
-    name === "getString" &&
-    defaultType !== UNKNOWN &&
-    (defaultType & (LIST | OBJECT)) !== 0
-  ) {
+  if (prefill !== null && shownCollection) {
     const parts = onlyOf(defaultType, LIST | NULL) ? listText(defaultNode!, context) : undefined;
     if (parts === null) return null;
     if (parts === undefined) {
@@ -16814,7 +17312,7 @@ function lowerSingleInput(
       name !== "getString" &&
       !notePrefill(name, defaultNode!, node, context)
     ) {
-      if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+      if (!prompted && !pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
       return useHelper(context, name === "getInteger" ? "askInteger" : "askNumber", [prefill]);
     }
     // A text input's prefill that may be no text is shown as text, and null stays null.
@@ -16827,7 +17325,7 @@ function lowerSingleInput(
             : useHelper(context, "text", [prefill]);
     }
   }
-  if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+  if (!prompted && !pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
   const input =
     name === "getString" ? "askText" : name === "getInteger" ? "askInteger" : "askNumber";
   return textPrefill === null
@@ -16882,11 +17380,12 @@ function pushPrompt(
   /** An argument whose statements already run before the prompt, such as the loop that builds a menu's options. */
   evaluated: AstNode | null = null,
   /**
-   * The lowered button texts or options and their nodes: one with effects, such as `"Yes, ${dommeTitle()}"`, is
-   * computed into a temporary before the question, in order after the question's own text, as Groovy evaluated every
-   * argument before showing it; `values` then holds the temporary.
+   * The lowered button texts, options, or pre-filled value and their nodes: one with effects, such as `"Yes,
+   * ${dommeTitle()}"`, is computed into a temporary before the question, in order after the question's own text, as
+   * Groovy evaluated every argument before showing it; `values` then holds the temporary, which `base` names (`option`
+   * by default).
    */
-  computed: { nodes: readonly AstNode[]; values: IrExpression[] } | null = null,
+  computed: { nodes: readonly AstNode[]; values: IrExpression[]; base?: string } | null = null,
 ): boolean {
   if (holdsOnlyNull(messageNode, context)) return true;
   const root = context.statementRoot;
@@ -16895,6 +17394,11 @@ function pushPrompt(
   const otherArguments = (callParts(inputNode)?.arguments ?? []).filter(
     (argument) =>
       argument !== messageNode &&
+      // The `show(text)` that gave the message (lowerSelectedValue).
+      !(
+        legacyApiCall(argument, context)?.name === "show" &&
+        callParts(argument)?.arguments[0] === messageNode
+      ) &&
       argument !== evaluated &&
       !effects.includes(argument) &&
       !(
@@ -16912,10 +17416,14 @@ function pushPrompt(
       context.prelude.push({ kind: "let", name, value, span: inputNode.span });
       return { kind: "variable", name };
     };
-    if (!isPure(messageNode, context)) message = temporary(message, "question");
+    // The question's text is read before the computed arguments, which may change what it reads, unless it is fixed.
+    const fixed =
+      message.kind === "literal" ||
+      (message.kind === "template" && message.parts.every((part) => "text" in part));
+    if (!fixed) message = temporary(message, "question");
     computed.nodes.forEach((node, index) => {
       if (effects.includes(node))
-        computed.values[index] = temporary(computed.values[index]!, "option");
+        computed.values[index] = temporary(computed.values[index]!, computed.base ?? "option");
     });
   }
   if (!ordered) {
@@ -16973,6 +17481,11 @@ function lowerSelectedValue(
       "getSelectedValue() must have exactly two arguments.",
     );
   }
+  // show() returned null, so getSelectedValue(show(text), options) showed the text and then the options without a
+  // message of their own, as getSelectedValue(text, options) shows them.
+  const shown = legacyApiCall(args[0]!, context);
+  if (shown?.name === "show" && shown.arguments.length === 1)
+    args = [shown.arguments[0]!, args[1]!];
   const message = lowerExpression(args[0]!, context);
   if (message === null) return null;
   const optionsNode = args[1]!;
@@ -18118,6 +18631,86 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
   return evaluates && lists && exact ? directory : null;
 }
 
+/**
+ * Whether a closure reads a stored whole number with a default of its own, `{ key, value -> def stored =
+ * loadInteger(key); if (stored == null) return value else return stored }`, also with the last return after the `if`.
+ */
+function isIntegerLoadOr(closure: AstNode): boolean {
+  const parameters = groovyParameters(closure.parameters) ?? [];
+  if (
+    closure.parameterSpecified !== true ||
+    parameters.length !== 2 ||
+    parameters.some((parameter) => parameter.defaultValue !== null)
+  )
+    return false;
+  const [key, value] = parameters.map((parameter) => parameter.name);
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const only = (node: AstNode | null): AstNode | null => {
+    if (node?.kind !== "block") return node;
+    const items = nodeArray(node.statements);
+    return items.length === 1 ? items[0]! : null;
+  };
+  const returns = (node: AstNode | null, name: string | null): boolean => {
+    const item = only(node);
+    return item?.kind === "return" && name !== null && variableName(item.value) === name;
+  };
+  const declaration =
+    statements[0]?.kind === "expressionStatement" ? asNode(statements[0].expression) : null;
+  // An untyped local: a written type such as `String stored` converts the read.
+  const stored =
+    declaration?.kind === "declaration" &&
+    (text(asNode(declaration.left)?.originType) ?? "java.lang.Object") === "java.lang.Object"
+      ? variableName(declaration.left)
+      : null;
+  const read = asNode(declaration?.right);
+  const readArguments = nodeArray(asNode(read?.arguments)?.items);
+  const test = statements[1];
+  const condition = asNode(test?.condition);
+  const sides = [asNode(condition?.left), asNode(condition?.right)];
+  if (
+    stored === null ||
+    read?.kind !== "methodCall" ||
+    read.implicitThis !== true ||
+    constantString(read.method) !== "loadInteger" ||
+    readArguments.length !== 1 ||
+    variableName(readArguments[0]) !== key ||
+    test?.kind !== "if" ||
+    condition?.kind !== "binary" ||
+    text(condition.operator) !== "==" ||
+    !sides.some((side) => variableName(side) === stored) ||
+    !sides.some((side) => side !== null && isNullConstant(side)) ||
+    !returns(asNode(test.then), value ?? null)
+  )
+    return false;
+  const otherwise = asNode(test.else);
+  if (statements.length === 2) return returns(otherwise, stored);
+  return (
+    statements.length === 3 &&
+    (otherwise === null || otherwise.kind === "empty") &&
+    returns(statements[2]!, stored)
+  );
+}
+
+/**
+ * Whether a Groovy value is a whole number that the conversion writes as one, never null: a whole literal not written
+ * `1.0`, its negation, or a variable declared with an integer type, which stores only whole numbers.
+ */
+function isWholeNumber(node: AstNode, context: LowerContext): boolean {
+  if (node.kind === "unaryMinus") {
+    const value = asNode(node.value);
+    return value !== null && isWholeNumber(value, context);
+  }
+  if (node.kind === "constant")
+    return (
+      typeof node.value === "number" &&
+      Number.isInteger(node.value) &&
+      !writtenDecimal(node, context)
+    );
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  return key !== null && context.integerVariables.has(key) && !mayReadNull(node, context);
+}
+
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
   const result = new Map<string, ClosureInfo>();
   const add = (name: string, closure: AstNode, nested: boolean): void => {
@@ -18131,6 +18724,7 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
       minArgs,
       maxArgs: implicitParameter ? 0 : parameters.length,
       ...(nested ? { nested } : {}),
+      ...(isIntegerLoadOr(closure) ? { integerLoadOr: true as const } : {}),
     });
   };
   for (const statement of nodeArray(body.statements)) {

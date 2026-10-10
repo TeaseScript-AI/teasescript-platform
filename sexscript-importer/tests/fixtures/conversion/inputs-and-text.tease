@@ -67,4 +67,20 @@ for value in 5..=6 {
 if askBoolean "Who controls the key?", yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
   say "Fine."
 }
+// show() returned null, so a menu whose message is show(text) showed the text and then its options.
+let menuText = "Main menu"
+say menuText
+let menuChoice = choose 0: "Start", 1: "End"
+say "Chose ${menuChoice}"
+// A gauge wait of a negative number of seconds did not wait at all, so seconds not certain to be at least 0 count
+// from 0; a literal, a random number, and their sums are certain.
+let penalty = [-60, 0]
+penalty[0] = penalty[0] + 30
+timer max(penalty[0], 0) s
+timer (randomInteger(0..3) + 1) s
+// So is a variable that every write sets to such a number.
+let gaugeStep = 1
+gaugeStep += 1
+timer (gaugeStep * 2) s
+say "Gauges done"
 exit

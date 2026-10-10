@@ -1,0 +1,11 @@
+// The scene reads the toys back one key at a time, as legacy storage kept them (DisciplineClinic's Harmony).
+let toys = ""
+for i in 0..5 {
+  let toy = load "club.toys.${i}", default: ""
+  if toy != "" {
+    toys += "${toy} "
+  }
+}
+say "Lay out ${toys}"
+save toys as "scene.laid"
+exit

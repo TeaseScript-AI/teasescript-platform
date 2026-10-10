@@ -63,6 +63,8 @@ export interface IrFunctionParameter {
   defaultValue: IrExpression | null;
   /** The declared type, where a call passes null for a parameter whose default gives it a type (V30 §17). */
   type?: string;
+  /** Groovy declared the parameter's type, which the calls do not then give it (variable typing). */
+  typed?: true;
 }
 
 export type IrStatement =
@@ -222,6 +224,11 @@ export type IrStatement =
       value: IrExpression;
       cases: IrSwitchCase[];
       default: IrStatement[];
+      /**
+       * The value, a variable, may be null, which matched none of the literal cases and ran the default in Groovy;
+       * variable typing tests it for null first where its type allows null, so the cases know that it holds a value.
+       */
+      nullFirst?: true;
     })
   | (IrBase & { kind: "break" })
   | (IrBase & { kind: "continue" })
@@ -307,6 +314,8 @@ export type IrExpression =
       fill?: true;
       /** A read whose variable the script fills in later and uses as a value, which keeps an open null. */
       open?: true;
+      /** Legacy `load()`, which rebuilt a list or a map from the key's elements (legacy-storage.ts). */
+      rebuilds?: true;
     }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each

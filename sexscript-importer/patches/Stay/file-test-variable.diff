@@ -1,0 +1,13 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -178,8 +178,8 @@
+ }
+ 
+ def testexists={ filename ->
+-	File x = new File(filename)
+-	return (x.exists())
++	File testfile = new File(filename)
++	return (testfile.exists())
+ }
+ 
+ def unit={numb, singular, plural ->

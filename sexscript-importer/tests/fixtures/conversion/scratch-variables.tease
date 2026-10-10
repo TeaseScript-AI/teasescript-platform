@@ -50,7 +50,7 @@ let actions: string[] = []
 function offer {
   actions = ["Nothing", "Work"]
   // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
-  actions += ["Use Torch"]
+  actions.add("Use Torch")
   actions = sexscriptLegacyListMinus(actions, ["Work"])
 }
 offer()

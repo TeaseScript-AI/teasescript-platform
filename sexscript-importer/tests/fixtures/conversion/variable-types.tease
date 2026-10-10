@@ -235,4 +235,37 @@ function scale(factor) {
 }
 scale(0.25)
 say "Share ${share} ${tally}"
+// A list held only until the next statement picks one of its elements leaves the variable a number.
+let which = randomInteger(0..3)
+let image = 0
+image = [970, 807, 830][which]
+// NOTE SX_PLUS_OPERAND_TYPE line 138: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Image ${image + 1}"
+// A parameter that a call gives a number that may be a fraction holds numbers, and so does the variable it sets
+// (DisciplineClinic's punishExtraSwats(numSeries / 4, ...)).
+let numSeries: number = 0
+function swats(sets) {
+  numSeries = sets
+  let done = 0
+  while done < numSeries {
+    done += 1
+  }
+  say "Sets ${done}"
+}
+numSeries = 12
+// NOTE SX_PLUS_OPERAND_TYPE line 149: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+numSeries += 3
+swats(numSeries / 4)
+swats(2)
+// A default that reads an earlier parameter gives the parameter no type of the calls: this call leaves it out and
+// passes a text through it.
+let limit = 1.5
+function check(limitValue, n = limitValue) {
+  let value = n
+  if n == 0 {
+    value = null
+  }
+  say "Result ${value}"
+}
+check("good")
 exit

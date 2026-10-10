@@ -154,7 +154,7 @@ function functionReturns(
   let results = new Map(knownResults);
   let returned = new Map<string, TeaseType[]>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings, results);
+    const analysis = analyse(statements, bindings, results, new Map(), false);
     // A known result stays where the analysis finds none of its own, such as a union it does not infer.
     const next = new Map(knownResults);
     for (const [name, type] of analysis.results)
@@ -282,6 +282,7 @@ interface Rounds {
 function runRounds(
   statements: IrStatement[],
   knownResults: ReadonlyMap<string, TeaseType>,
+  closedCalls: boolean,
 ): Rounds {
   const rounds: Rounds = {
     bindings: new Map(),
@@ -298,8 +299,9 @@ function runRounds(
     saved: new Map(),
   };
   let results = new Map(knownResults);
+  let parameters = new Map<IrFunctionParameter, TeaseType>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, rounds.bindings, results);
+    const analysis = analyse(statements, rounds.bindings, results, parameters, closedCalls);
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
     rounds.textAppends = analysis.textAppends;
@@ -316,7 +318,13 @@ function runRounds(
       next.size !== results.size ||
       [...next].some(([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN));
     results = next;
-    if (!analysis.changed && !resultsChanged) break;
+    const parametersChanged =
+      analysis.parameters.size !== parameters.size ||
+      [...analysis.parameters].some(
+        ([parameter, type]) => typeName(type) !== typeName(parameters.get(parameter) ?? UNKNOWN),
+      );
+    parameters = analysis.parameters;
+    if (!analysis.changed && !resultsChanged && !parametersChanged) break;
   }
   return rounds;
 }
@@ -325,8 +333,10 @@ export function enforceVariableTypes(
   statements: IrStatement[],
   /** Result types of functions defined elsewhere, such as the generated helpers. */
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+  /** Whether only this file calls its functions: no mixin module shares them (numberParameters). */
+  closedCalls = false,
 ): VariableTypeResult {
-  const accepted = runRounds(statements, knownResults);
+  const accepted = runRounds(statements, knownResults, closedCalls);
   const addedRecords = recordAdds(statements);
   const {
     bindings,
@@ -599,12 +609,29 @@ export function enforceVariableTypes(
         case "repeat":
         case "for":
           return withIntegerIndexes({ ...statement, body: rewrite(statement.body) }, indexes);
-        case "switch":
-          return {
+        case "switch": {
+          const otherwise = rewrite(statement.default);
+          const rewritten: IrStatement = {
             ...statement,
             cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body) })),
-            default: rewrite(statement.default),
+            default: otherwise,
           };
+          // Null ran the default in Groovy; after the test, the cases know that the value is one.
+          return nullFirstSwitches.has(statement)
+            ? {
+                kind: "if",
+                condition: {
+                  kind: "binary",
+                  operator: "==",
+                  left: statement.value,
+                  right: { kind: "literal", value: null },
+                },
+                then: structuredClone(otherwise),
+                else: [rewritten],
+                span: statement.span,
+              }
+            : rewritten;
+        }
         case "save": {
           // The type of the value saved under a literal key, from which the package decides the key's type.
           const type = saved.get(statement);
@@ -682,13 +709,18 @@ interface Analysis {
   loadDefaults: Set<IrStatement>;
   /** Saves under a key written as one literal, with the type of the value saved. */
   saved: Map<IrStatement, TeaseType>;
+  /** Parameters that the calls give numbers as of this round (numberParameters). */
+  parameters: Map<IrFunctionParameter, TeaseType>;
 }
 
 function analyse(
   statements: IrStatement[],
   bindings: Map<BindingKey, Binding>,
   results: ReadonlyMap<string, TeaseType>,
+  parameterTypes: ReadonlyMap<IrFunctionParameter, TeaseType>,
+  closedCalls: boolean,
 ): Analysis {
+  const knownNull = knownNullCompares(statements);
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -704,6 +736,7 @@ function analyse(
     unguarded: new Set(),
     loadDefaults: new Set(),
     saved: new Map(),
+    parameters: new Map(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
@@ -1054,14 +1087,54 @@ function analyse(
             : null;
         if (plain(left!) !== null && plain(left!) === plain(right!)) {
           plainCompares.add(child);
+          guardedCompares.delete(child);
           analysis.indexes.add(child);
-        } else plainCompares.delete(child);
+        } else {
+          plainCompares.delete(child);
+          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too.
+          // Where the compiler knows it holds null (knownNullCompares), the comparison after the test does not
+          // compile, so the helper stays.
+          const nullable = (side: number): boolean => {
+            const value = compared[side]!;
+            return (
+              value.kind === "variable" &&
+              !knownNull.has(child) &&
+              [left!, right!][side]!.kind === "optional" &&
+              plain(nonNull([left!, right!][side]!)) === "number"
+            );
+          };
+          const settledNumber = (side: number): boolean =>
+            plain([left!, right!][side]!) === "number" && settledValue(compared[side]!);
+          const side =
+            nullable(0) && settledNumber(1) ? 0 : nullable(1) && settledNumber(0) ? 1 : null;
+          if (side === null) guardedCompares.delete(child);
+          else {
+            guardedCompares.set(child, side);
+            analysis.indexes.add(child);
+          }
+        }
       }
     });
   };
 
+  // The argument types of each direct call of a function of the file, by function (numberParameters).
+  const calls = closedCalls ? fileCalls(statements) : null;
+  const passed = new Map<string, TeaseType[][]>();
+  const passArguments = (value: IrExpression, scope: Scope): void => {
+    forEachExpression(value, (child) => {
+      if (child.kind !== "call" || calls?.counts.has(child.name) !== true || child.local !== true)
+        return;
+      const types = child.positional.map((argument) => typeOf(argument, scope));
+      const known = passed.get(child.name);
+      if (known === undefined) passed.set(child.name, [types]);
+      else known.push(types);
+    });
+  };
   const statement = (item: IrStatement, scope: Scope): void => {
-    for (const value of ownExpressions(item)) findIndexes(value, scope);
+    for (const value of ownExpressions(item)) {
+      findIndexes(value, scope);
+      passArguments(value, scope);
+    }
     if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
@@ -1288,10 +1361,19 @@ function analyse(
         for (const child of item.body) statement(child, inner);
         return;
       }
-      case "switch":
+      case "switch": {
+        // A value that may be null is tested for it first where its type allows null (nullFirst).
+        const type = typeOf(item.value, scope);
+        if (
+          item.nullFirst === true &&
+          (type.kind === "optional" || nonNull(type).kind === "unknown")
+        )
+          nullFirstSwitches.add(item);
+        else nullFirstSwitches.delete(item);
         for (const switchCase of item.cases) block(switchCase.body, scope);
         block(item.default, scope);
         return;
+      }
       case "save":
         if (item.key.kind === "literal" && typeof item.key.value === "string") {
           analysis.saved.set(item, typeOf(item.value, scope));
@@ -1354,7 +1436,9 @@ function analyse(
   for (const item of functions) {
     const scope = new Scope(root);
     item.parameters.forEach((parameter: IrFunctionParameter) => {
-      scope.names.set(parameter.name, binding(parameter, parameter.name, null, UNKNOWN));
+      const found = binding(parameter, parameter.name, null, UNKNOWN);
+      found.fixed = parameterTypes.get(parameter) ?? UNKNOWN;
+      scope.names.set(parameter.name, found);
     });
     returns = [];
     walk(item.body, scope);
@@ -1363,6 +1447,44 @@ function analyse(
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
+  }
+  // A parameter without a Groovy type that some call gives a number that may be a fraction, `numSeries / 4`, and every
+  // other call a number or a whole number, holds numbers, so a variable it sets does too (DisciplineClinic's numSeries).
+  // That takes every call of the function: only this file's, each seen here, and no use of it as a value.
+  const scalarName = (type: TeaseType): string | null =>
+    type.kind === "scalar" ? type.name : null;
+  for (const item of functions) {
+    const types = passed.get(item.name) ?? [];
+    if (
+      calls === null ||
+      calls.open.has(item.name) ||
+      types.length === 0 ||
+      types.length !== calls.counts.get(item.name)
+    )
+      continue;
+    item.parameters.forEach((parameter, index) => {
+      if (
+        parameter.typed === true ||
+        parameter.type !== undefined ||
+        assignsVariable(item.body, parameter.name)
+      )
+        return;
+      // A call that leaves the parameter out gives it its default, which only a literal shows here: another default
+      // may read an earlier parameter.
+      const given = types.map((call) =>
+        scalarName(
+          call[index] ??
+            (parameter.defaultValue?.kind === "literal"
+              ? typeOf(parameter.defaultValue, root)
+              : NULL),
+        ),
+      );
+      if (
+        given.every((name) => name === "integer" || name === "number") &&
+        given.includes("number")
+      )
+        analysis.parameters.set(parameter, scalar("number"));
+    });
   }
   // A variable that a whole-number or number read starts and that also gets a value of unknown type.
   const openRead = (found: Binding): boolean => {
@@ -1463,6 +1585,42 @@ function breaksLoop(body: readonly IrStatement[]): boolean {
 }
 
 /** Whether the statements assign or declare `name`, also in nested blocks. */
+/**
+ * The functions of a file with the number of direct calls of each (numberParameters); a function that is also used as a
+ * value, such as an action, called with named arguments or through another name, or defined twice, is open.
+ */
+function fileCalls(statements: readonly IrStatement[]): {
+  counts: Map<string, number>;
+  open: Set<string>;
+} {
+  const counts = new Map<string, number>();
+  const open = new Set<string>();
+  const visit = (value: unknown, found: (record: Record<string, unknown>) => void): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, found);
+      return;
+    }
+    if (!isRecord(value)) return;
+    found(value);
+    for (const child of Object.values(value)) visit(child, found);
+  };
+  visit(statements, (record) => {
+    if (record.kind !== "function" || typeof record.name !== "string") return;
+    if (counts.has(record.name)) open.add(record.name);
+    counts.set(record.name, 0);
+  });
+  visit(statements, (record) => {
+    const name = record.kind === "literal" && record.action === true ? record.value : record.name;
+    if (typeof name !== "string" || !counts.has(name) || record.kind === "function") return;
+    const named = isRecord(record.named) ? Object.keys(record.named).length : 0;
+    if (record.kind === "call" && record.local === true && named === 0)
+      counts.set(name, counts.get(name)! + 1);
+    else if (record.kind === "call" || record.kind === "variable" || record.kind === "literal")
+      open.add(name);
+  });
+  return { counts, open };
+}
+
 function assignsVariable(statements: readonly IrStatement[], name: string): boolean {
   return statements.some((statement) => {
     switch (statement.kind) {
@@ -2003,6 +2161,15 @@ function arithmeticType(
     (fractional(left) || fractional(right))
   )
     return scalar("number");
+  // A date, a datetime, or a moment moved by a duration stays one, `today + 1 calendar day`.
+  if (
+    left.kind === "temporal" &&
+    left.name !== "time" &&
+    right.kind === "scalar" &&
+    right.name === "duration" &&
+    (operator === "+" || operator === "-")
+  )
+    return left;
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
@@ -2142,6 +2309,7 @@ const CALL_RESULTS = new Map<string, TeaseType>([
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
 const HELPER_RESULTS = new Map<string, TeaseType>([
   ["sexscriptLegacyLoadFirstTrue", { kind: "optional", value: scalar("string") }],
+  ["sexscriptLegacyLoadIntegerOr", scalar("integer")],
 ]);
 
 export function expressionType(
@@ -2371,6 +2539,156 @@ const wholeBounds = new WeakSet<IrStatement>();
 const ORDER_OPERATORS = new Set(["<", "<=", ">", ">="]);
 /** Orderings of two sides that typing proves to be numbers, or texts, which read as the plain comparison. */
 const plainCompares = new WeakSet<IrExpression>();
+/** Switches on a value that may be null whose type allows null, which test for it first (nullFirst). */
+const nullFirstSwitches = new WeakSet<IrStatement>();
+/**
+ * Orderings of a number variable that may be null and a settled number, with the side the variable is on, which test
+ * for null first (guardedCompare).
+ */
+const guardedCompares = new WeakMap<IrExpression, 0 | 1>();
+
+/**
+ * Groovy's ordering of a variable that may be null with a value that is not, written out: null is below every value, so
+ * `x < k` is `x == null or x < k`, and `x > k` is `x != null and x > k`; `variable` is the side the variable is on.
+ */
+function guardedCompare(
+  operator: string,
+  left: IrExpression,
+  right: IrExpression,
+  variable: 0 | 1,
+): IrExpression {
+  const nullBelow = (variable === 0) === (operator === "<" || operator === "<=");
+  return {
+    kind: "binary",
+    operator: nullBelow ? "or" : "and",
+    left: {
+      kind: "binary",
+      operator: nullBelow ? "==" : "!=",
+      left: variable === 0 ? left : right,
+      right: { kind: "literal", value: null },
+    },
+    right: { kind: "binary", operator, left, right },
+  };
+}
+
+/**
+ * The helper orderings (`sexscriptLegacyCompare(x, k) < 0`) evaluated where the compiler knows a side variable holds
+ * null: after `x = null`, a copy of such a variable, or in the branch of `x == null` that it took. A forward pass in
+ * statement order; branches keep what all of them know, a loop forgets what it sets, and a function starts knowing
+ * nothing.
+ */
+function knownNullCompares(statements: readonly IrStatement[]): Set<object> {
+  const found = new Set<object>();
+  const nameOf = (value: IrExpression): string | null =>
+    value.kind === "variable" ? value.name : null;
+  const isNull = (value: IrExpression): boolean => value.kind === "literal" && value.value === null;
+  // The variables that the condition, when true, shows to hold null (`x == null`), and when false (`x != null`).
+  const nullWhen = (condition: IrExpression, holds: boolean): string | null => {
+    if (condition.kind !== "binary" || condition.operator !== (holds ? "==" : "!=")) return null;
+    if (isNull(condition.right)) return nameOf(condition.left);
+    if (isNull(condition.left)) return nameOf(condition.right);
+    return null;
+  };
+  const check = (value: unknown, known: ReadonlySet<string>): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) check(item, known);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (
+      value.kind === "binary" &&
+      isRecord(value.left) &&
+      value.left.kind === "call" &&
+      value.left.name === COMPARE_HELPER &&
+      Array.isArray(value.left.positional) &&
+      value.left.positional.some(
+        (side) => isRecord(side) && side.kind === "variable" && known.has(String(side.name)),
+      )
+    )
+      found.add(value);
+    for (const child of Object.values(value)) check(child, known);
+  };
+  const assigned = (items: readonly IrStatement[]): Set<string> => {
+    const names = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!isRecord(value)) return;
+      if (value.kind === "let" && typeof value.name === "string") names.add(value.name);
+      if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+        names.add(String(value.target.name));
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(items);
+    return names;
+  };
+  const block = (items: readonly IrStatement[], entry: ReadonlySet<string>): Set<string> => {
+    const known = new Set(entry);
+    for (const item of items) {
+      for (const value of ownExpressions(item)) check(value, known);
+      switch (item.kind) {
+        case "let":
+        case "assign": {
+          const name = item.kind === "let" ? item.name : nameOf(item.target);
+          if (name === null) break;
+          const value = item.value;
+          const source = nameOf(value);
+          if (isNull(value) || (source !== null && known.has(source))) known.add(name);
+          else known.delete(name);
+          break;
+        }
+        case "if": {
+          const then = new Set(known);
+          const otherwise = new Set(known);
+          const whenTrue = nullWhen(item.condition, true);
+          const whenFalse = nullWhen(item.condition, false);
+          if (whenTrue !== null) then.add(whenTrue);
+          if (whenFalse !== null) otherwise.add(whenFalse);
+          const ends = [block(item.then, then), block(item.else, otherwise)];
+          for (const name of [...known])
+            if (!ends.every((end) => end.has(name))) known.delete(name);
+          for (const name of ends[0]!) if (ends[1]!.has(name)) known.add(name);
+          break;
+        }
+        case "switch": {
+          const ends = [
+            ...item.cases.map((switchCase) => block(switchCase.body, known)),
+            block(item.default, known),
+          ];
+          for (const name of [...known])
+            if (!ends.every((end) => end.has(name))) known.delete(name);
+          break;
+        }
+        case "while":
+        case "repeat":
+        case "for": {
+          for (const name of assigned(item.body)) known.delete(name);
+          block(item.body, known);
+          break;
+        }
+        case "function":
+          block(item.body, new Set());
+          break;
+        default:
+          break;
+      }
+    }
+    return known;
+  };
+  block(statements, new Set());
+  return found;
+}
+
+/** Whether evaluating a value can neither fail nor change anything: a literal, a variable, or `+`, `-`, `*` of these. */
+function settledValue(value: IrExpression): boolean {
+  if (value.kind === "literal" || value.kind === "variable") return true;
+  if (value.kind === "unary") return value.operator !== "not" && settledValue(value.value);
+  return (
+    value.kind === "binary" &&
+    ["+", "-", "*"].includes(value.operator) &&
+    settledValue(value.left) &&
+    settledValue(value.right)
+  );
+}
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
@@ -2480,6 +2798,14 @@ function withIntegerIndexes<T extends IrStatement>(
       return plainTruth(copy.positional[0]!, truthType);
     if (plainCompares.has(value) && copy.kind === "binary" && copy.left.kind === "call")
       return { ...copy, left: copy.left.positional[0]!, right: copy.left.positional[1]! };
+    const guarded = guardedCompares.get(value);
+    if (guarded !== undefined && copy.kind === "binary" && copy.left.kind === "call")
+      return guardedCompare(
+        copy.operator,
+        copy.left.positional[0]!,
+        copy.left.positional[1]!,
+        guarded,
+      );
     if (copy.kind === "index" && textIndexes.has(value))
       return helperCall("textAt", [copy.target, copy.index]);
     if (copy.kind === "binary" && openTimes.has(value)) {

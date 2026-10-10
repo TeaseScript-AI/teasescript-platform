@@ -29,3 +29,8 @@ int none = getRandom(1)
 showButton("Now", none)
 def quickest = showButton("Faster", none)
 show("You took " + quickest + " seconds.")
+// A gauge wait counts from 0 the seconds of a variable that may still hold a number below 0, so it keeps the seconds.
+def measured = -1
+if (loadBoolean("game.measure")) measured = showButton("Measure")
+waitWithGauge(Math.max(measured, 0))
+waitWithGauge(measured)

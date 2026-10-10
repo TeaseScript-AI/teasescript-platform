@@ -51,3 +51,21 @@ show("Power " + powerLevel)
 // A conditional start or step of a C-style for is computed first, as in a statement (MatchDares' shuffled deck).
 def deckStart = getInteger("Shuffle?", 1)
 for (def card = (deckStart == 1) ? 2 : 3; card <= 5; card += (deckStart == 1) ? 1 : 2) show("Card " + card)
+// A counter declared without a value that only loops use, each of which sets it first, is declared by each loop.
+def findFirst = { list, from ->
+	def at
+	if (from < 0) {
+		for (at = list.size() - 1; at > 0; at = at - 1) if (list[at] > 2) return at
+		return -1
+	}
+	for (at = from; at < list.size(); at++) if (list[at] > 2) return at
+	return -1
+}
+show("First " + findFirst([1, 3, 5], 0))
+// A counter whose loop sets it with a conditional, or that a closure's default reads, stays declared where it was.
+def round
+for (round = (getRandom(1) == 0 ? 1 : 2); round < 3; round++) show("Round " + round)
+def lap
+def lastLap = { seen = lap -> return seen }
+for (lap = 0; lap < 2; lap++) show("Lap " + lap)
+show("Last lap " + lastLap())

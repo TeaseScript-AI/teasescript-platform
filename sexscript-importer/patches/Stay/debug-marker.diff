@@ -1,0 +1,21 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -2366,12 +2366,12 @@
+ 		debmsg+="\nsaysnum "+saysnum
+ 		debmsg+="\nimp "+imp
+ 		debmsg+="\nenhavail "+enhavail
+-		cntenh[0]="☠"
+-		debmsg+="\n[wr1="+cntenh[$wr1]+" wr2="+cntenh[$wr2]+" wr3="+cntenh[$wr3]
+-		debmsg+=" pen="+cntenh[$pen]+" ict="+cntenh[$ict]+"+ icb="+cntenh[$icb]+"+ ice="+cntenh[$ice]
+-		debmsg+=" cpt="+cntenh[$cpt]+"+ cpb="+cntenh[$cpb]+"+ cp3="+cntenh[$cp3]+"+ cp="+cntenh[$cp]
+-		debmsg+=" too="+cntenh[$too]+" soa="+cntenh[$soa]+" rub="+cntenh[$rub]
+-		debmsg+=" bag="+cntenh[$bag]+" dog="+cntenh[$dog]+"] out of "+cntenhout
++		def mark={ k -> k == 0 ? "☠" : ""+cntenh[k] }
++		debmsg+="\n[wr1="+mark($wr1)+" wr2="+mark($wr2)+" wr3="+mark($wr3)
++		debmsg+=" pen="+mark($pen)+" ict="+mark($ict)+"+ icb="+mark($icb)+"+ ice="+mark($ice)
++		debmsg+=" cpt="+mark($cpt)+"+ cpb="+mark($cpb)+"+ cp3="+mark($cp3)+"+ cp="+mark($cp)
++		debmsg+=" too="+mark($too)+" soa="+mark($soa)+" rub="+mark($rub)
++		debmsg+=" bag="+mark($bag)+" dog="+mark($dog)+"] out of "+cntenhout
+ 		getSelectedValue(debmsg, ["Continue"])
+ 	}
+ 	save(properties+"running", true)

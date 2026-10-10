@@ -41,6 +41,18 @@ function sexscriptLegacyListMax(itemsValue3) {
   }
   return best
 }
+function sexscriptLegacyTextSum(itemsValue4) {
+  if itemsValue4.length == 0 {
+    return null
+  }
+  if itemsValue4.length == 1 {
+    return itemsValue4[0]
+  }
+  if itemsValue4[0] == null {
+    return itemsValue4[0] + "${itemsValue4[1]}"
+  }
+  return itemsValue4.join("")
+}
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
@@ -70,6 +82,12 @@ function sexscriptLegacyListText(valueValue2) {
   }
   return "${valueValue2}"
 }
+function sexscriptLegacyCastText(valueValue3): string? {
+  if valueValue3 == null {
+    return null
+  }
+  return toString(valueValue3)
+}
 function sexscriptLegacySplit(text, separator) {
   let partsValue2 = text.split(separator)
   if text == "" {
@@ -80,11 +98,11 @@ function sexscriptLegacySplit(text, separator) {
   }
   return partsValue2
 }
-function sexscriptLegacyReversed(itemsValue4) {
+function sexscriptLegacyReversed(itemsValue5) {
   let result = []
-  let index = itemsValue4.length - 1
+  let index = itemsValue5.length - 1
   while index >= 0 {
-    result.add(itemsValue4[index])
+    result.add(itemsValue5[index])
     index -= 1
   }
   return result
@@ -426,4 +444,17 @@ let entryCopy = entryParts
 // NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
 entryParts[0] = "x"
 say "Copy ${entryCopy.length}"
+// The sum of texts joins them, so an answer compares with the digits a game showed (ToyExpanded's number memory game).
+let digits = []
+for it in 0..3 {
+  digits.add(sexscriptLegacyCastText(it))
+}
+let sumResult = sexscriptLegacyTextSum(digits)
+if "012" == sumResult {
+  say "All digits"
+}
+// The sum is text, so a text variable takes it without a variable of its own for a number.
+let answer = ""
+answer = sexscriptLegacyTextSum(digits)
+say "Answer ${answer}"
 exit

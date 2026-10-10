@@ -69,4 +69,11 @@ let none = randomInteger(0..1)
 sexscriptLegacyShowButton("Now", none)
 let quickest = sexscriptLegacyShowButton("Faster", none)
 say "You took ${quickest} seconds."
+// A gauge wait counts from 0 the seconds of a variable that may still hold a number below 0, so it keeps the seconds.
+let measured: number = -1
+if load("game.measure", default: false) == true {
+  measured = (showButton "Measure") / 1 s
+}
+timer max(measured, 0) s
+timer max(measured, 0) s
 exit

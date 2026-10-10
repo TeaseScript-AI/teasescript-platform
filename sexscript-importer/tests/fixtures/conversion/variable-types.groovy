@@ -130,3 +130,31 @@ double tally = 0
 def scale = { factor -> share = factor * 2; tally = factor + 1 }
 scale(0.25)
 show("Share ${share} ${tally}")
+// A list held only until the next statement picks one of its elements leaves the variable a number.
+def which = getRandom(3)
+def image = 0
+image = [970, 807, 830]
+image = image[which]
+show("Image ${image + 1}")
+// A parameter that a call gives a number that may be a fraction holds numbers, and so does the variable it sets
+// (DisciplineClinic's punishExtraSwats(numSeries / 4, ...)).
+def numSeries = 0
+def swats = { sets ->
+	numSeries = sets
+	def done = 0
+	while (done < numSeries) done++
+	show("Sets ${done}")
+}
+numSeries = 12
+numSeries += 3
+swats(numSeries / 4)
+swats(2)
+// A default that reads an earlier parameter gives the parameter no type of the calls: this call leaves it out and
+// passes a text through it.
+limit = 1.5
+def check = { limit, n = limit ->
+	def value = n
+	if (n == 0) value = null
+	show("Result ${value}")
+}
+check("good")

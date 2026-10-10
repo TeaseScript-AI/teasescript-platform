@@ -1,5 +1,38 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
 function sexscriptLegacyValue(value) {
   return value
+}
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
 }
 // Registries keyed by runtime strings become dicts (#536); maps with fixed names stay objects.
 let COLLAR = "collar"
@@ -190,4 +223,52 @@ let stateToy = getStateToy("gagged")
 if stateToy != null and stateToy != "" {
   say "Remove your ${wornToys["${stateToy}"].name}"
 }
+// A closure every return of which builds a map with computed keys gives a dict, also to a variable set from it.
+let SIDES = { left: "left", right: "right" }
+function sides {
+  if randomInteger(0..2) == 0 {
+    return dict{ [SIDES.left]: "you", [SIDES.right]: "me" }
+  } else {
+    return dict{ [SIDES.left]: "me", [SIDES.right]: "you" }
+  }
+}
+let both = sides()
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say "Left is ${both["left"]}, right is ${sides()["right"]}"
+// A field of a map with fixed names that every write keeps a list appends and removes as Groovy's List did.
+let STATE = { choices: [], level: 1 }
+// NOTE SX_SHARED_MAP_WRITE line 121: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices.add("Spank")
+// NOTE SX_SHARED_MAP_WRITE line 122: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices.add("Tickle")
+// NOTE SX_SHARED_MAP_WRITE line 123: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices = sexscriptLegacyListMinus(STATE.choices, ["Spank"])
+say "Choices ${STATE.choices.length} at level ${STATE.level}"
+STATE.choices.clear()
+say "Choices after clearing: ${STATE.choices.length}"
+// A list parameter that clear() empties was the caller's list too, which a TeaseScript parameter is not.
+function emptyAll(all) {
+  // TODO SX_PARAMETER_LIST_WRITE line 128: Groovy changed the list that all refers to, which the caller or the iterated collection shares; in TeaseScript all holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
+  // | def emptyAll = { List all -> def emptied = all.clear(); show("Emptied " + all.size()) }
+  let emptied = null
+  say "Emptied ${all.length}"
+}
+emptyAll(["x"])
+// A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
+let TABLE_KEY = "human"
+// NOTE SX_LOAD_OPEN_NULL line 132: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let storedTable = load "game.table", default: sexscriptLegacyValue(null)
+function lookupTable {
+  // NOTE SX_DICT_MISSING_KEY line 133: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+  return storedTable[TABLE_KEY]
+}
+function tableOrRecord(flag) {
+  if sexscriptLegacyTruth(flag) {
+    return storedTable
+  } else {
+    return { human: "record" }
+  }
+}
+say "Record ${tableOrRecord(false) == { human: "record" }}"
 exit

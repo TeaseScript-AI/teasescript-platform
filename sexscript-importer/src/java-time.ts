@@ -42,6 +42,8 @@ export interface TemporalAnalysis {
    * conversion writes exactly from the date's fields.
    */
   readonly dataFormats?: ReadonlySet<AstNode>;
+  /** Variables that a text is stored in, which a date moves by no number of days. */
+  readonly texts?: ReadonlySet<string>;
 }
 
 const FORMATTER_TYPES = new Set(["SimpleDateFormat", "java.text.SimpleDateFormat"]);
@@ -106,28 +108,73 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
   const tree = buildTree(root);
   const variables = new Map<string, TemporalKind>();
   const fields = new Map<string, TemporalKind>();
-  const analysis: TemporalAnalysis = { variables, fields, writable: new Set() };
+  // A variable that ever holds a text is no number of days (numberOperand).
+  const texts = new Set(
+    [...tree.assignments]
+      .filter(([, values]) =>
+        values.some(
+          (value) =>
+            value !== null &&
+            (value.kind === "gstring" ||
+              (value.kind === "constant" && typeof value.value === "string")),
+        ),
+      )
+      .map(([name]) => name),
+  );
+  const analysis: TemporalAnalysis = { variables, fields, writable: new Set(), texts };
   // Variables and record fields whose every value is a Calendar, or every value a Date.
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [name, values] of tree.assignments) {
-      if (tree.parameters.has(name)) continue;
-      const kind = commonKind(values, analysis);
-      if (kind !== (variables.get(name) ?? null)) {
-        if (kind === null) variables.delete(name);
-        else variables.set(name, kind);
-        changed = true;
+  const settle = (): void => {
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const [name, values] of tree.assignments) {
+        if (tree.parameters.has(name)) continue;
+        const kind = commonKind(values, analysis);
+        if (kind !== (variables.get(name) ?? null)) {
+          if (kind === null) variables.delete(name);
+          else variables.set(name, kind);
+          changed = true;
+        }
+      }
+      for (const [key, values] of mapEntries(tree)) {
+        const kind = commonKind(values, analysis);
+        if (kind !== (fields.get(key) ?? null)) {
+          if (kind === null) fields.delete(key);
+          else fields.set(key, kind);
+          changed = true;
+        }
       }
     }
-    for (const [key, values] of mapEntries(tree)) {
-      const kind = commonKind(values, analysis);
-      if (kind !== (fields.get(key) ?? null)) {
-        if (kind === null) fields.delete(key);
-        else fields.set(key, kind);
-        changed = true;
-      }
-    }
+  };
+  settle();
+  // A value made from the variable itself, `today = today + 1` after `today = new Date()`, is of its kind only if the
+  // variable is: a variable with a value of a known kind, whose other values are not of another, is taken to be of it,
+  // and dropped again where a value then is of none.
+  const assumed: string[] = [];
+  for (const [name, values] of tree.assignments) {
+    if (tree.parameters.has(name) || variables.has(name)) continue;
+    const kinds = new Set(
+      values.flatMap((value) =>
+        value === null || isNullConstant(value) ? [] : [temporalKind(value, analysis)],
+      ),
+    );
+    kinds.delete(null);
+    const [kind] = kinds;
+    if (kinds.size !== 1 || kind === undefined || kind === null) continue;
+    assumed.push(name);
+    variables.set(name, kind);
   }
+  for (let changed = assumed.length > 0; changed;) {
+    changed = false;
+    for (const name of assumed)
+      if (
+        variables.has(name) &&
+        commonKind(tree.assignments.get(name) ?? [], analysis) !== variables.get(name)
+      ) {
+        variables.delete(name);
+        changed = true;
+      }
+  }
+  if (assumed.length > 0) settle();
   const formatters = dateFormatters(tree);
   return {
     variables,
@@ -135,6 +182,7 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
     writable: writableCalendars(tree, variables),
     formatters,
     dataFormats: dataFormats(tree, formatters),
+    texts,
   };
 }
 
@@ -302,6 +350,8 @@ function numberOperand(node: AstNode | null, analysis: TemporalAnalysis): boolea
   if (node === null) return false;
   if (["gstring", "list", "map"].includes(node.kind)) return false;
   if (node.kind === "constant") return typeof node.value === "number";
+  if (node.kind === "variable" && analysis.texts?.has(variableName(node) ?? "") === true)
+    return false;
   return temporalKind(node, analysis) === null;
 }
 

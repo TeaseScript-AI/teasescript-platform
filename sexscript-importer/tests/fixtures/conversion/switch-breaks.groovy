@@ -79,3 +79,12 @@ def implement = { int choice ->
 	return "none"
 }
 show("Fetch the " + implement(getRandom(2)))
+// A switch on a number that may be null ran its default for null, which a case of its own runs too.
+def picked = null
+if (getRandom(2) == 0) picked = getRandom(3)
+if (picked == null) show("Nothing picked")
+switch (picked) {
+	case 0: show("Zero " + (picked + 1)); break
+	case 1: show("One " + (picked + 1)); break
+	default: show("Other")
+}

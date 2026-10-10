@@ -38,3 +38,28 @@ def picture = loadString("game.picture")
 def saved = loadString("game.savedPicture")
 if (picture == null) picture = saved
 show("Picture " + picture)
+// A read of the script's own with a default, which a whole-number default makes a whole number.
+def loadIntegerVal = { keyword, defaultValue ->
+	def stored = loadInteger(keyword)
+	if (stored == null)
+		return defaultValue
+	else
+		return stored
+}
+def squares = null
+if (squares == null) {
+	squares = loadIntegerVal("game.squares", 0) + 1
+	def limit = squares + 3
+	show("Limit " + limit)
+}
+// A default that is no whole number written as one, or a local that converts the read, keeps the script's own read.
+def defaultNumber = 1.0
+show("Decimal default " + loadIntegerVal("game.missing", defaultNumber))
+def loadAsText = { keyword, defaultValue ->
+	String stored = loadInteger(keyword)
+	if (stored == null)
+		return defaultValue
+	else
+		return stored
+}
+show("Text " + loadAsText("game.squares", "none"))

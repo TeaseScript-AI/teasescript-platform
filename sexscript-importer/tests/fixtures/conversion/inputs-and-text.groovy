@@ -37,3 +37,18 @@ if (getBoolean("Ready, ${honorific()}?", "Yes, ${honorific()}", "No")) show("Goo
 // FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
 // legacy button did, also where it is an askBoolean's noText.
 if (getBoolean("Who controls the key?", "I do", loadString("cuckold.hotwife") + " has it")) show("Fine.")
+// show() returned null, so a menu whose message is show(text) showed the text and then its options.
+def menuText = "Main menu"
+int menuChoice = getSelectedValue(show(menuText), ["Start", "End"])
+show("Chose " + menuChoice)
+// A gauge wait of a negative number of seconds did not wait at all, so seconds not certain to be at least 0 count
+// from 0; a literal, a random number, and their sums are certain.
+def penalty = [-60, 0]
+penalty[0] = penalty[0] + 30
+waitWithGauge(penalty[0])
+waitWithGauge(getRandom(3) + 1)
+// So is a variable that every write sets to such a number.
+def gaugeStep = 1
+gaugeStep += 1
+waitWithGauge(gaugeStep * 2)
+show("Gauges done")

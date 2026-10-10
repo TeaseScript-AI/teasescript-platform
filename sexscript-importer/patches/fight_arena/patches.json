@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "records-and-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "Groovy typed these values at runtime, which TeaseScript's fixed types need written out: ATTRIBUTES_TO_DISPLAY, a list of maps that the attribute table and get_attribute_text look up by key, becomes one map of labels and lists of its keys in the same order; FAVOR_CHOICE, the sum of three maps, is written as the one map it made; the left branch's range is tested inline; the three removals from opponent.unknown, a list of attribute names, take it as a List first; a stored fighter's unknown attributes are collected into a list before they are stored in the fighter, where += on the field joined them as text; and the starting favor choices are taken as a list instead of an array.",
+      "diff": "records-and-lists.diff"
+    }
+  ]
+}

@@ -105,3 +105,37 @@ def wornToys = [:]
 wornToys[GAG] = [name: "ball gag"]
 def stateToy = getStateToy("gagged")
 if (stateToy) show("Remove your " + wornToys[stateToy].name)
+// A closure every return of which builds a map with computed keys gives a dict, also to a variable set from it.
+def SIDES = [left: "left", right: "right"]
+def sides = {
+	if (getRandom(2) == 0) {
+		return [(SIDES.left): "you", (SIDES.right): "me"]
+	} else {
+		return [(SIDES.left): "me", (SIDES.right): "you"]
+	}
+}
+def both = sides()
+show("Left is " + both.left + ", right is " + sides().right)
+// A field of a map with fixed names that every write keeps a list appends and removes as Groovy's List did.
+def STATE = [choices: [], level: 1]
+STATE.choices += "Spank"
+STATE.choices += "Tickle"
+STATE.choices -= "Spank"
+show("Choices " + STATE.choices.size() + " at level " + STATE.level)
+STATE.choices.clear()
+show("Choices after clearing: " + STATE.choices.size())
+// A list parameter that clear() empties was the caller's list too, which a TeaseScript parameter is not.
+def emptyAll = { List all -> def emptied = all.clear(); show("Emptied " + all.size()) }
+emptyAll(["x"])
+// A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
+def TABLE_KEY = "human"
+Map storedTable = load("game.table")
+def lookupTable = { return storedTable[TABLE_KEY] }
+def tableOrRecord = { flag ->
+	if (flag) {
+		return storedTable
+	} else {
+		[human: "record"]
+	}
+}
+show("Record " + (tableOrRecord(false) == [human: "record"]))

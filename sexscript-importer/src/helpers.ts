@@ -191,7 +191,10 @@ export type HelperName =
   | "button"
   | "value"
   | "loadInteger"
+  | "loadIntegerOr"
   | "loadFloat"
+  | "storedSave"
+  | "storedLoad"
   | "textMinus"
   | "textAt"
   | "slice"
@@ -214,6 +217,7 @@ export type HelperName =
   | "listMax"
   | "listMin"
   | "listSum"
+  | "textSum"
   | "loadFirstTrue"
   | "max"
   | "menuOptions"
@@ -273,7 +277,10 @@ const HELPER_ORDER: readonly HelperName[] = [
   "loadFirstTrue",
   "value",
   "loadInteger",
+  "loadIntegerOr",
   "loadFloat",
+  "storedSave",
+  "storedLoad",
   "button",
   "indexOf",
   "count",
@@ -285,6 +292,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMax",
   "listMin",
   "listSum",
+  "textSum",
   "max",
   "min",
   "fixed",
@@ -469,6 +477,36 @@ const range = (to: IrExpression, inclusive = false): IrExpression => ({
 const template = (...parts: Array<string | IrExpression>): IrExpression => ({
   kind: "template",
   parts: parts.map((part) => (typeof part === "string" ? { text: part } : { value: part })),
+});
+const call = (target: IrExpression, name: string, ...args: IrExpression[]): IrExpression => ({
+  kind: "methodCall",
+  target,
+  name,
+  arguments: args,
+});
+const not = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "not", value });
+const typedLet = (name: string, type: string, value: IrExpression): IrStatement => ({
+  kind: "let",
+  name,
+  type,
+  value,
+  span: null,
+});
+/** The storage helpers (storedSave, storedLoad) and the key that lists the keys they store. */
+export const STORED_SAVE = "sexscriptLegacySave";
+export const STORED_LOAD = "sexscriptLegacyLoad";
+const STORED_KEYS = "sexscriptLegacy.storedKeys";
+const storedKeys = (): IrStatement =>
+  typedLet("stored", "string[]", {
+    kind: "load",
+    key: lit(STORED_KEYS),
+    defaultValue: { kind: "list", items: [] },
+  });
+const elementLoad = (): IrExpression => ({
+  kind: "call",
+  name: STORED_LOAD,
+  positional: [template(v("prefix"), v("part"))],
+  named: {},
 });
 
 /**
@@ -1181,9 +1219,227 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     name: "sexscriptLegacyLoadInteger",
     build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),
   },
+  // A script's own read with a whole-number default, `def loadIntegerVal = { key, value -> def stored = loadInteger(key);
+  // if (stored == null) return value else return stored }`, reads a whole number where its call passes one: the result
+  // declares it, which the open result of loadInteger cannot (lower.ts, isIntegerLoadOr).
+  loadIntegerOr: {
+    name: "sexscriptLegacyLoadIntegerOr",
+    build: () => ({
+      kind: "function",
+      name: "sexscriptLegacyLoadIntegerOr",
+      parameters: [
+        { name: "key", defaultValue: null },
+        { name: "whenMissing", defaultValue: null, type: "integer" },
+      ],
+      returnType: "integer",
+      body: [
+        letS("value", { kind: "load", key: v("key") }),
+        ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
+        ret({ kind: "call", name: "toInteger", positional: [v("value")], named: {} }),
+      ],
+      span: null,
+    }),
+  },
   loadFloat: {
     name: "sexscriptLegacyLoadFloat",
     build: () => parsedLoad("sexscriptLegacyLoadFloat", "toNumber"),
+  },
+  // PropertiesWorker.save: removes the key and its elements, then stores a list as key.0, key.1, ..., a dict as
+  // key.name, and any other value under the key itself; null stores nothing.
+  storedSave: {
+    name: STORED_SAVE,
+    build: () => ({
+      ...fn(
+        STORED_SAVE,
+        ["key", "value"],
+        [
+          storedKeys(),
+          typedLet("kept", "string[]", { kind: "list", items: [] }),
+          letS("prefix", template(v("key"), ".")),
+          forS("name", v("stored"), [
+            ifS(
+              bin("or", bin("==", v("name"), v("key")), call(v("name"), "startsWith", v("prefix"))),
+              [{ kind: "delete", key: v("name"), span: null }],
+              [add("kept", v("name"))],
+            ),
+          ]),
+          { kind: "delete", key: v("key"), span: null },
+          // A plain value is stored under the key as it is, which keeps the key readable in a plain save.
+          ifS(
+            bin(
+              "or",
+              { kind: "typeTest", value: v("value"), type: "list" },
+              { kind: "typeTest", value: v("value"), type: "dict" },
+            ),
+            [
+              typedLet("names", "string[]", { kind: "list", items: [v("key")] }),
+              typedLet("values", "list", { kind: "list", items: [v("value")] }),
+              letS("position", lit(0)),
+              {
+                kind: "while",
+                condition: bin("<", v("position"), prop(v("names"), "length")),
+                body: [
+                  letS("name", at(v("names"), v("position"))),
+                  letS("item", at(v("values"), v("position"))),
+                  set(v("position"), lit(1), "+="),
+                  ifS(
+                    { kind: "typeTest", value: v("item"), type: "list" },
+                    [
+                      letS("index", lit(0)),
+                      forS("element", v("item"), [
+                        add("names", template(v("name"), ".", v("index"))),
+                        add("values", v("element")),
+                        set(v("index"), lit(1), "+="),
+                      ]),
+                    ],
+                    [
+                      ifS(
+                        { kind: "typeTest", value: v("item"), type: "dict" },
+                        [
+                          {
+                            kind: "for",
+                            variable: "entry",
+                            valueVariable: "inner",
+                            collection: v("item"),
+                            body: [
+                              add("names", template(v("name"), ".", v("entry"))),
+                              add("values", v("inner")),
+                            ],
+                            span: null,
+                          },
+                        ],
+                        [
+                          // An element that is null was stored as the text "null", which load() reads as null.
+                          ifS(
+                            bin("==", v("item"), lit(null)),
+                            [{ kind: "save", key: v("name"), value: lit("null"), span: null }],
+                            [{ kind: "save", key: v("name"), value: v("item"), span: null }],
+                          ),
+                          add("kept", v("name")),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+                span: null,
+              },
+            ],
+            [
+              ifS(bin("!=", v("value"), lit(null)), [
+                { kind: "save", key: v("key"), value: v("value"), span: null },
+                add("kept", v("key")),
+              ]),
+            ],
+          ),
+          { kind: "save", key: lit(STORED_KEYS), value: v("kept"), span: null },
+        ],
+      ),
+      leadingComments: [
+        "// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key",
+        "// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.",
+      ],
+    }),
+  },
+  // PropertiesWorker.load: the key's own value, or else the value its elements make, a list padded with null where
+  // their names are all numbers and a dict otherwise, or `whenMissing` without any.
+  storedLoad: {
+    name: STORED_LOAD,
+    build: () =>
+      fn(
+        STORED_LOAD,
+        ["key", "whenMissing"],
+        [
+          letS("value", { kind: "load", key: v("key"), defaultValue: lit(null) }),
+          // A key stored itself is its value, the text "null" being null; only a key not stored has elements to read.
+          letS("present", bin("!=", v("value"), lit(null))),
+          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+            ifS(bin("==", call(v("value"), "lowercase"), lit("null")), [
+              set(v("value"), lit(null)),
+            ]),
+          ]),
+          ifS(not(v("present")), [
+            storedKeys(),
+            letS("prefix", template(v("key"), ".")),
+            typedLet("parts", "string[]", { kind: "list", items: [] }),
+            forS("name", v("stored"), [
+              ifS(call(v("name"), "startsWith", v("prefix")), [
+                letS("part", call(v("name"), "substring", prop(v("prefix"), "length"))),
+                letS("dot", call(v("part"), "indexOf", lit("."))),
+                ifS(bin(">=", v("dot"), lit(0)), [
+                  set(v("part"), call(v("part"), "substring", lit(0), v("dot"))),
+                ]),
+                ifS(not(call(v("parts"), "contains", v("part"))), [add("parts", v("part"))]),
+              ]),
+            ]),
+            letS("numbered", lit(true)),
+            forS("part", v("parts"), [
+              // Legacy took elements whose names start with a digit for a list, so an empty name makes a dict.
+              ifS(bin("==", prop(v("part"), "length"), lit(0)), [set(v("numbered"), lit(false))]),
+              letS("position", lit(0)),
+              {
+                kind: "while",
+                condition: bin("<", v("position"), prop(v("part"), "length")),
+                body: [
+                  ifS(
+                    not(
+                      call(
+                        lit("0123456789"),
+                        "contains",
+                        call(
+                          v("part"),
+                          "substring",
+                          v("position"),
+                          bin("+", v("position"), lit(1)),
+                        ),
+                      ),
+                    ),
+                    [set(v("numbered"), lit(false))],
+                  ),
+                  set(v("position"), lit(1), "+="),
+                ],
+                span: null,
+              },
+            ]),
+            ifS(
+              bin("and", bin(">", prop(v("parts"), "length"), lit(0)), v("numbered")),
+              [
+                typedLet("items", "list", { kind: "list", items: [] }),
+                forS("part", v("parts"), [
+                  letS("index", {
+                    kind: "call",
+                    name: "toInteger",
+                    positional: [v("part")],
+                    named: {},
+                  }),
+                  {
+                    kind: "while",
+                    condition: bin("<=", prop(v("items"), "length"), v("index")),
+                    body: [add("items", lit(null))],
+                    span: null,
+                  },
+                  set(at(v("items"), v("index")), elementLoad()),
+                ]),
+                set(v("value"), v("items")),
+              ],
+              [
+                ifS(bin(">", prop(v("parts"), "length"), lit(0)), [
+                  typedLet("entries", "dict", { kind: "object", properties: [], dict: true }),
+                  forS("part", v("parts"), [
+                    set(
+                      { kind: "index", target: v("entries"), index: v("part"), dict: true },
+                      elementLoad(),
+                    ),
+                  ]),
+                  set(v("value"), v("entries")),
+                ]),
+              ],
+            ),
+          ]),
+          ifS(bin("==", v("value"), lit(null)), [set(v("value"), v("whenMissing"))]),
+          ret(v("value")),
+        ],
+        { whenMissing: lit(null) },
+      ),
   },
   booleanText: {
     name: "sexscriptLegacyBooleanText",
@@ -1953,6 +2209,25 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("total", lit(0)),
           forS("item", v("items"), [set(v("total"), v("item"), "+=")]),
           ret(v("total")),
+        ],
+      ),
+  },
+  // Groovy sum() of texts: the first element with each later one joined to it, a null one as "null"; null for no
+  // element, the element itself for one, and a failure, as Groovy's NullPointerException, where a null first element
+  // is followed by another.
+  textSum: {
+    name: "sexscriptLegacyTextSum",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextSum",
+        ["items"],
+        [
+          ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
+          ifS(bin("==", prop(v("items"), "length"), lit(1)), [ret(at(v("items"), lit(0)))]),
+          ifS(bin("==", at(v("items"), lit(0)), lit(null)), [
+            ret(bin("+", at(v("items"), lit(0)), template(at(v("items"), lit(1))))),
+          ]),
+          ret(call(v("items"), "join", lit(""))),
         ],
       ),
   },
