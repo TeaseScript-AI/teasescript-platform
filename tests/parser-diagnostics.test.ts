@@ -103,6 +103,28 @@ test("a missing closing delimiter is reported where its line ends, and the next 
       ],
       line,
     );
+  // A list left open in a block leaves the block's closing brace to the block, which keeps its statements.
+  for (const open of ["[", "set[", "[1,"]) {
+    const result = parse(`if true {\n    let v = ${open}\n}\nexit`);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.line,
+        diagnostic.span.start.column,
+      ]),
+      [
+        ["TSP012", 2, 0],
+        ["TSP017", 1, "    let v = ".length + open.length],
+      ],
+      open,
+    );
+    assert.deepEqual(statementKinds(result), ["ifStatement", "exitStatement"], open);
+  }
+  // A stray closer within the line stays part of the malformed element.
+  assert.deepEqual(
+    parse("let v = [1, }, 2]\nexit").diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP012"],
+  );
   // A line that starts with a value or a property named like a statement keyword stays in the literal.
   for (const source of ['let v = [\n    say "x"\n]\nexit', "let v = {\n    let: 1\n}\nexit"])
     assert.deepEqual(parse(source).diagnostics, [], source);

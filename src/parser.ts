@@ -4862,15 +4862,24 @@ class Parser {
   /**
    * Skips a malformed element to the next comma or the closer, or to a statement that starts a line, which no element
    * can be: the closer is then missing, and the statement still parses, as after `let v = [` on a line of its own.
+   * Brackets the element opens are skipped whole. A closer that none of them opened and that starts a line belongs to
+   * what encloses the literal, such as the `}` of a block around `let v = [`, and is left to it.
    */
   #synchronizeDelimited(closing: TokenKind): void {
+    let depth = 0;
     while (
-      !this.#check(TokenKind.Comma) &&
-      !this.#check(closing) &&
+      !(depth === 0 && (this.#check(TokenKind.Comma) || this.#check(closing))) &&
+      !(
+        depth === 0 &&
+        CLOSING_TOKENS.has(this.#peek().kind) &&
+        this.#previous().kind === TokenKind.Newline
+      ) &&
       !this.#check(TokenKind.EndOfFile) &&
       !(this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
     ) {
-      this.#advance();
+      const kind = this.#advance().kind;
+      if (OPENING_TOKENS.has(kind)) depth += 1;
+      else if (CLOSING_TOKENS.has(kind) && depth > 0) depth -= 1;
     }
   }
 
