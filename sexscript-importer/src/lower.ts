@@ -7323,9 +7323,11 @@ function lowerCallStatement(
         span,
       }));
     case "waitWithGauge":
+      // Legacy counted the gauge up to the seconds and so did not wait at all for a negative number, where a timer stops
+      // the script; seconds not certain to be at least 0 count from 0 (atLeastZero).
       return oneArgumentStatement(args, context, node, (duration) => ({
         kind: "wait",
-        duration,
+        duration: atLeastZero(duration),
         visible: true,
         unit: "s",
         span,
@@ -17433,7 +17435,8 @@ function lowerSelectedValue(
   // show() returned null, so getSelectedValue(show(text), options) showed the text and then the options without a
   // message of their own, as getSelectedValue(text, options) shows them.
   const shown = legacyApiCall(args[0]!, context);
-  if (shown?.name === "show" && shown.arguments.length === 1) args = [shown.arguments[0]!, args[1]!];
+  if (shown?.name === "show" && shown.arguments.length === 1)
+    args = [shown.arguments[0]!, args[1]!];
   const message = lowerExpression(args[0]!, context);
   if (message === null) return null;
   const optionsNode = args[1]!;
@@ -17558,6 +17561,39 @@ function lowerArguments(args: AstNode[], context: LowerContext): IrExpression[] 
     result.push(lowered);
   }
   return result;
+}
+
+/**
+ * A number of seconds as a timer takes it: as it is where it is certain to be at least 0, as a literal at least 0,
+ * `randomInteger(a..b)` with such an `a`, a random number below such a bound, or a sum, product, rounding, absolute
+ * value, or maximum with such numbers; else `max(seconds, 0)`.
+ */
+function atLeastZero(seconds: IrExpression): IrExpression {
+  const certain = (value: IrExpression): boolean => {
+    if (value.kind === "literal") return typeof value.value === "number" && value.value >= 0;
+    if (value.kind === "binary")
+      return (
+        (value.operator === "+" || value.operator === "*") &&
+        certain(value.left) &&
+        certain(value.right)
+      );
+    if (value.kind !== "call" || value.local === true) return false;
+    const [first] = value.positional;
+    if (value.name === "abs") return value.positional.length === 1;
+    if (value.name === "max") return value.positional.some(certain);
+    if (value.name === "randomInteger") return first?.kind === "range" && certain(first.from);
+    if (["round", "floor", "ceil", "sexscriptLegacyRandom"].includes(value.name))
+      return value.positional.length === 1 && first !== undefined && certain(first);
+    return false;
+  };
+  return certain(seconds)
+    ? seconds
+    : {
+        kind: "call",
+        name: "max",
+        positional: [seconds, { kind: "literal", value: 0 }],
+        named: {},
+      };
 }
 
 function oneArgumentStatement(

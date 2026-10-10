@@ -256,7 +256,9 @@ export function withElapsedDurations(
       // A wait or a timeout that reads a variable now holding a duration takes it as it is.
       const variable = waits.get(item);
       if (variable !== undefined && converted(variable)) {
-        if (next.kind === "wait") next = { ...next, unit: null };
+        // The time a button waited is never negative, so the wait takes it without the timer's `max(seconds, 0)`.
+        if (next.kind === "wait")
+          next = { ...next, duration: unclamped(next.duration), unit: null };
         else if (next.kind === "showButton") next = { ...next, durationTimeout: true };
       }
       current = item;
@@ -269,11 +271,17 @@ export function withElapsedDurations(
 function waitRead(item: IrStatement): Extract<IrExpression, { kind: "variable" }> | null {
   const read =
     item.kind === "wait" && item.unit === "s"
-      ? item.duration
+      ? unclamped(item.duration)
       : item.kind === "showButton"
         ? item.timeout
         : null;
   return read?.kind === "variable" ? read : null;
+}
+
+/** The seconds a gauge wait counts from 0 (atLeastZero in lower.ts), `max(seconds, 0)`, or the value itself. */
+function unclamped(value: IrExpression): IrExpression {
+  const [seconds, zero] = value.kind === "call" && value.name === "max" ? value.positional : [];
+  return seconds !== undefined && zero?.kind === "literal" && zero.value === 0 ? seconds : value;
 }
 
 class Scope {

@@ -41,3 +41,10 @@ if (getBoolean("Who controls the key?", "I do", loadString("cuckold.hotwife") + 
 def menuText = "Main menu"
 int menuChoice = getSelectedValue(show(menuText), ["Start", "End"])
 show("Chose " + menuChoice)
+// A gauge wait of a negative number of seconds did not wait at all, so seconds not certain to be at least 0 count
+// from 0; a literal, a random number, and their sums are certain.
+def penalty = [-60, 0]
+penalty[0] = penalty[0] + 30
+waitWithGauge(penalty[0])
+waitWithGauge(getRandom(3) + 1)
+show("Gauges done")
