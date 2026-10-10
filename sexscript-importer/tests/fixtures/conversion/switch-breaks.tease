@@ -142,4 +142,26 @@ function implement(choice) {
   return "none"
 }
 say "Fetch the ${implement(randomInteger(0..2))}"
+// A switch on a number that may be null ran its default for null, which a case of its own runs too.
+let picked = null
+if randomInteger(0..2) == 0 {
+  picked = randomInteger(0..3)
+}
+if picked == null {
+  say "Nothing picked"
+}
+switch picked {
+  case null {
+    say "Other"
+  }
+  case 0 {
+    say "Zero ${picked + 1}"
+  }
+  case 1 {
+    say "One ${picked + 1}"
+  }
+  default {
+    say "Other"
+  }
+}
 exit

@@ -2468,6 +2468,15 @@ function isVariable(value: IrExpression, name: string): boolean {
   return value.kind === "variable" && value.name === name;
 }
 
+/** Whether IR statements or expressions read a variable of the name. */
+function readsVariable(value: unknown, name: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => readsVariable(item, name));
+  if (typeof value !== "object" || value === null) return false;
+  const node = value as Record<string, unknown>;
+  if (node.kind === "variable" && node.name === name) return true;
+  return Object.values(node).some((child) => readsVariable(child, name));
+}
+
 /**
  * For an element read of the variable at a literal or variable position, `x[sub]` or its helper for a position Groovy
  * read differently, the same read of another list; null for another value.
@@ -9873,8 +9882,33 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   });
   const closureCases = matchNodes.map((matchNode) => closureCaseTest(matchNode));
   if (closureCases.every((test) => test === null) && isAcceptedSwitch(valueCases)) {
+    // A variable that may be null matched none of its literal cases there and ran the default, which a case for null
+    // runs too: the other cases then know that it holds a value, as Groovy's matched one did.
+    const subject = valueNode === null ? null : variableName(valueNode);
+    const nullCase =
+      subject !== null &&
+      mayReadNull(valueNode!, context) &&
+      valueCases.every((switchCase) =>
+        switchCase.matches.every((match) => match.kind === "literal" && match.value !== null),
+      ) &&
+      valueCases.some((switchCase) => readsVariable(switchCase.body, subject));
     return [
-      { kind: "switch", value, cases: valueCases, default: defaultStatements, span: node.span },
+      {
+        kind: "switch",
+        value,
+        cases: nullCase
+          ? [
+              {
+                span: node.span,
+                matches: [{ kind: "literal", value: null }],
+                body: structuredClone(defaultStatements),
+              },
+              ...valueCases,
+            ]
+          : valueCases,
+        default: defaultStatements,
+        span: node.span,
+      },
     ];
   }
   // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain when
