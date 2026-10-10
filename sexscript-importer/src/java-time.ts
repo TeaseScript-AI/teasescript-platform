@@ -762,14 +762,17 @@ function parsedDate(
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
   const tokens = [...pattern.matchAll(/([yMd])\1*|[^A-Za-z']/gu)].map((match) => match[0]);
-  if (tokens.join("") !== pattern || tokens.length !== 5) return undefined;
-  const [first, separator, second, other, third] = tokens as [
-    string,
-    string,
-    string,
-    string,
-    string,
-  ];
+  const [first, separator, second, other, third, extra] = tokens;
+  if (
+    tokens.join("") !== pattern ||
+    first === undefined ||
+    separator === undefined ||
+    second === undefined ||
+    other === undefined ||
+    third === undefined ||
+    extra !== undefined
+  )
+    return undefined;
   const fields = [first, second, third];
   if (separator !== other || /[A-Za-z]/u.test(separator)) return undefined;
   const at = (letter: string): number => fields.findIndex((field) => field.startsWith(letter));
