@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "summary-face",
+      "layer": "source",
+      "category": "b",
+      "reason": "Watching a player chose the female face when the player's summary, held in a list of cached summaries that starts with empty slots, mentions her or she; the test read the list slot four times. The conversion types the slots as possibly null, so each read stopped the package from compiling, although the slot was filled just before. The test reads text1, which already holds the same summary, after a check for null that legacy never needed: a stored summary was text, and a missing one made legacy fail where the check now keeps the male face.",
+      "diff": "summary-face.diff"
+    }
+  ]
+}
