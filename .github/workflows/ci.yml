@@ -22,12 +22,28 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
+          # A pull request's merge commit and its base, to compare them below.
+          fetch-depth: 2
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Select local-agent tooling check
+        id: local-agent
+        run: |
+          # The tooling suites read only these repository paths (and run on the Node version from .nvmrc), so a pull
+          # request that changes none of them cannot change their result. Every push to main runs them.
+          inputs='^(\.github/|tools/local-agent/|tools/chatgpt-project-agent/|tools/setup-chatgpt-project-agent\.sh$|docs/chatgpt-project/|\.nvmrc$)'
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] || grep -qE "$inputs" <<<"$changed"; then
+            echo run=true >> "$GITHUB_OUTPUT"
+          else
+            echo "No pull-request change touches the local-agent tooling inputs; skipping its check."
+            echo run=false >> "$GITHUB_OUTPUT"
+          fi
       - name: Validate local-agent tooling
+        if: ${{ steps.local-agent.outputs.run == 'true' }}
         run: bash tools/local-agent/check-local-agent.sh
       - name: Upload local-agent failure logs
         if: ${{ failure() }}

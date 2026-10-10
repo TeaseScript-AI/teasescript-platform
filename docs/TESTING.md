@@ -69,8 +69,10 @@ bash tools/local-agent/check-local-agent.sh
 
 It runs each local-agent producer, consumer, workflow-contract, and compact-output
 suite exactly once. Individual files remain useful for focused development, and
-normal CI always uses this canonical command to prevent duplicate execution and
-test-list drift.
+normal CI uses only this canonical command to prevent duplicate execution and
+test-list drift. Pull-request CI runs it when the change touches one of the
+repository paths it reads (listed in `.github/workflows/ci.yml`); every push to
+`main` runs it.
 
 Verified patch publication uses a trusted change-scope profile instead of always
 repeating every suite before the candidate is pushed. Workflow and local-agent
@@ -78,8 +80,8 @@ changes, unknown paths, and mixed changes that include either boundary still run
 the complete command. Ordinary product source runs the configured repository
 build/tests, while strict documentation-only changes retain exact candidate
 identity verification without executing Node. The normal pull-request CI starts
-again after publication and still runs the complete canonical command on the
-published commit.
+again after publication on the published commit, with the complete canonical
+command whenever the change touches its inputs.
 
 ## Test admission and consolidation
 
