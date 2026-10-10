@@ -4339,7 +4339,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     routeOf,
     session.randomChoices,
     (subject) => (times === null ? null : exactPart(subject, times)),
-    (condition) => identifiersIn(condition).some((node) => flow.setInPlay(node)),
+    (condition, at) => flow.readsSetInPlay(condition, at),
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -5147,7 +5147,7 @@ function lineCoverage(
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
   clockPartOf: (subject: unknown) => string | null,
-  setInPlay: (condition: unknown) => boolean,
+  setInPlay: (condition: unknown, at: number) => boolean,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5433,7 +5433,7 @@ function lineCoverage(
       sources: directed === undefined ? [] : sourceKinds(directed.goals),
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
-      ...(setInPlay(condition) ? { setInPlay: true as const } : {}),
+      ...(setInPlay(condition, index) ? { setInPlay: true as const } : {}),
       behindLines: (regions[unvisitedBranches.length] = behind(missedTarget ? target : index + 1))
         .size,
       ownLines: 0,

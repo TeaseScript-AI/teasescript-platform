@@ -1253,6 +1253,48 @@ test(
       assert.ok(about(path, line).includes(own), about(path, line));
       assert.ok(!about(path, line).includes(other), about(path, line));
     }
+    // A block sees the variables where it was set up; a call's arguments are its parameters' values; and a value set in
+    // play is found also through the temporary a `switch` compares.
+    const analyzed = (written: string) => {
+      const { plan: compiled } = engine.compileProject([{ path: "main.tease", source: written }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(compiled));
+      const instructions = Array.isArray(compiled.instructions)
+        ? compiled.instructions.filter(isRecord)
+        : [];
+      const flow = new DataFlow(compiled, instructions);
+      return instructions.flatMap((instruction, index) =>
+        instruction.kind === "jumpIfFalse"
+          ? [
+              {
+                index,
+                line: isRecord(instruction.span) ? Number(instruction.span.sl) + 1 : 0,
+                sources: flow
+                  .sourcesOf(instruction.condition)
+                  .map((source) => (source.kind === "storage" ? source.key : source.kind)),
+                inPlay: flow.readsSetInPlay(instruction.condition, index),
+              },
+            ]
+          : [],
+      );
+    };
+    const timed = analyzed(
+      'if load("other", default: false) {\n  let n = load("unrelated", default: 0)\n}\nfunction f {\n' +
+        '  let n = load("real", default: 0)\n  timer async 1 s {\n    if n == 7 {\n      say "Real."\n    }\n  }\n' +
+        "  wait 2 s\n}\nf()\nexit\n",
+    ).find((condition) => condition.line === 7);
+    assert.deepEqual(timed?.sources, ["real"]);
+    const echoed = analyzed(
+      'function readAnswer {\n  let answer = askInteger "Number?"\n  return echo(answer)\n}\nfunction echo(answer) {\n' +
+        '  return answer\n}\nif readAnswer() == 1234 {\n  say "Matched."\n}\nexit\n',
+    ).find((condition) => condition.line === 8);
+    assert.deepEqual(echoed?.sources, ["ask"]);
+    const fallen = analyzed(
+      'let health = load("slot.health", default: 9)\nhealth = health - 1\nswitch health {\n  case -50 {\n' +
+        '    say "Fallen."\n  }\n}\nexit\n',
+    ).find((condition) => condition.line === 4);
+    assert.equal(fallen?.inPlay, true);
   },
 );
 

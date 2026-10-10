@@ -396,6 +396,10 @@ export class DataFlow {
   readonly #fileBinds = new Map<number, Set<string>>();
   /** The functions any file can call (`global function`), by ID. */
   readonly #globalFunctions = new Set<number>();
+  /** The instruction that sets up each block's function (a timer, button, or media block), by the function's ID. */
+  readonly #creatorOf = new Map<number, number>();
+  /** Each function's entry instruction, by ID. */
+  readonly #entryOf = new Map<number, number>();
   /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
   readonly #fileRanges: { start: number; end: number }[] = [];
   /** The scope keys of each name. */
@@ -458,7 +462,16 @@ export class DataFlow {
       const scope = owner === 0 ? this.#fileAt(index) : owner;
       binds.set(scope, (binds.get(scope) ?? new Set()).add(name));
     };
+    instructions.forEach((instruction, index) => {
+      if (instruction.kind === "callFunction") return;
+      for (const [field, value] of Object.entries(instruction))
+        if (field.endsWith("FunctionId") && typeof value === "number")
+          this.#creatorOf.set(value, index);
+      for (const cue of list(instruction.cues))
+        if (typeof cue.functionId === "number") this.#creatorOf.set(cue.functionId, index);
+    });
     for (const definition of functions) {
+      this.#entryOf.set(Number(definition.id), Number(definition.entryInstruction));
       if (definition.global === true) this.#globalFunctions.add(Number(definition.id));
       for (const parameter of list(definition.parameters))
         bind(parameter.name, Number(definition.entryInstruction));
@@ -529,14 +542,25 @@ export class DataFlow {
                 this.flowOf(instruction.value),
               ) || changed;
             break;
-          case "callFunction":
+          case "callFunction": {
             if (typeof instruction.destinationTemporary === "number")
               changed =
                 merge(
                   this.#temporary(instruction.destinationTemporary),
                   this.#function(Number(instruction.functionId)),
                 ) || changed;
+            // The arguments are the values of the function's parameters.
+            const entry = this.#entryOf.get(Number(instruction.functionId));
+            if (entry !== undefined)
+              for (const argument of list(instruction.arguments))
+                if (typeof argument.parameterName === "string")
+                  changed =
+                    merge(
+                      this.#variable(this.scopeKey(argument.parameterName, entry)),
+                      this.flowOf(argument.value),
+                    ) || changed;
             break;
+          }
           case "returnValue": {
             const owner = functionOf.get(index);
             if (owner !== undefined)
@@ -584,11 +608,21 @@ export class DataFlow {
    * The key a name has in the data flow where instruction `at` uses it: with the function, for a name the function
    * declares (a parameter, a `let`, a loop variable); with the file, for one a file's own code declares, read there or
    * in a function of that file only it calls (not a `global function`, which sees the top-level variables of whichever
-   * file calls it); else the name alone, as for a global. Values of a name alone and of its scoped keys are read
-   * together (see {@link #variableFlow}).
+   * file calls it); else the name alone, as for a global. A block's function (a timer, button, or media block) sees the
+   * names where the block was set up. Values of a name alone and of its scoped keys are read together (see
+   * {@link #variableFlow}).
    */
   scopeKey(name: string, at: number): string {
     const owner = this.functionAt(at);
+    // A block sees the variables where it was set up.
+    const creator = this.#creatorOf.get(owner);
+    if (
+      owner !== 0 &&
+      creator !== undefined &&
+      this.functionAt(creator) !== owner &&
+      this.#functionBinds.get(owner)?.has(name) !== true
+    )
+      return this.scopeKey(name, creator);
     const file = this.#fileAt(at);
     const scoped =
       owner !== 0 && this.#functionBinds.get(owner)?.has(name) === true
@@ -793,6 +827,38 @@ export class DataFlow {
         value.kind !== "parameter" &&
         ![...this.flowOf(value).keys].some((key) => this.holdsStored(value, key, index)),
     );
+  }
+
+  /**
+   * Whether an expression at instruction `at` reads a variable the code sets in play ({@link setInPlay}), also through
+   * the temporaries it reads and the results of the calls it reads.
+   */
+  readsSetInPlay(expression: unknown, at: number): boolean {
+    const seen = new Set<string>();
+    const walk = (value: unknown, at: number): boolean => {
+      if (Array.isArray(value)) return value.some((item) => walk(item, at));
+      if (!isRecord(value)) return false;
+      if (value.kind === "identifier") return this.setInPlay(value);
+      if (value.kind === "temporary" && typeof value.temporaryId === "number") {
+        const id = `temporary ${value.temporaryId} at ${at}`;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return (
+          this.heldAt(value.temporaryId, at)?.some((store) => walk(store.value, store.index)) ??
+          false
+        );
+      }
+      if (value.kind === "callResult" && typeof value.functionId === "number") {
+        const id = `function ${value.functionId}`;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return (this.#returns.get(value.functionId) ?? []).some((index) =>
+          walk(this.#instructions[index]!.value, index),
+        );
+      }
+      return Object.entries(value).some(([key, item]) => key !== "span" && walk(item, at));
+    };
+    return walk(expression, at);
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
@@ -1254,8 +1320,12 @@ export class DataFlow {
    * a parameter, a loop variable, and an assignment to a part of it (see {@link #assigned}).
    */
   #recordAssignments(plan: Data, instructions: readonly Data[]): void {
-    const assigned = (name: string, value: Data, index: number) => {
-      const key = this.scopeKey(name, index);
+    const assigned = (
+      name: string,
+      value: Data,
+      index: number,
+      key = this.scopeKey(name, index),
+    ) => {
       const known = this.#assigned.get(key) ?? [];
       known.push({ value, index });
       this.#assigned.set(key, known);
@@ -1265,6 +1335,20 @@ export class DataFlow {
         if (typeof parameter.name === "string")
           assigned(parameter.name, { kind: "parameter" }, Number(definition.entryInstruction));
     instructions.forEach((instruction, index) => {
+      // A call's arguments, as evaluated where it is, are values of the function's parameters.
+      const entry =
+        instruction.kind === "callFunction"
+          ? this.#entryOf.get(Number(instruction.functionId))
+          : undefined;
+      if (entry !== undefined)
+        for (const argument of list(instruction.arguments))
+          if (typeof argument.parameterName === "string")
+            assigned(
+              argument.parameterName,
+              record(argument.value),
+              index,
+              this.scopeKey(argument.parameterName, entry),
+            );
       if (instruction.kind === "loopStart")
         for (const name of [instruction.variable, instruction.valueVariable])
           if (typeof name === "string")
