@@ -3584,7 +3584,7 @@ test(
 );
 
 test(
-  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name",
+  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name, nor one a variable of another scope shares",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -3638,6 +3638,22 @@ test(
               '  let wanted = load("wanted", default: 12)\n' +
               '  if getDateTime().hour == wanted {\n    say "Wrong."\n  } else {\n    say "Right."\n  }\n}\n' +
               "visit(1)\nexit\n",
+          },
+        ],
+        false,
+      ],
+      [
+        // The call paused in returns, and the next call compares its own parameter; another function's two clock
+        // values of the name do not make the state's binding the comparison's.
+        "a later activation's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              "function unrelated {\n  let wantedHour = getDateTime().hour\n  wantedHour = getDateTime().hour + 1\n}\n" +
+              'function visit(rounds, wantedHour) {\n  if rounds > 0 {\n    showButton "Check"\n    return\n  }\n' +
+              '  if getDateTime().hour == wantedHour {\n    say "Wrong."\n  } else {\n    say "Right."\n  }\n}\n' +
+              "visit(1, 12)\nvisit(0, 13)\nexit\n",
           },
         ],
         false,

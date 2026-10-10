@@ -113,6 +113,11 @@ export interface ClockModel {
   readonly once: ReadonlyMap<string, Definition>;
   /** An expression of the plan read at instruction `at`, its variables named as the model names them ({@link scoped}). */
   readonly scope: (expression: unknown, at: number) => PlanField;
+  /**
+   * Names the plan's variables of different scopes share ({@link scoped}): such a variable is not read from a state's
+   * bindings, which do not say whose activation the code reading it will run in.
+   */
+  readonly shared: ReadonlySet<string>;
 }
 
 /**
@@ -156,13 +161,19 @@ function scoped(plan: Data, instructions: readonly Data[]) {
     const owner = functionAt[index];
     declare(owner === null ? `file ${fileAt(index)}` : `function ${owner}`, instruction.name);
   });
+  // Each variable's names, by the name it has in a state's bindings.
+  const variants = new Map<string, Set<string>>();
   const resolve = (name: string, index: number): string => {
     const owner = functionAt[index] ?? null;
-    if (owner !== null && declared.get(`function ${owner}`)?.has(name) === true)
-      return `${name}\u0001function ${owner}`;
     const file = fileAt(owner === null ? index : (entries.get(owner) ?? index));
-    if (declared.get(`file ${file}`)?.has(name) === true) return `${name}\u0001file ${file}`;
-    return name;
+    const scoped =
+      owner !== null && declared.get(`function ${owner}`)?.has(name) === true
+        ? `${name}\u0001function ${owner}`
+        : declared.get(`file ${file}`)?.has(name) === true
+          ? `${name}\u0001file ${file}`
+          : name;
+    (variants.get(name) ?? variants.set(name, new Set()).get(name)!).add(scoped);
+    return scoped;
   };
   /** A record of the plan with its variables' names scoped where instruction `index` reads them. */
   const rename = (value: Data, index: number): Data =>
@@ -219,7 +230,8 @@ function scoped(plan: Data, instructions: readonly Data[]) {
     ),
   );
   const scope = (expression: unknown, at: number): PlanField => renameField(expression, at);
-  return { instructions: renamed, functions: renamedFunctions, scope };
+  const shared = new Set([...variants].flatMap(([name, found]) => (found.size > 1 ? [name] : [])));
+  return { instructions: renamed, functions: renamedFunctions, scope, shared };
 }
 
 /** The name a variable the model names has in a state's bindings ({@link scoped}). */
@@ -522,7 +534,7 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
  * whose sides reads the clock, also through variables and temporaries set from it.
  */
 export function clockModel(plan: Data, original: readonly Data[]): ClockModel {
-  const { instructions, functions, scope } = scoped(plan, original);
+  const { instructions, functions, scope, shared } = scoped(plan, original);
   const { pure, clock: clockFunctions } = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
@@ -624,6 +636,7 @@ export function clockModel(plan: Data, original: readonly Data[]): ClockModel {
     instructions,
     once,
     scope,
+    shared,
   };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
   // through variables computed so), and is not a bare clock read, which is a time kept to measure from. Updates of the
@@ -921,14 +934,14 @@ function valueAt(expression: unknown, reading: Reading): Value {
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
         // A variable takes a binding only when the state binds its name once (a variable named by its scope: in that
-        // scope); when the state binds the name otherwise, whose the binding is is not known.
+        // scope), and no variable of another scope has its name; when the state binds the name otherwise, whose the
+        // binding is is not known.
         const bare = bareName(node.name);
-        if (bare === node.name) {
-          if (context.bindings.has(bare)) return runtimeValue(context.bindings.get(bare));
-          if (context.named.has(bare)) return undefined;
-        } else if (context.scoped.has(node.name))
-          return runtimeValue(context.scoped.get(node.name));
-        else if (context.named.has(bare)) return undefined;
+        if (context.named.has(bare)) {
+          if (model.shared.has(bare)) return undefined;
+          const bound = bare === node.name ? context.bindings : context.scoped;
+          return bound.has(node.name) ? runtimeValue(bound.get(node.name)) : undefined;
+        }
         // Not set yet in the state: from the one value it is set to, as the session will set it.
         const set = model.once.get(node.name);
         if (set === undefined || reading.memo.has(set))
@@ -1426,6 +1439,7 @@ export function storedHolds(
     once: new Map(),
     // Stored values alone are read here, no expression of the plan at an instruction.
     scope: () => undefined,
+    shared: new Set(),
   };
   const none = new Map<number, Data>();
   if (!isRecord(condition)) return undefined;
@@ -1484,14 +1498,10 @@ export function timeContext(snapshot: Data): TimeContext {
       hold(binding.name, single(owner ?? file), binding.value);
     }
   });
-  // A scope kept after its file was left (a persistent button's or timer's) holds that file's own variables.
+  // A scope kept after its code was left (a persistent button's or timer's) binds its names too, but is not read: the
+  // code reading such a name may be its handler's, or a later activation's that has not bound it yet.
   for (const scope of list(snapshot.retainedScopes))
-    for (const binding of list(scope.bindings))
-      hold(
-        binding.name,
-        typeof scope.file === "number" ? single(`file ${scope.file}`) : null,
-        binding.value,
-      );
+    for (const binding of list(scope.bindings)) hold(binding.name, null, binding.value);
   // A variable is read from the state only where the state binds its name once (one named by its scope: in that
   // scope): a handler's capture, kept in a scope, is not another frame's binding of its name.
   const scoped = new Map<string, unknown>();
