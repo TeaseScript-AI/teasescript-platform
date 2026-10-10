@@ -18215,6 +18215,27 @@ function askedMembers(body: AstNode, variable: string): Set<string> {
 const LISTED_MEDIA_FOLDERS = new Set(["images", "sounds", "videos"]);
 
 /**
+ * The kind of entry a walk's closure acts on when its body is one `if` without `else` on the entry's kind:
+ * `if (file.isDirectory()) {...}` or `if (file.isFile()) {...}`; null for any other body.
+ */
+function guardedKind(body: AstNode, variable: string): "folder" | "file" | null {
+  const statements = nodeArray(body.statements);
+  const only = statements.length === 1 ? statements[0]! : null;
+  if (only?.kind !== "if" || branchStatements(only.else).length > 0) return null;
+  const condition = asNode(only.condition);
+  const member =
+    condition?.kind === "methodCall" && nodeArray(asNode(condition.arguments)?.items).length === 0
+      ? constantString(condition.method)
+      : condition?.kind === "property"
+        ? constantString(condition.property)
+        : null;
+  if (condition === null || variableName(asNode(condition.object)) !== variable) return null;
+  if (member === "isDirectory" || member === "directory") return "folder";
+  if (member === "isFile" || member === "file") return "file";
+  return null;
+}
+
+/**
  * A walk through a package folder of images, sounds, or videos whose path the script fixes, as a loop over the
  * package's files or subfolders there, listed at conversion time: `eachFile`, which also visited subfolders, and
  * `eachFileRecurse`, also only through files (`FileType.FILES`). A walk through the images of one folder stays with
@@ -18276,9 +18297,12 @@ function listedFolderWalk(
   visit("");
   const files = walked.filter((entry) => !entry.folder);
   const folders = walked.filter((entry) => entry.folder);
-  if (tellsKinds && files.length > 0 && folders.length > 0) return undefined;
+  // A closure that only acts on one kind, as Baccarat's `if (file.isDirectory()) names << file.getName()`, goes
+  // through that kind: the entries of the other one did nothing.
+  const guarded = guardedKind(body, variable);
+  if (tellsKinds && guarded === null && files.length > 0 && folders.length > 0) return undefined;
   // A walk that tells files from subfolders goes through the kind the folder holds.
-  const listsFolders = tellsKinds && folders.length > 0;
+  const listsFolders = tellsKinds && (guarded === null ? folders.length > 0 : guarded === "folder");
   // A walk through the images the package holds in one folder finds them by the folder's tag (imageFolderWalk).
   if (root === "images" && recursive === null && !listsFolders && files.length > 0)
     return undefined;
