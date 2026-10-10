@@ -170,4 +170,36 @@ if elapsed < 2 {
 } else {
   say "Held"
 }
+// A text that only switch cases set is said where it is not empty, and pairs with its wait as any text: a loop's tick
+// stays its beat, and a wait that its reading time replaces stays for the path where nothing is said.
+let tick = ""
+for nValue in 0..2 {
+  switch nValue {
+    case 0 {
+      tick = "Tick ${nValue}"
+    }
+    default {
+      tick = "Tock ${nValue}"
+    }
+  }
+  if tick != "" {
+    say tick, instant
+  }
+  wait 0.5 s
+}
+let reply = ""
+switch randomInteger(0..3) {
+  case 0 {
+    reply = "Good."
+  }
+  case 1 {
+    reply = "Again."
+  }
+}
+if reply != "" {
+  say reply
+} else {
+  wait 2 s
+}
+say "Done"
 exit

@@ -139,3 +139,22 @@ wait(2)
 def elapsed = getTime() - started
 if (elapsed < 2) show("Too soon")
 else show("Held")
+// A text that only switch cases set is said where it is not empty, and pairs with its wait as any text: a loop's tick
+// stays its beat, and a wait that its reading time replaces stays for the path where nothing is said.
+def tick = ""
+for (def n = 0; n < 2; n++) {
+	switch (n) {
+		case 0: tick = "Tick " + n; break
+		default: tick = "Tock " + n
+	}
+	show(tick)
+	wait(0.5)
+}
+def reply = ""
+switch (getRandom(3)) {
+	case 0: reply = "Good."; break
+	case 1: reply = "Again."; break
+}
+show(reply)
+wait(2)
+show("Done")

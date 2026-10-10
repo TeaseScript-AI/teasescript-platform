@@ -771,9 +771,12 @@ export function withoutBlankText(
       scan(value.default, true);
       return;
     }
-    const before = new Map(writes);
+    const write = (name: string, count: number): void => {
+      writes.set(name, (writes.get(name) ?? 0) + count);
+      if (!inCase) plainWrites.set(name, (plainWrites.get(name) ?? 0) + count);
+    };
     if (value.kind === "let" && "name" in value && typeof value.name === "string") {
-      writes.set(value.name, (writes.get(value.name) ?? 0) + 1);
+      write(value.name, 1);
       if ("value" in value && isBlank(value.value)) blankStarts.add(value.name);
     }
     if (
@@ -786,17 +789,13 @@ export function withoutBlankText(
       "name" in value.target &&
       typeof value.target.name === "string"
     )
-      writes.set(value.target.name, (writes.get(value.target.name) ?? 0) + 2);
+      write(value.target.name, 2);
     if (value.kind === "for" && "variable" in value && typeof value.variable === "string")
-      writes.set(value.variable, (writes.get(value.variable) ?? 0) + 2);
+      write(value.variable, 2);
     if (value.kind === "function" && "parameters" in value && Array.isArray(value.parameters))
       for (const parameter of value.parameters)
         if (typeof parameter === "object" && parameter !== null && "name" in parameter)
-          writes.set(String(parameter.name), (writes.get(String(parameter.name)) ?? 0) + 2);
-    if (!inCase)
-      for (const [name, count] of writes)
-        if (count !== before.get(name))
-          plainWrites.set(name, (plainWrites.get(name) ?? 0) + count - (before.get(name) ?? 0));
+          write(String(parameter.name), 2);
     for (const item of Object.values(value)) scan(item, inCase);
   };
   scan(statements);
@@ -835,6 +834,7 @@ export function withoutBlankText(
             },
             then: [item],
             else: [],
+            guard: "blank",
             span: item.span,
           },
         ];

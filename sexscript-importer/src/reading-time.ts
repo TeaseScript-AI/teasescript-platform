@@ -42,11 +42,19 @@ export function withReadingTimes(
     diagnostics.push({ code, severity: "info", message, span: statement.span });
   };
   const block = (items: IrStatement[], loopBody = false): IrStatement[] => {
-    const nested = items.map((item) =>
-      withNestedBlocks(item, (body) =>
+    // A text said only where it is not empty (withoutBlankText) pairs with the wait after it as the text alone would; a
+    // wait that its reading time replaces stays for the path where it is empty and nothing is said.
+    const guards = new Map<number, Extract<IrStatement, { kind: "if" }>>();
+    const nested = items.map((item, index) => {
+      const text = item.kind === "if" && item.guard === "blank" ? item.then[0] : undefined;
+      if (item.kind === "if" && text?.kind === "say") {
+        guards.set(index, item);
+        return text;
+      }
+      return withNestedBlocks(item, (body) =>
         block(body, item.kind === "while" || item.kind === "repeat" || item.kind === "for"),
-      ),
-    );
+      );
+    });
     // The index of the next statement that is no blank line or comment, -1 for none.
     const next: number[] = Array.from(nested, () => -1);
     for (let index = nested.length - 2; index >= 0; index -= 1)
@@ -60,6 +68,8 @@ export function withReadingTimes(
     };
     const result = [...nested];
     const dropped = new Set<number>();
+    // The texts that moved after the sound that legacy started after them, by their places.
+    const moved = new Map<number, number>();
     nested.forEach((statement, index) => {
       // A sound that starts between a text and its wait took no time in legacy, so the wait is the text's (owner
       // decision 2026-10-08).
@@ -155,9 +165,16 @@ export function withReadingTimes(
         );
         result[index] = nested[sound]!;
         result[sound] = { ...statement, readingTime: wait };
+        moved.set(index, sound);
       } else result[index] = { ...statement, readingTime: wait };
       dropped.add(waitIndex);
     });
+    for (const [index, guard] of guards) {
+      const at = moved.get(index) ?? index;
+      const text = result[at]!;
+      const replaced = text.kind === "say" ? text.readingTime : undefined;
+      result[at] = { ...guard, then: [text], else: replaced === undefined ? [] : [replaced] };
+    }
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
   };
   return block(statements);

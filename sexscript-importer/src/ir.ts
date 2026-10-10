@@ -201,8 +201,11 @@ export type IrStatement =
       condition: IrExpression;
       then: IrStatement[];
       else: IrStatement[];
-      /** `prompt` marks the importer's test that a legacy input's question is not null before it is shown. */
-      guard?: "prompt";
+      /**
+       * `prompt` marks the importer's test that a legacy input's question is not null before it is shown; `blank`, its
+       * test that a text only switch cases set is not empty before it is said (withoutBlankText).
+       */
+      guard?: "prompt" | "blank";
     })
   /** `wholeBound` marks a `<` or `<=` condition whose right side variable typing proves a whole number, never null. */
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[]; wholeBound?: true })
