@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "hypnosis-quiz-answers",
+      "layer": "source",
+      "category": "b",
+      "reason": "Wayland's hypnosis quiz offers [answers[~ansorder], answers[ansorder]] and takes the answer with case {it^ansorder}: the bitwise not of a 0 or 1 position counted from the end, and an exclusive or tested as a truth, which the converter leaves as TODO comments, so the drawn quiz asked nothing and left the sentence unchanged. For a position of 0 or 1 these are answers[1-ansorder] and it != ansorder, written so.",
+      "diff": "hypnosis-quiz-answers.diff"
+    },
+    {
+      "id": "kitty-reward-count",
+      "layer": "source",
+      "category": "e",
+      "reason": "Kitty saves her reward count as save(\"Kitty.rwd\", +1), which stores 1 each time instead of counting up; Ancilla, Jewell and Wayland save rwd+1, and the author made the same fix in Ancilla's earlier version. Save rwd+1.",
+      "diff": "kitty-reward-count.diff"
+    },
+    {
+      "id": "wayland-obeyed-summons",
+      "layer": "source",
+      "category": "e",
+      "reason": "Wayland greets a player who came at once when summoned (Wayland.Summon below 0) and scolds one who ignored a summons (above 0, which the choice script counts up when the player declines), but nothing ever saved the below-0 value: going straight to her from the note left Summon at 0, so the greeting for obeying never came. Save -1 when the player goes at once without an ignored summons on record.",
+      "diff": "wayland-obeyed-summons.diff"
+    }
+  ]
+}
