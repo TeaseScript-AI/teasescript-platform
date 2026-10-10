@@ -639,7 +639,7 @@ test("values the compiler cannot know are not rejected at compile time", () => {
   );
 });
 
-test("an operation on a value the compiler cannot know is rejected where no result fits a written type", () => {
+test("an operation on a value the compiler cannot know is rejected where no result fits the place's type", () => {
   const inFunction = (...body: string[]): string =>
     ["function f(x, z) {", ...body.map((line) => `    ${line}`), "}", "f(8, 2)", "exit"].join("\n");
   // '/' gives a number, a duration, or a calendar duration, whatever 'x' holds, and never text.
@@ -657,6 +657,10 @@ test("an operation on a value the compiler cannot know is rejected where no resu
     ["let items: string[] = []", "items.add(x * 4)"],
     ["g(x - 4)"],
     ["let y: string = (x / 4) + 1", "say y"],
+    // A place without a written type keeps the type its values decided.
+    ['let y = "a"', "y = x / z", "say y"],
+    ['let ys = ["a"]', "ys.add(x * 4)"],
+    ['let o = { a: "t" }', "o.a = x / 4", "say o"],
   ])
     assert.deepEqual(
       mismatches(`function g(s: string) {\n    say s\n}\n${inFunction(...body)}`).map(
@@ -689,6 +693,13 @@ test("an operation on a value the compiler cannot know is rejected where no resu
         "let joined: list = x + [1]",
         "let day: date = x + 1 calendar day",
         "let either: string | number = x / 4",
+        "let count = 1",
+        "count = x / 4",
+        "count += x / 4",
+        "let box = { t: null }",
+        "box.t = x * 2",
+        "let ys = []",
+        "ys.add(x / 4)",
         "say ratio",
       ),
     ),
@@ -748,13 +759,18 @@ test("an operation of unknown result keeps the types it can give, also inside an
       "(x / 4) + z",
     ],
   ]);
-  assert.deepEqual(mismatches(inFunction('let y: string = "a"', "y += x / 4", "say y")), [
-    [
-      "TSV041",
-      "'y' holds text (string), so the result of '/', which is a number or a duration or a calendar duration, cannot be added to it. Put the result in the text instead, as in 'y += \"${x / 4}\"'.",
-      "x / 4",
-    ],
-  ]);
+  for (const declaration of ['let y: string = "a"', 'let y = "a"'])
+    assert.deepEqual(
+      mismatches(inFunction(declaration, "y += x / 4", "say y")),
+      [
+        [
+          "TSV041",
+          "'y' holds text (string), so the result of '/', which is a number or a duration or a calendar duration, cannot be added to it. Put the result in the text instead, as in 'y += \"${x / 4}\"'.",
+          "x / 4",
+        ],
+      ],
+      declaration,
+    );
   // No member of a union of collections can hold it.
   assert.deepEqual(mismatches(inFunction("let ys: string[] | boolean[] = [x / 4]", "say ys")), [
     [
