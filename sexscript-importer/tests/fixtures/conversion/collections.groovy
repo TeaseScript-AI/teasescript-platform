@@ -127,3 +127,16 @@ def marks = ["a|re", "b|ok"].collect { entry ->
 	return entry
 }
 show("Marks " + marks.join(","))
+// A list of lists shows as Groovy showed it (PainWaveGen's shock list); one that may be null, which the conversion may
+// start empty, or that holds maps, which it may make objects, stays a TODO.
+List<List> shocks = []
+shocks.add([1.5, [100, 100], "SINE"])
+def chosen = getSelectedValue("Remove:", shocks.collect { it.toString() } + ["Back"])
+show("Shocks " + shocks + " chosen " + chosen)
+def spare = null
+if (getBoolean("Spare?")) spare = [1, 2]
+show("Spare ${spare}")
+show("Settings " + [[speed: 2], [:]])
+// A declaration whose value cannot be converted keeps its variable, also where a part of it is computed first.
+int kept = getSelectedValue("Keep:", shocks.collect { Eval.me(it.toString()) } + ["Back"])
+if (kept < shocks.size()) show("Kept")

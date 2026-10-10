@@ -3578,6 +3578,7 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
         "SX_CONDITIONAL_POSITION",
         "This conditional expression cannot be computed first without changing behavior: a list or map read earlier in the statement may be changed by its side effects. Rewrite it with an explicit if.",
       ),
+      ...declaredPlaceholder(root, context),
     ]
   );
 }
@@ -3854,10 +3855,31 @@ function hoistDeferred(
   for (const item of [...declarations, rest]) {
     const [prelude, lowered, postlude] = withSurroundings(context, item);
     result.push(...prelude, ...lowered, ...postlude);
-    // A part that could not be converted leaves its temporary undefined; the root cause is reported already.
-    if (lowered.some((part) => part.kind === "unsupported")) break;
+    // A part that could not be converted leaves its temporary undefined; the root cause is reported already. A variable
+    // the statement declares stays declared, as where its own initializer fails (lowerDeclaration).
+    if (lowered.some((part) => part.kind === "unsupported")) {
+      if (item !== rest) result.push(...declaredPlaceholder(root, context));
+      break;
+    }
   }
   return result;
+}
+
+/**
+ * For a declaration whose value cannot be converted: the variable with a neutral value of its type, so the code that
+ * uses it still compiles.
+ */
+function declaredPlaceholder(root: AstNode, context: LowerContext): IrStatement[] {
+  const name = root.kind === "declaration" ? variableName(root.left) : null;
+  if (name === null) return [];
+  return [
+    {
+      kind: "let",
+      name,
+      value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+      span: root.span ?? null,
+    },
+  ];
 }
 
 /**
@@ -12428,22 +12450,28 @@ function startsWithText(node: AstNode, context: LowerContext): boolean {
 
 /**
  * Groovy shows a list in text as `[a, b]`, while TeaseScript `${list}` selects one element (V30 §16): a list of text,
- * numbers, and booleans becomes `[${list.join(", ")}]`. Returns undefined for a value that is not a list.
+ * numbers, and booleans becomes `[${list.join(", ")}]`, and one that holds lists, or elements of unknown type, a
+ * helper that shows each element as Groovy did, a list or map inside as `[...]` (`sexscriptLegacyListText`). A list
+ * that may be null, which the conversion may start empty, or that holds maps, which it may make objects, stays a TODO.
+ * Returns undefined for a value that is not a list.
  */
 function listText(node: AstNode, context: LowerContext): TemplatePart[] | null | undefined {
   const type = inferType(node, context.types);
   if (!(onlyOf(type, LIST | NULL) && type & LIST)) return undefined;
   const elements = listElementType(node, context);
-  if (!onlyOf(type, LIST) || !onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL)) {
+  const scalar = onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL);
+  const shown = elements === UNKNOWN || onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL | LIST);
+  if (!onlyOf(type, LIST) || !shown) {
     return unsupportedExpression(
       context,
       node,
       "SX_COLLECTION_TEXT",
-      "Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and join() shows only text, numbers, and booleans, which this list is not proven to hold. Format the list explicitly.",
+      "Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.",
     );
   }
   const list = lowerExpression(node, context);
   if (list === null) return null;
+  if (!scalar) return [{ value: useHelper(context, "listText", [list]) }];
   return [
     { text: "[" },
     { value: listJoin(list, { kind: "literal", value: ", " }) },
