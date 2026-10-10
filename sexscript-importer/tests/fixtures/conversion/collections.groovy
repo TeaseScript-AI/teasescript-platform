@@ -105,3 +105,15 @@ show("Rolled " + rolled.size())
 def finalists = ["Anna", "Bea"]
 if (getBoolean("Bye?")) finalists = ["Anna"]
 show("Final: " + finalists[0] + " and " + finalists[1])
+// A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
+// OwlSays' owned implements.
+def owned = []
+def ownedCount = 0
+for (toy in ["paddle", "cane"]) {
+	if (getBoolean("Own a " + toy + "?")) {
+		owned[ownedCount] = toy
+		ownedCount++
+	}
+}
+owned = owned.reverse()
+show("Owned " + owned.size())

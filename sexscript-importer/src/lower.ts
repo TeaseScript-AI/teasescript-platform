@@ -14242,6 +14242,11 @@ function growingListWrite(
     node?.kind === "list" && nodeArray(node.items).length === 0;
   const startsEmpty =
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
+  // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
+  // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows past its end the same way.
+  const refilled =
+    isEmptyList(assigned[0]) &&
+    assigned.every((node) => node.kind !== "list" || nodeArray(node.items).length === 0);
   // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
   // `label[2] = exit`, grows it too.
   const position = indexNode === null ? undefined : constantValue(indexNode);
@@ -14267,7 +14272,7 @@ function growingListWrite(
     target.dict === true ||
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
-    !(startsEmpty || pastLiteral || loopPast) ||
+    !(startsEmpty || refilled || pastLiteral || loopPast) ||
     // A write that reads the same position first, `map[i] = map[i] % 1000`, needs the position to exist already.
     (listNode !== null && readsPosition(valueNode, listNode, indexNode)) ||
     !listGrowthIndex(indexNode, context)

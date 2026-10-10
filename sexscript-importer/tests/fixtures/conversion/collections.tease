@@ -31,6 +31,15 @@ function sexscriptLegacyItemAt(listValue, position) {
   }
   return listValue[position]
 }
+function sexscriptLegacyReversed(itemsValue3) {
+  let result = []
+  let index = itemsValue3.length - 1
+  while index >= 0 {
+    result.add(itemsValue3[index])
+    index -= 1
+  }
+  return result
+}
 let items = ["kneel", "wait", "count"]
 let upper = []
 for it in items {
@@ -268,4 +277,21 @@ if askBoolean "Bye?" {
 }
 // NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
 say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}"
+// A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
+// OwlSays' owned implements.
+let owned = []
+let ownedCount = 0
+for toy in ["paddle", "cane"] {
+  if askBoolean "Own a ${toy}?" {
+    // NOTE SX_LIST_GROWTH line 114: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if ownedCount < owned.length {
+      owned[ownedCount] = toy
+    } else {
+      owned.add(toy)
+    }
+    ownedCount += 1
+  }
+}
+owned = sexscriptLegacyReversed(owned)
+say "Owned ${owned.length}"
 exit
