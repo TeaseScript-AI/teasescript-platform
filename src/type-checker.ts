@@ -7112,9 +7112,10 @@ function programEffects(program: Program): ProgramEffects {
     if (statement.kind === "globalStatement" && statement.assignment !== null)
       noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
-      // A store into an element or property changes the variable that holds it, too.
+      // A store into an element or property changes the variable that holds it in place, too.
       const root = rootName(statement.target);
-      if (root !== null) write(root, "assigns", loop, inside);
+      if (root !== null)
+        write(root, statement.target.kind === "identifier" ? "assigns" : "changes", loop, inside);
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }

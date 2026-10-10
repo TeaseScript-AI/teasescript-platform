@@ -280,6 +280,34 @@ test("a change in place keeps a null check, but not a test the change may undo",
       [change.endsWith("clear()") ? "0" : "2"],
       change,
     );
+  // A store into an element or property changes the list or object in place too: in a loop, in a function, and in a
+  // timer.
+  assert.deepEqual(
+    sayTexts(
+      'let values: integer[] | null = [1, 2, 3]\nfor i in 0..2 {\n    values[i] = 0\n}\nsay "${values[0]}"\nexit',
+    ),
+    ["0"],
+  );
+  assert.deepEqual(
+    sayTexts(
+      'let box = null\nbox = { count: 0 }\nlet i = 0\nwhile i < 3 {\n    box.count = i\n    i += 1\n}\nsay "${box.count}"\nexit',
+    ),
+    ["2"],
+  );
+  assert.deepEqual(
+    sayTexts(
+      `${values}function reset {\n    if values != null {\n        values[0] = 7\n    }\n}\nif values != null {\n    reset()\n    say "${"${values[0]}"}"\n}\nexit`,
+    ),
+    ["7"],
+  );
+  const stored = `${pick}function show {\n    let values: integer[]? = pick(1)\n    timer async 1 s {\n        if values != null {\n            values[0] = 5\n        }\n    }\n    if values != null {\n        wait 2 s\n        say "${"${values[0]}"}"\n    }\n}\nshow()\nexit`;
+  const storedPlan = compileValidPlan(stored);
+  step = run(storedPlan, createFreshRuntimeSnapshot(storedPlan, { baseDelayMs: 0 }));
+  step = run(storedPlan, observeTime(storedPlan, step.snapshot, 2_000).snapshot);
+  assert.deepEqual(
+    step.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["5"],
+  );
   // An assignment may make it null.
   assert.deepEqual(
     errors(
