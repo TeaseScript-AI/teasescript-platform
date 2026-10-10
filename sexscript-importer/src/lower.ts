@@ -3289,7 +3289,7 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
             context,
             node,
             "SX_LABELLED_JUMP",
-            `${node.kind} ${node.label} leaves an outer labelled loop; TeaseScript ${node.kind} affects only the innermost loop. Restructure the loops, for example with a flag.`,
+            `${node.kind} ${node.label} jumps to a labelled loop or statement, which Groovy also allowed outside any loop as a jump back to that statement; TeaseScript ${node.kind} affects only the innermost loop. Restructure the code, for example with a loop and a flag.`,
           ),
         ];
       }
