@@ -183,12 +183,27 @@ test("a place that held only null is an impossible operand also where a loop or 
     ],
     ["let v = null\nrepeat 2 {\n    v += 1\n    v = null\n}\nexit", "TSV041", "1"],
     ["let xs = [null]\nsay xs[0] + 1\nexit", "TSV043", "xs[0] + 1"],
+    ["let v = 1\nlet xs = [null]\nv += xs[0]\nexit", "TSV041", "xs[0]"],
   ] as const)
     assert.deepEqual(errors(source), [[code, marked]], source);
   // A store of another value anywhere decides the place, and then only a missing null check is reported.
   assert.deepEqual(errors("let v = null\nrepeat 2 {\n    say v + 1\n    v = 5\n}\nexit"), [
     ["TSV043", "v"],
   ]);
+  // A test that rules null out leaves nothing to report.
+  assert.deepEqual(
+    errors(
+      "let v = null\nrepeat 2 {\n    if v != null {\n        say v + 1\n    }\n    v = null\n}\nexit",
+    ),
+    [],
+  );
+  // Nor does a copy of a place that a value the compiler cannot know reaches after the copy is checked.
+  assert.deepEqual(
+    says(
+      "function pick(value) {\n    return value\n}\nlet a = null\nfunction f {\n    let v = a\n    say v + 1\n}\nfunction g {\n    a = pick(2)\n}\ng()\nf()\nexit",
+    ),
+    ["3"],
+  );
   // A value the compiler cannot know may be what the place holds, so the operation stays a runtime check.
   assert.deepEqual(
     says(

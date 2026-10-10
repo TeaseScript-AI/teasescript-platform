@@ -2147,8 +2147,8 @@ class TypeChecker {
     if (variable !== undefined) this.#flow.set(variable, undefined);
     const reported = this.diagnostics.length;
     const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
-    const cannotCombine = (held: StaticType) =>
-      `${place.subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(held), value, statement)}`;
+    const cannotCombine = (held: StaticType, added: StaticType) =>
+      `${place.subject}, so ${describeValue(added)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(held), added, statement)}`;
     // Adding or subtracting null is never supported.
     const outcome =
       resolved(nonNullType(value)).kind === "never"
@@ -2159,16 +2159,22 @@ class TypeChecker {
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) {
       if (place.inferred === undefined) this.#checkUnknownCompound(place, kept, statement);
-      // A place that so far held only null is checked as null too, in case no store gives it another value.
-      const slot = this.diagnostics.length === reported ? nullOnlySlot(kept) : undefined;
-      if (slot !== undefined)
-        this.#deferNullOnly([slot], () => {
+      // A place or a value that so far held only null is checked as null too, in case no store gives it another value.
+      const slots =
+        this.diagnostics.length === reported
+          ? [kept, value].flatMap((operand) => nullOnlySlot(operand) ?? [])
+          : [];
+      if (slots.length > 0) {
+        const held = nullOnlySlot(kept) === undefined ? kept : NULL_TYPE;
+        const added = nullOnlySlot(value) === undefined ? value : NULL_TYPE;
+        this.#deferNullOnly(slots, () => {
           if (
-            "failed" in
-            this.#memberOperation([NULL_TYPE, value], [target, statement.value], combine)
+            resolved(nonNullType(added)).kind === "never" ||
+            "failed" in this.#memberOperation([held, added], [target, statement.value], combine)
           )
-            this.#report(typeCode.typeMismatch, cannotCombine(NULL_TYPE), statement.value.span);
+            this.#report(typeCode.typeMismatch, cannotCombine(held, added), statement.value.span);
         });
+      }
       return;
     }
     if (result === undefined) {
@@ -2196,7 +2202,7 @@ class TypeChecker {
         );
         return;
       }
-      this.#report(typeCode.typeMismatch, cannotCombine(kept), statement.value.span);
+      this.#report(typeCode.typeMismatch, cannotCombine(kept, value), statement.value.span);
       return;
     }
     if (this.#widens(place, result, statement.value)) return;
