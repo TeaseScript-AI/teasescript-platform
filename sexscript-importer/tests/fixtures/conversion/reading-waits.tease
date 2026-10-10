@@ -160,4 +160,14 @@ for c in sexscriptLegacyPlainText("Ready").split("") {
 let breaths = 0
 say "Breathe in slowly."
 breaths += 1
+// A clock reading between a text and its wait measures the wait, which stays where it was.
+say "Keep holding until the wait is over."
+let started = getAbsoluteDateTime().toSeconds()
+wait 2 s
+let elapsed = getAbsoluteDateTime().toSeconds() - started
+if elapsed < 2 {
+  say "Too soon"
+} else {
+  say "Held"
+}
 exit

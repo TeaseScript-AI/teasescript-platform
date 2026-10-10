@@ -1875,6 +1875,11 @@ test(
           'countDown("Hold your breath", 3, 0.5)',
           'countDown("", 2, 1)',
           'typing("5....4....3....2....1..........CUM!")',
+          // A clock reading between a text and its wait measures the wait, which stays after the reading.
+          'show("Keep holding.")',
+          "def started = getTime()",
+          "wait(2)",
+          'if (getTime() - started < 2) show("Too soon")',
           "",
         ].join("\n"),
       );
@@ -1882,11 +1887,18 @@ test(
       const { plan } = compileSource(tease);
       assert.ok(plan !== undefined, tease);
       const times: number[] = [];
+      const texts: string[] = [];
       const note = (events: readonly PacedEvent[], at: PacedSnapshot): void => {
         for (const event of events)
-          if (event.kind === "say") times.push(at.currentSessionTimeMs ?? NaN);
+          if (event.kind === "say") {
+            times.push(at.currentSessionTimeMs ?? NaN);
+            texts.push(event.text ?? "");
+          }
       };
-      let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      let step = run(
+        plan,
+        createFreshRuntimeSnapshot(plan, { seed: 1, wallClockMs: Date.UTC(2026, 9, 2, 12) }),
+      );
       note(step.events, step.snapshot);
       for (let turn = 0; turn < 200 && step.snapshot.status === "waiting"; turn += 1) {
         // A player who never skips: time goes on to the earliest deadline, a reading time's or a wait's.
@@ -1903,9 +1915,10 @@ test(
       }
       assert.equal(step.snapshot.status, "halted", tease);
       // Six ticks of half a second, two of a second, and 35 characters half a second apart: 3 + 2 + 17.5 s, two texts
-      // per tick and one per character.
-      assert.equal(times.length, 12 + 4 + 35, tease);
-      assert.equal((step.snapshot.currentSessionTimeMs ?? NaN) - times[0]!, 22_500, tease);
+      // per tick and one per character; then the held text, whose wait the clock measured.
+      assert.equal(times.length, 12 + 4 + 35 + 1, tease);
+      assert.equal(times.at(-1)! - times[0]!, 22_500, tease);
+      assert.equal(texts.at(-1), "Keep holding.", tease);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -2013,7 +2026,10 @@ interface PacedCompletion {
 }
 interface PacedRuntime {
   compileSource(source: string): { plan?: unknown };
-  createFreshRuntimeSnapshot(plan: unknown, options: { seed: number }): PacedSnapshot;
+  createFreshRuntimeSnapshot(
+    plan: unknown,
+    options: { seed: number; wallClockMs?: number },
+  ): PacedSnapshot;
   run(plan: unknown, snapshot: PacedSnapshot): { snapshot: PacedSnapshot; events: PacedEvent[] };
   observeTime(
     plan: unknown,

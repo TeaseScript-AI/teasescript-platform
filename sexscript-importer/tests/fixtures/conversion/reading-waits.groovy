@@ -132,3 +132,10 @@ def breaths = 0
 show("Breathe in slowly.")
 breaths++
 wait(2)
+// A clock reading between a text and its wait measures the wait, which stays where it was.
+show("Keep holding until the wait is over.")
+def started = getTime()
+wait(2)
+def elapsed = getTime() - started
+if (elapsed < 2) show("Too soon")
+else show("Held")

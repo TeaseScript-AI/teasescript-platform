@@ -1,3 +1,4 @@
+import { CLOCK_CALLS } from "./clock-loops.ts";
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { hasEffect, ownEffect, withNestedBlocks } from "./repeated-text.ts";
@@ -170,12 +171,20 @@ function soundBeat(text: Extract<IrStatement, { kind: "say" }>): IrStatement {
   return { ...text, instant: true, beat: true };
 }
 
-/** Whether a statement only sets a variable, or an element of one, to a value without effects. */
+/**
+ * Whether a statement only sets a variable, or an element of one, to a value without effects that does not read the
+ * clock: a wait moved past a clock reading, or one that goes, would change the time it measures.
+ */
 function setsOnly(statement: IrStatement): boolean {
   if (statement.kind !== "let" && statement.kind !== "assign") return false;
   let effect = false;
+  const clock = (value: IrExpression): IrExpression => {
+    effect ||= value.kind === "call" && CLOCK_CALLS.has(value.name);
+    return mapChildren(value, clock);
+  };
   mapOwnExpressions(statement, (value) => {
     effect ||= hasEffect(value);
+    clock(value);
     return value;
   });
   return !effect;
