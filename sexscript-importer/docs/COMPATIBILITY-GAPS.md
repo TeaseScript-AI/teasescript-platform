@@ -800,8 +800,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
   (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
-  `padStart`, and a fixed-decimals helper (`SX_FORMAT`); `tokenize()` becomes a helper that splits at any delimiter
-  character without empty parts.
+  `padStart`, and a fixed-decimals helper (`SX_FORMAT`); a pattern known only at runtime, such as a text a function
+  gets (PainStacks' and ShockJack's countdowns), goes to a helper that writes the same conversions from the values as
+  text and shows other conversions as written (`SX_FORMAT_RUNTIME`); `tokenize()` becomes a helper that splits at any
+  delimiter character without empty parts.
 - Control flow: `for (;;)` becomes `while true`; `++x` and `--x` inside an expression change the variable before the
   statement; a declaration whose value cannot convert keeps its variable with a neutral value of its type.
 - Branches: a switch case for a value that no code of the package stores under the switched key never runs; its chain to

@@ -2423,6 +2423,7 @@ const CALL_RESULTS = new Map<string, TeaseType>([
 const HELPER_RESULTS = new Map<string, TeaseType>([
   ["sexscriptLegacyLoadFirstTrue", { kind: "optional", value: scalar("string") }],
   ["sexscriptLegacyLoadIntegerOr", scalar("integer")],
+  ["sexscriptLegacyFormat", scalar("string")],
   // The parts of a text, which the helpers build from its characters.
   ["sexscriptLegacyTokenize", listOf(scalar("string"))],
   ["sexscriptLegacySplit", listOf(scalar("string"))],

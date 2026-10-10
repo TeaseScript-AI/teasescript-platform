@@ -13982,6 +13982,29 @@ function lowerObjectMethodCallExpression(
   if (name === "format" && receiverName === "String" && argumentsNodes.length >= 1) {
     const formatted = formatText(argumentsNodes, node, context);
     if (formatted !== undefined) return formatted;
+    // A pattern known only at runtime, such as a text a function gets (PainStacks' countdown), is written by a helper.
+    if (constantString(argumentsNodes[0]) === null) {
+      const pattern = lowerExpression(argumentsNodes[0]!, context);
+      if (pattern === null) return null;
+      const values: IrExpression[] = [];
+      for (const argument of argumentsNodes.slice(1)) {
+        const value = lowerExpression(argument, context);
+        if (value === null) return null;
+        values.push(value);
+      }
+      addDiagnostic(
+        context,
+        "SX_FORMAT_RUNTIME",
+        "warning",
+        "Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.",
+        node.span,
+      );
+      context.syntheticHelpers.add("fixed");
+      return useHelper(context, "format", [
+        pattern,
+        { kind: "list", items: values.map((value) => templateOrLiteral([{ value }])) },
+      ]);
+    }
   }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
     const listParts = listText(targetNode, context);

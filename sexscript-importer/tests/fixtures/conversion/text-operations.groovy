@@ -45,3 +45,9 @@ for (word in "Kneel, now.".tokenize(" ")) {
 	if (word[word.length() - 1] == "," || word[word.length() - 1] == ".") word = word.substring(0, word.length() - 1)
 	show("Word " + word)
 }
+// A pattern known only at runtime, such as a text a function gets, is written by a helper as Java wrote it
+// (PainStacks' countdown).
+def countdownText = { String pattern, int seconds -> String.format(pattern, (int) (seconds / 60), seconds % 60) }
+show(countdownText("Wait %d:%02d", 75))
+def shockPattern = "Shock time %.1f seconds, %d%% done"
+show(String.format(shockPattern, 2.25f, 50))

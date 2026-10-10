@@ -167,6 +167,7 @@ function withNestedBodies(
 export type HelperName =
   | "array"
   | "fixed"
+  | "format"
   | "packagePath"
   | "pathTag"
   | "items"
@@ -296,6 +297,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "max",
   "min",
   "fixed",
+  "format",
   "packagePath",
   "pathTag",
   "items",
@@ -666,6 +668,107 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ),
         ],
       ),
+  },
+  // Java's String.format() of a pattern known only at runtime, for the values written as text: %s, %d, and %f, with a 0
+  // flag, a width, and a precision for %f (sexscriptLegacyFixed), and %% for a percent sign; a missing value is empty.
+  format: {
+    name: "sexscriptLegacyFormat",
+    build: () => {
+      const rest = v("rest");
+      const head = call(rest, "substring", lit(0), lit(1));
+      const skip = set(rest, call(rest, "substring", lit(1)));
+      const digit = bin(
+        "and",
+        bin(">", prop(rest, "length"), lit(0)),
+        bin(">=", call(lit("0123456789"), "indexOf", head), lit(0)),
+      );
+      const number = (name: string): IrStatement => ({
+        kind: "while",
+        condition: digit,
+        body: [
+          set(
+            v(name),
+            bin("+", bin("*", v(name), lit(10)), {
+              kind: "call",
+              name: "toInteger",
+              positional: [head],
+              named: {},
+            }),
+          ),
+          skip,
+        ],
+        span: null,
+      });
+      const text = (value: IrExpression): IrStatement => set(v("text"), value);
+      return fn(
+        "sexscriptLegacyFormat",
+        ["pattern", "values"],
+        [
+          letS("result", lit("")),
+          letS("rest", v("pattern")),
+          letS("next", lit(0)),
+          {
+            kind: "while",
+            condition: bin(">=", call(rest, "indexOf", lit("%")), lit(0)),
+            body: [
+              letS("at", call(rest, "indexOf", lit("%"))),
+              set(v("result"), call(rest, "substring", lit(0), v("at")), "+="),
+              set(rest, call(rest, "substring", bin("+", v("at"), lit(1)))),
+              ifS(call(rest, "startsWith", lit("%")), [
+                set(v("result"), lit("%"), "+="),
+                skip,
+                { kind: "continue", span: null },
+              ]),
+              letS("fill", lit(" ")),
+              ifS(call(rest, "startsWith", lit("0")), [set(v("fill"), lit("0")), skip]),
+              letS("width", lit(0)),
+              number("width"),
+              letS("digits", lit(6)),
+              ifS(call(rest, "startsWith", lit(".")), [
+                set(v("digits"), lit(0)),
+                skip,
+                number("digits"),
+              ]),
+              letS("conversion", head),
+              skip,
+              letS("text", lit("")),
+              ifS(bin("<", v("next"), prop(v("values"), "length")), [
+                text(at(v("values"), v("next"))),
+              ]),
+              set(v("next"), lit(1), "+="),
+              ifS(bin("==", v("conversion"), lit("d")), [
+                text({
+                  kind: "call",
+                  name: "toString",
+                  positional: [
+                    { kind: "call", name: "toInteger", positional: [v("text")], named: {} },
+                  ],
+                  named: {},
+                }),
+              ]),
+              ifS(bin("==", v("conversion"), lit("f")), [
+                text({
+                  kind: "call",
+                  name: "sexscriptLegacyFixed",
+                  positional: [
+                    { kind: "call", name: "toNumber", positional: [v("text")], named: {} },
+                    v("digits"),
+                    { kind: "call", name: "pow", positional: [lit(10), v("digits")], named: {} },
+                  ],
+                  named: {},
+                }),
+              ]),
+              ifS(bin(">", v("width"), lit(0)), [
+                text(call(v("text"), "padStart", v("width"), v("fill"))),
+              ]),
+              set(v("result"), v("text"), "+="),
+            ],
+            span: null,
+          },
+          ret(bin("+", v("result"), rest)),
+        ],
+      );
+    },
   },
   // Groovy tokenize(): the parts between any of the delimiter characters, without empty parts.
   // Java split() of text by a plain separator: TeaseScript split() without the trailing empty parts Java dropped, the
