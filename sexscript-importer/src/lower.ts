@@ -14392,15 +14392,31 @@ function dictionaryVariables(
         : null;
     if (called !== null) calls.push([target, called]);
   });
-  // The closures whose every return gives a dict literal or a dict variable, and nothing as the value of a last
-  // expression; a closure that ends otherwise gives null, as a call of one that returns nothing does.
+  // The closures whose every return gives a dict literal or a dict variable, and that end in a return on every path,
+  // so that no last expression gives a value of its own (Groovy returned the value of a closure's last expression,
+  // also one at the end of an `if` or `else`).
   const returns = new Map<string, AstNode[]>();
+  const endsInReturn = (node: AstNode | null): boolean => {
+    if (node === null) return false;
+    if (node.kind === "return") return true;
+    if (node.kind === "block") return endsInReturn(nodeArray(node.statements).at(-1) ?? null);
+    if (node.kind === "if") {
+      const otherwise = asNode(node.else);
+      return (
+        endsInReturn(asNode(node.then)) &&
+        otherwise !== null &&
+        otherwise.kind !== "empty" &&
+        endsInReturn(otherwise)
+      );
+    }
+    return false;
+  };
   walkAst(body, (node) => {
     const name = node.kind === "declaration" ? variableName(node.left) : null;
     const closure = asNode(node.right);
     if (name === null || closure?.kind !== "closure") return;
     const statements = nodeArray(asNode(closure.body)?.statements);
-    if (statements.length === 0 || statements.at(-1)!.kind === "expressionStatement") return;
+    if (!endsInReturn(statements.at(-1) ?? null)) return;
     const values: AstNode[] = [];
     let open = false;
     const visit = (value: unknown): void => {
@@ -18550,7 +18566,12 @@ function isIntegerLoadOr(closure: AstNode): boolean {
   };
   const declaration =
     statements[0]?.kind === "expressionStatement" ? asNode(statements[0].expression) : null;
-  const stored = declaration?.kind === "declaration" ? variableName(declaration.left) : null;
+  // An untyped local: a written type such as `String stored` converts the read.
+  const stored =
+    declaration?.kind === "declaration" &&
+    (text(asNode(declaration.left)?.originType) ?? "java.lang.Object") === "java.lang.Object"
+      ? variableName(declaration.left)
+      : null;
   const read = asNode(declaration?.right);
   const readArguments = nodeArray(asNode(read?.arguments)?.items);
   const test = statements[1];
@@ -18580,10 +18601,24 @@ function isIntegerLoadOr(closure: AstNode): boolean {
   );
 }
 
-/** Whether a Groovy value is a whole number, never null: one that mayBeFractional does not doubt, not written `1.0`. */
+/**
+ * Whether a Groovy value is a whole number that the conversion writes as one, never null: a whole literal not written
+ * `1.0`, its negation, or a variable declared with an integer type, which stores only whole numbers.
+ */
 function isWholeNumber(node: AstNode, context: LowerContext): boolean {
-  const type = inferType(node, context.types);
-  return type === NUMBER && !mayBeFractional(node, context) && !writtenDecimal(node, context);
+  if (node.kind === "unaryMinus") {
+    const value = asNode(node.value);
+    return value !== null && isWholeNumber(value, context);
+  }
+  if (node.kind === "constant")
+    return (
+      typeof node.value === "number" &&
+      Number.isInteger(node.value) &&
+      !writtenDecimal(node, context)
+    );
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  return key !== null && context.integerVariables.has(key) && !mayReadNull(node, context);
 }
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {

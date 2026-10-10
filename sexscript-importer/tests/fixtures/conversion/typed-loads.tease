@@ -22,6 +22,12 @@ function sexscriptLegacyLoadFloat(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toNumber(value))
 }
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 // Legacy loadInteger() and loadFloat() parsed the stored text as a number, loadInteger() dropping the fraction toward
 // zero; a missing key read null.
 save "5.1" as "game.version"
@@ -91,4 +97,16 @@ if squares == null {
   let limit = squares + 3
   say "Limit ${limit}"
 }
+// A default that is no whole number written as one, or a local that converts the read, keeps the script's own read.
+let defaultNumber = 1.0
+say "Decimal default ${loadIntegerVal("game.missing", defaultNumber)}"
+function loadAsText(keyword, defaultValue) {
+  let stored: string? = sexscriptLegacyText(sexscriptLegacyLoadInteger(keyword))
+  if stored == null {
+    return defaultValue
+  } else {
+    return stored
+  }
+}
+say "Text ${loadAsText("game.squares", "none")}"
 exit

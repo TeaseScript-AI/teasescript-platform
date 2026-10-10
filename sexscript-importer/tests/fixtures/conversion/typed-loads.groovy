@@ -52,3 +52,14 @@ if (squares == null) {
 	def limit = squares + 3
 	show("Limit " + limit)
 }
+// A default that is no whole number written as one, or a local that converts the read, keeps the script's own read.
+def defaultNumber = 1.0
+show("Decimal default " + loadIntegerVal("game.missing", defaultNumber))
+def loadAsText = { keyword, defaultValue ->
+	String stored = loadInteger(keyword)
+	if (stored == null)
+		return defaultValue
+	else
+		return stored
+}
+show("Text " + loadAsText("game.squares", "none"))

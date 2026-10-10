@@ -1,6 +1,27 @@
 function sexscriptLegacyValue(value) {
   return value
 }
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 function sexscriptLegacyListMinus(items, removed) {
   let kept = []
   for item in items {
@@ -221,4 +242,20 @@ STATE.choices = STATE.choices + ["Tickle"]
 // NOTE SX_SHARED_MAP_WRITE line 123: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 STATE.choices = sexscriptLegacyListMinus(STATE.choices, ["Spank"])
 say "Choices ${STATE.choices.length} at level ${STATE.level}"
+// A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
+let TABLE_KEY = "human"
+// NOTE SX_LOAD_OPEN_NULL line 127: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let storedTable = load "game.table", default: sexscriptLegacyValue(null)
+function lookupTable {
+  // NOTE SX_DICT_MISSING_KEY line 128: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+  return storedTable[TABLE_KEY]
+}
+function tableOrRecord(flag) {
+  if sexscriptLegacyTruth(flag) {
+    return storedTable
+  } else {
+    return { human: "record" }
+  }
+}
+say "Record ${tableOrRecord(false) == { human: "record" }}"
 exit

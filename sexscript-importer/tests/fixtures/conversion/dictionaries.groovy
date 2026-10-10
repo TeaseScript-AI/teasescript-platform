@@ -122,3 +122,15 @@ STATE.choices += "Spank"
 STATE.choices += "Tickle"
 STATE.choices -= "Spank"
 show("Choices " + STATE.choices.size() + " at level " + STATE.level)
+// A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
+def TABLE_KEY = "human"
+Map storedTable = load("game.table")
+def lookupTable = { return storedTable[TABLE_KEY] }
+def tableOrRecord = { flag ->
+	if (flag) {
+		return storedTable
+	} else {
+		[human: "record"]
+	}
+}
+show("Record " + (tableOrRecord(false) == [human: "record"]))

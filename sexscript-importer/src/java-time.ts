@@ -42,6 +42,8 @@ export interface TemporalAnalysis {
    * conversion writes exactly from the date's fields.
    */
   readonly dataFormats?: ReadonlySet<AstNode>;
+  /** Variables that a text is stored in, which a date moves by no number of days. */
+  readonly texts?: ReadonlySet<string>;
 }
 
 const FORMATTER_TYPES = new Set(["SimpleDateFormat", "java.text.SimpleDateFormat"]);
@@ -106,7 +108,20 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
   const tree = buildTree(root);
   const variables = new Map<string, TemporalKind>();
   const fields = new Map<string, TemporalKind>();
-  const analysis: TemporalAnalysis = { variables, fields, writable: new Set() };
+  // A variable that ever holds a text is no number of days (numberOperand).
+  const texts = new Set(
+    [...tree.assignments]
+      .filter(([, values]) =>
+        values.some(
+          (value) =>
+            value !== null &&
+            (value.kind === "gstring" ||
+              (value.kind === "constant" && typeof value.value === "string")),
+        ),
+      )
+      .map(([name]) => name),
+  );
+  const analysis: TemporalAnalysis = { variables, fields, writable: new Set(), texts };
   // Variables and record fields whose every value is a Calendar, or every value a Date.
   const settle = (): void => {
     for (let changed = true; changed;) {
@@ -167,6 +182,7 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
     writable: writableCalendars(tree, variables),
     formatters,
     dataFormats: dataFormats(tree, formatters),
+    texts,
   };
 }
 
@@ -334,6 +350,8 @@ function numberOperand(node: AstNode | null, analysis: TemporalAnalysis): boolea
   if (node === null) return false;
   if (["gstring", "list", "map"].includes(node.kind)) return false;
   if (node.kind === "constant") return typeof node.value === "number";
+  if (node.kind === "variable" && analysis.texts?.has(variableName(node) ?? "") === true)
+    return false;
   return temporalKind(node, analysis) === null;
 }
 
