@@ -125,6 +125,8 @@ const RANDOM_SUPPORT = 16;
 const RANDOM_DRAWS_PER_STEP = 4;
 /** Once nothing else is left to do: the outcomes of a draw, at most, that the rest of its outcomes are taken from. */
 const RANDOM_WIDE_SUPPORT = 1024;
+/** The draws whose outcomes were not all offered kept for then, at most. */
+const MAX_PARTIAL_DRAWS = 256;
 /**
  * With random choices: the share of all runtime operations that steps with a chosen random outcome and the expansions
  * of states after one may take while play states are open. Such steps can cost much more than others.
@@ -2620,7 +2622,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       );
       // A draw whose outcomes were not all offered gets the rest once nothing else is left to do.
       const key = `${context} ${draw.site} ${JSON.stringify(draw.support)}`;
-      if ((!found.complete || taken < found.alternatives.length) && !partialKeys.has(key)) {
+      if (
+        (!found.complete || taken < found.alternatives.length) &&
+        !partialKeys.has(key) &&
+        partialDraws.length < MAX_PARTIAL_DRAWS
+      ) {
         partialKeys.add(key);
         partialDraws.push({ node: node.id, input, draw, support: RANDOM_SUPPORT });
       }
@@ -2663,12 +2669,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /**
    * With random choices, once nothing else is left to do: the outcomes of the draws whose outcomes were not all
    * offered, from four times as many as before (up to {@link RANDOM_WIDE_SUPPORT}), all those not tried at their place
-   * yet; passes that find none tried already go on until one does or no draw is left. Whether it queued any.
+   * yet; a pass that finds only tried ones is followed by the next, until one finds an untried one or no draw is left.
+   * Whether it queued any, or the budget ran out, for the search to stop on that.
    */
   const widenDraws = (): boolean => {
     const before = chosenSteps.length;
     while (chosenSteps.length === before && partialDraws.length > 0)
       for (let index = 0; index < partialDraws.length;) {
+        if (outOfBudget()) return true;
         const entry = partialDraws[index]!;
         const { random: _, ...plain } = entry.input;
         const context = `${nodes[entry.node]!.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
