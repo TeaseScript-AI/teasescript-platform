@@ -1,0 +1,3 @@
+delete "lines.kitty"
+say "Kitty is reset."
+exit

@@ -1,5 +1,15 @@
-function sexscriptLegacyShuffled(itemsValue) {
-  let shuffled = itemsValue
+// MIGRATION INCOMPLETE: 4 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyArray(size, valueValue) {
+  let itemsValue = []
+  repeat size {
+    itemsValue.add(valueValue)
+  }
+  return itemsValue
+}
+function sexscriptLegacyShuffled(itemsValue2) {
+  let shuffled = itemsValue2
   let index = shuffled.length - 1
   while index > 0 {
     let other = randomInteger(0..=index)
@@ -10,12 +20,21 @@ function sexscriptLegacyShuffled(itemsValue) {
   }
   return shuffled
 }
-function sexscriptLegacyListMax(itemsValue2) {
-  if itemsValue2.length == 0 {
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let position = first
+  for text in texts {
+    options.add({ value: position, text: text })
+    position += 1
+  }
+  return options
+}
+function sexscriptLegacyListMax(itemsValue3) {
+  if itemsValue3.length == 0 {
     return null
   }
-  let best = itemsValue2.first
-  for item in itemsValue2 {
+  let best = itemsValue3.first
+  for item in itemsValue3 {
     if item > best {
       best = item
     }
@@ -30,6 +49,45 @@ function sexscriptLegacyItemAt(listValue, position) {
     return null
   }
   return listValue[position]
+}
+function sexscriptLegacyListText(valueValue2) {
+  if valueValue2 is list or valueValue2 is set {
+    let partsValue: string[] = []
+    for item in valueValue2 {
+      partsValue.add(sexscriptLegacyListText(item))
+    }
+    return "[${partsValue.join(", ")}]"
+  }
+  if valueValue2 is dict {
+    let entries: string[] = []
+    for key, item in valueValue2 {
+      entries.add("${key}:${sexscriptLegacyListText(item)}")
+    }
+    if entries.length == 0 {
+      return "[:]"
+    }
+    return "[${entries.join(", ")}]"
+  }
+  return "${valueValue2}"
+}
+function sexscriptLegacySplit(text, separator) {
+  let partsValue2 = text.split(separator)
+  if text == "" {
+    return partsValue2
+  }
+  while partsValue2.length > 0 and partsValue2.last == "" {
+    partsValue2.removeLast()
+  }
+  return partsValue2
+}
+function sexscriptLegacyReversed(itemsValue4) {
+  let result = []
+  let index = itemsValue4.length - 1
+  while index >= 0 {
+    result.add(itemsValue4[index])
+    index -= 1
+  }
+  return result
 }
 let items = ["kneel", "wait", "count"]
 let upper = []
@@ -268,4 +326,104 @@ if askBoolean "Bye?" {
 }
 // NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
 say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}"
+// A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
+// OwlSays' owned implements.
+let owned = []
+let ownedCount = 0
+for toy in ["paddle", "cane"] {
+  if askBoolean "Own a ${toy}?" {
+    // NOTE SX_LIST_GROWTH line 114: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if ownedCount < owned.length {
+      owned[ownedCount] = toy
+    } else {
+      owned.add(toy)
+    }
+    ownedCount += 1
+  }
+}
+owned = sexscriptLegacyReversed(owned)
+say "Owned ${owned.length}"
+// A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
+// check.
+let marks = []
+for entry in ["a|re", "b|ok"] {
+  let partsValue3 = sexscriptLegacySplit(entry, "|")
+  if partsValue3[1] == "re" {
+    marks.add("${partsValue3[0]}|ex")
+    continue
+  }
+  marks.add(entry)
+}
+// NOTE SX_LIST_JOIN line 129: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Marks ${marks.join(",")}"
+// A list of lists shows as Groovy showed it (PainWaveGen's shock list); one that may be null, which the conversion may
+// start empty, or that holds maps, which it may make objects, stays a TODO.
+let shocks: (number | integer[] | string)[][] = []
+shocks.add([1.5, [100, 100], "SINE"])
+// NOTE SX_COLLECTION_TEXT_NESTED line 134: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
+let collectResult2 = []
+for it in shocks {
+  collectResult2.add("${sexscriptLegacyListText(it)}")
+}
+say "Remove:"
+let chosen = choose sexscriptLegacyMenuOptions(collectResult2 + ["Back"], 0)
+// NOTE SX_COLLECTION_TEXT_NESTED line 135: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
+say "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}"
+let spare = []
+if askBoolean "Spare?" {
+  spare = [1, 2]
+}
+// TODO SX_COLLECTION_TEXT line 138: Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.
+// | show("Spare ${spare}")
+// TODO SX_COLLECTION_TEXT line 139: Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.
+// | show("Settings " + [[speed: 2], [:]])
+// A declaration whose value cannot be converted keeps its variable, also where a part of it is computed first.
+// TODO SX_DYNAMIC_OR_OBJECT_CALL line 141: Object/dynamic Groovy method calls are not lowered by the first slice.
+// | int kept = getSelectedValue("Keep:", shocks.collect { Eval.me(it.toString()) } + ["Back"])
+let collectResult3 = []
+let kept = 0
+if kept < shocks.length {
+  say "Kept"
+}
+// A position that add() calls before it show inside the list, or at its end, is written in place or appended.
+let picks = []
+if askBoolean "Pick?" {
+  picks.add("a")
+  picks[0] = "b"
+  if picks.length == 1 {
+    picks.add("c")
+  } else {
+    picks[1] = "c"
+  }
+}
+say "Picks ${picks.length}"
+// A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
+let finallyCount = 0
+// TODO SX_UNSUPPORTED_LIST_METHOD line 153: Groovy list method collect() is not safely mapped yet.
+// | def finallyKept = [1, 2].collect { item ->
+// | 	try {
+// | 		if (item == 1) return item
+// | 	} finally {
+// | 		finallyCount++
+// | 	}
+// | 	return item + 1
+// | }
+let finallyKept = []
+say "Kept ${finallyKept.length} ${finallyCount}"
+// A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
+let fixedSlots = []
+let fixedFilled = 0
+// NOTE SX_JAVA_ARRAY_CONVERSION line 165: A Java int[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+if askBoolean "Fixed?" {
+  fixedSlots = sexscriptLegacyArray(2, 0)
+}
+fixedSlots[fixedFilled] = 5
+fixedFilled += 1
+say "Slots ${fixedSlots.length}"
+// A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
+let entryParts = sexscriptLegacySplit(load("game.entries", default: ""), ",")
+let entryCopy = entryParts
+// NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
+entryParts[0] = "x"
+say "Copy ${entryCopy.length}"
 exit

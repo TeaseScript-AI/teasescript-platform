@@ -35,7 +35,16 @@ export interface TemporalAnalysis {
   readonly fields: ReadonlyMap<string, TemporalKind>;
   /** Calendar variables that a write may replace: nothing else shares their object while it changes. */
   readonly writable: ReadonlySet<string>;
+  /** Variables that only ever hold a `new SimpleDateFormat(pattern)` of one literal pattern, by name. */
+  readonly formatters?: ReadonlyMap<string, string>;
+  /**
+   * The date formatting calls whose text the script saves or parses again, as data rather than for display, which the
+   * conversion writes exactly from the date's fields.
+   */
+  readonly dataFormats?: ReadonlySet<AstNode>;
 }
+
+const FORMATTER_TYPES = new Set(["SimpleDateFormat", "java.text.SimpleDateFormat"]);
 
 const CALENDAR_CLASSES = new Set(["Calendar", "java.util.Calendar"]);
 const GREGORIAN_TYPES = new Set(["GregorianCalendar", "java.util.GregorianCalendar"]);
@@ -119,7 +128,69 @@ export function analyzeTemporal(root: AstNode): TemporalAnalysis {
       }
     }
   }
-  return { variables, fields, writable: writableCalendars(tree, variables) };
+  const formatters = dateFormatters(tree);
+  return {
+    variables,
+    fields,
+    writable: writableCalendars(tree, variables),
+    formatters,
+    dataFormats: dataFormats(tree, formatters),
+  };
+}
+
+/** The literal pattern of a `new SimpleDateFormat(pattern)`, or null. */
+function formatterPattern(node: AstNode | null): string | null {
+  if (node?.kind !== "constructorCall" || !FORMATTER_TYPES.has(String(node.type))) return null;
+  const args = argumentsOf(node);
+  return args.length === 1 ? constantString(args[0]) : null;
+}
+
+/** Variables that only ever hold a SimpleDateFormat of one literal pattern. */
+function dateFormatters(tree: Tree): Map<string, string> {
+  const formatters = new Map<string, string>();
+  for (const [name, values] of tree.assignments) {
+    if (tree.parameters.has(name) || values.length === 0) continue;
+    const patterns = new Set(values.map((value) => formatterPattern(value)));
+    const [pattern] = patterns;
+    if (patterns.size === 1 && typeof pattern === "string") formatters.set(name, pattern);
+  }
+  return formatters;
+}
+
+/**
+ * The `format` calls whose text is data: saved, `save(key, text)`, or parsed again by a formatter, also through a
+ * variable that holds the text, as jewell keeps the day it last ran (`y/M/d`) to count the days since.
+ */
+function dataFormats(tree: Tree, formatters: ReadonlyMap<string, string>): Set<AstNode> {
+  const used = new Set<AstNode>();
+  for (const node of tree.calls) {
+    const name = constantString(node.method);
+    const args = argumentsOf(node);
+    const receiver = asNode(node.object);
+    if (name === "save" && node.implicitThis === true && args.length === 2) used.add(args[1]!);
+    if (name === "parse" && args.length === 1 && formatters.has(variableName(receiver) ?? ""))
+      used.add(args[0]!);
+  }
+  const names = new Set([...used].flatMap((node) => variableName(node) ?? []));
+  // A variable that one of them is set from holds the same text, `copy = text` before `save(key, copy)`.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const name of [...names])
+      for (const value of tree.assignments.get(name) ?? []) {
+        const source = variableName(value);
+        if (source !== null && !names.has(source)) {
+          names.add(source);
+          changed = true;
+        }
+      }
+  }
+  const result = new Set<AstNode>();
+  const isFormat = (node: AstNode | null): node is AstNode =>
+    node?.kind === "methodCall" && constantString(node.method) === "format";
+  for (const node of used) if (isFormat(node)) result.add(node);
+  for (const name of names)
+    for (const value of tree.assignments.get(name) ?? []) if (isFormat(value)) result.add(value);
+  return result;
 }
 
 /** The kind every non-null value has, or null. */
@@ -210,6 +281,9 @@ export function temporalKind(node: AstNode, analysis: TemporalAnalysis): Tempora
         return "calendar";
       // Date.parse(pattern, text) is a Date; Date.parse(text) gave Unix milliseconds.
       if (owner !== null && DATE_TYPES.has(owner) && name === "parse" && args.length >= 2)
+        return "date";
+      // A SimpleDateFormat's parse(text) is a Date too.
+      if (name === "parse" && args.length === 1 && analysis.formatters?.has(owner ?? "") === true)
         return "date";
       const kind = temporalKind(receiver, analysis);
       if (name === "clone" && args.length === 0) return kind;
@@ -395,6 +469,23 @@ export function temporalCall(
   if (receiver === null) return undefined;
   const analysis = host.state.temporal;
   const owner = dottedName(receiver);
+  // A SimpleDateFormat in a variable formats a date, or parses its text back (jewell's day count).
+  const pattern = owner === null ? undefined : analysis.formatters?.get(owner);
+  if (pattern !== undefined && args.length === 1) {
+    if (name === "format") {
+      const date = args[0]!;
+      const now =
+        date.kind === "constructorCall" &&
+        DATE_TYPES.has(String(date.type)) &&
+        argumentsOf(date).length === 0;
+      if (!now && temporalKind(date, analysis) !== "date") return undefined;
+      const source = now ? call("getDateTime") : host.lower(date);
+      return source === null
+        ? null
+        : patternText(pattern, source, analysis.dataFormats?.has(node) === true, node, host);
+    }
+    if (name === "parse") return parsedDate(pattern, args[0]!, host);
+  }
   const clock = name === "format" && args.length === 1 ? clockSeconds(receiver, args[0]!) : null;
   if (clock !== null) {
     const parts: IrExpression[] = [];
@@ -482,6 +573,15 @@ export function temporalCall(
       return args.length === 1 && kind === "date"
         ? dateArithmetic(name === "plus" ? "+" : "-", receiver, args[0]!, host)
         : undefined;
+    // Groovy's Date.format(pattern), as Farkel shows the end of a denial.
+    case "format": {
+      const text = args.length === 1 ? constantString(args[0]) : null;
+      if (text === null || kind !== "date") return undefined;
+      const target = value();
+      return target === null
+        ? null
+        : patternText(text, target, analysis.dataFormats?.has(node) === true, node, host);
+    }
     case "getYear":
     case "getMonth":
     case "getDate":
@@ -564,6 +664,9 @@ export function temporalConstructor(
   const type = String(node.type);
   const args = argumentsOf(node);
   if (GREGORIAN_TYPES.has(type) && args.length === 0) return call("getDateTime");
+  // A formatter of a literal pattern keeps its pattern, which its format and parse calls write out.
+  const pattern = formatterPattern(node);
+  if (pattern !== null) return literal(pattern);
   if (!DATE_TYPES.has(type)) return undefined;
   if (args.length === 1) {
     // new Date(text) parsed the text instead.
@@ -607,6 +710,157 @@ export function temporalConstructor(
     seconds ?? literal(0),
     literal(0),
   ]);
+}
+
+/**
+ * A date and time shown in a Java pattern (#532): the machine date `yyyy-MM-dd` as `toISO()`; a pattern of number
+ * fields from the fields, exactly, where it shows no whole date or time, or where the script saves or parses the text
+ * again (`data`); another display pattern of a whole date or time as the player's local form, with a note. Null after
+ * a diagnostic for a pattern with names or a time zone.
+ */
+export function patternText(
+  pattern: string,
+  source: IrExpression,
+  data: boolean,
+  node: AstNode,
+  host: JavaRuleHost,
+): IrExpression | null {
+  const kind = datePatternKind(pattern);
+  if (kind === "isoDate") return method(call("toDate", source), "toISO");
+  const fields = datePatternFields(pattern, source);
+  if (fields !== null && (data || kind === null)) return fields;
+  if (kind === null || data) {
+    host.diagnostic(
+      "SX_DATE_FORMAT",
+      "error",
+      data
+        ? `The script saves or parses this date text again, so it needs Java's exact pattern ${JSON.stringify(pattern)}, whose names or time zone TeaseScript does not write; build the text from the date fields.`
+        : "This Java date pattern is neither the ISO date yyyy-MM-dd (toISO()) nor a whole date or time that formatDate(), formatTime(), or formatDateTime() can show (#532); build the text from the date fields.",
+      node.span,
+    );
+    return null;
+  }
+  const shown = kind === "date" ? "Date" : kind === "time" ? "Time" : "DateTime";
+  host.diagnostic(
+    "SX_DATE_FORMAT",
+    "warning",
+    `Java formatted this date with the pattern ${JSON.stringify(pattern)}; format${shown}() shows the player's local form instead (#532).`,
+    node.span,
+  );
+  return method(source, `format${shown}`);
+}
+
+/**
+ * A SimpleDateFormat's parse(text) of a pattern of a year, a month, and a day as numbers with one separator, as
+ * jewell's `y/M/d`, which reads back the text the same pattern wrote: the date at midnight (a Java Date), with a note
+ * that Java's lenient parse also read other text, which stops the script here or reads another date. Undefined for
+ * another pattern, such as a month name or a two-digit year.
+ */
+function parsedDate(
+  pattern: string,
+  textNode: AstNode,
+  host: JavaRuleHost,
+): IrExpression | null | undefined {
+  const tokens = [...pattern.matchAll(/([yMd])\1*|[^A-Za-z']/gu)].map((match) => match[0]);
+  if (tokens.join("") !== pattern || tokens.length !== 5) return undefined;
+  const [first, separator, second, other, third] = tokens as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const fields = [first, second, third];
+  if (separator !== other || /[A-Za-z]/u.test(separator)) return undefined;
+  const at = (letter: string): number => fields.findIndex((field) => field.startsWith(letter));
+  if (
+    ["y", "M", "d"].some((letter) => at(letter) < 0) ||
+    fields.some((field) => field === "yy" || (!field.startsWith("y") && field.length > 2))
+  )
+    return undefined;
+  const text = host.lower(textNode);
+  if (text === null) return null;
+  noteOnce(
+    host,
+    "SX_DATE_PARSE",
+    `Java's lenient parse of the pattern ${JSON.stringify(pattern)} also read a day or month past its end, which it carried into the next, a year of one or two digits in the current century, and spaces or text after the date; the conversion reads the date the pattern writes, and stops the script on other text or reads another year.`,
+    textNode.span ?? null,
+  );
+  return host.helper("dateFromText", [
+    text,
+    literal(separator),
+    literal(at("y")),
+    literal(at("M")),
+    literal(at("d")),
+  ]);
+}
+
+/** What a Java SimpleDateFormat pattern shows: the ISO date, a whole date, a time, both, or null for anything else. */
+export function datePatternKind(pattern: string): "isoDate" | "date" | "time" | "dateTime" | null {
+  if (pattern === "yyyy-MM-dd") return "isoDate";
+  // Quoted text is literal; every other letter is a pattern field.
+  const fields = pattern.replace(/'[^']*'/gu, "").replace(/[^A-Za-z]/gu, "");
+  if (/[^yMdHhkKmsSa]/u.test(fields)) return null;
+  const date = /y/u.test(fields) && /M/u.test(fields) && /d/u.test(fields);
+  const time = /[HhkK]/u.test(fields) && /m/u.test(fields);
+  if (date && time) return "dateTime";
+  if (date && !/[HhkKmsSa]/u.test(fields)) return "date";
+  if (time && !/[yMd]/u.test(fields)) return "time";
+  return null;
+}
+
+/** The date and time fields that Java's pattern letters write as numbers. */
+const NUMBER_PATTERN_FIELDS = new Map([
+  ["y", "year"],
+  ["M", "month"],
+  ["d", "day"],
+  ["H", "hour"],
+  ["m", "minute"],
+  ["s", "second"],
+]);
+
+/**
+ * A Java pattern of number fields, such as jewell's `dd/MM` or `HH`, as the fields of `source` (by default the current
+ * date and time) written the same way, padded to the letters' count: exact, since Java writes numbers the same in
+ * every locale. Null for a pattern with another letter, such as a month or weekday name.
+ */
+export function datePatternFields(
+  pattern: string,
+  source: IrExpression = { kind: "call", name: "getDateTime", positional: [], named: {} },
+): IrExpression | null {
+  const now = source;
+  const parts: Array<{ text: string } | { value: IrExpression }> = [];
+  for (const [token, letter] of pattern.matchAll(/'(?:[^']|'')*'|([A-Za-z])\1*|[^A-Za-z']+/gu)) {
+    if (letter === undefined) {
+      parts.push({
+        text: token.startsWith("'") ? token.slice(1, -1).replaceAll("''", "'") || "'" : token,
+      });
+      continue;
+    }
+    const field = NUMBER_PATTERN_FIELDS.get(letter);
+    if (field === undefined || (letter === "M" && token.length > 2)) return null;
+    const value: IrExpression = { kind: "property", target: now, name: field };
+    // `yy` writes the year's last two digits.
+    const shown: IrExpression =
+      letter === "y" && token.length === 2
+        ? { kind: "binary", operator: "%", left: value, right: { kind: "literal", value: 100 } }
+        : value;
+    parts.push({
+      value:
+        token.length === 1
+          ? shown
+          : {
+              kind: "methodCall",
+              target: { kind: "call", name: "toString", positional: [shown], named: {} },
+              name: "padStart",
+              arguments: [
+                { kind: "literal", value: token.length },
+                { kind: "literal", value: "0" },
+              ],
+            },
+    });
+  }
+  return { kind: "template", parts };
 }
 
 /** Calendar writes as statements: `cal.add(Calendar.MINUTE, n)`, `cal.set(...)`, `cal.setTime(d)`, ... */

@@ -3,4 +3,19 @@ title: "Teacher Trouble"
 author: "Banjo"
 ---
 
-goto "Banjo/teachertrouble.tease"
+// NOTE SX_ENTRY_EXTRAS: The legacy player also listed fontconfiguration.tease, system/implements.tease for the player to open directly; the start offers them after the main story (owner decision 2026-10-10).
+say "Which script do you want to start?"
+let picked = choose teachertrouble: "Teacher Trouble (main story)",
+  fontconfiguration: "Extra, not part of the story: fontconfiguration",
+  implements: "Extra, not part of the story: implements"
+switch picked {
+  case "fontconfiguration" {
+    goto "fontconfiguration.tease"
+  }
+  case "implements" {
+    goto "system/implements.tease"
+  }
+  default {
+    goto "Banjo/teachertrouble.tease"
+  }
+}

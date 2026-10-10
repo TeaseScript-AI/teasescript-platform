@@ -105,7 +105,7 @@ const INTRO_QUESTIONS = new Map<string, string>([
   ["intro.likefemale", "Are you attracted to women ?"],
 ]);
 
-const PROFILE_HELPER = "sexscriptLegacyAskProfile";
+export const PROFILE_HELPER = "sexscriptLegacyAskProfile";
 
 const v = (name: string): IrExpression => ({ kind: "variable", name });
 const lit = (value: string | number | boolean | null): IrExpression => ({ kind: "literal", value });
@@ -145,19 +145,10 @@ const ifMissing = (key: string, body: IrStatement[]): IrStatement => ({
 export function legacyProfilePrompt(
   programs: readonly MigrationProgram[],
   main: MigrationProgram,
+  /** Whether main.tease calls the helper where it starts; a start choice calls it in its options instead. */
+  call = true,
 ): IrStatement[] {
-  const reads = new Set<string>();
-  const saves = new Set<string>();
-  for (const program of [...programs, main]) collectKeys(program.statements, reads, saves);
-  // A script's save of a toy or a garment corrects what the player owns, as jewell's training saves that the player
-  // has no panties after all; it asks nothing, so the item is still asked.
-  const asked = [...reads]
-    .filter(
-      (key) =>
-        isProfileKey(key) &&
-        (key.startsWith("toys.") || key.startsWith("clothes.") || !saves.has(key)),
-    )
-    .sort();
+  const asked = askedProfileKeys([...programs, main]);
   if (asked.length === 0) return [];
   const body: IrStatement[] = [];
   if (asked.includes("intro.name"))
@@ -223,12 +214,40 @@ export function legacyProfilePrompt(
       trailing: false,
       span: null,
     },
-    {
-      kind: "expression",
-      expression: { kind: "call", name: PROFILE_HELPER, positional: [], named: {}, local: true },
-      span: null,
-    },
+    ...(call ? [profileCall()] : []),
   ];
+}
+
+/** The profile keys the package's programs read that the prompt asks: those no script saves, and toys and garments. */
+export function askedProfileKeys(programs: readonly MigrationProgram[]): string[] {
+  const reads = new Set<string>();
+  const saves = new Set<string>();
+  for (const program of programs) collectKeys(program.statements, reads, saves);
+  // A script's save of a toy or a garment corrects what the player owns, as jewell's training saves that the player
+  // has no panties after all; it asks nothing, so the item is still asked.
+  return [...reads]
+    .filter(
+      (key) =>
+        isProfileKey(key) &&
+        (key.startsWith("toys.") || key.startsWith("clothes.") || !saves.has(key)),
+    )
+    .sort();
+}
+
+/** The literal storage keys a program reads. */
+export function keysRead(program: MigrationProgram): Set<string> {
+  const reads = new Set<string>();
+  collectKeys(program.statements, reads, new Set());
+  return reads;
+}
+
+/** The call of the profile prompt's helper (legacyProfilePrompt). */
+export function profileCall(): IrStatement {
+  return {
+    kind: "expression",
+    expression: { kind: "call", name: PROFILE_HELPER, positional: [], named: {}, local: true },
+    span: null,
+  };
 }
 
 function isProfileKey(key: string): boolean {

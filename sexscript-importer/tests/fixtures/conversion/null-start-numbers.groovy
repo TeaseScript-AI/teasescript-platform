@@ -47,3 +47,19 @@ def fill = { n ->
 def spell = { -> for (i in ["a", "b"]) show(i) }
 fill(3)
 spell()
+// So do numbers set from a closure that returns a load with a default through another one, as SlideLadderDare's
+// loadInteger0 over loadIntegerVal.
+def loadOr = { key, fallback ->
+	def stored = loadInteger(key)
+	if (stored == null) return fallback
+	return stored
+}
+def loadSet = { key, fallback ->
+	def value = loadOr(key, fallback)
+	if (value == 0) return fallback
+	return value
+}
+def spanks
+def configure = { -> spanks = loadSet("game.spanks", 4) }
+configure()
+show("Spanks " + spanks * 2)

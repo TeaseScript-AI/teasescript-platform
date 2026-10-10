@@ -7,6 +7,10 @@ function sexscriptLegacyListPart(value) {
   }
   return [value]
 }
+function sexscriptLegacyDateFromText(textValue, separator, year, monthValue, day) {
+  let parts = textValue.split(separator)
+  return toDateTime(toDate("${parts[year].padStart(4, "0")}-${parts[monthValue].padStart(2, "0")}-${parts[day].padStart(2, "0")}"), toTime("00:00"))
+}
 function sexscriptLegacyRepeatList(items, times) {
   let result = []
   let roundValue = 0
@@ -75,4 +79,24 @@ if collectResult.length == 0 {
   total = null
 }
 say "Total ${total}"
+// A Date's format(pattern) shows a time or date in the player's local form, and number fields exactly (Farkel's denial).
+let denialEnd = getDateTime()
+denialEnd = (denialEnd.toAbsoluteDateTime() + 30 * 1 min).toDateTime()
+let until = denialEnd
+// NOTE SX_DATE_FORMAT line 43: Java formatted this date with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "Wait until ${until.formatTime()} ${toString(until.day).padStart(2, "0")}/${toString(until.month).padStart(2, "0")}"
+// A formatter in a variable writes a date the script saves or parses again exactly, and parses it back, as jewell counts
+// the days since it last ran.
+let dayFormat = "y/M/d"
+let lastRun = load "game.lastRun", default: ""
+let thisRun = "${getDateTime().year}/${getDateTime().month}/${getDateTime().day}"
+save thisRun as "game.lastRun"
+// NOTE SX_DATE_PARSE line 50: Java's lenient parse of the pattern "y/M/d" also read a day or month past its end, which it carried into the next, a year of one or two digits in the current century, and spaces or text after the date; the conversion reads the date the pattern writes, and stops the script on other text or reads another year.
+if lastRun != "" and (toDate(sexscriptLegacyDateFromText(thisRun, "/", 0, 1, 2)) - toDate(sexscriptLegacyDateFromText(lastRun, "/", 0, 1, 2))).days > 2 {
+  say "You stayed away too long."
+}
+// So is a text the script saves through a copy of it.
+let savedDay = "${getDateTime().year}-${getDateTime().month}-${getDateTime().day}"
+let savedCopy = savedDay
+save savedCopy as "game.savedDay"
 exit

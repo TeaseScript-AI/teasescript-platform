@@ -7,5 +7,8 @@
       "reason": "In the root German script the image folder was lost from 28 setImage paths (\"/Kendra1.jpg\", \"/balltied.jpg\", \"e/granny.jpg\", …), so 23 images were missing. The English script and the German copy in scripts/Puzzle Challenge/ use \"Puzzle Challenge/<name>\" on the same lines, and the images exist there; restore that folder.",
       "diff": "de-image-folder.diff"
     }
-  ]
+  ],
+  "heldStandAlone": {
+    "Puzzle Challenge/Puzzle Challenge.groovy": "A byte-identical copy of the main story, Puzzle Challenge.groovy at the root, under another path: no script of its own to offer beside it."
+  }
 }

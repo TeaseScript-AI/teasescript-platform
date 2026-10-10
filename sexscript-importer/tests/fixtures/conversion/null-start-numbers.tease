@@ -1,3 +1,13 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
 // Numbers declared without a value, or as null, that functions set start at 0: no code compares them with null, and
 // Groovy truth treats null and 0 alike.
 let score = 0
@@ -67,4 +77,26 @@ function spell {
 }
 fill(3)
 spell()
+// So do numbers set from a closure that returns a load with a default through another one, as SlideLadderDare's
+// loadInteger0 over loadIntegerVal.
+function loadOr(key, fallbackValue) {
+  let stored = sexscriptLegacyLoadInteger(key)
+  if stored == null {
+    return fallbackValue
+  }
+  return stored
+}
+function loadSet(key, fallbackValue2) {
+  let value = loadOr(key, fallbackValue2)
+  if value == 0 {
+    return fallbackValue2
+  }
+  return value
+}
+let spanks = 0
+function configure {
+  spanks = loadSet("game.spanks", 4)
+}
+configure()
+say "Spanks ${spanks * 2}"
 exit

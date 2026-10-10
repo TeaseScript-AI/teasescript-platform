@@ -184,6 +184,8 @@ export type HelperName =
   | "endsWithDigits"
   | "plainText"
   | "listPart"
+  | "listText"
+  | "dateFromText"
   | "listMinus"
   | "booleanText"
   | "button"
@@ -302,6 +304,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "endsWithDigits",
   "plainText",
   "listPart",
+  "listText",
+  "dateFromText",
   "listMinus",
   "booleanText",
   "textMinus",
@@ -1267,6 +1271,103 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret({ kind: "list", items: [v("value")] }),
         ],
       ),
+  },
+  // Groovy's text of a value in a list (`[a, [b, c]]`, a map as `[key:value]`): a list, set, or dict element by
+  // element, any other value as `${...}` shows it.
+  listText: {
+    name: "sexscriptLegacyListText",
+    build: () => {
+      const is = (type: string): IrExpression => ({ kind: "typeTest", value: v("value"), type });
+      const shown = (value: IrExpression): IrExpression => ({
+        kind: "call",
+        name: "sexscriptLegacyListText",
+        positional: [value],
+        named: {},
+      });
+      const joined = (list: string): IrExpression =>
+        template(
+          "[",
+          { kind: "methodCall", target: v(list), name: "join", arguments: [lit(", ")] },
+          "]",
+        );
+      return fn(
+        "sexscriptLegacyListText",
+        ["value"],
+        [
+          ifS(bin("or", is("list"), is("set")), [
+            {
+              kind: "let",
+              name: "parts",
+              value: { kind: "list", items: [] },
+              type: "string[]",
+              span: null,
+            },
+            forS("item", v("value"), [add("parts", shown(v("item")))]),
+            ret(joined("parts")),
+          ]),
+          ifS(is("dict"), [
+            {
+              kind: "let",
+              name: "entries",
+              value: { kind: "list", items: [] },
+              type: "string[]",
+              span: null,
+            },
+            {
+              kind: "for",
+              variable: "key",
+              valueVariable: "item",
+              collection: v("value"),
+              body: [add("entries", template(v("key"), ":", shown(v("item"))))],
+              dict: true,
+              span: null,
+            },
+            ifS(bin("==", prop(v("entries"), "length"), lit(0)), [ret(lit("[:]"))]),
+            ret(joined("entries")),
+          ]),
+          ret(template(v("value"))),
+        ],
+      );
+    },
+  },
+  // A Java SimpleDateFormat's parse() of a year, a month, and a day as numbers with one separator, at midnight; the
+  // positions name the parts the separator splits the text into.
+  dateFromText: {
+    name: "sexscriptLegacyDateFromText",
+    build: () => {
+      const part = (position: string, width: number): IrExpression => ({
+        kind: "methodCall",
+        target: at(v("parts"), v(position)),
+        name: "padStart",
+        arguments: [lit(width), lit("0")],
+      });
+      return fn(
+        "sexscriptLegacyDateFromText",
+        ["text", "separator", "year", "month", "day"],
+        [
+          letS("parts", {
+            kind: "methodCall",
+            target: v("text"),
+            name: "split",
+            arguments: [v("separator")],
+          }),
+          ret({
+            kind: "call",
+            name: "toDateTime",
+            positional: [
+              {
+                kind: "call",
+                name: "toDate",
+                positional: [template(part("year", 4), "-", part("month", 2), "-", part("day", 2))],
+                named: {},
+              },
+              { kind: "call", name: "toTime", positional: [lit("00:00")], named: {} },
+            ],
+            named: {},
+          }),
+        ],
+      );
+    },
   },
   // Groovy `text[position]`: the one character there as text, a negative position counting from the end.
   textAt: {

@@ -105,3 +105,69 @@ show("Rolled " + rolled.size())
 def finalists = ["Anna", "Bea"]
 if (getBoolean("Bye?")) finalists = ["Anna"]
 show("Final: " + finalists[0] + " and " + finalists[1])
+// A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
+// OwlSays' owned implements.
+def owned = []
+def ownedCount = 0
+for (toy in ["paddle", "cane"]) {
+	if (getBoolean("Own a " + toy + "?")) {
+		owned[ownedCount] = toy
+		ownedCount++
+	}
+}
+owned = owned.reverse()
+show("Owned " + owned.size())
+// A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
+// check.
+def marks = ["a|re", "b|ok"].collect { entry ->
+	def parts = entry.split('\\|')
+	if (parts[1] == "re") {
+		return parts[0] + "|ex"
+	}
+	return entry
+}
+show("Marks " + marks.join(","))
+// A list of lists shows as Groovy showed it (PainWaveGen's shock list); one that may be null, which the conversion may
+// start empty, or that holds maps, which it may make objects, stays a TODO.
+List<List> shocks = []
+shocks.add([1.5, [100, 100], "SINE"])
+def chosen = getSelectedValue("Remove:", shocks.collect { it.toString() } + ["Back"])
+show("Shocks " + shocks + " chosen " + chosen)
+def spare = null
+if (getBoolean("Spare?")) spare = [1, 2]
+show("Spare ${spare}")
+show("Settings " + [[speed: 2], [:]])
+// A declaration whose value cannot be converted keeps its variable, also where a part of it is computed first.
+int kept = getSelectedValue("Keep:", shocks.collect { Eval.me(it.toString()) } + ["Back"])
+if (kept < shocks.size()) show("Kept")
+// A position that add() calls before it show inside the list, or at its end, is written in place or appended.
+def picks = []
+if (getBoolean("Pick?")) {
+	picks.add("a")
+	picks[0] = "b"
+	picks[1] = "c"
+}
+show("Picks " + picks.size())
+// A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
+def finallyCount = 0
+def finallyKept = [1, 2].collect { item ->
+	try {
+		if (item == 1) return item
+	} finally {
+		finallyCount++
+	}
+	return item + 1
+}
+show("Kept " + finallyKept.size() + " " + finallyCount)
+// A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
+def fixedSlots = []
+def fixedFilled = 0
+if (getBoolean("Fixed?")) fixedSlots = new int[2]
+fixedSlots[fixedFilled] = 5
+fixedFilled++
+show("Slots " + fixedSlots.size())
+// A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
+def entryParts = loadString("game.entries")?.split(",")
+def entryCopy = entryParts
+entryParts[0] = "x"
+show("Copy " + entryCopy.size())

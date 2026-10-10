@@ -1,0 +1,44 @@
+--- a/scripts/TheSnowyOwl/OwlSays.groovy
++++ b/scripts/TheSnowyOwl/OwlSays.groovy
+@@ -499,10 +499,10 @@
+ def pointslap
+ def seq=[]
+ def nseq=0
+-def spanktotal
+-def spankeach
+-def retry
+-def retryeach
++def spanktotal = 50
++def spankeach = 5
++def retry = 2
++def retryeach = 1
+ def target=4
+ def targetwl=6
+ 
+@@ -566,21 +566,21 @@
+ 			switch(rand)
+ 			{
+ 			case 0:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr
+ 				break
+ 			case 1:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr+1
+ 				break
+ 			case 2:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr
+-				index2[nphr+1]=index2[1]
++				index2.add(index2[1])
+ 				index2[1]=nphr+1
+ 				break
+ 			case 3:
+-				index2[nphr]=index2[1]
++				index2.add(index2[1])
+ 				index2[1]=nphr+1
+ 				break
+ 			case 4:

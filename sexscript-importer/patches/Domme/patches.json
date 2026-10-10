@@ -42,5 +42,8 @@
       "reason": "The bedtime spreader-bar choice tests clothes.spreader_bar, which nothing saves; the toy chest saves the spreader bar as toys.spreader_bar, so the choice always went back to picking a toy. Read toys.spreader_bar.",
       "diff": "spreader-bar-key.diff"
     }
-  ]
+  ],
+  "heldStandAlone": {
+    "Domme/exerciseOld.groovy": "An older copy of Domme/exercise.groovy, which the script chains to: a development leftover."
+  }
 }

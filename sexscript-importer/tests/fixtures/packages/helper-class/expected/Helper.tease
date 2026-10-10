@@ -1,3 +1,4 @@
+global tau = 2 * 3.141592653589793
 // The shared functions of this helper class are static closures that the scripts call like methods.
 global function showWait(msg, tmo = 5) {
   say msg
@@ -11,6 +12,10 @@ global function rounds(count, msg) {
 }
 global function twice(it = null) {
   return it * 2
+}
+// A static that operators compute from literals is a global, so the method that reads it is a global function too.
+global function turns(count) {
+  return count * tau
 }
 // Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
 global function percentChance(percent) {

@@ -21,5 +21,8 @@
       "reason": "The warm-up seating adds each player's spanker to the seating only when that player was spanked (p1spanked, p2spanked, p4spanked to p6spanked), but adds the third player's spanker under p2spanked again. With two players in gauntlet mode the third spanker, never set, joined the seating as the placeholder \"ERROR\" and could be paired with a player. Test p3spanked.",
       "diff": "warmup-p3-seat.diff"
     }
-  ]
+  ],
+  "heldStandAlone": {
+    "Banjo/DLC/spankparty-pp02.groovy": "Party Pack #2 is internal like its siblings pp00, pp01 and pp03: its own text says it cannot be run alone and only adds players to Spanking Party. unit.json not listing it in internalScripts is an author omission."
+  }
 }

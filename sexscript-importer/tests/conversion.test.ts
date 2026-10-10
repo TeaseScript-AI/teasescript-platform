@@ -795,8 +795,6 @@ test(
           // Lists of numbers and lists of text are values of two types.
           { code: "SX_DICT_VALUE_TYPE", line: 10 },
           { code: "SX_UNSUPPORTED_DECLARATION_VALUE", line: 10 },
-          { code: "SX_COLLECTION_TEXT", line: 11 },
-          { code: "SX_UNSUPPORTED_ARGUMENT", line: 11 },
           { code: "SX_DICT_EQUALITY", line: 15 },
           { code: "SX_UNSUPPORTED_IF", line: 15 },
         ],
@@ -961,6 +959,7 @@ test(
       "module-files",
       "entry-hub",
       "entry-own-folder",
+      "stand-alone",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");

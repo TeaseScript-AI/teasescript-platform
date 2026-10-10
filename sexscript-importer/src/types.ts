@@ -21,6 +21,9 @@ export const OBJECT = 16;
 export const NULL = 32;
 export const UNKNOWN = STRING | NUMBER | BOOLEAN | LIST | OBJECT | NULL;
 
+/** `=` and the compound assignments, such as `+=` and `<<=`. */
+const ASSIGNMENT_OPERATOR = /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u;
+
 export type ValueType = number;
 
 export interface TypeEnvironment {
@@ -438,7 +441,7 @@ export function inferVariableTypes(
   const localFunctions = new Set<string>(localFunctionNames);
   // The values each closure kept in a variable returns, which calls of it produce; a returned parameter that the
   // closure never assigns is the call's argument (functionPassThrough).
-  const returns: Array<{ name: string; values: AstNode[] }> = [];
+  const returns: Array<{ name: string; values: AstNode[]; callees: string[] }> = [];
   const passThrough = new Map<string, number[]>();
   walkAst(body, (node) => {
     collectAssignments(node, collector);
@@ -462,16 +465,72 @@ export function inferVariableTypes(
           if (target !== null) assignedInside.add(target);
         });
         const values = closureReturnValues(closure);
+        const parameterPosition = (value: AstNode | undefined): number => {
+          const position = parameterNames.indexOf(variableName(value ?? null) ?? "");
+          return position >= 0 && !assignedInside.has(parameterNames[position]!) ? position : -1;
+        };
+        // A returned local that only calls of a closure passing an argument through set, with a parameter of this
+        // closure as that argument, passes the parameter through too, besides the callee's own result (SlideLadderDare's
+        // `def ans = loadIntegerVal(keyword1, defaultval)` in loadInteger0).
+        const forwarded = (value: AstNode): { positions: number[]; callee: string } | null => {
+          const local = variableName(value);
+          if (local === null || parameterNames.includes(local)) return null;
+          const sources: AstNode[] = [];
+          let other = false;
+          let declarations = 0;
+          walkAst(closure.body, (inner) => {
+            const target =
+              inner.kind === "postfix" || inner.kind === "prefix"
+                ? variableName(inner.value)
+                : inner.kind === "declaration" ||
+                    (inner.kind === "binary" && ASSIGNMENT_OPERATOR.test(String(inner.operator)))
+                  ? variableName(inner.left)
+                  : null;
+            if (target !== local) return;
+            if (inner.kind === "declaration") declarations += 1;
+            const right = asNode(inner.right);
+            if (
+              inner.kind !== "postfix" &&
+              inner.kind !== "prefix" &&
+              right !== null &&
+              (inner.kind === "declaration" || inner.operator === "=")
+            )
+              sources.push(right);
+            else other = true;
+          });
+          const callees = new Set(
+            sources.map((source) =>
+              source.kind === "methodCall" && source.implicitThis === true
+                ? constantString(source.method)
+                : null,
+            ),
+          );
+          const [callee] = callees;
+          const through =
+            callee === undefined || callee === null ? undefined : passThrough.get(callee);
+          // Only the closure's own local: a script variable that it sets may change in between.
+          if (other || declarations !== 1 || callees.size !== 1 || through === undefined)
+            return null;
+          const positions = sources.flatMap((source) => {
+            const items: unknown = asNode(source.arguments)?.items;
+            const args = Array.isArray(items) ? items.filter(isAstNode) : [];
+            return through.map((position) => parameterPosition(args[position]));
+          });
+          return positions.includes(-1) ? null : { positions, callee: callee! };
+        };
         const passed = values.flatMap((value) => {
-          const position = parameterNames.indexOf(variableName(value) ?? "");
-          return position >= 0 && !assignedInside.has(parameterNames[position]!) ? [position] : [];
+          const position = parameterPosition(value);
+          return position >= 0 ? [position] : (forwarded(value)?.positions ?? []);
         });
         if (passed.length > 0) passThrough.set(name, [...new Set(passed)]);
         returns.push({
           name,
-          values: values.filter((value) => {
-            const position = parameterNames.indexOf(variableName(value) ?? "");
-            return !(position >= 0 && passed.includes(position));
+          values: values.filter(
+            (value) => parameterPosition(value) < 0 && forwarded(value) === null,
+          ),
+          callees: values.flatMap((value) => {
+            const callee = parameterPosition(value) < 0 ? forwarded(value)?.callee : undefined;
+            return callee === undefined ? [] : [callee];
           }),
         });
       }
@@ -543,9 +602,12 @@ export function inferVariableTypes(
           changed = true;
         }
       }
-      for (const { name, values } of returns) {
+      for (const { name, values, callees } of returns) {
         const current = functionResults.get(name) ?? 0;
-        const next = values.reduce((type, value) => type | inferType(value, environment), current);
+        const next = values.reduce(
+          (type, value) => type | inferType(value, environment),
+          callees.reduce((type, callee) => type | (functionResults.get(callee) ?? 0), current),
+        );
         if (next !== current) {
           functionResults.set(name, next);
           changed = true;

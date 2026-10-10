@@ -1,3 +1,5 @@
+import { datePatternFields, datePatternKind } from "./java-time.ts";
+import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import {
@@ -236,7 +238,7 @@ interface LowerContext {
   scriptPaths: ReadonlyMap<string, string> | null;
   /** Variables assigned once with the current date (`new Date()`, `Calendar.getInstance()`). */
   dateValues: ReadonlySet<string>;
-  /** List variables that Groovy shared with another variable by an assignment of one to the other. */
+  /** Bindings of lists, or values that may be lists, that Groovy shared with another variable by an assignment. */
   aliasedLists: ReadonlySet<string>;
   /** Bindings of closure parameters and loop variables (parameterBindings). */
   parameterBindings: ReadonlySet<string>;
@@ -282,6 +284,8 @@ interface LowerContext {
   writeTargets: Set<AstNode>;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
+  /** Variables that only ever hold null, whose declarations are left out and whose reads read null (nullOnlyVariables). */
+  nullOnly: ReadonlySet<string>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -1342,6 +1346,71 @@ function declaredWrites(body: AstNode, keys: BindingKeys): DeclaredWrites {
   return { initialized, other };
 }
 
+/**
+ * Variables that only ever hold null: declared without a value or with null, and never set, counted, or changed
+ * anywhere else in the script, as SubChallenges' `def ChallengeType0` beside `typeout = ChallengeType0`. They are the
+ * legacy script's dead variables, whose every read gave null. A name that a loop or another declaration binds too is
+ * left alone, since its reads may be another variable's.
+ */
+function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
+  const declared = new Set<string>();
+  const changed = new Set<string>();
+  const read = new Set<string>();
+  const declarationTargets = new Set<unknown>();
+  // How often a binding key is bound: script-level blocks and loops share their names' keys, so a loop variable or a
+  // second declaration of the name is another variable under the same key.
+  const bound = new Map<string, number>();
+  const bind = (key: string | null): void => {
+    if (key !== null) bound.set(key, (bound.get(key) ?? 0) + 1);
+  };
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      const left = asNode(node.left);
+      const several = left?.kind === "arguments" || left?.kind === "tuple";
+      for (const target of several ? nodeArray(left.items) : [left]) {
+        declarationTargets.add(target);
+        bind(bindingKey(target, context.bindings));
+      }
+      const key = several ? null : bindingKey(node.left, context.bindings);
+      // `int count` starts at 0, `boolean ready` at false, and `char c` at character 0, not null.
+      const type = text(left?.originType) ?? "";
+      const primitive = PRIMITIVE_DEFAULTS.has(type) || type === "char";
+      if (key !== null && !primitive) declared.add(key);
+    } else if (node.kind === "for" && typeof node.variable === "string") {
+      bind(context.bindings.get(node) ?? node.variable);
+    } else if (
+      node.kind === "binary" &&
+      node.operator === "=" &&
+      ["arguments", "tuple"].includes(asNode(node.left)?.kind ?? "")
+    ) {
+      // A multiple assignment, `(x, y) = values`, gives each target a value.
+      for (const target of nodeArray(asNode(node.left)?.items)) {
+        const key = bindingKey(target, context.bindings);
+        if (key !== null) changed.add(key);
+      }
+    } else if (node.kind === "postfix" || node.kind === "prefix") {
+      const key = bindingKey(node.value, context.bindings);
+      if (key !== null) changed.add(key);
+    } else if (node.kind === "variable" && !declarationTargets.has(node)) {
+      const key = bindingKey(node, context.bindings);
+      if (key !== null) read.add(key);
+    }
+  });
+  // A variable nothing reads keeps its declaration, as before.
+  return new Set(
+    [...declared].filter(
+      (key) =>
+        read.has(key) &&
+        bound.get(key) === 1 &&
+        !changed.has(key) &&
+        !context.compoundValues.has(key) &&
+        (context.assignedValues.get(key) ?? []).every(
+          (value) => isNullConstant(value) || isEmptyGroovyExpression(value),
+        ),
+    ),
+  );
+}
+
 /** The value each compound update gives its variable, as the binary expression it computes (`x += y` is `x + y`). */
 function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
   const values = new Map<string, AstNode[]>();
@@ -1484,6 +1553,7 @@ export function lowerParsedFile(
     knownKeys: [],
     writeTargets: new Set(),
     indexedSplits: new Set(),
+    nullOnly: new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -1566,11 +1636,12 @@ export function lowerParsedFile(
       options.globalTypes,
     );
     context.dateValues = currentDateVariables(body, context.types);
-    context.aliasedLists = aliasedListVariables(body, context.types);
+    context.aliasedLists = aliasedListVariables(body, context.types, context.bindings);
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
+    context.nullOnly = nullOnlyVariables(body, context);
     context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
@@ -1676,6 +1747,7 @@ export function lowerParsedFile(
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
+  texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
@@ -2131,20 +2203,23 @@ function lowerHelperCompilationUnit(
   const typedStatements = withoutCutReadingTimes(
     withReadingTimes(
       withMessageHandles(
-        withElapsedDurations(
-          withFillableLoads(
-            withParsedLoads(
-              withSwitchLadders(
-                withCounterLoops(
-                  withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+        withClockLoopTicks(
+          withElapsedDurations(
+            withFillableLoads(
+              withParsedLoads(
+                withSwitchLadders(
+                  withCounterLoops(
+                    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                  ),
                 ),
+                baseContext.syntheticHelpers,
               ),
-              baseContext.syntheticHelpers,
+              true,
             ),
+            diagnostics,
             true,
           ),
           diagnostics,
-          true,
         ),
         diagnostics,
         false,
@@ -2637,6 +2712,7 @@ function lowerHelperMethod(
     knownKeys: [],
     writeTargets: new Set(),
     indexedSplits: new Set(),
+    nullOnly: new Set(),
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -3534,6 +3610,7 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
         "SX_CONDITIONAL_POSITION",
         "This conditional expression cannot be computed first without changing behavior: a list or map read earlier in the statement may be changed by its side effects. Rewrite it with an explicit if.",
       ),
+      ...declaredPlaceholder(root, context),
     ]
   );
 }
@@ -3810,10 +3887,31 @@ function hoistDeferred(
   for (const item of [...declarations, rest]) {
     const [prelude, lowered, postlude] = withSurroundings(context, item);
     result.push(...prelude, ...lowered, ...postlude);
-    // A part that could not be converted leaves its temporary undefined; the root cause is reported already.
-    if (lowered.some((part) => part.kind === "unsupported")) break;
+    // A part that could not be converted leaves its temporary undefined; the root cause is reported already. A variable
+    // the statement declares stays declared, as where its own initializer fails (lowerDeclaration).
+    if (lowered.some((part) => part.kind === "unsupported")) {
+      if (item !== rest) result.push(...declaredPlaceholder(root, context));
+      break;
+    }
   }
   return result;
+}
+
+/**
+ * For a declaration whose value cannot be converted: the variable with a neutral value of its type, so the code that
+ * uses it still compiles.
+ */
+function declaredPlaceholder(root: AstNode, context: LowerContext): IrStatement[] {
+  const name = root.kind === "declaration" ? variableName(root.left) : null;
+  if (name === null) return [];
+  return [
+    {
+      kind: "let",
+      name,
+      value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+      span: root.span ?? null,
+    },
+  ];
 }
 
 /**
@@ -4557,6 +4655,26 @@ function lowerDeclaration(
       ),
     ];
   }
+  // A variable that only ever held null is left out, with a note where it was declared.
+  if (context.nullOnly.has(bindingKey(node.left, context.bindings) ?? "")) {
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_NULL_ONLY_VARIABLE",
+      severity: "info",
+      message: `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    const line = span === null ? "" : ` line ${span.line}`;
+    return [
+      {
+        kind: "comment",
+        text: `// NOTE ${diagnostic.code}${line}: ${diagnostic.message}`,
+        trailing: false,
+        span,
+      },
+    ];
+  }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
   // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
   if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
@@ -4597,6 +4715,14 @@ function lowerDeclaration(
   if (collectionLoop !== null) return collectionLoop;
   // `def x` without an initializer starts as null in Groovy; primitive declarations start at 0 or false.
   const declaredType = text(asNode(node.left)?.originType) ?? "";
+  if (declaredType === "char" && isEmptyGroovyExpression(right))
+    addDiagnostic(
+      context,
+      "SX_CHAR_DEFAULT",
+      "warning",
+      `Groovy started the char ${name} at character 0, which TeaseScript text has no value for; it starts at null here, so a test of it for null passes where Groovy's did not.`,
+      span,
+    );
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: PRIMITIVE_DEFAULTS.get(declaredType) ?? null }
     : right.kind === "map"
@@ -7207,7 +7333,12 @@ function lowerCollectionAssignment(
   if (argument !== null && argument.parameters.length !== 1) return null;
   const variable = argument?.parameters[0] ?? "item";
   const result = argument === null ? null : closureResult(argument.closure);
-  if (argument !== null && result === null) return null;
+  // A collect() closure that returns early adds each returned element in the loop (collectReturnsBody).
+  const returning =
+    call.name === "collect" && argument !== null && result === null
+      ? collectReturnsBody(argument.closure, syntheticVariable("collected", null)) !== null
+      : false;
+  if (argument !== null && result === null && !returning) return null;
   // Groovy sum() adds numbers (it joins text) and returns null for an empty list.
   const summand =
     result === null ? listElementType(receiver, context) : inferType(result.value, context.types);
@@ -7310,6 +7441,17 @@ function lowerCollectionAssignment(
       initial = { kind: "list", items: [] };
       if (identity) {
         body = [add(item)];
+        break;
+      }
+      if (returning) {
+        const variables = new Map(context.types.variables);
+        variables.set(accumulator, LIST);
+        context.types = { ...context.types, variables };
+        const statements = collectReturnsBody(
+          argument!.closure,
+          syntheticVariable(accumulator, span),
+        );
+        body = lowerStatementList(statements!, null, context);
         break;
       }
       const value = computed(result!.value);
@@ -7416,6 +7558,68 @@ function listElementType(node: AstNode, context: LowerContext): number {
     return nodeArray(node.items).reduce((type, item) => type | inferType(item, context.types), 0);
   }
   return context.types.listElements?.get(variableName(node) ?? "") ?? UNKNOWN;
+}
+
+/**
+ * The body of a collect() closure that returns early, as loop statements that add each returned element to the
+ * accumulator and go on with the next element: `return v` becomes `accumulator.add(v)` and `continue`, and a last value
+ * is added too (SissyPlaytimeExposure's exposure check). Null where a return sits in a loop or switch of the body,
+ * which a continue would not leave, or in a try with a finally block, which it would skip, or where the body does not
+ * end in a return or a value.
+ */
+function collectReturnsBody(closure: AstNode, accumulator: AstNode): AstNode[] | null {
+  let jumps = true;
+  const add = (value: AstNode | null, span: SourceSpan | null): AstNode => ({
+    kind: "expressionStatement",
+    span,
+    expression: {
+      kind: "methodCall",
+      span,
+      object: accumulator,
+      method: { kind: "constant", span, value: "add" },
+      arguments: { kind: "arguments", span, items: [value ?? syntheticConstant(null, span)] },
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    },
+  });
+  const rewrite = (node: AstNode, inJump: boolean): AstNode => {
+    if (node.kind === "closure") return node;
+    if (node.kind === "return") {
+      if (inJump) jumps = false;
+      return {
+        kind: "block",
+        span: node.span,
+        statements: [
+          add(asNode(node.value), node.span),
+          { kind: "continue", span: node.span, label: null },
+        ],
+      };
+    }
+    // A continue would also skip a finally block that the return ran (Groovy ran it before the closure returned).
+    const nested =
+      inJump ||
+      ["for", "while", "doWhile", "switch"].includes(node.kind) ||
+      (node.kind === "tryCatch" && nodeArray(asNode(node.finally)?.statements).length > 0);
+    const result: AstNode = { ...node };
+    for (const [key, value] of Object.entries(node)) {
+      if (isAstNode(value)) result[key] = rewrite(value, nested);
+      else if (Array.isArray(value))
+        result[key] = value.map((item) => (isAstNode(item) ? rewrite(item, nested) : item));
+    }
+    return result;
+  };
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const last = statements.at(-1);
+  if (last === undefined) return null;
+  const leading = statements.slice(0, -1).map((statement) => rewrite(statement, false));
+  const tail =
+    last.kind === "return"
+      ? add(asNode(last.value), last.span)
+      : last.kind === "expressionStatement"
+        ? add(asNode(last.expression), last.span)
+        : null;
+  return jumps && tail !== null ? [...leading, tail] : null;
 }
 
 /** A closure body ending in an expression (or `return expression`) with no other returns. */
@@ -8677,6 +8881,22 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const thenNode = asNode(node.then);
   const elseNode = asNode(node.else);
+  // A test that a variable which only ever held null holds a value never passed: the branch is left out.
+  if (
+    conditionNode !== null &&
+    (elseNode === null || elseNode.kind === "empty") &&
+    nullOnlyTruth(conditionNode, context) === false
+  ) {
+    const line = node.span === null ? "" : ` line ${node.span.line}`;
+    return [
+      {
+        kind: "comment",
+        text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.`,
+        trailing: false,
+        span: node.span,
+      },
+    ];
+  }
   const condition = conditionNode === null ? null : lowerCondition(conditionNode, context);
   if (condition === null || thenNode === null || thenNode.kind === "empty") {
     return [
@@ -8699,6 +8919,67 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
           lowerBranch(elseNode, context),
         );
   return [{ kind: "if", condition, then, else: otherwise, span: node.span }];
+}
+
+/**
+ * A switch on a variable that only ever held null whose cases are texts, numbers, or flags, as the default's statements
+ * (`if true { ... }` where they declare variables, as a block); null for any other switch.
+ */
+function switchDefaultOnly(node: AstNode, context: LowerContext): IrStatement[] | null {
+  const valueNode = asNode(node.expression);
+  if (valueNode === null || isNullConstant(valueNode) || !holdsOnlyNull(valueNode, context))
+    return null;
+  const literal = (match: AstNode | null): boolean =>
+    match?.kind === "constant" && ["string", "number", "boolean"].includes(typeof match.value);
+  if (
+    !nodeArray(node.cases).every((item) => item.kind === "case" && literal(asNode(item.expression)))
+  )
+    return null;
+  const defaultSource = switchBodyStatements(asNode(node.default));
+  if (defaultSource === null) return null;
+  const line = node.span === null ? "" : ` line ${node.span.line}`;
+  const statements = eliminateSwitchBreaks(withoutTerminalBreak(defaultSource));
+  return [
+    {
+      kind: "comment",
+      text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This switch is on a variable that only ever held null, which no case matched; the conversion keeps only its default.`,
+      trailing: false,
+      span: node.span,
+    },
+    ...(statements.length === 0
+      ? []
+      : lowerStatement({ kind: "block", span: node.span, statements }, context)),
+  ];
+}
+
+/** Whether a value is null wherever it is read: the null constant, or a variable that only ever held null. */
+function holdsOnlyNull(node: AstNode, context: LowerContext): boolean {
+  return (
+    isNullConstant(node) ||
+    (node.kind === "variable" && context.nullOnly.has(bindingKey(node, context.bindings) ?? ""))
+  );
+}
+
+/**
+ * The outcome of a test on a variable that only ever held null (nullOnlyVariables): `x`, `!x`, `x == null`,
+ * `x != null`, and an `&&` whose first test is known false. Null where the outcome is not known that way.
+ */
+function nullOnlyTruth(node: AstNode, context: LowerContext): boolean | null {
+  const nullOnly = (side: AstNode | null): boolean => side !== null && holdsOnlyNull(side, context);
+  if (node.kind === "variable") return nullOnly(node) ? false : null;
+  if (node.kind === "not") {
+    const inner = asNode(node.value);
+    const truth = inner === null ? null : nullOnlyTruth(inner, context);
+    return truth === null ? null : !truth;
+  }
+  if (node.kind !== "binary") return null;
+  const [left, right] = [asNode(node.left), asNode(node.right)];
+  if (node.operator === "&&")
+    return left !== null && nullOnlyTruth(left, context) === false ? false : null;
+  if (node.operator !== "==" && node.operator !== "!=") return null;
+  if (!nullOnly(left) || !nullOnly(right) || (isNullConstant(left!) && isNullConstant(right!)))
+    return null;
+  return node.operator === "==";
 }
 
 function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
@@ -9342,6 +9623,14 @@ const STATIC_CONVERSIONS = new Map([
 ]);
 
 function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
+  // A conditional value, `for (def i = (cfgshuffle == 1) ? 2 : 3; …)` (MatchDares), is computed first, as in a statement.
+  if (node.kind === "declaration" || node.kind === "binary") {
+    const conditional = lowerConditionalStatement(
+      { kind: "expressionStatement", span: node.span, expression: node },
+      context,
+    );
+    if (conditional !== null) return conditional;
+  }
   if (node.kind === "declaration") return lowerDeclaration(node, node.span, context);
   if (node.kind === "binary") return lowerAssignment(node, node.span, context);
   if (node.kind === "postfix" || node.kind === "prefix")
@@ -9357,6 +9646,9 @@ function lowerForControlExpression(node: AstNode, context: LowerContext): IrStat
 
 function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   const valueNode = asNode(node.expression);
+  // A switch on a variable that only ever held null ran its default: no case of a text, number, or flag matched null.
+  const defaultOnly = switchDefaultOnly(node, context);
+  if (defaultOnly !== null) return defaultOnly;
   const value = valueNode === null ? null : lowerExpression(valueNode, context);
   if (value === null)
     return [
@@ -10046,6 +10338,11 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
       }
+      if (
+        !context.writeTargets.has(node) &&
+        context.nullOnly.has(bindingKey(node, context.bindings) ?? "")
+      )
+        return { kind: "literal", value: null };
       if (
         context.checksUndefinedVariables &&
         !context.types.variables.has(name) &&
@@ -12240,22 +12537,37 @@ function startsWithText(node: AstNode, context: LowerContext): boolean {
 
 /**
  * Groovy shows a list in text as `[a, b]`, while TeaseScript `${list}` selects one element (V30 §16): a list of text,
- * numbers, and booleans becomes `[${list.join(", ")}]`. Returns undefined for a value that is not a list.
+ * numbers, and booleans becomes `[${list.join(", ")}]`, and one that holds lists, or elements of unknown type, a
+ * helper that shows each element as Groovy did, a list or map inside as `[...]` (`sexscriptLegacyListText`). A list
+ * that may be null, which the conversion may start empty, or that holds maps, which it may make objects, stays a TODO.
+ * Returns undefined for a value that is not a list.
  */
 function listText(node: AstNode, context: LowerContext): TemplatePart[] | null | undefined {
   const type = inferType(node, context.types);
   if (!(onlyOf(type, LIST | NULL) && type & LIST)) return undefined;
   const elements = listElementType(node, context);
-  if (!onlyOf(type, LIST) || !onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL)) {
+  const scalar = onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL);
+  const shown = elements === UNKNOWN || onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL | LIST);
+  if (!onlyOf(type, LIST) || !shown) {
     return unsupportedExpression(
       context,
       node,
       "SX_COLLECTION_TEXT",
-      "Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and join() shows only text, numbers, and booleans, which this list is not proven to hold. Format the list explicitly.",
+      "Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.",
     );
   }
   const list = lowerExpression(node, context);
   if (list === null) return null;
+  if (!scalar) {
+    addDiagnostic(
+      context,
+      "SX_COLLECTION_TEXT_NESTED",
+      "warning",
+      "Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.",
+      node.span,
+    );
+    return [{ value: useHelper(context, "listText", [list]) }];
+  }
   return [
     { text: "[" },
     { value: listJoin(list, { kind: "literal", value: ", " }) },
@@ -13590,7 +13902,8 @@ function isCurrentDate(node: AstNode): boolean {
 
 function noteSharedListWrite(list: AstNode | null, node: AstNode, context: LowerContext): void {
   const name = list === null ? null : variableName(list);
-  if (name === null || !context.aliasedLists.has(name)) return;
+  if (name === null || !context.aliasedLists.has(bindingKey(list, context.bindings) ?? name))
+    return;
   addDiagnostic(
     context,
     "SX_SHARED_LIST_WRITE",
@@ -13620,7 +13933,7 @@ function parameterListWrite(
   if (context.parameterBindings.has(key)) {
     return `Groovy changed the list that ${name} refers to, which the caller or the iterated collection shares; in TeaseScript ${name} holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.`;
   }
-  if (context.aliasedLists.has(name)) {
+  if (context.aliasedLists.has(key)) {
     noteSharedListWrite(root, node, context);
   } else if ((context.assignedValues.get(key) ?? []).some((value) => sharesList(value, context))) {
     addDiagnostic(
@@ -13682,20 +13995,25 @@ function sharesList(value: AstNode, context: LowerContext): boolean {
   }
 }
 
-function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string> {
-  const names = new Set<string>();
+function aliasedListVariables(
+  body: AstNode,
+  types: TypeEnvironment,
+  bindings: BindingKeys,
+): Set<string> {
+  const keys = new Set<string>();
   walkAst(body, (node) => {
     const assigns =
       node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
-    const target = assigns ? variableName(node.left) : null;
-    const source = assigns ? variableName(node.right) : null;
+    const target = assigns ? bindingKey(node.left, bindings) : null;
+    const source = assigns ? bindingKey(node.right, bindings) : null;
     if (target === null || source === null) return;
-    if (onlyOf(types.variables.get(source) ?? UNKNOWN, LIST | NULL)) {
-      names.add(target);
-      names.add(source);
+    // A value of unknown type may be a list too (SissyPlaytimeExposure's `thisSissy = sissy`, a split of an entry).
+    if ((inferType(asNode(node.right)!, types) & LIST) !== 0) {
+      keys.add(target);
+      keys.add(source);
     }
   });
-  return names;
+  return keys;
 }
 
 /** Groovy map methods that use a map as a lookup table (#536); `clear`, `size`, and `isEmpty` alone do not. */
@@ -13967,6 +14285,8 @@ const sequentialBounds = new WeakMap<AstNode, { bound: AstNode; inclusive: boole
 /** Writes at a literal position that a straight-line block shows to be the list's length, or inside it. */
 const literalAppends = new WeakSet<AstNode>();
 const literalSets = new WeakSet<AstNode>();
+/** Writes at a literal position that a straight-line block shows to be inside the list or at its end. */
+const literalEnds = new WeakSet<AstNode>();
 
 /**
  * Marks the list writes whose position grows by one with each write, so a list that starts empty grows by appending:
@@ -14026,8 +14346,9 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       if (key !== null) counters.add(key);
     }
     // The known lengths of lists in this straight-line block, for writes at literal positions: `a = []`, `a[0] = x`,
-    // `a[1] = y`.
+    // `a[1] = y`; and the lengths a list at least has after the `add` calls and writes on it.
     const lengths = new Map<string, number>();
+    const atLeast = new Map<string, number>();
     for (const statement of statements) {
       const expression = expressionOf(statement);
       const operator = expression?.kind === "binary" ? text(expression.operator) : null;
@@ -14051,6 +14372,23 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
         if (position <= length) {
           (position === length ? literalAppends : literalSets).add(left!);
           lengths.set(listKey, Math.max(length, position + 1));
+          atLeast.set(listKey, Math.max(length, position + 1));
+          continue;
+        }
+      }
+      // A list that `add` made at least that long holds a position below it, and grows by one at it (OwlSays'
+      // `index2.add(index2[0])` before `index2[0] = nphr`), where a value without calls cannot shorten it first.
+      if (
+        listKey !== null &&
+        typeof position === "number" &&
+        atLeast.has(listKey) &&
+        assigned !== null &&
+        withoutCalls(assigned)
+      ) {
+        const least = atLeast.get(listKey)!;
+        if (position <= least) {
+          (position === least ? literalEnds : literalSets).add(left!);
+          atLeast.set(listKey, Math.max(least, position + 1));
           continue;
         }
       }
@@ -14058,17 +14396,38 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
       const variable = target === null || left !== null ? null : bindingKey(target, keys);
       if (variable !== null && assigned?.kind === "list") {
         lengths.set(variable, nodeArray(assigned.items).length);
+        atLeast.set(variable, nodeArray(assigned.items).length);
+        continue;
+      }
+      // `list.add(value)` appends one element, where a value without calls cannot change the list first.
+      const call = expression?.kind === "methodCall" ? callParts(expression) : null;
+      const appended =
+        call?.name === "add" &&
+        !call.inherited &&
+        call.arguments.length === 1 &&
+        withoutCalls(call.arguments[0]!)
+          ? bindingKey(asNode(expression!.object), keys)
+          : null;
+      if (appended !== null) {
+        if (lengths.has(appended)) lengths.set(appended, lengths.get(appended)! + 1);
+        atLeast.set(appended, (atLeast.get(appended) ?? 0) + 1);
         continue;
       }
       let calls = false;
       walkAst(statement, (child) => {
         if (child.kind === "variable") {
           const key = bindingKey(child, keys);
-          if (key !== null) lengths.delete(key);
+          if (key !== null) {
+            lengths.delete(key);
+            atLeast.delete(key);
+          }
         } else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
           calls ||= legacyApiCall(child, context) === null;
       });
-      if (calls) lengths.clear();
+      if (calls) {
+        lengths.clear();
+        atLeast.clear();
+      }
     }
   };
   walkAst(body, (node) => {
@@ -14095,6 +14454,20 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
         bound === null ? null : { counter, bound, inclusive: comparison === "<=" },
       );
   });
+}
+
+/** Whether evaluating an expression calls nothing and assigns nothing, so it cannot change a list. */
+function withoutCalls(node: AstNode): boolean {
+  let calls = false;
+  walkAst(node, (child) => {
+    calls ||=
+      ["methodCall", "call", "closure", "postfix", "prefix", "constructorCall"].includes(
+        child.kind,
+      ) ||
+      (child.kind === "binary" &&
+        /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(text(child.operator) ?? ""));
+  });
+  return !calls;
 }
 
 /** Lists whose elements the code compares with null: `list[i] == null`, `list.contains(null)`, `any { e -> e == null }`. */
@@ -14242,6 +14615,20 @@ function growingListWrite(
     node?.kind === "list" && nodeArray(node.items).length === 0;
   const startsEmpty =
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
+  // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
+  // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows by appending where the writes count up with a
+  // counter; a write at another position of such a list is taken to lie inside it, as in a list of unknown length.
+  // A Java array has a fixed length, which a write past its end failed on, so a variable that may hold one does not grow.
+  const array = (node: AstNode): boolean =>
+    node.kind === "array" ||
+    (node.kind === "cast" && /^\[|\[\]$/u.test(text(node.type) ?? "")) ||
+    callParts(node)?.name === "toArray";
+  const refilled =
+    isEmptyList(assigned[0]) &&
+    assigned.every(
+      (node) => (node.kind !== "list" || nodeArray(node.items).length === 0) && !array(node),
+    ) &&
+    sequentialWrites.has(targetNode);
   // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
   // `label[2] = exit`, grows it too.
   const position = indexNode === null ? undefined : constantValue(indexNode);
@@ -14267,7 +14654,7 @@ function growingListWrite(
     target.dict === true ||
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
-    !(startsEmpty || pastLiteral || loopPast) ||
+    !(startsEmpty || refilled || pastLiteral || loopPast) ||
     // A write that reads the same position first, `map[i] = map[i] % 1000`, needs the position to exist already.
     (listNode !== null && readsPosition(valueNode, listNode, indexNode)) ||
     !listGrowthIndex(indexNode, context)
@@ -14276,6 +14663,27 @@ function growingListWrite(
   const list = target.target;
   // A literal position known to be inside the list is a plain write; one known to be its length appends.
   if (literalSets.has(targetNode)) return null;
+  if (literalEnds.has(targetNode))
+    return [
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: { kind: "property", target: list, name: "length" },
+          right: { kind: "literal", value: constantValue(indexNode) as number },
+        },
+        then: [
+          {
+            kind: "expression",
+            expression: { kind: "methodCall", target: list, name: "add", arguments: [value] },
+            span,
+          },
+        ],
+        else: [{ kind: "assign", target, operator: "=", value, span }],
+        span,
+      },
+    ];
   if (literalAppends.has(targetNode))
     return [
       {
@@ -14791,8 +15199,18 @@ function dateFormat(
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
-  const fields = pattern === null || kind !== null ? null : datePatternFields(pattern);
+  // A text the script saves or parses again is data, written exactly, as jewell's day (`y/M/d`).
+  const data = context.java.temporal.dataFormats?.has(node) === true;
+  const fields = pattern === null || (kind !== null && !data) ? null : datePatternFields(pattern);
   if (fields !== null) return fields;
+  if (data && pattern !== null && kind !== "isoDate") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DATE_FORMAT",
+      `The script saves or parses this date text again, so it needs Java's exact pattern ${JSON.stringify(pattern)}, whose names or time zone TeaseScript does not write; build the text from the date fields.`,
+    );
+  }
   if (kind === null) {
     return unsupportedExpression(
       context,
@@ -14879,71 +15297,6 @@ function unixDate(node: AstNode, context: LowerContext): IrExpression | null | u
       right: { kind: "duration", value: 1, unit: "s" },
     },
   };
-}
-
-/** What a Java SimpleDateFormat pattern shows: the ISO date, a whole date, a time, both, or null for anything else. */
-function datePatternKind(pattern: string): "isoDate" | "date" | "time" | "dateTime" | null {
-  if (pattern === "yyyy-MM-dd") return "isoDate";
-  // Quoted text is literal; every other letter is a pattern field.
-  const fields = pattern.replace(/'[^']*'/gu, "").replace(/[^A-Za-z]/gu, "");
-  if (/[^yMdHhkKmsSa]/u.test(fields)) return null;
-  const date = /y/u.test(fields) && /M/u.test(fields) && /d/u.test(fields);
-  const time = /[HhkK]/u.test(fields) && /m/u.test(fields);
-  if (date && time) return "dateTime";
-  if (date && !/[HhkKmsSa]/u.test(fields)) return "date";
-  if (time && !/[yMd]/u.test(fields)) return "time";
-  return null;
-}
-
-/** The current date and time's fields that Java's pattern letters write as numbers. */
-const NUMBER_PATTERN_FIELDS = new Map([
-  ["y", "year"],
-  ["M", "month"],
-  ["d", "day"],
-  ["H", "hour"],
-  ["m", "minute"],
-  ["s", "second"],
-]);
-
-/**
- * A Java pattern of number fields that is no whole date or time, such as jewell's `dd/MM` or `HH`, as the current
- * date and time's fields written the same way, padded to the letters' count: exact, since Java writes numbers the
- * same in every locale. Null for a pattern with another letter, such as a month or weekday name.
- */
-function datePatternFields(pattern: string): IrExpression | null {
-  const now: IrExpression = { kind: "call", name: "getDateTime", positional: [], named: {} };
-  const parts: Array<{ text: string } | { value: IrExpression }> = [];
-  for (const [token, letter] of pattern.matchAll(/'(?:[^']|'')*'|([A-Za-z])\1*|[^A-Za-z']+/gu)) {
-    if (letter === undefined) {
-      parts.push({
-        text: token.startsWith("'") ? token.slice(1, -1).replaceAll("''", "'") || "'" : token,
-      });
-      continue;
-    }
-    const field = NUMBER_PATTERN_FIELDS.get(letter);
-    if (field === undefined || (letter === "M" && token.length > 2)) return null;
-    const value: IrExpression = { kind: "property", target: now, name: field };
-    // `yy` writes the year's last two digits.
-    const shown: IrExpression =
-      letter === "y" && token.length === 2
-        ? { kind: "binary", operator: "%", left: value, right: { kind: "literal", value: 100 } }
-        : value;
-    parts.push({
-      value:
-        token.length === 1
-          ? shown
-          : {
-              kind: "methodCall",
-              target: { kind: "call", name: "toString", positional: [shown], named: {} },
-              name: "padStart",
-              arguments: [
-                { kind: "literal", value: token.length },
-                { kind: "literal", value: "0" },
-              ],
-            },
-    });
-  }
-  return { kind: "template", parts };
 }
 
 /** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */
@@ -16370,7 +16723,7 @@ function pushPrompt(
    */
   computed: { nodes: readonly AstNode[]; values: IrExpression[] } | null = null,
 ): boolean {
-  if (isNullConstant(messageNode)) return true;
+  if (holdsOnlyNull(messageNode, context)) return true;
   const root = context.statementRoot;
   const effects = computed?.nodes.filter((node) => !isPure(node, context)) ?? [];
   // Groovy evaluates all arguments before showing the message, so other arguments must not have effects.

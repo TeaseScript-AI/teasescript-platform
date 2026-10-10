@@ -42,7 +42,7 @@ import {
   withDispatcherResultTypes,
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { legacyProfilePrompt } from "./profile.ts";
+import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
 import {
   expressionType,
@@ -107,6 +107,11 @@ export interface PackageOptions {
    * expansion or a story chapter of an assembled unit: the generated entry menu does not offer them.
    */
   internalScripts?: readonly string[];
+  /**
+   * Stand-alone scripts that the start does not offer beside the main story until the owner decides, by their paths
+   * from the legacy scripts folder, such as a development leftover (a unit's `heldStandAlone`).
+   */
+  heldScripts?: readonly string[];
   /**
    * Releases of the package that a corpus merge put side by side, each the files of one release by their paths from
    * the legacy scripts folder, such as an older version of a script with its own module versions
@@ -422,6 +427,8 @@ function entryMenu(
   scripts: PackageScripts,
   programs: readonly MigrationProgram[],
   internal: ReadonlySet<number>,
+  /** Stand-alone scripts held back until the owner decides (PackageOptions.heldScripts). */
+  heldBack: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
   // The literal transfers of each script, by its path.
@@ -600,13 +607,54 @@ function entryMenu(
           },
         ];
   const metadata = entryMetadata(choices, scripts, programs);
+  // The stand-alone scripts (owner decision 2026-10-10): the other scripts of the package that a player could open in
+  // the legacy player, also without setInfos, apart from internal scripts, those that something chains to, also
+  // through a computed transfer of a folder above them, and localized variants, such as Lines' Reset scripts. With one
+  // entry, main.tease starts with a choice of the main story or one of them.
+  const lowerPaths = new Set(paths.map((path) => path.toLowerCase()));
+  const candidates = [...scripts.pathOf]
+    .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
+    .filter(
+      (path) =>
+        !choices.includes(path) &&
+        !targeted(path) &&
+        ![...computed].some((from) => path.toLowerCase().startsWith(folderOf(from))) &&
+        !(base(path) !== path && lowerPaths.has(base(path).toLowerCase())),
+    )
+    .sort(versionOrder);
+  const heldPaths = new Set([...heldBack].map((index) => scripts.pathOf.get(index)));
+  const extras = candidates.filter((path) => !heldPaths.has(path));
+  // A package with several entries, or more than five such scripts, keeps its start until the owner decides, as do
+  // the scripts a unit holds back.
+  const heldAll = extras.length > 0 && (choices.length > 1 || extras.length > 5);
+  const notOffered = heldAll ? candidates : candidates.filter((path) => heldPaths.has(path));
+  const held: MigrationDiagnostic[] =
+    notOffered.length === 0
+      ? []
+      : [
+          {
+            code: "SX_ENTRY_EXTRAS_HELD",
+            severity: "info",
+            message: `The legacy player also listed ${notOffered.join(", ")} for the player to open directly; the start does not offer ${notOffered.length === 1 ? "it" : "them"} yet (${heldAll ? (choices.length > 1 ? "the package has several entries" : "more than five such scripts") : "held back by the unit"}), pending an owner decision.`,
+            span: null,
+          },
+        ];
+  const heldBackAll = heldAll;
+  if (choices.length === 1 && extras.length > 0 && !heldBackAll)
+    return {
+      sourceName: `${scripts.root}/main.tease`,
+      metadata,
+      statements: startChoice(choices[0]!, extras, variants, scripts, programs),
+      diagnostics: held,
+      startChoice: true,
+    };
   // One entry needs no menu and no note: main.tease goes there.
   if (choices.length === 1 && variants.length === 0)
     return {
       sourceName: `${scripts.root}/main.tease`,
       metadata,
       statements: chain,
-      diagnostics: [],
+      diagnostics: held,
     };
   return {
     sourceName: `${scripts.root}/main.tease`,
@@ -616,8 +664,84 @@ function entryMenu(
       ...question,
       ...chain,
     ],
-    diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
+    diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }, ...held],
   };
+}
+
+/**
+ * The start of a package whose one entry, the main story, has stand-alone scripts beside it (owner decision
+ * 2026-10-10): a choice of the main story, first and labelled as such, or one of them, each labelled as no part of the
+ * story by its legacy name; the main story asks the profile first, as without the choice, and a stand-alone script
+ * only where it reads profile keys the prompt asks (withProfile adds the prompt).
+ */
+function startChoice(
+  main: string,
+  extras: readonly string[],
+  variants: readonly string[],
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): IrStatement[] {
+  const indexOf = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
+  const asked = new Set(askedProfileKeys(programs));
+  const readsProfile = (path: string): boolean => {
+    const program = programs[indexOf.get(path) ?? -1];
+    return program !== undefined && [...keysRead(program)].some((key) => asked.has(key));
+  };
+  const file = (path: string): string => path.replace(/^.*\//u, "").replace(/\.tease$/iu, "");
+  // The legacy name of a script, its path from the scripts folder where another offered script has its file name.
+  const legacyName = (path: string): string =>
+    extras.filter((other) => file(other).toLowerCase() === file(path).toLowerCase()).length > 1
+      ? path.replace(/\.tease$/iu, "")
+      : file(path);
+  const id = menuIds([main, ...extras]);
+  const goto = (path: string): IrStatement => ({
+    kind: "goto",
+    target: { kind: "file", path },
+    span: null,
+  });
+  const message =
+    `The legacy player also listed ${extras.join(", ")} for the player to open directly; the start offers them after the main story (owner decision 2026-10-10).` +
+    (variants.length === 0
+      ? ""
+      : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
+  return [
+    { kind: "comment", text: `// NOTE SX_ENTRY_EXTRAS: ${message}`, trailing: false, span: null },
+    {
+      kind: "say",
+      value: { kind: "literal", value: "Which script do you want to start?" },
+      span: null,
+    },
+    {
+      kind: "let",
+      name: "picked",
+      value: {
+        kind: "choice",
+        options: [
+          {
+            kind: "literal",
+            value: `${menuLabels([main], scripts, programs).get(main)!} (main story)`,
+          },
+          ...extras.map((path): IrExpression => ({
+            kind: "literal",
+            value: `Extra, not part of the story: ${legacyName(path)}`,
+          })),
+        ],
+        labels: [main, ...extras].map((path) => id.get(path)!),
+      },
+      span: null,
+    },
+    {
+      kind: "switch",
+      value: { kind: "variable", name: "picked" },
+      cases: extras.map((path) => ({
+        matches: [{ kind: "literal", value: id.get(path)! }],
+        body: [...(readsProfile(path) ? [profileCall()] : []), goto(path)],
+        span: null,
+      })),
+      default: [...(asked.size > 0 ? [profileCall()] : []), goto(main)],
+      span: null,
+    },
+  ];
 }
 
 /**
@@ -848,10 +972,11 @@ export function lowerPackage(
   // can (classGlobals); the others are copied into each script that calls them.
   const classOutputs =
     options.standalone === true ? new Map<number, MigrationProgram>() : classFiles(files, lowered);
+  // Only its global functions are visible to the scripts; a method the class file keeps local is copied like the rest.
   const classFunctions = new Set(
     [...classOutputs.values()].flatMap((program) =>
       program.statements.flatMap((statement) =>
-        statement.kind === "function" ? [statement.name] : [],
+        statement.kind === "function" && statement.global === true ? [statement.name] : [],
       ),
     ),
   );
@@ -954,7 +1079,12 @@ export function lowerPackage(
   const generated: MigrationProgram | null =
     legacyMain !== null
       ? null
-      : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
+      : entryMenu(
+          scripts,
+          withClasses,
+          internalScripts(files, options.internalScripts),
+          internalScripts(files, options.heldScripts),
+        );
   const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses);
   const outputIndexes = [
     ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),
@@ -1424,6 +1554,19 @@ function classFiles(
     const fields = program.statements.flatMap((statement) =>
       statement.kind === "let" && isLiteralValue(statement.value) ? [statement] : [],
     );
+    // A static computed otherwise, which may fail, is no global: Groovy computed it when the class was first used.
+    const computed = program.statements.flatMap((statement): IrStatement[] =>
+      statement.kind === "let" && !isLiteralValue(statement.value)
+        ? [
+            {
+              kind: "comment",
+              text: `// NOTE SX_CLASS_STATIC${statement.span === null ? "" : ` line ${statement.span.line}`}: Groovy computed the static ${statement.name} when the class was first used; it is no global, since computing it may fail at session start, so only a script that copies a method reading it computes it, and a failure of computing it happens there or not at all.`,
+              trailing: false,
+              span: statement.span,
+            },
+          ]
+        : [],
+    );
     const methods = program.statements.flatMap((statement) =>
       statement.kind === "function" && helperDefinitionOrder(statement) < 0 ? [statement] : [],
     );
@@ -1448,6 +1591,7 @@ function classFiles(
       renameConflictingIdentifiers({
         ...program,
         statements: [
+          ...computed,
           ...fields.map((statement): IrStatement => ({ ...statement, global: true })),
           ...helpers.filter(({ name }) => global.has(name)),
           ...kept.map((statement): IrStatement =>
@@ -1488,12 +1632,29 @@ function freeNames(statement: FunctionStatement): { variables: Set<string>; call
   return { variables: new Set([...variables].filter((name) => !declared.has(name))), calls };
 }
 
-/** Whether a value is made of literals only, so it can start a global (ADR 0022 §6.4). */
+/**
+ * Whether a value is made of literals and operators only, so it can start a global (ADR 0022 §6.4; V30 §12 allows
+ * side-effect-free operators), such as GuessMyNumber's `static float tau = 2 * Math.PI`. A division by anything but
+ * a literal number that is no zero stays where the legacy code ran it, since the class's statics ran only when the class
+ * was first used and a global's start value runs at session start.
+ */
 function isLiteralValue(value: IrExpression): boolean {
   switch (value.kind) {
     case "literal":
     case "duration":
       return true;
+    case "unary":
+      return isLiteralValue(value.value);
+    case "binary":
+      // A division only by a literal number that is no zero: one that may fail stays where the legacy code ran it.
+      return (
+        isLiteralValue(value.left) &&
+        isLiteralValue(value.right) &&
+        (!["/", "%"].includes(value.operator) ||
+          (value.right.kind === "literal" &&
+            typeof value.right.value === "number" &&
+            value.right.value !== 0))
+      );
     case "list":
       return value.items.every(isLiteralValue);
     case "object":
@@ -1588,12 +1749,15 @@ function packageSavedKeys(
   return keys;
 }
 
-/** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */
+/**
+ * A generated entry menu that first asks the legacy player's profile the package reads but never saves; a start
+ * choice defines the prompt there and calls it in its options (startChoice).
+ */
 function withProfile(
   menu: MigrationProgram,
   programs: readonly MigrationProgram[],
 ): MigrationProgram {
-  const profile = legacyProfilePrompt(programs, menu);
+  const profile = legacyProfilePrompt(programs, menu, menu.startChoice !== true);
   return profile.length === 0
     ? menu
     : renameConflictingIdentifiers(
