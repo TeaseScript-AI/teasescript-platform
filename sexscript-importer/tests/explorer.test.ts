@@ -1133,6 +1133,29 @@ test(
       diagnostics: [],
     }).coverage.unvisitedBranches.map((entry) => entry.line);
     assert.deepEqual(missed, [8]);
+    // An `else if` whose condition has such a load still has its chain's earlier condition as a part.
+    const chained =
+      'function blank(n) {\n  return n\n}\nshowButton "Go"\nif load("skip", default: false) {\n  say "Skip."\n' +
+      '} else if load("score", default: blank(0)) > 7 {\n  say "Win."\n}\nexit\n';
+    const { plan: chainedPlan } = engine.compileProject([{ path: "main.tease", source: chained }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(chainedPlan));
+    const win = explore(engine, chainedPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", chained]]),
+      diagnostics: [],
+      realign: true,
+    }).coverage.unvisitedBranches.find((entry) => entry.line === 7 && entry.missed === "true");
+    assert.ok(
+      win?.parts.some(
+        (part) => part.of === "earlier condition" && part.needs === "stored skip != true",
+      ),
+      JSON.stringify(win),
+    );
   },
 );
 
@@ -1142,22 +1165,25 @@ test(
   () => {
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
+    const run = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 20_000,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        randomChoices: true,
+      });
+    };
     let source =
       'say "Shuffle."\nshowButton "Deal"\nlet face = randomInteger(0..40)\nswitch face {\n';
     for (let index = 0; index < 40; index += 1)
       source += `  case ${index} {\n    say "Face ${index}."\n  }\n`;
     source += '}\nshowButton "Again"\nexit\n';
-    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    assert.ok(isRecord(plan));
-    const result = explore(engine, plan, {
-      seed: 1,
-      budgetMs: Infinity,
-      budgetOps: 20_000,
-      maxStates: 100_000,
-      sources: new Map([["main.tease", source]]),
-      diagnostics: [],
-      randomChoices: true,
-    });
+    const result = run(source);
     assert.equal(result.search.stoppedBy, "exhausted");
     // Every face of the forty, of which a draw first offers sixteen; only the last case's other way, no face beyond it, is
     // left.
@@ -1166,6 +1192,16 @@ test(
       ["false"],
     );
     assert.equal(result.coverage.reach.unknown, 0);
+    // A draw at the same place and site whose range depends on an earlier answer gets the rest of its own outcomes.
+    const ranged = run(
+      'let size = choose small: "Small", large: "Large"\nlet cap = 40\nif size == "large" {\n  cap = 400\n}\n' +
+        'showButton "Go"\nlet n = randomInteger(0..cap)\nif n == 123 {\n  say "Exact."\n}\nexit\n',
+    );
+    assert.equal(ranged.search.stoppedBy, "exhausted");
+    assert.ok(
+      ranged.coverage.unvisitedBranches.every((entry) => entry.line !== 8),
+      JSON.stringify(ranged.coverage.unvisitedBranches),
+    );
   },
 );
 

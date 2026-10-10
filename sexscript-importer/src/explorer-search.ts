@@ -1737,7 +1737,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
   /**
-   * With random choices: the draws, once per place, input, and site, whose outcomes were not all offered, with how many
+   * With random choices: the draws, once per place, input, site, and support, whose outcomes were not all offered, with how many
    * outcomes they were taken from (see {@link widenDraws}).
    */
   const partialDraws: { node: number; input: ExplorerInput; draw: Data; support: number }[] = [];
@@ -2619,7 +2619,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         RANDOM_ALTERNATIVES,
       );
       // A draw whose outcomes were not all offered gets the rest once nothing else is left to do.
-      const key = `${context} ${draw.site}`;
+      const key = `${context} ${draw.site} ${JSON.stringify(draw.support)}`;
       if ((!found.complete || taken < found.alternatives.length) && !partialKeys.has(key)) {
         partialKeys.add(key);
         partialDraws.push({ node: node.id, input, draw, support: RANDOM_SUPPORT });
@@ -2663,27 +2663,28 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /**
    * With random choices, once nothing else is left to do: the outcomes of the draws whose outcomes were not all
    * offered, from four times as many as before (up to {@link RANDOM_WIDE_SUPPORT}), all those not tried at their place
-   * yet. Whether it queued any.
+   * yet; passes that find none tried already go on until one does or no draw is left. Whether it queued any.
    */
   const widenDraws = (): boolean => {
     const before = chosenSteps.length;
-    for (let index = 0; index < partialDraws.length;) {
-      const entry = partialDraws[index]!;
-      const { random: _, ...plain } = entry.input;
-      const context = `${nodes[entry.node]!.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
-      entry.support = Math.min(entry.support * 4, RANDOM_WIDE_SUPPORT);
-      const found = engine.randomDrawAlternatives(entry.draw, entry.support);
-      queueOutcomes(
-        nodes[entry.node]!,
-        entry.input,
-        entry.draw,
-        found.alternatives,
-        context,
-        Infinity,
-      );
-      if (found.complete || entry.support === RANDOM_WIDE_SUPPORT) partialDraws.splice(index, 1);
-      else index += 1;
-    }
+    while (chosenSteps.length === before && partialDraws.length > 0)
+      for (let index = 0; index < partialDraws.length;) {
+        const entry = partialDraws[index]!;
+        const { random: _, ...plain } = entry.input;
+        const context = `${nodes[entry.node]!.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
+        entry.support = Math.min(entry.support * 4, RANDOM_WIDE_SUPPORT);
+        const found = engine.randomDrawAlternatives(entry.draw, entry.support);
+        queueOutcomes(
+          nodes[entry.node]!,
+          entry.input,
+          entry.draw,
+          found.alternatives,
+          context,
+          Infinity,
+        );
+        if (found.complete || entry.support === RANDOM_WIDE_SUPPORT) partialDraws.splice(index, 1);
+        else index += 1;
+      }
     return chosenSteps.length > before;
   };
 
@@ -4732,7 +4733,8 @@ function alignedKind(
 /**
  * The `else if` chains of a plan: for each condition after an `else`, the earlier conditions of its chain, nearest
  * first. A condition's `else` starts where its jump goes when it is false, after the jump that ends its true block;
- * only temporaries and calls may come before the next condition there.
+ * only temporaries, calls, and the check the compiler adds for a load whose default calls a function
+ * ({@link loadDefaultCheck}) may come before the next condition there.
  */
 function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
   const chains = new Map<number, number[]>();
@@ -4742,10 +4744,11 @@ function elseIfChains(instructions: readonly Data[]): Map<number, number[]> {
     if (instruction.kind !== "jumpIfFalse" || instructions[target - 1]?.kind !== "jump") return;
     for (let next = target; next < instructions.length; next += 1) {
       const kind = instructions[next]!.kind;
-      if (kind === "jumpIfFalse") {
+      if (kind === "jumpIfFalse" && !loadDefaultCheck(instructions, next)) {
         chains.set(next, [index, ...(chains.get(index) ?? [])]);
         return;
       }
+      if (kind === "jumpIfFalse") continue;
       if (!between.has(String(kind))) return;
     }
   });
