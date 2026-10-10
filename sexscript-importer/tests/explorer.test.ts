@@ -1295,6 +1295,17 @@ test(
         '    say "Fallen."\n  }\n}\nexit\n',
     ).find((condition) => condition.line === 4);
     assert.equal(fallen?.inPlay, true);
+    // A parameter left out takes its default: a value computed from a stored one is set in play, not the stored value.
+    const defaulted = analyzed(
+      'function echo(n = load("score", default: 0) + 1) {\n  return n\n}\nlet s = load("score", default: 0)\n' +
+        'echo(s)\nif echo() == 7 {\n  say "Default."\n}\nexit\n',
+    ).find((condition) => condition.line === 6);
+    assert.deepEqual([defaulted?.sources, defaulted?.inPlay], [["score"], true]);
+    // A long chain of helpers is looked through without running out of stack.
+    let helpers = "";
+    for (let index = 0; index < 2000; index += 1)
+      helpers += `function f${index} {\n  if load("quick", default: true) {\n    return 1\n  }\n  return ${index === 1999 ? 'load("deep", default: 0)' : `f${index + 1}()`}\n}\n`;
+    assert.ok(analyzed(`${helpers}if f0() > 7 {\n  say "Deep."\n}\nexit\n`).length > 0);
   },
 );
 

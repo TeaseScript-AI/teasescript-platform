@@ -400,6 +400,10 @@ export class DataFlow {
   readonly #creatorOf = new Map<number, number>();
   /** Each function's entry instruction, by ID. */
   readonly #entryOf = new Map<number, number>();
+  /** Each function's parameter names, by ID, in order. */
+  readonly #parameterNames = new Map<number, string[]>();
+  /** {@link setInPlay} by scope key. */
+  readonly #inPlay = new Map<string, boolean>();
   /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
   readonly #fileRanges: { start: number; end: number }[] = [];
   /** The scope keys of each name. */
@@ -472,6 +476,10 @@ export class DataFlow {
     });
     for (const definition of functions) {
       this.#entryOf.set(Number(definition.id), Number(definition.entryInstruction));
+      this.#parameterNames.set(
+        Number(definition.id),
+        list(definition.parameters).map((parameter) => String(parameter.name)),
+      );
       if (definition.global === true) this.#globalFunctions.add(Number(definition.id));
       for (const parameter of list(definition.parameters))
         bind(parameter.name, Number(definition.entryInstruction));
@@ -565,6 +573,17 @@ export class DataFlow {
             const owner = functionOf.get(index);
             if (owner !== undefined)
               changed = merge(this.#function(owner), this.flowOf(instruction.value)) || changed;
+            break;
+          }
+          case "bindDefaultParameter": {
+            // A parameter's default, when a call leaves it out.
+            const name = this.#parameterNames.get(Number(instruction.functionId))?.[
+              Number(instruction.parameterIndex)
+            ];
+            if (name !== undefined)
+              changed =
+                merge(this.#variable(this.scopeKey(name, index)), this.flowOf(instruction.value)) ||
+                changed;
             break;
           }
           case "declareBinding":
@@ -822,11 +841,16 @@ export class DataFlow {
    * which a saved game may also restore. The variable as the code reads it (an identifier of a condition).
    */
   setInPlay(variable: unknown): boolean {
-    return this.#assignmentsOf(this.#keyOf(variable)).some(
+    const key = this.#keyOf(variable);
+    const known = this.#inPlay.get(key);
+    if (known !== undefined) return known;
+    const found = this.#assignmentsOf(key).some(
       ({ value, index }) =>
         value.kind !== "parameter" &&
-        ![...this.flowOf(value).keys].some((key) => this.holdsStored(value, key, index)),
+        ![...this.flowOf(value).keys].some((stored) => this.holdsStored(value, stored, index)),
     );
+    this.#inPlay.set(key, found);
+    return found;
   }
 
   /**
@@ -835,30 +859,34 @@ export class DataFlow {
    */
   readsSetInPlay(expression: unknown, at: number): boolean {
     const seen = new Set<string>();
-    const walk = (value: unknown, at: number): boolean => {
-      if (Array.isArray(value)) return value.some((item) => walk(item, at));
-      if (!isRecord(value)) return false;
-      if (value.kind === "identifier") return this.setInPlay(value);
-      if (value.kind === "temporary" && typeof value.temporaryId === "number") {
+    // A list of values to look through, not recursion, as chains of helpers can be long.
+    const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
+    for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+      const { value, at } = item;
+      if (Array.isArray(value)) {
+        for (const each of value) pending.push({ value: each, at });
+        continue;
+      }
+      if (!isRecord(value)) continue;
+      if (value.kind === "identifier") {
+        if (this.setInPlay(value)) return true;
+      } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         const id = `temporary ${value.temporaryId} at ${at}`;
-        if (seen.has(id)) return false;
+        if (seen.has(id)) continue;
         seen.add(id);
-        return (
-          this.heldAt(value.temporaryId, at)?.some((store) => walk(store.value, store.index)) ??
-          false
-        );
-      }
-      if (value.kind === "callResult" && typeof value.functionId === "number") {
+        for (const store of this.heldAt(value.temporaryId, at) ?? [])
+          pending.push({ value: store.value, at: store.index });
+      } else if (value.kind === "callResult" && typeof value.functionId === "number") {
         const id = `function ${value.functionId}`;
-        if (seen.has(id)) return false;
+        if (seen.has(id)) continue;
         seen.add(id);
-        return (this.#returns.get(value.functionId) ?? []).some((index) =>
-          walk(this.#instructions[index]!.value, index),
-        );
-      }
-      return Object.entries(value).some(([key, item]) => key !== "span" && walk(item, at));
-    };
-    return walk(expression, at);
+        for (const index of this.#returns.get(value.functionId) ?? [])
+          pending.push({ value: this.#instructions[index]!.value, at: index });
+      } else
+        for (const [key, each] of Object.entries(value))
+          if (key !== "span") pending.push({ value: each, at });
+    }
+    return false;
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */
@@ -1349,6 +1377,12 @@ export class DataFlow {
               index,
               this.scopeKey(argument.parameterName, entry),
             );
+      if (instruction.kind === "bindDefaultParameter") {
+        const name = this.#parameterNames.get(Number(instruction.functionId))?.[
+          Number(instruction.parameterIndex)
+        ];
+        if (name !== undefined) assigned(name, record(instruction.value), index);
+      }
       if (instruction.kind === "loopStart")
         for (const name of [instruction.variable, instruction.valueVariable])
           if (typeof name === "string")
