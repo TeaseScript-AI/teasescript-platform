@@ -1007,6 +1007,78 @@ test(
   },
 );
 
+test(
+  "a stored value a condition needs is aimed at by its sessions, counted as attempts, and by play going on from the state that stored it",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const run = (source: string, budgetOps: number) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps,
+        maxStates: 100_000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+      });
+    };
+    // Each visit climbs one higher: the sessions toward the summit are the way's attempts.
+    const climb = run(
+      'let height: integer = load "climb.height", default: 0\nshowButton "Climb"\nif height >= 1000 {\n' +
+        '  say "Summit."\n}\nsave height + 1 as "climb.height"\nexit\n',
+      2000,
+    ).coverage.unvisitedBranches.find((entry) => entry.line === 3);
+    assert.ok(climb !== undefined && climb.attempts > 1, JSON.stringify(climb));
+    assert.equal(climb.attempts, climb.chains?.[0]?.sessions);
+    // A menu that stores a flag another one reads, where a next visit starts elsewhere: play goes on from the state that
+    // stored it, in the same visit.
+    const source = [
+      "function tidy(ignore) {",
+      '  showButton "Sweep"',
+      '  showButton "Done"',
+      "}",
+      'save load("log.visits", default: 0) + 1 as "log.visits"',
+      'if load("log.visits", default: 0) > 1 {',
+      '  let mood = choose calm: "Calm", cross: "Cross"',
+      '  say "Back again, ${mood}."',
+      "}",
+      "let done = false",
+      "while not done {",
+      '  let pick = choose talk: "Talk", admit: "Admit", review: "Review", tidy: "Tidy", hum: "Hum", leave: "Leave"',
+      '  if pick == "admit" {',
+      '    showButton "I admit it"',
+      '    save true as "log.admitted"',
+      "    tidy(0)",
+      '  } else if pick == "review" {',
+      '    if load("log.admitted", default: false) {',
+      '      say "You admitted it."',
+      "    }",
+      '  } else if pick == "talk" {',
+      '    showButton "Hello"',
+      "    tidy(0)",
+      '  } else if pick == "tidy" {',
+      "    tidy(0)",
+      '  } else if pick == "hum" {',
+      '    showButton "La"',
+      "  } else {",
+      "    done = true",
+      "  }",
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const line = source.split("\n").findIndex((text) => text.includes('load("log.admitted"')) + 1;
+    const admitted = run(source, 200).directed.ways.find(
+      (way) => way.line === line && way.way === "true",
+    );
+    assert.equal(admitted?.via, "directed", JSON.stringify(admitted));
+    assert.equal(admitted?.sessions, 1);
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

@@ -92,6 +92,10 @@ function list(value: unknown): Data[] {
 const ATTEMPT_EXPANSIONS = 20;
 /** Expansions, in all, that states closer to a target's comparison keep the first place for. */
 const CLOSER_EXPANSIONS = 40;
+/** States of the session that stored a value a target needs, nearest first, given the lead to go on from it. */
+const STORED_LEAD_STATES = 16;
+/** States looked through for them. */
+const STORED_LEAD_SEARCH = 256;
 /**
  * The part of all runtime operations that directed work may take: directed attempts, next sessions, and expansions of
  * states in the first place. Above it, play goes first again until it has caught up.
@@ -236,8 +240,11 @@ interface Node {
    */
   tried?: Set<string>;
   left?: ExplorerInput[];
-  /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
-  readonly lead: Lead | null;
+  /**
+   * The directed attempt, closeness to a comparison, or storage that meets a target's stored-value goal whose first
+   * place it shares; null for none.
+   */
+  lead: Lead | null;
   /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
   readonly rank: readonly number[];
   /** With cells ({@link ExploreOptions.cells}): its cell, and the ID of its slot values; -1 without. */
@@ -1394,6 +1401,8 @@ interface Chain {
   sessions: number;
   /** Sessions of this chain that ran (one more may be queued). */
   started: number;
+  /** Play went on from a state whose storage met the goal, with a lead of its own ({@link chainStep}). */
+  led: boolean;
   /** An attempt of this chain is still queued. */
   queued: boolean;
   /** The storages measured so far, and the closest of them. */
@@ -2900,7 +2909,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const chain = attempt.chain === undefined ? undefined : target.chains.get(attempt.chain);
     if (chain !== undefined) chain.queued = false;
     if (settled(target)) return;
-    if (chain !== undefined) chain.started += 1;
+    // A chain's session is an attempt at the target too.
+    if (chain !== undefined) {
+      chain.started += 1;
+      target.attempts += 1;
+    }
     attemptCount += 1;
     const work = session.operations;
     // A chain's next session comes from the storage it reached, so its states take no first place of their own.
@@ -3037,6 +3050,38 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
 
   /**
+   * Gives target `code` a lead of {@link ATTEMPT_EXPANSIONS} for the play states of the session of state `from` that go
+   * on from it: the state itself while open, else its open play successors in the same session, nearest first, at
+   * most {@link STORED_LEAD_STATES}; a state that already has an active lead keeps it. They take the first place in the
+   * search order again.
+   */
+  const leadOnFrom = (from: number, code: number): void => {
+    const lead: Lead = { remaining: ATTEMPT_EXPANSIONS, target: code };
+    const origin = nodes[from]!;
+    const queue = [origin.id];
+    const seen = new Set(queue);
+    let given = 0;
+    for (
+      let at = 0;
+      at < queue.length && at < STORED_LEAD_SEARCH && given < STORED_LEAD_STATES;
+      at += 1
+    ) {
+      const node = nodes[queue[at]!]!;
+      if (node.status === "open" && !active(node.lead)) {
+        node.lead = lead;
+        frontier.push(node.id, order(node));
+        given += 1;
+      }
+      for (const next of node.edges) {
+        const child = nodes[next]!;
+        if (seen.has(next) || child.start !== origin.start || child.clock || child.chosen) continue;
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  };
+
+  /**
    * One step of a session chain toward a stored value: from the closest storage an explored play state left, a
    * session that replays the witness path when that storage satisfies the condition, or else a route that brought the
    * value closer before, to get closer still: the one with the most progress per operation, now and then another
@@ -3054,6 +3099,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         value: "",
         sessions: 0,
         started: 0,
+        led: false,
         queued: false,
         scanned: 0,
         closest: null,
@@ -3156,6 +3202,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       depthCloser[best.left.sessions] = (depthCloser[best.left.sessions] ?? 0) + 1;
     }
     if (best.distance === 0) {
+      // Play goes on from the state that stored the value, in its own session, as well as in a next session from its
+      // storage: the condition may come later in the same visit.
+      if (!found.led) {
+        found.led = true;
+        leadOnFrom(best.left.node, code);
+        target.attempts += 1;
+      }
       if (found.best === 0) {
         target.notes.set(
           goal,
