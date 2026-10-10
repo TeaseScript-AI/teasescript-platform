@@ -320,7 +320,7 @@ function optionValues(options: unknown): unknown[] | null {
 
 /**
  * How many steps the searches for what may carry a stored key's value take in all, per plan, after which no stored-value
- * proof that needs them holds (conservative, so that the work stays bounded).
+ * proof holds (conservative, so that the work stays bounded).
  */
 const CARRIER_WORK = 2_000_000;
 
@@ -928,7 +928,7 @@ export class DataFlow {
    * What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what (`own`),
    * and when that reaches a saved value (`saved`), all that saved values reach ({@link #savedReach}), as what any save
    * stores may be what any load reads. Null once all keys' searches took {@link CARRIER_WORK} steps: then no stored-value
-   * proof that needs them holds.
+   * proof holds.
    */
   #carriers(key: string): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
     const known = this.#carriersOf.get(key);
@@ -1188,8 +1188,10 @@ export class DataFlow {
       loose: boolean;
       from: string;
     };
-    // Only a value that reads the key can be its value: the values kept loosely below read nothing else.
-    if (!this.#flowIn(expression, at, null).keys.has(key)) return false;
+    // Only a value that reads the key can be its value: the values kept loosely below read nothing else. And none once
+    // the searches for what may carry a key took their steps, so that no question walks the same values again.
+    if (this.#carrierWork > CARRIER_WORK || !this.#flowIn(expression, at, null).keys.has(key))
+      return false;
     const visited = new Set<string>();
     const pending: Item[] = [
       { value: expression, at, need: "value", context: null, loose: false, from: "" },
