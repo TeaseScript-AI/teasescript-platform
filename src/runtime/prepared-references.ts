@@ -278,6 +278,12 @@ function preparePreparedReferencesForListChange(
       if (pathIndex === null) continue;
       const step = descriptor.path[pathIndex];
       if (step?.kind !== "index") continue;
+      // A reference whose path already leads nowhere past the list, as one through an emptied dict's `values` does,
+      // keeps its copy of the root: rebasing would refresh that copy from the variable, where it leads nowhere either.
+      if (!resolvePreparedReferenceDescriptor(snapshot, descriptor).found) {
+        freezePreparedReference(snapshot, temporary.value, descriptor);
+        continue;
+      }
       const index = newIndex(step.index);
       if (index === undefined) {
         freezePreparedReference(snapshot, temporary.value, descriptor);

@@ -724,4 +724,15 @@ test("a change through a dict's values list keeps the list it read when a call t
     ].join("\n"),
   );
   assert.deepEqual(said(extended.events), ["dict{}"]);
+  // Moving the dict within a list keeps the copy of a reference that already leads nowhere.
+  const moved = assertRuntimeResumeEquivalent(
+    [
+      'let rows = [dict{}, dict{ "x": [0] }]',
+      "function f {\n    rows[1].clear()\n    rows.removeFirst()\n    return 7\n}",
+      "rows[1].values[0][0] = f()",
+      "say rows",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(said(moved.events), ["[dict{}]"]);
 });
