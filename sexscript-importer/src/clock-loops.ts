@@ -7,6 +7,8 @@ const TICK_SECONDS = 0.1;
 
 /** Calls that read the clock. */
 const CLOCK_CALLS = new Set(["getAbsoluteDateTime", "getDateTime", "getDate", "getTime"]);
+/** The operators whose result a clock value carries into, as in `t + 1`. */
+const ARITHMETIC = new Set(["+", "-", "*", "/", "%"]);
 
 /**
  * A loop that polls the clock until a time passes, such as ZapEdgeStrip's dice roll, `while t1 < t2 { r = …; say …; t1 =
@@ -406,8 +408,8 @@ function inFrame(statements: IrStatement[], frame: string): IrStatement[] {
 
 /**
  * Where a clock value may be held, in assignment order: a variable holds one from a `let` or assignment whose value
- * reads the clock or is another variable that holds one (`b = a`), until it is set to something else; a value only
- * computed from such a variable, such as an index into a list, holds none. For a loop body, `held` is what a pass may
+ * reads the clock, copies another variable that holds one (`b = a`), or does arithmetic on one (`t + 1`), until it is
+ * set to something else; another value computed from such a variable, such as the list element it picks, holds none. For a loop body, `held` is what a pass may
  * end or continue with, over the passes; for a function body, `returns` whether a return may give a value read from
  * the clock or from a variable that holds one.
  */
@@ -417,8 +419,15 @@ function clockValues(
   as: "loop" | "function",
 ): { held: Set<string>; returns: boolean } {
   let returns = false;
+  const carries = (value: IrExpression, held: ReadonlySet<string>): boolean =>
+    value.kind === "variable"
+      ? held.has(value.name)
+      : value.kind === "binary"
+        ? ARITHMETIC.has(value.operator) &&
+          (carries(value.left, held) || carries(value.right, held))
+        : value.kind === "unary" && value.operator !== "not" && carries(value.value, held);
   const fromClock = (value: IrExpression, held: ReadonlySet<string>): boolean =>
-    readsClock(value, clockFunctions) || (value.kind === "variable" && held.has(value.name));
+    readsClock(value, clockFunctions) || carries(value, held);
   type Jumps = { continued: Set<string>; broken: Set<string> };
   // What the statements end with from what they start with, or null where they do not reach their end.
   const walk = (

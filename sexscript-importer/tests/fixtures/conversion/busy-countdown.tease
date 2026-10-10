@@ -305,4 +305,25 @@ while picked == null {
   seed += 1
 }
 say picked
+// Arithmetic on a clock value still holds it.
+function adjustedNow {
+  let t = getAbsoluteDateTime().toSeconds()
+  t += 0
+  return t
+}
+let adjustedEnd = adjustedNow() + 1
+// NOTE SX_CLOCK_LOOP line 148: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
+let passClock13: absoluteDateTime? = null
+let frame8: messageHandle? = null
+while adjustedNow() < adjustedEnd {
+  if passClock13 == getAbsoluteDateTime() {
+    wait 0.1 s
+  }
+  passClock13 = getAbsoluteDateTime()
+  if frame8 == null {
+    frame8 = say "Adjusted", instant
+  } else {
+    frame8.text = "Adjusted"
+  }
+}
 exit

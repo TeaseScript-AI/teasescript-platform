@@ -142,3 +142,7 @@ while (picked == null) {
   seed++
 }
 show(picked)
+// Arithmetic on a clock value still holds it.
+def adjustedNow = { -> def t = getTime(); t = t + 0; return t }
+def adjustedEnd = adjustedNow() + 1
+while (adjustedNow() < adjustedEnd) show("Adjusted")
