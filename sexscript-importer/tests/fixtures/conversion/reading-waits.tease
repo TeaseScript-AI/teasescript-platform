@@ -1,3 +1,19 @@
+function sexscriptLegacyRange(from, to, inclusive) {
+  let items = []
+  let step = 1
+  if from > to {
+    step = -1
+  }
+  let position = from
+  while (position - to) * step < 0 {
+    items.add(position)
+    position += step
+  }
+  if inclusive {
+    items.add(to)
+  }
+  return items
+}
 function sexscriptLegacyPlainText(value) {
   let text = "${value}".replace("**", "").replace("~~", "").replace("[u]", "").replace("[/u]", "").replace("[/color]", "")
   let start = text.indexOf("[color=")
@@ -140,7 +156,7 @@ counted("Alternating cheeks.")
 // wait after a text that a loop builds anew each pass is its tick, so the countdown keeps its speed.
 function countDown(text, timeValue, speed) {
   let leftValue = timeValue / speed
-  for it in 1..=floor(timeValue / speed) {
+  for it in sexscriptLegacyRange(1, floor(timeValue / speed), true) {
     say "${text}", instant
     say "${toInteger(leftValue * speed)} seconds", instant
     leftValue -= 1

@@ -2335,6 +2335,8 @@ const HELPER_RESULTS = new Map<string, TeaseType>([
   // The parts of a text, which the helpers build from its characters.
   ["sexscriptLegacyTokenize", listOf(scalar("string"))],
   ["sexscriptLegacySplit", listOf(scalar("string"))],
+  // The whole numbers of a Groovy range, counting either way.
+  ["sexscriptLegacyRange", listOf(scalar("integer"))],
 ]);
 
 export function expressionType(

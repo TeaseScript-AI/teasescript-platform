@@ -1,3 +1,19 @@
+function sexscriptLegacyRange(from, to, inclusive) {
+  let items = []
+  let step = 1
+  if from > to {
+    step = -1
+  }
+  let position = from
+  while (position - to) * step < 0 {
+    items.add(position)
+    position += step
+  }
+  if inclusive {
+    items.add(to)
+  }
+  return items
+}
 // A C-style loop may leave out its start or name the counter without a value; neither part does anything.
 let count = 3
 let turn = 0
@@ -56,7 +72,7 @@ say "Score: ${score}"
 // A range up to a value that may hold a fraction iterates up to the whole number below it, as Groovy did.
 let swats = 17
 let perCheek = swats / 2
-for swat in 1..=floor(perCheek) {
+for swat in sexscriptLegacyRange(1, floor(perCheek), true) {
   say "Swat ${swat}"
 }
 // An increment in an argument of a function that reads the counter keeps the old value first and counts before the

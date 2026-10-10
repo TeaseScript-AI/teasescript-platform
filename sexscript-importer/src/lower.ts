@@ -3119,7 +3119,10 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context));
+  return withGroovyRanges(
+    withCountedLoops(withVisibleCountdowns(withReusedLoopCounters(result), context)),
+    context,
+  );
 }
 
 /**
@@ -3253,13 +3256,14 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
 /**
  * A loop over an inclusive range whose only statement adds a number to a variable, `for it in 1..=n { p += 1 }`, only
  * counts; Groovy finished it at once, while TeaseScript runs it out of its instruction budget for a large n. It adds the
- * count in one step where the range is not empty: `if n >= 1 { p += n }`. The bounds are read twice, so they must be
+ * count in one step where the range is not empty: `if n >= 1 { p += n }`; a Groovy range that may count down
+ * (rangeDirection) is never empty and adds its length, `p += abs(n - 1) + 1`. The bounds are read twice, so they must be
  * free of effects.
  */
 function withCountedLoops(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement): IrStatement => {
     if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
-    const { from, to, inclusive } = statement.collection;
+    const { from, to, inclusive, either } = statement.collection;
     const [only, ...rest] = statement.body;
     if (
       !inclusive ||
@@ -3284,6 +3288,26 @@ function withCountedLoops(statements: IrStatement[]): IrStatement[] {
             right: { kind: "literal", value: 1 },
           };
     const step = only.value.value;
+    // A Groovy range that may count down holds its bounds and every whole number between them.
+    if (either === true) {
+      const length: IrExpression = {
+        kind: "binary",
+        operator: "+",
+        left: {
+          kind: "call",
+          name: "abs",
+          positional: [{ kind: "binary", operator: "-", left: to, right: from }],
+          named: {},
+        },
+        right: { kind: "literal", value: 1 },
+      };
+      return {
+        ...only,
+        value:
+          step === 1 ? length : { kind: "binary", operator: "*", left: length, right: only.value },
+        span: statement.span,
+      };
+    }
     return {
       kind: "if",
       condition: { kind: "binary", operator: ">=", left: to, right: from },
@@ -9576,9 +9600,9 @@ function lowerIterated(
     );
     return useHelper(context, "items", [collection]);
   }
+  if (collection.kind !== "range") return collection;
   const toNode = node.kind === "range" ? asNode(node.to) : null;
-  if (collection.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
-    return collection;
+  if (toNode === null || !mayBeFractional(toNode, context)) return rangeDirection(collection);
   addDiagnostic(
     context,
     "SX_RANGE_FLOOR",
@@ -9587,7 +9611,65 @@ function lowerIterated(
     node.span,
   );
   const name = collection.inclusive ? "floor" : "ceil";
-  return { ...collection, to: { kind: "call", name, positional: [collection.to], named: {} } };
+  return rangeDirection({
+    ...collection,
+    to: { kind: "call", name, positional: [collection.to], named: {} },
+  });
+}
+
+/**
+ * A Groovy range ran down where its first bound was greater, `1..0` through 1 and 0, where a TeaseScript range is empty
+ * (owner decision 2026-10-10). A range of two literals keeps its direction as written: one that counts down becomes
+ * the list of its numbers. One whose direction shows only at runtime is marked `either`, for withGroovyRanges, unless it
+ * starts at 0 or below and ends at a length, which it never passes going down.
+ */
+function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpression {
+  const integer = (value: IrExpression): number | null => {
+    if (
+      value.kind === "literal" &&
+      typeof value.value === "number" &&
+      Number.isInteger(value.value)
+    )
+      return value.value;
+    if (value.kind === "unary" && value.operator === "-") {
+      const inner = integer(value.value);
+      return inner === null ? null : -inner;
+    }
+    return null;
+  };
+  const from = integer(range.from);
+  const to = integer(range.to);
+  if (from !== null && to !== null) {
+    if (from <= to) return range;
+    const last = range.inclusive ? to : to + 1;
+    if (from - last < 100) {
+      const items: IrExpression[] = [];
+      for (let value = from; value >= last; value -= 1) items.push({ kind: "literal", value });
+      return { kind: "list", items };
+    }
+  }
+  if (from !== null && from <= 0 && range.to.kind === "property" && range.to.name === "length")
+    return range;
+  return { ...range, either: true };
+}
+
+/**
+ * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through a helper that
+ * counts either way; withCountedLoops has folded those that only count.
+ */
+function withGroovyRanges(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  return statements.map((item) => {
+    const statement = withNestedBlocks(item, (body) => withGroovyRanges(body, context));
+    if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
+    const { from, to, inclusive, either } = statement.collection;
+    if (either !== true) return statement;
+    const collection = useHelper(context, "range", [
+      from,
+      to,
+      { kind: "literal", value: inclusive },
+    ]);
+    return { ...statement, collection };
+  });
 }
 
 /**

@@ -1925,6 +1925,44 @@ test(
   },
 );
 
+// Groovy ranges ran down where the first bound was greater, also where only the values showed it: `1..0` went through
+// 1 and 0, and `1..<0` through 1 (Domme2's reward of 0 points ran twice).
+test("ranges count down as Groovy's did", { skip: parserUnavailable }, async () => {
+  const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+  assert.ok(typeof runtime === "object" && runtime !== null);
+  // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+  const { compileSource, createFreshRuntimeSnapshot, run } = runtime as PacedRuntime;
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-ranges-"));
+  try {
+    const file = path.join(directory, "ranges.groovy");
+    writeFileSync(
+      file,
+      [
+        'def said = ""',
+        "(3..1).each { said += it }",
+        "def none = 0",
+        '(1..none).each { said += " " + it }',
+        'for (k in 1..<none) said += " <" + k',
+        'for (k in 2..3) said += " +" + k',
+        "show(said)",
+        "",
+      ].join("\n"),
+    );
+    const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+    const { plan } = compileSource(tease);
+    assert.ok(plan !== undefined, tease);
+    const step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+    assert.equal(step.snapshot.status, "halted", tease);
+    assert.deepEqual(
+      step.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ["321 1 0 <1 +2 +3"],
+      tease,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 // Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
 // The hierarchical storage fixture says what the same script said with legacy storage (PropertiesWorker, ported to
 // Groovy as an oracle): elements read and rebuilt, a key that is a value first, a shorter list, a null element, and the

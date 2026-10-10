@@ -1,3 +1,19 @@
+function sexscriptLegacyRange(from, to, inclusive) {
+  let items = []
+  let step = 1
+  if from > to {
+    step = -1
+  }
+  let position = from
+  while (position - to) * step < 0 {
+    items.add(position)
+    position += step
+  }
+  if inclusive {
+    items.add(to)
+  }
+  return items
+}
 // A loop goes through, and a draw takes from, a range that ends at a whole number. One that may end at a fraction ends
 // where Groovy stopped: n.times runs for the whole part of n, an inclusive range at the last whole number in it, an
 // exclusive one before the first whole number past it; whole bounds stay as they are.
@@ -5,10 +21,10 @@ let half = 2.5
 for it in 0..toInteger(half) {
   say "Tick ${it}"
 }
-for i in 0..=floor(half) {
+for i in sexscriptLegacyRange(0, floor(half), true) {
   say "Up to ${i}"
 }
-for it in 0..ceil(half) {
+for it in sexscriptLegacyRange(0, ceil(half), false) {
   say "Below ${it}"
 }
 // Java's nextInt took a whole number only, here one a variable that may hold a fraction holds.
@@ -20,8 +36,20 @@ let whole = 3
 for it in 0..whole {
   say "Again ${it}"
 }
-for i in 0..whole {
+for i in sexscriptLegacyRange(0, whole, false) {
   say "Whole ${i}"
 }
 say "Drawn ${randomInteger(0..whole)}"
+// A Groovy range ran down where its first bound was greater: written so, it is the list of its numbers (guillotine's
+// countdown), and where only the values show it, a helper counts either way (Domme2's reward of 0 points ran twice).
+for it in [3, 2, 1] {
+  say "Down ${it}"
+}
+let rewardPoints = randomInteger(0..2)
+for it in sexscriptLegacyRange(1, rewardPoints, true) {
+  say "Stroke ${it}"
+}
+for k in sexscriptLegacyRange(0, rewardPoints, false) {
+  say "Before ${k}"
+}
 exit

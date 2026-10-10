@@ -356,7 +356,15 @@ export type IrExpression =
       unread?: true;
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
-  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
+  | {
+      kind: "range";
+      from: IrExpression;
+      to: IrExpression;
+      inclusive: boolean;
+      count?: true;
+      /** A Groovy range a loop goes through, which counts down where its first bound is greater at runtime. */
+      either?: true;
+    }
   /**
    * A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). `calendar`
    * marks a calendar step, the same clock time a number of days later, which time model 2 writes `1 calendar day`,
