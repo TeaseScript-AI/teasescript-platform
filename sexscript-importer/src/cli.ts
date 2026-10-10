@@ -335,12 +335,15 @@ async function releases(scriptsRoot: string): Promise<string[][]> {
 /** Every file below the legacy data folder, relative to it with forward slashes. */
 async function packageFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) =>
-      path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
-    )
-    .sort();
+  return (
+    entries
+      // The staged unit's patch lines are no file of the package (convert-corpus).
+      .filter((entry) => entry.isFile() && entry.name !== SOURCE_PATCHES_FILE)
+      .map((entry) =>
+        path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
+      )
+      .sort()
+  );
 }
 
 /** Reads a file of the legacy data folder by its relative name; null when it cannot be read. */
