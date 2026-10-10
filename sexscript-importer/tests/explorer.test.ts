@@ -1152,6 +1152,15 @@ test(
       ),
       ["score"],
     );
+    // A chain of copies of such a load is gone through once per copy.
+    const helperCopies = Array.from(
+      { length: 2048 },
+      (_, index) => `  let v${index + 1} = v${index}\n`,
+    ).join("");
+    assert.deepEqual(
+      helper(`  let v0 = load key, default: 0\n${helperCopies}  return v2048`, 'get("score")'),
+      ["score > 7"],
+    );
     // A helper's variable passed through a chain of calls is read once per call.
     const calls = Array.from({ length: 64 }, () => "  value = identity(value)\n").join("");
     assert.deepEqual(

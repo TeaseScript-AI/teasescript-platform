@@ -869,9 +869,15 @@ export class DataFlow {
 
   /**
    * An expression's flow at instruction `at` in a call's context: with the flows of the parameters the call gives, and
-   * through the temporaries and the helper results it reads ({@link #flowAt}).
+   * through the temporaries and the helper results it reads ({@link #flowAt}); with `follow`, also through the
+   * helper's own variables that hold loads whose key a parameter names.
    */
-  #flowIn(expression: unknown, at: number | undefined, context: CallContext | null): Flow {
+  #flowIn(
+    expression: unknown,
+    at: number | undefined,
+    context: CallContext | null,
+    follow = true,
+  ): Flow {
     const flows = this.#flowsIn(context);
     return at === undefined
       ? this.flowOf(expression, flows)
@@ -881,6 +887,8 @@ export class DataFlow {
           flows ?? new Map(),
           context?.constants ?? new Map(),
           HELPER_DEPTH,
+          null,
+          follow,
         );
   }
 
@@ -1274,8 +1282,10 @@ export class DataFlow {
       if (visited.has(id)) return true;
       visited.add(id);
       let reading = 0;
+      // Not through the helper's own variables that hold a parameter-keyed load, which a chain of copies would walk
+      // again for each copy: such a value is kept loosely, as the loads of resolved keys are carriers (#mayCarry).
       for (const each of values())
-        if (this.#flowIn(each.value, each.at, each.context).keys.has(key)) {
+        if (this.#flowIn(each.value, each.at, each.context, false).keys.has(key)) {
           pending.push({ ...each, need, loose: false, from: id });
           reading += 1;
         } else {
@@ -2153,9 +2163,10 @@ export class DataFlow {
     bound: ReadonlyMap<string, SavedScalar>,
     depth: number,
     followed: Set<string> | null = null,
+    follow = true,
   ): Flow {
     const flow = emptyFlow();
-    const texts = [...bound.values()].some((each) => typeof each === "string");
+    const texts = follow && [...bound.values()].some((each) => typeof each === "string");
     const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
       const { value, at } = item;
