@@ -1,6 +1,15 @@
 function sexscriptLegacyValue(value) {
   return value
 }
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
 // Registries keyed by runtime strings become dicts (#536); maps with fixed names stay objects.
 let COLLAR = "collar"
 let GAG = "gag"
@@ -203,4 +212,13 @@ let both = sides()
 // NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 118: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 say "Left is ${both["left"]}, right is ${sides()["right"]}"
+// A field of a map with fixed names that every write keeps a list appends and removes as Groovy's List did.
+let STATE = { choices: [], level: 1 }
+// NOTE SX_SHARED_MAP_WRITE line 121: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices = STATE.choices + ["Spank"]
+// NOTE SX_SHARED_MAP_WRITE line 122: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices = STATE.choices + ["Tickle"]
+// NOTE SX_SHARED_MAP_WRITE line 123: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+STATE.choices = sexscriptLegacyListMinus(STATE.choices, ["Spank"])
+say "Choices ${STATE.choices.length} at level ${STATE.level}"
 exit

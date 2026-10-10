@@ -53,6 +53,8 @@ export interface TypeEnvironment {
   bindingTypes?: ReadonlyMap<string, ValueType>;
   /** The binding key a variable reference names (see `VariableBindings`). */
   bindingOf?: (node: AstNode) => string | null;
+  /** Types of the fields of script map records, by `binding.field` (recordListFields in lower.ts). */
+  recordFields?: ReadonlyMap<string, ValueType>;
 }
 
 /**
@@ -227,7 +229,14 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       return methodCallType(node, environment);
     case "property": {
       const property = constantString(node.property);
-      return property === "size" || property === "length" ? NUMBER : UNKNOWN;
+      if (property === "size" || property === "length") return NUMBER;
+      const receiver = asNode(node.object);
+      if (property !== null && receiver?.kind === "variable" && node.spreadSafe !== true) {
+        const key = environment.bindingOf?.(receiver) ?? variableName(receiver);
+        const field = environment.recordFields?.get(`${key}.${property}`);
+        if (field !== undefined) return field;
+      }
+      return UNKNOWN;
     }
     // A placeholder for a value that adds no type, such as a lookup of the dict whose values are being inferred.
     case "noValue":

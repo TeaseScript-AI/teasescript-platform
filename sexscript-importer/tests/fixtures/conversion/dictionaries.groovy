@@ -116,3 +116,9 @@ def sides = {
 }
 def both = sides()
 show("Left is " + both.left + ", right is " + sides().right)
+// A field of a map with fixed names that every write keeps a list appends and removes as Groovy's List did.
+def STATE = [choices: [], level: 1]
+STATE.choices += "Spank"
+STATE.choices += "Tickle"
+STATE.choices -= "Spank"
+show("Choices " + STATE.choices.size() + " at level " + STATE.level)

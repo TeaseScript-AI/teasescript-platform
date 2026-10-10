@@ -613,6 +613,8 @@ export interface MapUses {
    * false (owner decision 2026-10-08).
    */
   emptyStarts: Map<string, "" | false>;
+  /** Fields of script map records that hold a list wherever Groovy wrote them, as `binding.field` (recordListFields). */
+  recordListFields: Set<string>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -855,9 +857,11 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     shownEarly: new Set(),
     zeroStartNumbers: new Set(),
     emptyStarts: new Map(),
+    recordListFields: new Set(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
+  uses.recordListFields = recordListFields(bodies, dictionaries);
   for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
   // The names each body reads, as variables or as properties such as a module's `owner.field`: a variable of the
   // script that another body reads may pass its value on there.
@@ -1003,6 +1007,115 @@ function collectEarlyDisplays({ body, keys }: MapBody, shownEarly: Set<string>):
   for (const { key, line, inFunction } of shown)
     if (inFunction || line < (firstAssigned.get(key) ?? Number.POSITIVE_INFINITY))
       shownEarly.add(key);
+}
+
+/**
+ * Fields of script map records that hold a list wherever Groovy could see them. A record is a variable declared with a
+ * map literal, assigned only map literals, and used only as the receiver of a named field (`X.f`, `X["f"]`), so no
+ * other name, call, or dynamic key reaches it. Its field holds a list when every literal gives it a list and every
+ * write gives it a list: a list value or a cast to an array or List, `+=` and `-=` (Groovy's List and array plus and
+ * minus give a list again), and no other compound operator, `++`, or `--`.
+ */
+function recordListFields(
+  bodies: readonly MapBody[],
+  dictionaries: ReadonlySet<string>,
+): Set<string> {
+  const declared = new Set<string>();
+  const rejected = new Set<string>(dictionaries);
+  const literalFields = new Map<string, Set<string>>();
+  const allowed = new Set<AstNode>();
+  const notList = new Set<string>();
+  const isListValue = (value: AstNode | null, types: TypeEnvironment): boolean => {
+    if (value === null) return false;
+    if (value.kind === "cast" && typeof value.type === "string")
+      return /\[\]$/u.test(value.type) || value.type === "List" || value.type === "java.util.List";
+    const type = inferType(value, types);
+    return type !== 0 && onlyOf(type, LIST);
+  };
+  for (const { body, types, keys } of bodies)
+    walkAst(body, (node) => {
+      const assigns =
+        node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+      const target = assigns ? asNode(node.left) : null;
+      const key = target?.kind === "variable" ? bindingKey(target, keys) : null;
+      if (key === null || target === null) return;
+      allowed.add(target);
+      const right = asNode(node.right);
+      if (node.kind === "declaration") declared.add(key);
+      if (right?.kind !== "map") {
+        rejected.add(key);
+        return;
+      }
+      const lists = new Set<string>();
+      for (const entry of nodeArray(right.entries)) {
+        const field = constantString(entry.key);
+        if (field !== null && isListValue(asNode(entry.value), types)) lists.add(field);
+      }
+      const earlier = literalFields.get(key);
+      literalFields.set(
+        key,
+        earlier === undefined ? lists : new Set([...earlier].filter((field) => lists.has(field))),
+      );
+    });
+  const candidate = (key: string | null): key is string =>
+    key !== null && literalFields.has(key) && declared.has(key) && !rejected.has(key);
+  for (const { body, types, keys } of bodies)
+    walkAst(body, (node) => {
+      // The record and field a node names: `X.f` or `X["f"]`.
+      const fieldOf = (access: AstNode | null): string | null => {
+        if (access === null) return null;
+        const receiver =
+          access.kind === "property" || (access.kind === "binary" && access.operator === "[")
+            ? asNode(access.kind === "property" ? access.object : access.left)
+            : null;
+        const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+        if (!candidate(key)) return null;
+        const field =
+          access.kind === "property"
+            ? constantString(access.property)
+            : constantString(access.right);
+        return field === null ? null : `${key}.${field}`;
+      };
+      if (node.kind === "property" || (node.kind === "binary" && node.operator === "[")) {
+        const receiver = asNode(node.kind === "property" ? node.object : node.left);
+        const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+        if (candidate(key) && receiver !== null) {
+          const named =
+            node.kind === "property"
+              ? constantString(node.property) !== null && node.spreadSafe !== true
+              : constantString(node.right) !== null;
+          if (named) allowed.add(receiver);
+          else rejected.add(key);
+        }
+      }
+      const operator = typeof node.operator === "string" ? node.operator : "";
+      if (node.kind === "binary" && /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(operator)) {
+        const field = fieldOf(asNode(node.left));
+        if (field === null) return;
+        if (
+          operator === "="
+            ? !isListValue(asNode(node.right), types)
+            : operator !== "+=" && operator !== "-="
+        )
+          notList.add(field);
+      }
+      if (node.kind === "postfix" || node.kind === "prefix") {
+        const field = fieldOf(asNode(node.expression) ?? asNode(node.value));
+        if (field !== null) notList.add(field);
+      }
+    });
+  // Any other use of the record, such as a call, an argument, or an alias, may reach its fields unseen.
+  for (const { body, keys } of bodies)
+    walkAst(body, (node) => {
+      if (node.kind !== "variable" || allowed.has(node)) return;
+      const key = bindingKey(node, keys);
+      if (candidate(key)) rejected.add(key);
+    });
+  const fields = new Set<string>();
+  for (const [key, lists] of literalFields)
+    if (candidate(key))
+      for (const field of lists) if (!notList.has(`${key}.${field}`)) fields.add(`${key}.${field}`);
+  return fields;
 }
 
 /**
@@ -1699,6 +1812,7 @@ export function lowerParsedFile(
       variables,
       listElements,
       ...(context.types.bindingTypes === undefined ? {} : { bindingTypes }),
+      recordFields: new Map([...context.mapUses.recordListFields].map((field) => [field, LIST])),
     };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
