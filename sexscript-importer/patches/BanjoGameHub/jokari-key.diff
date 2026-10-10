@@ -1,0 +1,33 @@
+--- a/scripts/Banjo/fourheroes.groovy
++++ b/scripts/Banjo/fourheroes.groovy
+@@ -970,7 +970,7 @@
+ 	def toysLight = ["toys.ruler","toys.wooden_spoon","toys.spatula","toys.spatula_wooden","toys.flyswatter",
+ 		"toys.slipper","toys.sandal","toys.plimsoll","toys.sneaker",
+ 		"toys.slapper","toys.strap_loop","toys.paddle_leather","toys.paddle_plastic",
+-		"toys.bat","toys.bat_flyback","toys.bat_battledore","toys.bat_beach",
++		"toys.bat","toys.bat_flyback","toys.bat_jokari","toys.bat_beach",
+ 		"toys.hairbrush","toys.hairbrush_plastic","toys.hairbrush_paddle"]
+ 	implement = getRandomItem(toysLight)
+ 	if(implement == "toys.ruler") lightImplement = "ruler"
+--- a/scripts/Banjo/gameofchance_ee.groovy
++++ b/scripts/Banjo/gameofchance_ee.groovy
+@@ -753,7 +753,7 @@
+ 	def toysBase = ["toys.ruler","toys.wooden_spoon","toys.spatula","toys.spatula_wooden","toys.flyswatter",
+ 		"toys.slipper","toys.sandal","toys.plimsoll","toys.sneaker",
+ 		"toys.slapper","toys.strap_loop","toys.paddle_leather","toys.paddle_plastic",
+-		"toys.bat","toys.bat_flyback","toys.bat_battledore","toys.bat_beach",
++		"toys.bat","toys.bat_flyback","toys.bat_jokari","toys.bat_beach",
+ 		"toys.hairbrush","toys.hairbrush_plastic","toys.hairbrush_paddle"]
+ 	implement = getRandomItem(toysBase)
+ 	if(implement == "toys.ruler") baseImplement = "ruler"
+--- a/scripts/Banjo/guessthenumber_ee.groovy
++++ b/scripts/Banjo/guessthenumber_ee.groovy
+@@ -584,7 +584,7 @@
+ 		def toysRound = ["toys.ruler","toys.wooden_spoon","toys.spatula","toys.spatula_wooden","toys.flyswatter",
+ 			"toys.slipper","toys.sandal","toys.plimsoll","toys.sneaker",
+ 			"toys.slapper","toys.strap_loop","toys.paddle_leather","toys.paddle_plastic",
+-			"toys.bat","toys.bat_flyback","toys.bat_battledore","toys.bat_beach",
++			"toys.bat","toys.bat_flyback","toys.bat_jokari","toys.bat_beach",
+ 			"toys.hairbrush","toys.hairbrush_plastic","toys.hairbrush_paddle"]
+ 		implement = getRandomItem(toysRound)
+ 		if(implement == "toys.ruler") roundImplement = "ruler"
