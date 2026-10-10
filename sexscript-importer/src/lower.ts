@@ -17359,7 +17359,11 @@ function pushPrompt(
       context.prelude.push({ kind: "let", name, value, span: inputNode.span });
       return { kind: "variable", name };
     };
-    if (!isPure(messageNode, context)) message = temporary(message, "question");
+    // The question's text is read before the computed arguments, which may change what it reads, unless it is fixed.
+    const fixed =
+      message.kind === "literal" ||
+      (message.kind === "template" && message.parts.every((part) => "text" in part));
+    if (!fixed) message = temporary(message, "question");
     computed.nodes.forEach((node, index) => {
       if (effects.includes(node))
         computed.values[index] = temporary(computed.values[index]!, computed.base ?? "option");

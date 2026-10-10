@@ -1768,6 +1768,38 @@ test(
   },
 );
 
+// Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
+test(
+  "an input's question shows what it read before its pre-filled value was computed",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-question-"));
+    try {
+      const file = path.join(directory, "question.groovy");
+      writeFileSync(
+        file,
+        'def n = 1\ndef bump = { -> n += 1; return "prefill" }\ndef answer = getString("Question ${n}", bump())\nshow(answer)\n',
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      assert.equal(step.snapshot.foregroundAction?.interactionKind, "text", tease);
+      assert.deepEqual(
+        step.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        ["Question 1"],
+        tease,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 interface PacedEvent {
   kind?: string;
   text?: string;
