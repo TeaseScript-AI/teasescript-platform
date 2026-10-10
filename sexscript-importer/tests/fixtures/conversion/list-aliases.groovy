@@ -53,3 +53,11 @@ def held = slots[0]
 slots[0] = [5]
 held[0] = 1
 show("Slots " + slots[0][0] + " " + held[0])
+// A closure that empties the list, called through another name or a map, leaves the element taken before out of it.
+def cards = [[0]]
+def drop = { cards.clear() }
+def dropAll = drop
+def held2 = cards[0]
+dropAll()
+held2[0] = 1
+show("Held " + held2[0])

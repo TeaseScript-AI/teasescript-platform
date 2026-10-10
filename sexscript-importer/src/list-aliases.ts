@@ -54,8 +54,12 @@ const COMPOUND_OPERATORS = new Map([
  */
 export function withListAliasesAsPaths(body: AstNode, fresh: (base: string) => string): AstNode {
   const negative = negativeNames(body);
-  const replaced = new Set([...replacedSlots(body), ...sharedLists(body)]);
   const movers = closureMoves(body);
+  const replaced = new Set([
+    ...replacedSlots(body),
+    ...sharedLists(body),
+    ...escapingMoves(body, movers),
+  ]);
   return scope(loops(body, fresh, replaced, movers), fresh, negative, replaced, movers);
 }
 
@@ -141,6 +145,59 @@ function closureMoves(body: AstNode): Map<string, Set<string>> {
     moves.set(name, moved);
   }
   return moves;
+}
+
+/**
+ * The lists that a closure the script may call by another name moves: one that is not a variable's value, as a map's or
+ * a list's, or whose variable the script reads as a value, which a call through another name or a map may reach unseen.
+ */
+function escapingMoves(body: AstNode, movers: Moves): Set<string> {
+  const lists = new Set<string>();
+  const named = new Set<AstNode>();
+  const reads = new Set<string>();
+  walkAst(body, (node) => {
+    const name =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")
+        ? variableName(node.left)
+        : null;
+    const value = asNode(node.right);
+    if (name !== null && value?.kind === "closure") named.add(value);
+    if (name !== null && value?.kind === "variable" && movers.has(variableName(value) ?? ""))
+      reads.add(variableName(value)!);
+    if (node.kind === "list")
+      nodeArray(node.items).forEach((item) => reads.add(variableName(item) ?? ""));
+    if (node.kind === "map")
+      nodeArray(node.entries).forEach((entry) =>
+        reads.add(variableName(asNode(entry.value)) ?? ""),
+      );
+    if (node.kind === "methodCall")
+      nodeArray(asNode(node.arguments)?.items).forEach((item) =>
+        reads.add(variableName(item) ?? ""),
+      );
+  });
+  for (const name of reads) movers.get(name)?.forEach((list) => lists.add(list));
+  // An anonymous closure, such as a map's, moves its lists wherever it may be called.
+  walkAst(body, (node) => {
+    if (node.kind !== "closure" || named.has(node)) return;
+    walkAst(node, (child) => {
+      const method = child.kind === "methodCall" ? constantString(child.method) : null;
+      const appends =
+        method !== null &&
+        APPENDING_METHODS.has(method) &&
+        nodeArray(asNode(child.arguments)?.items).length === 1;
+      const receiver = child.kind === "methodCall" ? variableName(child.object) : null;
+      if (method !== null && CHANGING_METHODS.has(method) && !appends && receiver !== null)
+        lists.add(receiver);
+      const set =
+        child.kind === "binary" && ASSIGNING_OPERATORS.has(String(child.operator))
+          ? variableName(child.left)
+          : null;
+      if (set !== null) lists.add(set);
+      const sorted = movedByCollections(child);
+      if (sorted !== null) lists.add(sorted);
+    });
+  });
+  return lists;
 }
 
 /** The closure a node calls by name, `f(…)` or `f.call(…)`, or null. */
@@ -265,19 +322,32 @@ function plainPositions(target: AstNode): boolean {
 }
 
 /**
- * Whether the node reads or writes an element of the variable at a negative position, `row[-1]`, which Groovy counted
- * from the end and which the conversion writes for a variable, not for an element read through its list.
+ * Whether the node writes an element of the variable at a negative position, `row[-1] += 1`, which Groovy counted from
+ * the end and which the conversion writes for a variable, not for an element read through its list; a read converts.
  */
 function negativeAccess(node: AstNode, name: string): boolean {
   let found = false;
+  const negativeTarget = (target: AstNode | null): boolean => {
+    for (let at = target; at !== null && at.kind !== "variable";) {
+      if (at.kind !== "binary" || at.operator !== "[") return false;
+      const position = asNode(at.right);
+      const left = asNode(at.left);
+      if (
+        variableName(left) === name &&
+        (position?.kind === "unaryMinus" ||
+          (position?.kind === "constant" &&
+            typeof position.value === "number" &&
+            position.value < 0))
+      )
+        return true;
+      at = left;
+    }
+    return false;
+  };
   walkAst(node, (child) => {
-    if (child.kind !== "binary" || child.operator !== "[" || variableName(child.left) !== name)
-      return;
-    const position = asNode(child.right);
-    if (
-      position?.kind === "unaryMinus" ||
-      (position?.kind === "constant" && typeof position.value === "number" && position.value < 0)
-    )
+    if (child.kind === "binary" && ASSIGNING_OPERATORS.has(String(child.operator)))
+      if (negativeTarget(asNode(child.left))) found = true;
+    if ((child.kind === "postfix" || child.kind === "prefix") && negativeTarget(firstChild(child)))
       found = true;
   });
   return found;
