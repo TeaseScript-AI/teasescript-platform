@@ -2270,10 +2270,10 @@ function executeLoopStart(
   const owner = currentCallFrameId(snapshot);
   let frame = snapshot.loopFrames.at(-1);
   if (frame?.loopId !== instruction.loopId || frame.callFrameId !== owner) {
+    // The call's own loops are those since it began, so a deep stack is not searched at each loop.
+    const callLoops = snapshot.loopFrames.slice(snapshot.callFrames.at(-1)?.loopBaseDepth ?? 0);
     if (
-      snapshot.loopFrames.some(
-        (item) => item.loopId === instruction.loopId && item.callFrameId === owner,
-      )
+      callLoops.some((item) => item.loopId === instruction.loopId && item.callFrameId === owner)
     ) {
       throw fault(
         "TSR042",
