@@ -2235,6 +2235,16 @@ class TypeChecker {
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) {
       this.#checkUnknownCompound(place, kept, statement);
+      // `p += d / 2` with `d` of unknown type gives a number and never a whole number, so it widens `p` (rule 1.2).
+      if (
+        this.diagnostics.length === reported &&
+        this.#givesNonWholeNumber(statement.value, (type) =>
+          members(resolved(nonNullType(kept))).flatMap(
+            (member) => arithmeticType(operator, member, type) ?? [],
+          ),
+        )
+      )
+        this.#widens(place, NUMBER_TYPE, statement.value);
       // A place or a value that so far held only null is checked as null too, in case no store gives it another value.
       const slots =
         this.diagnostics.length === reported
@@ -2298,6 +2308,24 @@ class TypeChecker {
       }
       if (variable !== undefined) this.#assigned(variable, result);
     }
+  }
+
+  /**
+   * Whether an operation of unknown result can give a number and never a whole number, as `d / 2` with `d` of unknown
+   * type, so that storing it can store a non-whole number (rule 1.2). `stored` gives what a compound assignment stores
+   * for each type the operation can give.
+   */
+  #givesNonWholeNumber(
+    expression: Expression,
+    stored: (result: StaticType) => readonly StaticType[] = (result) => [result],
+  ): boolean {
+    const given = this.#unknownOperations.get(unwrap(expression));
+    if (given === undefined) return false;
+    const results = given.flatMap(stored);
+    return (
+      results.some((result) => isScalar(result, "number")) &&
+      !results.some((result) => isScalar(result, "integer"))
+    );
   }
 
   /**
@@ -2519,6 +2547,11 @@ class TypeChecker {
         (mayGainParts || this.#unappliedWidening.has(place.widening.root))
       )
         this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
+      // An operation of unknown result that can give a number and never a whole number, such as `d / 2` with `d` of
+      // unknown type, can store a non-whole number (rule 1.2): it widens the integers the place holds as a number
+      // would, instead of leaving them to a whole-number check that fails when the script runs.
+      if (decides && !isKnown(value) && this.#givesNonWholeNumber(expression))
+        this.#widens(place, NUMBER_TYPE, expression);
       this.#follow(place.widening, value, expression.span);
       return;
     }

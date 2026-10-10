@@ -26,7 +26,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    general union inference. A variable without a type annotation (declared by `let`, as a parameter with a default, or
    as a loop variable) whose type is `integer` is likewise inferred from all its assignments: it is a `number` when any
    of them can store a non-whole number, also one checked after its uses. With `let speed = 1` and
-   `speed = speed * 1.5`, `speed` is a `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. The
+   `speed = speed * 1.5`, `speed` is a `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. An
+   operation on a value of unknown type whose result can be a number and never a whole number, such as `d / 2`, can
+   store a non-whole number too; one that may give a whole number, such as `d + 1`, leaves the `integer` to the runtime
+   check of rule 7. The
    elements and properties inside such a variable widen by the same rule: with `let prices = [1, 2]` and
    `prices.add(2.5)`, `prices` is a `number[]`, and `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A
    declared type stays strict, such as `integer`, `integer[]`, or `integer set`, and an integer-only use of a widened

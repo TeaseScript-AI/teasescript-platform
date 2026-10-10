@@ -1335,6 +1335,61 @@ test("a first null is remembered wherever a first value decides a type", () => {
   ]);
 });
 
+test("an operation result that can never be a whole number widens an inferred integer place", () => {
+  // `d / 2` with `d` of unknown type gives a number and never a whole number, so the place can store a non-whole
+  // number (rule 1.2); `d + 1` may give a whole number, so the place keeps its integer and the runtime checks it.
+  const inFunction = (argument: string, ...body: string[]): string =>
+    ["function f(d) {", ...body.map((line) => `    ${line}`), "}", `f(${argument})`, "exit"].join(
+      "\n",
+    );
+  assert.deepEqual(sayTexts(inFunction("7", "let p = 0", "p = p + d / 2", "say p")), ["3.5"]);
+  assert.deepEqual(sayTexts(inFunction("7", "let p = 1", "p += d / 2", "say p")), ["4.5"]);
+  assert.deepEqual(sayTexts(inFunction("7", "let p = 0", "p = d * 1.5", "say p")), ["10.5"]);
+  assert.deepEqual(
+    sayTexts(
+      inFunction(
+        "7",
+        "let counts = [0]",
+        "let box = { n: 0 }",
+        "counts[0] = d / 2",
+        "box.n = d / 2",
+        "say counts",
+        "say box.n",
+      ),
+    ),
+    ["[3.5]", "3.5"],
+  );
+  // An integer-only use of the widened variable names the store, as after a store of a known number.
+  assert.deepEqual(
+    mismatches(inFunction("7", "let p = 0", "p = p + d / 2", 'let names = ["a"]', "say names[p]")),
+    [
+      [
+        "TSV043",
+        "A list index must be a whole number (integer), but this is a number. 'p' is a number because line 3 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
+        "p",
+      ],
+    ],
+  );
+  // A result that may be a whole number does not widen: the integer stays and the runtime checks the value.
+  const whole = inFunction(
+    "7",
+    "let i = 0",
+    "i = i + d",
+    "i += d * 2",
+    'let names = ["a"]',
+    "say names[i]",
+  );
+  assert.deepEqual(mismatches(whole), []);
+  assert.equal(
+    runValidSource(inFunction("7", "let i = 0", "i = i + d", "say i")).snapshot.failure,
+    null,
+  );
+  assert.equal(
+    runValidSource(inFunction("7.5", "let i = 0", "i = i + d", "say i")).snapshot.failure?.code,
+    "TSR058",
+  );
+});
+
 test("calls never decide parameter types, and an unknown return makes a result unknown", () => {
   assert.deepEqual(
     codes(
