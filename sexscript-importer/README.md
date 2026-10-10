@@ -372,12 +372,13 @@ it passes `name` to, is the one key it names), the clock, or a variable the code
 function's own variable, a file's own, also as a function of that file reads it, and otherwise one name for the
 package, as a `global function` reads the variables of whichever file calls it). A parameter does not take every
 caller's arguments as its values (that gave a helper's conditions all its callers' values, and cost coverage on the
-gate); the result of a call is read with that call's own arguments for the parameters the function returns as they are,
+gate); the result of a call is read with that call's own arguments for the parameters the function reads in what it
+returns, also in a helper it passes them on to (`return echo(n)`; a local copy, `let m = n`, reads only the default),
 and with only the returns its constant arguments can reach (a helper `owns(item)` whose `if item == KNIFE ... else if
 item == ROPE` loads one key per branch reads one key for `owns(ROPE)`, also through a helper that passes its parameter
-on, three calls deep). Its comparisons with constants give the values that take the missed way. An ask is answered again with them on the path of
-the step that first evaluated the condition, and the rest of that path is replayed; the values also become answers of
-that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
+on, three calls deep). Its comparisons with constants give the values that take the missed way. An ask is answered
+again with them on the path of the step that first evaluated the condition, and the rest of that path is replayed; the
+values also become answers of that ask wherever the search meets it. For a stored value, sessions are chained: when an explored state left storage
 that satisfies the condition, a session starts from it and replays that path (with `--stored-leads`, off by default
 as it cost coverage on the gate, play also goes on from the state that stored it, in its own session: that state, or
 once it was expanded its open successors in that session, 16 at most, nearest first, share the first place for 20

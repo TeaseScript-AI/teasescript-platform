@@ -1015,6 +1015,17 @@ test(
       ),
       ["score > 20"],
     );
+    // Through a helper that returns its parameter: what this call passes it, not the parameter's default.
+    const echo = (parameter: string, argument: string) =>
+      compared(
+        `function echo(${parameter}) {\n  return n\n}\nif echo(${argument}) > 7 {\n  say "Yes"\n}\nexit\n`,
+      );
+    assert.deepEqual(echo('n = load("score", default: 0) + 1', 'load("score", default: 0)'), [
+      "score > 7",
+    ]);
+    assert.deepEqual(echo('n = load("score", default: 0)', 'load("score", default: 0) + 1'), [
+      "score",
+    ]);
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",
@@ -1294,6 +1305,19 @@ test(
         '  return answer\n}\nif readAnswer() == 1234 {\n  say "Matched."\n}\nexit\n',
     ).find((condition) => condition.line === 8);
     assert.deepEqual(echoed?.sources, ["ask"]);
+    // Also through a helper that passes its parameter on; and a counter it returns is set in play.
+    const forwarded = analyzed(
+      'function echo(n) {\n  return n\n}\nfunction relay(n) {\n  return echo(n)\n}\nlet answer = askInteger "Number?"\n' +
+        'let count = 0\ncount += 1\nif relay(answer) == 1234 {\n  say "Matched."\n}\nif echo(count) > 7 {\n' +
+        '  say "Counted."\n}\nexit\n',
+    ).filter((condition) => condition.line === 10 || condition.line === 13);
+    assert.deepEqual(
+      forwarded.map((condition) => [condition.sources, condition.inPlay]),
+      [
+        [["ask"], true],
+        [[], true],
+      ],
+    );
     // A helper that picks a stored value by comparing its parameter with constants reads only the one a constant
     // argument picks.
     const picked = analyzed(
