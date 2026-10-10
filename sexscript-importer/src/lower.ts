@@ -1,3 +1,4 @@
+import { datePatternFields, datePatternKind } from "./java-time.ts";
 import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
@@ -15189,7 +15190,9 @@ function dateFormat(
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
-  const fields = pattern === null || kind !== null ? null : datePatternFields(pattern);
+  // A text the script saves or parses again is data, written exactly, as jewell's day (`y/M/d`).
+  const data = context.java.temporal.dataFormats?.has(node) === true;
+  const fields = pattern === null || (kind !== null && !data) ? null : datePatternFields(pattern);
   if (fields !== null) return fields;
   if (kind === null) {
     return unsupportedExpression(
@@ -15277,71 +15280,6 @@ function unixDate(node: AstNode, context: LowerContext): IrExpression | null | u
       right: { kind: "duration", value: 1, unit: "s" },
     },
   };
-}
-
-/** What a Java SimpleDateFormat pattern shows: the ISO date, a whole date, a time, both, or null for anything else. */
-function datePatternKind(pattern: string): "isoDate" | "date" | "time" | "dateTime" | null {
-  if (pattern === "yyyy-MM-dd") return "isoDate";
-  // Quoted text is literal; every other letter is a pattern field.
-  const fields = pattern.replace(/'[^']*'/gu, "").replace(/[^A-Za-z]/gu, "");
-  if (/[^yMdHhkKmsSa]/u.test(fields)) return null;
-  const date = /y/u.test(fields) && /M/u.test(fields) && /d/u.test(fields);
-  const time = /[HhkK]/u.test(fields) && /m/u.test(fields);
-  if (date && time) return "dateTime";
-  if (date && !/[HhkKmsSa]/u.test(fields)) return "date";
-  if (time && !/[yMd]/u.test(fields)) return "time";
-  return null;
-}
-
-/** The current date and time's fields that Java's pattern letters write as numbers. */
-const NUMBER_PATTERN_FIELDS = new Map([
-  ["y", "year"],
-  ["M", "month"],
-  ["d", "day"],
-  ["H", "hour"],
-  ["m", "minute"],
-  ["s", "second"],
-]);
-
-/**
- * A Java pattern of number fields that is no whole date or time, such as jewell's `dd/MM` or `HH`, as the current
- * date and time's fields written the same way, padded to the letters' count: exact, since Java writes numbers the
- * same in every locale. Null for a pattern with another letter, such as a month or weekday name.
- */
-function datePatternFields(pattern: string): IrExpression | null {
-  const now: IrExpression = { kind: "call", name: "getDateTime", positional: [], named: {} };
-  const parts: Array<{ text: string } | { value: IrExpression }> = [];
-  for (const [token, letter] of pattern.matchAll(/'(?:[^']|'')*'|([A-Za-z])\1*|[^A-Za-z']+/gu)) {
-    if (letter === undefined) {
-      parts.push({
-        text: token.startsWith("'") ? token.slice(1, -1).replaceAll("''", "'") || "'" : token,
-      });
-      continue;
-    }
-    const field = NUMBER_PATTERN_FIELDS.get(letter);
-    if (field === undefined || (letter === "M" && token.length > 2)) return null;
-    const value: IrExpression = { kind: "property", target: now, name: field };
-    // `yy` writes the year's last two digits.
-    const shown: IrExpression =
-      letter === "y" && token.length === 2
-        ? { kind: "binary", operator: "%", left: value, right: { kind: "literal", value: 100 } }
-        : value;
-    parts.push({
-      value:
-        token.length === 1
-          ? shown
-          : {
-              kind: "methodCall",
-              target: { kind: "call", name: "toString", positional: [shown], named: {} },
-              name: "padStart",
-              arguments: [
-                { kind: "literal", value: token.length },
-                { kind: "literal", value: "0" },
-              ],
-            },
-    });
-  }
-  return { kind: "template", parts };
 }
 
 /** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */

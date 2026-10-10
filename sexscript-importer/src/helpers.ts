@@ -185,6 +185,7 @@ export type HelperName =
   | "plainText"
   | "listPart"
   | "listText"
+  | "dateFromText"
   | "listMinus"
   | "booleanText"
   | "button"
@@ -304,6 +305,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "plainText",
   "listPart",
   "listText",
+  "dateFromText",
   "listMinus",
   "booleanText",
   "textMinus",
@@ -1324,6 +1326,45 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ret(joined("entries")),
           ]),
           ret(template(v("value"))),
+        ],
+      );
+    },
+  },
+  // A Java SimpleDateFormat's parse() of a year, a month, and a day as numbers with one separator, at midnight; the
+  // positions name the parts the separator splits the text into.
+  dateFromText: {
+    name: "sexscriptLegacyDateFromText",
+    build: () => {
+      const part = (position: string, width: number): IrExpression => ({
+        kind: "methodCall",
+        target: at(v("parts"), v(position)),
+        name: "padStart",
+        arguments: [lit(width), lit("0")],
+      });
+      return fn(
+        "sexscriptLegacyDateFromText",
+        ["text", "separator", "year", "month", "day"],
+        [
+          letS("parts", {
+            kind: "methodCall",
+            target: v("text"),
+            name: "split",
+            arguments: [v("separator")],
+          }),
+          ret({
+            kind: "call",
+            name: "toDateTime",
+            positional: [
+              {
+                kind: "call",
+                name: "toDate",
+                positional: [template(part("year", 4), "-", part("month", 2), "-", part("day", 2))],
+                named: {},
+              },
+              { kind: "call", name: "toTime", positional: [lit("00:00")], named: {} },
+            ],
+            named: {},
+          }),
         ],
       );
     },

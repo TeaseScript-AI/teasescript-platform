@@ -36,3 +36,15 @@ show(chant.join(" ") + " " + "ha" * laughs)
 def dayCount = getInteger("How many days?", 0)
 def total = (0..<dayCount).collect { day -> day * 2 }.sum()
 show("Total " + total)
+// A Date's format(pattern) shows a time or date in the player's local form, and number fields exactly (Farkel's denial).
+def denialEnd = Calendar.getInstance()
+denialEnd.add(Calendar.MINUTE, 30)
+def until = denialEnd.getTime()
+show("Wait until " + until.format("HH:mm") + " " + until.format("dd/MM"))
+// A formatter in a variable writes a date the script saves or parses again exactly, and parses it back, as jewell counts
+// the days since it last ran.
+def dayFormat = new java.text.SimpleDateFormat("y/M/d")
+def lastRun = loadString("game.lastRun")
+def thisRun = dayFormat.format(new Date())
+save("game.lastRun", thisRun)
+if (lastRun != null && dayFormat.parse(thisRun) - dayFormat.parse(lastRun) > 2) show("You stayed away too long.")

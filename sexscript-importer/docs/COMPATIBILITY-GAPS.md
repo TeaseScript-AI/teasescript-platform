@@ -372,6 +372,10 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
   player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`; a pattern of number fields
   that is no whole date or time, such as `dd/MM` or `HH`, is written from the current date and time's fields, exactly.
+  The same holds for a Date's `format(pattern)` (Farkel's end of a denial) and for a `SimpleDateFormat` kept in a
+  variable, whose `parse(text)` of a year, a month, and a day as numbers with one separator gives the date at midnight
+  (jewell's `y/M/d`). A text the script saves or parses again is data, written exactly from the fields also where it
+  shows a whole date or time, so that the day jewell keeps reads back the same.
   A pattern with names (weekday, month) or a time zone stays reported (`SX_DATE_FORMAT`), as does a date built from a
   Unix time unless it shows a whole date or time (`SX_DATE_FROM_SECONDS`); see the observations below.
 - Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
