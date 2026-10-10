@@ -1954,7 +1954,15 @@ test("the list-aliases fixture says what Groovy's shared lists gave", async () =
     note(step.events);
   }
   assert.equal(step.snapshot.status, "halted");
-  assert.deepEqual(said, ["Done 2", "Rows 3 2", "First false false", "Last first true"]);
+  assert.deepEqual(said, [
+    "Done 2",
+    "Rows 3 2",
+    "First false false",
+    "Last first true",
+    "Cells 0 1",
+    "Counts 6 7,5,2",
+    "Slots 5 1",
+  ]);
 });
 
 // Groovy ranges ran down where the first bound was greater, also where only the values showed it: `1..0` went through

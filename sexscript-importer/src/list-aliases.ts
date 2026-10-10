@@ -22,7 +22,18 @@ const CHANGING_METHODS = new Set([
 ]);
 // Of those, the ones that only append, which leave the positions of the elements there are as they were.
 const APPENDING_METHODS = new Set(["add", "addAll", "leftShift"]);
+// Of those, the ones the conversion writes for an element read through its list as well as for a variable.
+const INDEXED_METHODS = new Set(["add", "addAll", "clear", "leftShift", "pop", "remove"]);
+// Static methods of java.util.Collections that change the list they get first in place.
+const COLLECTIONS_METHODS = new Set(["fill", "reverse", "rotate", "shuffle", "sort", "swap"]);
 const ASSIGNING_OPERATORS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "<<="]);
+const COMPOUND_OPERATORS = new Map([
+  ["+=", "+"],
+  ["-=", "-"],
+  ["*=", "*"],
+  ["/=", "/"],
+  ["%=", "%"],
+]);
 
 /**
  * Groovy lists are shared references, so a change through an element read or an iterated item changed the list it
@@ -35,11 +46,114 @@ const ASSIGNING_OPERATORS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "<<="]);
  *   element's position instead, `stackIndex = i`, and reads the element as `stacks[stackIndex]`, where the scope does
  *   not set the list again or move its elements; one that starts empty or null, `List stack = []`, qualifies where each
  *   use follows a statement of its block that takes an element, so the starting value is never used.
+ * Neither applies to a list whose slots the script replaces anywhere, `rows[0] = [5]`, after which the element taken
+ * before is no longer in the list, nor where the item or variable gets a changing method that the conversion writes for
+ * a variable only, such as `push`. A compound change through the element, `row[0] += 1`, is written out,
+ * `rows[rowIndex][0] = rows[rowIndex][0] + 1`, where its positions are plain values.
  * `fresh` gives a new variable name.
  */
 export function withListAliasesAsPaths(body: AstNode, fresh: (base: string) => string): AstNode {
   const negative = negativeNames(body);
-  return scope(loops(body, fresh), fresh, negative);
+  const replaced = replacedSlots(body);
+  return scope(loops(body, fresh, replaced), fresh, negative, replaced);
+}
+
+/** The list variables whose slots the body replaces or moves anywhere: `rows[0] = [5]`, `rows.set(…)`, a swap. */
+function replacedSlots(body: AstNode): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const left = node.kind === "binary" ? asNode(node.left) : null;
+    if (
+      node.kind === "binary" &&
+      ASSIGNING_OPERATORS.has(String(node.operator)) &&
+      left?.kind === "binary" &&
+      left.operator === "[" &&
+      variableName(left.left) !== null
+    )
+      names.add(variableName(left.left)!);
+    const list = movedByCollections(node);
+    if (list !== null) names.add(list);
+    const method = node.kind === "methodCall" ? constantString(node.method) : null;
+    if (
+      (method === "set" || method === "putAt" || method === "swap") &&
+      variableName(node.object) !== null
+    )
+      names.add(variableName(node.object)!);
+  });
+  return names;
+}
+
+/** The list variable a `Collections.shuffle(list)`, `sort`, `swap`, or other changing static call changes. */
+function movedByCollections(node: AstNode): string | null {
+  if (node.kind !== "methodCall" || !COLLECTIONS_METHODS.has(constantString(node.method) ?? ""))
+    return null;
+  const receiver = asNode(node.object);
+  const owner =
+    receiver?.kind === "classExpression" ? String(receiver.type ?? "") : variableName(receiver);
+  if (owner === null || !/(^|\.)Collections$/u.test(owner)) return null;
+  return variableName(nodeArray(asNode(node.arguments)?.items)[0]);
+}
+
+/**
+ * Whether the node calls a changing method on the variable itself that the conversion writes for a variable only, which
+ * reading the element through its list would lose (`row.push(7)`), or changes it with a static Collections call.
+ */
+function variableOnlyChange(node: AstNode, name: string): boolean {
+  let found = false;
+  walkAst(node, (child) => {
+    const method = child.kind === "methodCall" ? constantString(child.method) : null;
+    if (
+      method !== null &&
+      CHANGING_METHODS.has(method) &&
+      !INDEXED_METHODS.has(method) &&
+      variableName(child.object) === name
+    )
+      found = true;
+    if (movedByCollections(child) === name) found = true;
+  });
+  return found;
+}
+
+/**
+ * Whether a compound change through the variable, `row[0] += 1`, has a position that is no plain value, which writing
+ * it out would compute twice.
+ */
+function computedCompound(node: AstNode, name: string): boolean {
+  let found = false;
+  walkAst(node, (child) => {
+    if (child.kind !== "binary" || !COMPOUND_OPERATORS.has(String(child.operator))) return;
+    const left = asNode(child.left);
+    if (left === null || left.kind === "variable" || rootName(left) !== name) return;
+    for (let at: AstNode | null = left; at !== null && at.kind !== "variable";) {
+      if (at.kind === "binary") {
+        const position = asNode(at.right);
+        if (position !== null && position.kind !== "constant" && position.kind !== "variable")
+          found = true;
+        at = asNode(at.left);
+      } else at = asNode(at.object);
+    }
+  });
+  return found;
+}
+
+/** The node with each compound change through `list`'s elements written out: `a[i][0] += 1` as `a[i][0] = a[i][0] + 1`. */
+function plainCompounds(node: AstNode, list: string): AstNode {
+  const changed = mapChildren(node, (child) => plainCompounds(child, list));
+  const operator =
+    changed.kind === "binary" ? COMPOUND_OPERATORS.get(String(changed.operator)) : undefined;
+  const left = asNode(changed.left);
+  if (
+    operator === undefined ||
+    left === null ||
+    left.kind === "variable" ||
+    rootName(left) !== list
+  )
+    return changed;
+  return {
+    ...changed,
+    operator: "=",
+    right: { kind: "binary", span: changed.span, operator, left, right: changed.right },
+  };
 }
 
 /**
@@ -69,11 +183,28 @@ function negativeNames(body: AstNode): Set<string> {
   return negative;
 }
 
+/**
+ * Whether a position may be negative: anything but a number of at least 0, a variable that never holds a negative one,
+ * a size or a length, a random draw, or a sum or product of those.
+ */
 function mayBeNegative(value: AstNode, negative: ReadonlySet<string>): boolean {
-  if (value.kind === "constant") return typeof value.value === "number" && value.value < 0;
-  if (value.kind === "unaryMinus") return true;
+  if (value.kind === "constant") return typeof value.value !== "number" || value.value < 0;
   const name = variableName(value);
-  return name !== null && negative.has(name);
+  if (name !== null) return negative.has(name);
+  if (value.kind === "property" && constantString(value.property) === "length") return false;
+  if (value.kind === "methodCall") {
+    const method = constantString(value.method);
+    const random =
+      method === "getRandom" &&
+      asNode(value.object)?.kind === "variable" &&
+      value.implicitThis === true;
+    return !(method === "size" || method === "length" || random);
+  }
+  if (value.kind === "binary" && (value.operator === "+" || value.operator === "*"))
+    return (
+      mayBeNegative(asNode(value.left)!, negative) || mayBeNegative(asNode(value.right)!, negative)
+    );
+  return true;
 }
 
 /**
@@ -140,13 +271,18 @@ export function withTupleAssignments(body: AstNode, fresh: (base: string) => str
 }
 
 /** Rewrites the loops over a list that change their item, everywhere in the node. */
-function loops(node: AstNode, fresh: (base: string) => string): AstNode {
-  const result = mapChildren(node, (child) => loops(child, fresh));
+function loops(
+  node: AstNode,
+  fresh: (base: string) => string,
+  replaced: ReadonlySet<string>,
+): AstNode {
+  const result = mapChildren(node, (child) => loops(child, fresh, replaced));
   if (result.kind === "for") {
     const list = asNode(result.collection);
     const item = typeof result.variable === "string" ? result.variable : null;
     const body = asNode(result.body);
     if (list?.kind !== "variable" || item === null || body === null) return result;
+    if (replaced.has(variableName(list)!)) return result;
     return itemLoop(result, variableName(list)!, item, body, fresh) ?? result;
   }
   if (result.kind === "expressionStatement") {
@@ -160,6 +296,7 @@ function loops(node: AstNode, fresh: (base: string) => string): AstNode {
     const body = asNode(closure.body);
     // A `return` in the closure went on with the next element, which a loop would have to write otherwise.
     if (parameters.length !== 1 || body === null || returnsInPlace(body)) return result;
+    if (replaced.has(variableName(list)!)) return result;
     return itemLoop(result, variableName(list)!, parameters[0]!, body, fresh) ?? result;
   }
   return result;
@@ -175,7 +312,8 @@ function itemLoop(
 ): AstNode | null {
   if (!changes(body, item) || sets(body, item) || sets(body, list) || moves(body, list, false))
     return null;
-  if (declares(body, list)) return null;
+  if (declares(body, list) || variableOnlyChange(body, item) || computedCompound(body, item))
+    return null;
   const span = loop.span;
   const index = fresh(`${item}Index`);
   const element = (at: AstNode["span"]): AstNode => ({
@@ -205,7 +343,7 @@ function itemLoop(
       },
       inclusive: false,
     },
-    body: substitute(body, item, element),
+    body: plainCompounds(substitute(body, item, element), list),
   };
 }
 
@@ -214,8 +352,9 @@ function scope(
   node: AstNode,
   fresh: (base: string) => string,
   negative: ReadonlySet<string>,
+  replaced: ReadonlySet<string>,
 ): AstNode {
-  const nested = mapChildren(node, (child) => scope(child, fresh, negative));
+  const nested = mapChildren(node, (child) => scope(child, fresh, negative, replaced));
   const block =
     nested.kind === "closure" ? asNode(nested.body) : nested.kind === "block" ? nested : null;
   if (block?.kind !== "block") return nested;
@@ -224,7 +363,8 @@ function scope(
     const declared = declaration(statement);
     if (declared === null) continue;
     rewritten =
-      elementVariable(rewritten, declared.name, declared.value, fresh, negative) ?? rewritten;
+      elementVariable(rewritten, declared.name, declared.value, fresh, negative, replaced) ??
+      rewritten;
   }
   if (rewritten === block) return nested;
   return nested.kind === "closure" ? { ...nested, body: rewritten } : rewritten;
@@ -237,6 +377,7 @@ function elementVariable(
   initial: AstNode | null,
   fresh: (base: string) => string,
   negative: ReadonlySet<string>,
+  replaced: ReadonlySet<string>,
 ): AstNode | null {
   // Every write takes an element of one list variable; a closure that reads the variable keeps it.
   let list: string | null = null;
@@ -266,6 +407,8 @@ function elementVariable(
   if (!valid || list === null || !changes(block, name)) return null;
   const source: string = list;
   if (sets(block, source, true) || moves(block, source, true) || closureDeclares(block, source))
+    return null;
+  if (replaced.has(source) || variableOnlyChange(block, name) || computedCompound(block, name))
     return null;
   if (placeholder && !usesFollowTakes(block, name, source)) return null;
   const index = fresh(`${name}Index`);
@@ -354,7 +497,8 @@ function elementVariable(
       };
     return mapChildren(node, rewrite);
   };
-  return mapChildren(block, rewrite);
+  // The block's own statements take the position as theirs, so that a declaration stays in the block.
+  return plainCompounds(rewrite(block), source);
 }
 
 /**
@@ -444,13 +588,20 @@ function moves(node: AstNode, name: string, append: boolean): boolean {
   let found = false;
   walkAst(node, (child) => {
     const method = child.kind === "methodCall" ? constantString(child.method) : null;
+    // `add(position, value)` inserts, which moves the elements after it.
+    const appends =
+      append &&
+      method !== null &&
+      APPENDING_METHODS.has(method) &&
+      nodeArray(asNode(child.arguments)?.items).length === 1;
     if (
       method !== null &&
       CHANGING_METHODS.has(method) &&
       variableName(child.object) === name &&
-      !(append && APPENDING_METHODS.has(method))
+      !appends
     )
       found = true;
+    if (movedByCollections(child) === name) found = true;
     if (
       child.kind === "binary" &&
       child.operator === "<<" &&

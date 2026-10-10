@@ -13,6 +13,9 @@ function fill {
   let done = 0
   while done < 2 {
     stackIndex = colIndex
+    if stackIndex < 0 {
+      stackIndex = stacks.length + stackIndex
+    }
     if stacks[stackIndex][stacks[stackIndex].length - 1][0] == true {
       colIndex = (colIndex + 1) % stacks.length
       continue
@@ -51,4 +54,34 @@ function pick {
 }
 pick()
 say "Last first ${stacks[1][0][0]}"
+// A position computed from the end counts from there too.
+let cells = [
+  [0],
+  [5]
+]
+let lastCellIndex = cells.length - 3
+if lastCellIndex < 0 {
+  lastCellIndex = cells.length + lastCellIndex
+}
+cells[lastCellIndex][0] = 1
+say "Cells ${cells[0][0]} ${cells[1][0]}"
+// A compound change through the element is written out, and a push goes to the element as it is.
+let counts = [[5]]
+let countIndex = 0
+// NOTE SX_PLUS_OPERAND_TYPE line 45: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+while counts[countIndex][0] < 6 {
+  counts[countIndex][0] = counts[countIndex][0] + 1
+}
+let queue = [[5, 2]]
+let waiting = queue[0]
+// NOTE SX_SHARED_LIST_WRITE line 48: Groovy shared the list in waiting with the variable, list element, or field it was assigned from, so this change affected that place too; in TeaseScript waiting holds a separate copy (ADR 0014).
+waiting = [7] + waiting
+// NOTE SX_LIST_JOIN line 49: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "Counts ${counts[0][0]} ${waiting.join(",")}"
+// A list whose slot the script replaces leaves the element taken before out of it.
+let slots = [[0]]
+let held = slots[0]
+slots[0] = [5]
+held[0] = 1
+say "Slots ${slots[0][0]} ${held[0]}"
 exit

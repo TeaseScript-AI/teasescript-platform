@@ -34,3 +34,22 @@ def pick = {
 }
 pick()
 show("Last first " + stacks[1][0][0])
+// A position computed from the end counts from there too.
+def cells = [[0], [5]]
+def lastCell = cells[cells.size() - 3]
+lastCell[0] = 1
+show("Cells " + cells[0][0] + " " + cells[1][0])
+// A compound change through the element is written out, and a push goes to the element as it is.
+def counts = [[5]]
+def count = counts[0]
+while (count[0] < 6) count[0] += 1
+def queue = [[5, 2]]
+def waiting = queue[0]
+waiting.push(7)
+show("Counts " + counts[0][0] + " " + waiting.join(","))
+// A list whose slot the script replaces leaves the element taken before out of it.
+def slots = [[0]]
+def held = slots[0]
+slots[0] = [5]
+held[0] = 1
+show("Slots " + slots[0][0] + " " + held[0])
