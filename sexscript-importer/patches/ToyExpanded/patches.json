@@ -293,6 +293,13 @@
       "category": "e",
       "reason": "When the next event falls due while the player is still at an earlier button, such as the introduction's (a second session that the player leaves waiting), the lounge loop passes showButton a negative wait, Math.min(cycleTime, e.event.time - getTime()); the legacy player's button.wait threw IllegalArgumentException on it, which nothing caught (MainFrame.showButtonFromScript), so the script failed, and TeaseScript rejects the timeout as well (TSR050). Wait at least 0, so the loop goes on to run the due event at once.",
       "diff": "lounge-wait-due.diff"
+    },
+    {
+      "id": "availability-cleanup",
+      "layer": "source",
+      "category": "b",
+      "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which TeaseScript's step limit makes too slow to walk. Read the days from 20 days ago to today directly instead: availability is only ever saved for the current day, and a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
+      "diff": "availability-cleanup.diff"
     }
   ]
 }

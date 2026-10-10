@@ -1,0 +1,20 @@
+--- a/scripts/toy/availability.groovy
++++ b/scripts/toy/availability.groovy
+@@ -38,12 +38,12 @@
+ 	toy.addTriggerHandler("talkEnded", { toy.setTalkEnded() });
+ 
+ 	return {
+-		def p = toy.load("toy.availability");
+-		if (!p) return;
+ 		def p2 = [:];
+-		final firstDay = toy.getDayNum() - 20;
+-		p.eachWithIndex{ avail, day ->
+-			if (day >= firstDay && avail > 0) {
++		final today = toy.getDayNum();
++		final firstDay = today - 20;
++		for (int day = firstDay; day <= today; day++) {
++			def avail = toy.loadInteger("toy.availability.$day");
++			if (avail != null && avail > 0) {
+ 				p2["$day"] = avail;
+ 			}
+ 		}
