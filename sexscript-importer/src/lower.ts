@@ -13681,6 +13681,9 @@ function lowerObjectMethodCallExpression(
   // `toArray(new String[0])` only names the array type.
   if (name === "toArray" && argumentsNodes.length === 1 && isPure(argumentsNodes[0]!, context))
     return target;
+  // A list that is not a variable, such as a record's field, empties in place as a variable's does.
+  if (name === "clear" && argumentsNodes.length === 0)
+    return { kind: "methodCall", target, name: "clear", arguments: [] };
   return unsupportedExpression(
     context,
     node,
