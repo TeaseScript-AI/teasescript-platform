@@ -130,8 +130,8 @@ import {
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 72;
-export const DEFAULT_MAX_CALL_DEPTH = 256;
-export const MAX_SUPPORTED_CALL_DEPTH = 4096;
+export const DEFAULT_MAX_CALL_DEPTH = 8192;
+export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
