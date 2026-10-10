@@ -28,6 +28,8 @@ interface Variable {
   comparisons: Array<{ operator: string; number: number }>;
   /** Waits and button timeouts that read it. */
   waits: number;
+  /** Whether a number below 0 is written to it, which a gauge wait's `max(seconds, 0)` then keeps out. */
+  negative: boolean;
 }
 
 /**
@@ -49,8 +51,9 @@ export function withElapsedDurations(
   const writes = new Map<IrStatement, Variable>();
   const comparisons = new Map<Binary, Variable>();
   const direct = new Set<Binary>();
-  // The variable that each wait or button timeout reads.
+  // The variable that each wait or button timeout reads, and the waits that read it as `max(seconds, 0)`.
   const waits = new Map<IrStatement, Variable>();
+  const clamped = new Set<IrStatement>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const numberOnly = (): Variable => ({
@@ -59,6 +62,7 @@ export function withElapsedDurations(
     buttons: 0,
     comparisons: [],
     waits: 0,
+    negative: false,
   });
 
   const expression = (value: IrExpression, scope: Scope): void => {
@@ -113,10 +117,11 @@ export function withElapsedDurations(
       expression(button, scope);
       return;
     }
-    if (numberValue(value) === null) {
+    const number = numberValue(value);
+    if (number === null) {
       target.duration = false;
       expression(value, scope);
-    }
+    } else if (number < 0) target.negative = true;
   };
   const statement = (item: IrStatement, scope: Scope): void => {
     switch (item.kind) {
@@ -154,6 +159,7 @@ export function withElapsedDurations(
         if (found === undefined) break;
         found.waits += 1;
         waits.set(item, found);
+        if (item.kind === "wait" && unclamped(item.duration) !== item.duration) clamped.add(item);
         if (item.kind === "showButton") expression(item.label, scope);
         return;
       }
@@ -208,6 +214,8 @@ export function withElapsedDurations(
   };
   walk(statements, root);
   for (const item of functions) body(item, new Scope(root));
+  // A gauge wait counts from 0 the seconds of a variable that may hold a number below 0, which a duration would not.
+  for (const item of clamped) if (waits.get(item)!.negative) waits.get(item)!.duration = false;
 
   const converted = (variable: Variable): boolean =>
     variable.duration &&
@@ -256,7 +264,8 @@ export function withElapsedDurations(
       // A wait or a timeout that reads a variable now holding a duration takes it as it is.
       const variable = waits.get(item);
       if (variable !== undefined && converted(variable)) {
-        // The time a button waited is never negative, so the wait takes it without the timer's `max(seconds, 0)`.
+        // The time a button waited is never negative, and a variable that a gauge wait counts from 0 holds no number
+        // below 0 where it becomes a duration, so the wait takes it without the timer's `max(seconds, 0)`.
         if (next.kind === "wait")
           next = { ...next, duration: unclamped(next.duration), unit: null };
         else if (next.kind === "showButton") next = { ...next, durationTimeout: true };
