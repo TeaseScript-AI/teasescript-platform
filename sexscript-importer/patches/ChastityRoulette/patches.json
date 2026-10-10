@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "max-multiplier-text",
+      "layer": "source",
+      "category": "b",
+      "reason": "The settings menu stores getString's answer in MaxMultiplier for one statement, then sets it to -1 or to the number the text gives, so the variable holds a number again on every path; TeaseScript variables keep one type, so the text gets its own variable, maxMultiplierText, and MaxMultiplier and Multiplier, which copies it, stay numbers.",
+      "diff": "max-multiplier-text.diff"
+    }
+  ]
+}
