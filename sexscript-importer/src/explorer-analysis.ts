@@ -769,6 +769,23 @@ export class DataFlow {
   }
 
   /**
+   * An expression's flow at instruction `at` in a call's context: with the flows of the parameters the call gives, and
+   * through the temporaries and the helper results it reads ({@link #flowAt}).
+   */
+  #flowIn(expression: unknown, at: number | undefined, context: CallContext | null): Flow {
+    const flows = this.#flowsIn(context);
+    return at === undefined
+      ? this.flowOf(expression, flows)
+      : this.#flowAt(
+          expression,
+          at,
+          flows ?? new Map(),
+          context?.constants ?? new Map(),
+          HELPER_DEPTH,
+        );
+  }
+
+  /**
    * The flows of the parameters a context's call gives ({@link CallContext.flows}): each argument's, read in the context
    * of the call, with what the function assigns the parameter.
    */
@@ -778,7 +795,7 @@ export class DataFlow {
     const flows = new Map<string, Flow>();
     for (const [key, argument] of this.#argumentsOf(context.call)) {
       const flow = emptyFlow();
-      merge(flow, this.flowOf(argument, this.#flowsIn(context.outer)));
+      merge(flow, this.#flowIn(argument, context.call, context.outer));
       const assigned = this.#assignedInCode.has(key) ? this.#variableFlow(key) : undefined;
       if (assigned !== undefined) merge(flow, assigned);
       flows.set(key, flow);
@@ -892,7 +909,7 @@ export class DataFlow {
       if (this.#holds.has(id) || visited.has(id)) return true;
       visited.add(id);
       const reading = values.filter((each) =>
-        this.flowOf(each.value, this.#flowsIn(each.context)).keys.has(key),
+        this.#flowIn(each.value, each.at, each.context).keys.has(key),
       );
       for (const each of reading) pending.push({ ...each, need });
       return reading.length > 0;
@@ -955,6 +972,9 @@ export class DataFlow {
         const id = value.functionId;
         const call = typeof value.call === "number" ? value.call : null;
         const inner = call === null ? null : this.#enter(call, context);
+        // Past the calls a context follows, its parameters' values are not known.
+        if (call !== null && inner === null && (this.#parameterNames.get(id)?.length ?? 0) > 0)
+          return false;
         return node(
           call === null ? `function ${id}` : `call ${call}`,
           need,
@@ -987,12 +1007,15 @@ export class DataFlow {
     const known = this.#inPlay.get(key);
     if (known !== undefined) return known;
     const found = this.#assignmentsOf(key).some(
-      ({ value, index }) =>
-        value.kind !== "parameter" &&
-        ![...this.flowOf(value).keys].some((stored) => this.holdsStored(value, stored, index)),
+      ({ value, index }) => value.kind !== "parameter" && this.#notStored(value, index),
     );
     this.#inPlay.set(key, found);
     return found;
+  }
+
+  /** Whether a value assigned at instruction `index` is no stored key's value ({@link holdsStored}). */
+  #notStored(value: Data, index: number): boolean {
+    return ![...this.flowOf(value).keys].some((stored) => this.holdsStored(value, stored, index));
   }
 
   /**
@@ -1023,7 +1046,17 @@ export class DataFlow {
           if (this.setInPlay(value)) return true;
         } else {
           pending.push({ value: argument, at: context!.call, context: context!.outer });
-          if (this.#assignedInCode.has(key) && this.setInPlay(value)) return true;
+          // What the function assigns it, not its default, which the call does not use.
+          if (
+            this.#assignedInCode.has(key) &&
+            this.#assignmentsOf(key).some(
+              ({ value: assigned, index }) =>
+                assigned.kind !== "parameter" &&
+                this.#instructions[index]?.kind !== "bindDefaultParameter" &&
+                this.#notStored(assigned, index),
+            )
+          )
+            return true;
         }
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         const id = `temporary ${value.temporaryId} at ${at}${where}`;
@@ -1604,21 +1637,26 @@ export class DataFlow {
     depth = HELPER_DEPTH,
     outer: ReadonlyMap<string, Flow> | null = null,
   ): Flow {
-    const substitute = this.#parameterFlows(call, bound, outer);
-    // By what the parameters read, not by which call passed them, so that calls passing the same share it.
-    const text = [...substitute]
-      .map(
-        ([key, flow]) => `${key}=${[...flow.asks].join()}|${[...flow.keys].join()}|${flow.clock}`,
-      )
-      .sort()
-      .join("\u0000");
+    const substitute = this.#parameterFlows(call, bound, depth, outer);
+    const constants = this.#constantArguments(call, bound);
+    // By the function and what its parameters read, not by which call passed them, so that calls passing the same
+    // share it.
+    const text = JSON.stringify(
+      [...substitute]
+        .map(([key, flow]) => [
+          key,
+          [...flow.asks].sort((left, right) => left - right),
+          [...flow.keys].sort(),
+          flow.clock,
+        ])
+        .sort(([left], [right]) => (String(left) < String(right) ? -1 : 1)),
+    );
     const id =
       this.#substitutionIds.get(text) ??
       this.#substitutionIds.set(text, String(this.#substitutionIds.size)).get(text)!;
-    const memo = `${call} ${depth} ${this.#constantsId(bound)} ${id}`;
+    const memo = `${String(this.#instructions[call]!.functionId)} ${depth} ${this.#constantsId(constants)} ${id}`;
     const known = this.#callFlows.get(memo);
     if (known !== undefined) return known;
-    const constants = this.#constantArguments(call, bound);
     const found = emptyFlow();
     for (const index of this.#returnsFor(call, bound))
       merge(
@@ -1631,11 +1669,13 @@ export class DataFlow {
 
   /**
    * The flows of the parameters of a call's function that it reads as the call's ({@link #callFlow}): each argument's,
-   * read with the `bound` constants and the `outer` parameter flows of the call it is in, or the default of one left out.
+   * read where the call is with the `bound` constants and the `outer` parameter flows of the call it is in, also through
+   * the helpers it calls ({@link #flowAt}), or the default of one left out.
    */
   #parameterFlows(
     call: number,
     bound: ReadonlyMap<string, SavedScalar>,
+    depth: number,
     outer: ReadonlyMap<string, Flow> | null,
   ): Map<string, Flow> {
     const instruction = this.#instructions[call]!;
@@ -1650,12 +1690,13 @@ export class DataFlow {
         const key = this.scopeKey(name, entry);
         // A parameter the function assigns holds more than what the call passed.
         if (this.#assignedInCode.has(key)) continue;
-        const value = given.has(name) ? given.get(name) : this.#defaults.get(key);
-        if (value !== undefined)
-          substitute.set(
-            key,
-            this.flowOf(value, new Map([...(outer ?? []), ...this.#substituted(bound)])),
-          );
+        const substituted = new Map([...(outer ?? []), ...this.#substituted(bound)]);
+        if (given.has(name))
+          substitute.set(key, this.#flowAt(given.get(name), call, substituted, bound, depth));
+        else {
+          const value = this.#defaults.get(key);
+          if (value !== undefined) substitute.set(key, this.flowOf(value, substituted));
+        }
       }
     }
     return substitute;
@@ -1667,9 +1708,9 @@ export class DataFlow {
   }
 
   /**
-   * An expression's flow at instruction `at` of a function's code, as {@link flowOf} with `substitute`, where a
-   * temporary holding a helper call's result is read as that call's result with the `bound` constants
-   * ({@link #callFlow}), `depth` calls deep.
+   * An expression's flow at instruction `at` of a function's code, as {@link flowOf} with `substitute`, where a helper
+   * call's result, also in a temporary that holds it, is read as that call's result with the `bound` constants and
+   * `substitute` for its arguments ({@link #callFlow}), `depth` calls deep.
    */
   #flowAt(
     expression: unknown,
@@ -1692,10 +1733,11 @@ export class DataFlow {
           ? this.heldAt(value.temporaryId, at)
           : null;
       if (held !== null) {
-        for (const store of held)
-          if (store.value.kind === "callResult" && typeof store.value.call === "number")
-            merge(flow, this.#callFlow(store.value.call, bound, depth - 1, substitute));
-          else pending.push({ value: store.value, at: store.index });
+        for (const store of held) pending.push({ value: store.value, at: store.index });
+        continue;
+      }
+      if (value.kind === "callResult" && typeof value.call === "number" && depth > 0) {
+        merge(flow, this.#callFlow(value.call, bound, depth - 1, substitute));
         continue;
       }
       if (

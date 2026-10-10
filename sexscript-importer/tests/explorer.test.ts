@@ -1026,6 +1026,18 @@ test(
     assert.deepEqual(echo('n = load("score", default: 0)', 'load("score", default: 0) + 1'), [
       "score",
     ]);
+    // Also through helpers that pass it on, three calls deep; past that, what a parameter holds is not followed, and a
+    // value computed from it is not taken for the stored value.
+    const relayed = (depth: number, step: string) => {
+      let source = 'function f0(n = load("score", default: 0)) {\n  return n\n}\n';
+      for (let index = 1; index < depth; index += 1)
+        source += `function f${index}(n = load("score", default: 0)) {\n  return f${index - 1}(n${index === 1 ? step : ""})\n}\n`;
+      return compared(
+        `${source}if f${depth - 1}(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n`,
+      );
+    };
+    assert.deepEqual(relayed(3, ""), ["score > 7"]);
+    assert.deepEqual(relayed(4, " + 1"), ["score"]);
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",
@@ -1305,9 +1317,10 @@ test(
         '  return answer\n}\nif readAnswer() == 1234 {\n  say "Matched."\n}\nexit\n',
     ).find((condition) => condition.line === 8);
     assert.deepEqual(echoed?.sources, ["ask"]);
-    // Also through a helper that passes its parameter on; and a counter it returns is set in play.
+    // Also through a helper that passes its parameter on, also as another call's result; and a counter it returns is set
+    // in play.
     const forwarded = analyzed(
-      'function echo(n) {\n  return n\n}\nfunction relay(n) {\n  return echo(n)\n}\nlet answer = askInteger "Number?"\n' +
+      'function echo(n) {\n  return n\n}\nfunction relay(n) {\n  return echo(echo(n))\n}\nlet answer = askInteger "Number?"\n' +
         'let count = 0\ncount += 1\nif relay(answer) == 1234 {\n  say "Matched."\n}\nif echo(count) > 7 {\n' +
         '  say "Counted."\n}\nexit\n',
     ).filter((condition) => condition.line === 10 || condition.line === 13);
@@ -1317,6 +1330,15 @@ test(
         [["ask"], true],
         [[], true],
       ],
+    );
+    // Calls whose arguments read different stored keys are told apart, also when the keys' texts join alike.
+    const joined = analyzed(
+      'function echo(n) {\n  return n\n}\nfunction relay(n) {\n  return echo(n)\n}\nif relay(load("a,b", default: 0)) > 7 {\n' +
+        '  say "One."\n}\nif relay(load("a", default: 0) + load("b", default: 0)) > 8 {\n  say "Two."\n}\nexit\n',
+    ).filter((condition) => condition.line === 7 || condition.line === 10);
+    assert.deepEqual(
+      joined.map((condition) => condition.sources.toSorted()),
+      [["a,b"], ["a", "b"]],
     );
     // A helper that picks a stored value by comparing its parameter with constants reads only the one a constant
     // argument picks.
