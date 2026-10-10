@@ -1,3 +1,16 @@
+function sexscriptLegacyPlainText(value) {
+  let text = "${value}".replace("**", "").replace("~~", "").replace("[u]", "").replace("[/u]", "").replace("[/color]", "")
+  let start = text.indexOf("[color=")
+  while start >= 0 {
+    let endValue = text.indexOf("]")
+    if endValue < start {
+      return text.replace("*", "")
+    }
+    text = "${text.substring(0, start)}${text.substring(endValue + 1)}"
+    start = text.indexOf("[color=")
+  }
+  return text.replace("*", "")
+}
 // A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
 // button; a wait that timed the reading goes, also in milliseconds.
 showButton "Start"
@@ -123,4 +136,28 @@ say "will be slower ...", instant
 say "and harder!", instant
 wait 7 s
 counted("Alternating cheeks.")
+// BreatheAcademy waitWithCountDownSound: a step of the count between a text and its wait takes no time, and a computed
+// wait after a text that a loop builds anew each pass is its tick, so the countdown keeps its speed.
+function countDown(text, timeValue, speed) {
+  let leftValue = timeValue / speed
+  for it in 1..=floor(timeValue / speed) {
+    say "${text}", instant
+    say "${toInteger(leftValue * speed)} seconds", instant
+    leftValue -= 1
+    wait speed s
+  }
+}
+countDown("Hold your breath", 3, 0.5)
+// BreatheAcademy showDynamically: a text typed out a character at a time keeps the pace of its computed wait.
+let textSpeed = 2
+let typed = ""
+for c in sexscriptLegacyPlainText("Ready").split("") {
+  typed = "${typed}${c}"
+  say typed, instant
+  wait (1 / textSpeed) s
+}
+// A step of a count between a text and a short literal wait takes no time either: the reading time replaces the wait.
+let breaths = 0
+say "Breathe in slowly."
+breaths += 1
 exit

@@ -1839,6 +1839,79 @@ test(
   },
 );
 
+// BreatheAcademy's breath-hold countdown and typed-out text: legacy showed one text per tick and waited the tick, so a
+// player who never skips sees them take the time the author wrote, not a reading time per message.
+test(
+  "countdowns and texts typed out a character at a time keep their legacy pace",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-pace-"));
+    try {
+      const file = path.join(directory, "pace.groovy");
+      writeFileSync(
+        file,
+        [
+          "def countDown = { text, time, speed ->",
+          "  def left = time / speed",
+          "  (1..(time / speed)).each {",
+          '    show(text + "\\n\\n" + (left * speed).toInteger() + " seconds")',
+          "    left = left - 1",
+          "    wait(speed)",
+          "  }",
+          "}",
+          "def textSpeed = 2",
+          "def typing = { message ->",
+          '  def shown = ""',
+          "  for (c in message) {",
+          "    shown += c",
+          "    show(shown)",
+          "    wait(1 / textSpeed)",
+          "  }",
+          "}",
+          'countDown("Hold your breath", 3, 0.5)',
+          'countDown("", 2, 1)',
+          'typing("5....4....3....2....1..........CUM!")',
+          "",
+        ].join("\n"),
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const times: number[] = [];
+      const note = (events: readonly PacedEvent[], at: PacedSnapshot): void => {
+        for (const event of events)
+          if (event.kind === "say") times.push(at.currentSessionTimeMs ?? NaN);
+      };
+      let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      note(step.events, step.snapshot);
+      for (let turn = 0; turn < 200 && step.snapshot.status === "waiting"; turn += 1) {
+        // A player who never skips: time goes on to the earliest deadline, a reading time's or a wait's.
+        const deadlines = [
+          step.snapshot.foregroundAction,
+          ...(step.snapshot.backgroundActions ?? []),
+        ]
+          .map((action) => action?.deadlineMs)
+          .filter((deadline) => deadline !== undefined);
+        const observed = observeTime(plan, step.snapshot, Math.min(...deadlines));
+        note(observed.events, observed.snapshot);
+        step = run(plan, observed.snapshot);
+        note(step.events, step.snapshot);
+      }
+      assert.equal(step.snapshot.status, "halted", tease);
+      // Six ticks of half a second, two of a second, and 35 characters half a second apart: 3 + 2 + 17.5 s, two texts
+      // per tick and one per character.
+      assert.equal(times.length, 12 + 4 + 35, tease);
+      assert.equal((step.snapshot.currentSessionTimeMs ?? NaN) - times[0]!, 22_500, tease);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
 // The hierarchical storage fixture says what the same script said with legacy storage (PropertiesWorker, ported to
 // Groovy as an oracle): elements read and rebuilt, a key that is a value first, a shorter list, a null element, and the
@@ -1923,6 +1996,8 @@ interface PacedEvent {
 }
 interface PacedSnapshot {
   status: string;
+  currentSessionTimeMs?: number;
+  backgroundActions?: ReadonlyArray<{ deadlineMs?: number }>;
   foregroundAction?: {
     kind?: string;
     actionId?: number;

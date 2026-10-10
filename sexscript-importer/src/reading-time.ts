@@ -17,8 +17,9 @@ const visibleText = await loadVisibleText();
 
 /**
  * Legacy `show()` displayed its text at once, so authors timed its reading with the `wait()` after it, where the Player
- * gives every `say` a skippable reading time. A literal wait right after a text, at most 1.5 times the text's reading
- * time, goes and the Player's reading time takes over; this includes a wait before a button or an ask, where the player
+ * gives every `say` a skippable reading time. A literal wait right after a text, or after it and statements that only
+ * set variables, which take no time, at most 1.5 times the text's reading time, goes and the Player's reading time
+ * takes over; this includes a wait before a button or an ask, where the player
  * decides when to go on (owner decisions 2026-10-07). A longer wait is time for an action or a task and stays
  * (`afterText`), as does any other wait. A text before a wait that stays appears without reading time (`instant`, owner
  * decision 2026-10-05), so that the wait alone sets its timing; withoutCutReadingTimes takes it away again where it
@@ -29,8 +30,8 @@ const visibleText = await loadVisibleText();
  * measure is the shortest reading time the text can have. A wait stays as it is where another wait follows it, a pause
  * the author made; after the system speaker's text, which the importer adds; and where it keeps a beat (owner decision
  * 2026-10-07), whatever its length: after a text without letters, which has nothing to read (`3`, `...`, a number), and
- * a loop's tick, a second at most after a text the loop's body builds anew each pass, as a clock or a countdown does. A
- * beat's text keeps `instant`, as do the messages of animations and counters (withMessageHandles), whose waits stay.
+ * a loop's tick, a second at most or computed, after a text the loop's body builds anew each pass, as a clock, a
+ * countdown, or a text typed out a character at a time does. A beat's text keeps `instant`, as do the messages of animations and counters (withMessageHandles), whose waits stay.
  */
 export function withReadingTimes(
   statements: IrStatement[],
@@ -49,6 +50,13 @@ export function withReadingTimes(
     const next: number[] = Array.from(nested, () => -1);
     for (let index = nested.length - 2; index >= 0; index -= 1)
       next[index] = significant(nested[index + 1]!) ? index + 1 : next[index + 1]!;
+    // The index of the statement at `index` or the first after it that does more than set a variable to a value without
+    // effects, which takes no time: a text's wait may follow such statements, as a countdown's step of its count.
+    const past = (index: number): number => {
+      let at = index;
+      while (at !== -1 && setsOnly(nested[at]!)) at = next[at]!;
+      return at;
+    };
     const result = [...nested];
     const dropped = new Set<number>();
     nested.forEach((statement, index) => {
@@ -69,7 +77,7 @@ export function withReadingTimes(
         return;
       }
       if (statement.kind !== "say") return;
-      const waitIndex = sound === -1 ? next[index]! : next[sound]!;
+      const waitIndex = past(sound === -1 ? next[index]! : next[sound]!);
       const wait = nested[waitIndex];
       if (wait?.kind !== "wait" || wait.visible) return;
       // In a loop that polls the clock, the wait is the time the loop waits for: a text's reading time passes no time.
@@ -98,11 +106,12 @@ export function withReadingTimes(
         result[index] = { ...statement, instant: true, beat: true };
         return;
       }
-      // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown.
+      // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown; so does
+      // one whose wait is computed, which no reading time replaces, as a countdown at a given speed or a text typed out
+      // a character at a time.
       if (
         loopBody &&
-        milliseconds !== null &&
-        milliseconds <= TICK_MS &&
+        (milliseconds === null || milliseconds <= TICK_MS) &&
         builtAtRuntime(statement.value)
       ) {
         report(
@@ -159,6 +168,17 @@ const SOUND_BEAT =
 /** A text said at once with the sound that starts after it, a beat that sets its own timing. */
 function soundBeat(text: Extract<IrStatement, { kind: "say" }>): IrStatement {
   return { ...text, instant: true, beat: true };
+}
+
+/** Whether a statement only sets a variable, or an element of one, to a value without effects. */
+function setsOnly(statement: IrStatement): boolean {
+  if (statement.kind !== "let" && statement.kind !== "assign") return false;
+  let effect = false;
+  mapOwnExpressions(statement, (value) => {
+    effect ||= hasEffect(value);
+    return value;
+  });
+  return !effect;
 }
 
 /** Whether a text is fixed or interpolates only variables. */

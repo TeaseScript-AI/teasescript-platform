@@ -108,3 +108,27 @@ def counted = { message ->
 show("These last fifteen ... \n\nwill be slower ... \n\nand harder!")
 wait(7)
 counted("Alternating cheeks.")
+// BreatheAcademy waitWithCountDownSound: a step of the count between a text and its wait takes no time, and a computed
+// wait after a text that a loop builds anew each pass is its tick, so the countdown keeps its speed.
+def countDown = { text, time, speed ->
+	def left = time / speed
+	(1..(time / speed)).each {
+		show(text + "\n\n" + (left * speed).toInteger() + " seconds")
+		left = left - 1
+		wait(speed)
+	}
+}
+countDown("Hold your breath", 3, 0.5)
+// BreatheAcademy showDynamically: a text typed out a character at a time keeps the pace of its computed wait.
+def textSpeed = 2
+def typed = ""
+for (c in "Ready") {
+	typed += c
+	show(typed)
+	wait(1 / textSpeed)
+}
+// A step of a count between a text and a short literal wait takes no time either: the reading time replaces the wait.
+def breaths = 0
+show("Breathe in slowly.")
+breaths++
+wait(2)
