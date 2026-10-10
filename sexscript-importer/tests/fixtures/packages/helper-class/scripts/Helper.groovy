@@ -9,6 +9,11 @@ class Helper {
     count.times { showWait(main, msg, 1) }
   }
   def static twice = { it * 2 }
+  static double tau = 2 * Math.PI
+  // A static that operators compute from literals is a global, so the method that reads it is a global function too.
+  def static turns(main, count) {
+    return count * tau
+  }
   // Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
   def static percentChance(main, percent) {
     switch (main.getRandom(99) + 1) {

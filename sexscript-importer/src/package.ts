@@ -848,10 +848,11 @@ export function lowerPackage(
   // can (classGlobals); the others are copied into each script that calls them.
   const classOutputs =
     options.standalone === true ? new Map<number, MigrationProgram>() : classFiles(files, lowered);
+  // Only its global functions are visible to the scripts; a method the class file keeps local is copied like the rest.
   const classFunctions = new Set(
     [...classOutputs.values()].flatMap((program) =>
       program.statements.flatMap((statement) =>
-        statement.kind === "function" ? [statement.name] : [],
+        statement.kind === "function" && statement.global === true ? [statement.name] : [],
       ),
     ),
   );
@@ -1488,12 +1489,28 @@ function freeNames(statement: FunctionStatement): { variables: Set<string>; call
   return { variables: new Set([...variables].filter((name) => !declared.has(name))), calls };
 }
 
-/** Whether a value is made of literals only, so it can start a global (ADR 0022 §6.4). */
+/**
+ * Whether a value is made of literals and operators only, so it can start a global (ADR 0022 §6.4; V30 §12 allows
+ * side-effect-free operators), such as GuessMyNumber's `static float tau = 2 * Math.PI`. A division by a literal zero
+ * stays where the legacy code failed.
+ */
 function isLiteralValue(value: IrExpression): boolean {
   switch (value.kind) {
     case "literal":
     case "duration":
       return true;
+    case "unary":
+      return isLiteralValue(value.value);
+    case "binary":
+      return (
+        isLiteralValue(value.left) &&
+        isLiteralValue(value.right) &&
+        !(
+          ["/", "%"].includes(value.operator) &&
+          value.right.kind === "literal" &&
+          Number(value.right.value) === 0
+        )
+      );
     case "list":
       return value.items.every(isLiteralValue);
     case "object":

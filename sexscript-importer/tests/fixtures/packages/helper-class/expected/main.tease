@@ -1,6 +1,7 @@
 showWait("Kneel")
 rounds(3, "Stroke")
 say "Twice ${twice(2)}"
+say "Turns ${turns(2)}"
 if percentChance(40) {
   say "Lucky"
 }
