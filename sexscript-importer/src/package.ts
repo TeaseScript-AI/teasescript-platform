@@ -93,6 +93,14 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 ]);
 
 export interface PackageOptions {
+  /**
+   * The unit's source patches with the lines each took out of each script, by path from the scripts folder, so that a
+   * note on what a script no longer does names the patch (LowerOptions.patchedAssignments).
+   */
+  sourcePatches?: ReadonlyArray<{
+    id: string;
+    removed: Readonly<Record<string, readonly string[]>>;
+  }>;
   /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** Keeps texts with blank lines as one message each (LowerOptions.keepParagraphs). */
@@ -948,6 +956,7 @@ export function lowerPackage(
         info !== null && visible(index, other) ? [info] : [],
       ),
       packageFunctions: packageFunctionNames(groups[index]!),
+      patchedAssignments: patchedAssignments(file.sourceName, options.sourcePatches ?? []),
       stableNames,
       storageLiterals,
       nonTextKeys,
@@ -1718,6 +1727,23 @@ function packageStorageLiterals(
       ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
     ),
   );
+}
+
+/** The variables that a line a source patch took out of the script assigned, `final osName = ...`, with the patch. */
+function patchedAssignments(
+  sourceName: string,
+  patches: NonNullable<PackageOptions["sourcePatches"]>,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  const name = sourceName.replaceAll("\\", "/");
+  for (const patch of patches)
+    for (const [file, lines] of Object.entries(patch.removed)) {
+      if (name !== file && !name.endsWith(`/${file}`)) continue;
+      for (const line of lines)
+        for (const match of line.matchAll(/\b([A-Za-z_]\w*)\s*=(?![=~])/gu))
+          if (!found.has(match[1]!)) found.set(match[1]!, patch.id);
+    }
+  return found;
 }
 
 /**

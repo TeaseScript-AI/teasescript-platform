@@ -132,6 +132,11 @@ export interface LowerOptions {
   packageFunctions?: ReadonlySet<string>;
   /** Runtime-loaded mixin modules of the package. */
   mixinModules?: readonly MixinModuleInfo[];
+  /**
+   * Variables whose value a unit's source patch took out of this script, with the patch's ID, which a note on what the
+   * script no longer does names (the null-only variable).
+   */
+  patchedAssignments?: ReadonlyMap<string, string>;
   /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
   stableNames?: ReadonlySet<string>;
   /**
@@ -297,6 +302,8 @@ interface LowerContext {
   indexedSplits: Set<AstNode>;
   /** Variables that only ever hold null, whose declarations are left out and whose reads read null (nullOnlyVariables). */
   nullOnly: ReadonlySet<string>;
+  /** LowerOptions.patchedAssignments. */
+  patchedAssignments: ReadonlyMap<string, string>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -354,6 +361,8 @@ const ONLINE_STORAGE_NOTE =
 
 /** The storage key prefix under which a sent photo reference is kept, by its code (sendImage). */
 export const SENT_IMAGE_PREFIX = "sexscript.image.";
+/** The file of a staged unit with the lines its source patches took out of each script (convert-corpus, cli.ts). */
+export const SOURCE_PATCHES_FILE = ".source-patches.json";
 
 const DIRECT_STORAGE_LOADS = new Set([
   "load",
@@ -1688,6 +1697,7 @@ export function lowerParsedFile(
     writeTargets: new Set(),
     indexedSplits: new Set(),
     nullOnly: new Set(),
+    patchedAssignments: options.patchedAssignments ?? new Map(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -2946,6 +2956,7 @@ function lowerHelperMethod(
     writeTargets: new Set(),
     indexedSplits: new Set(),
     nullOnly: new Set(),
+    patchedAssignments: baseContext.patchedAssignments,
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -4909,7 +4920,9 @@ function lowerDeclaration(
     const diagnostic: MigrationDiagnostic = {
       code: "SX_NULL_ONLY_VARIABLE",
       severity: "info",
-      message: `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
+      message: context.patchedAssignments.has(name)
+        ? `${name} is given no value in the script as the unit's patch ${context.patchedAssignments.get(name)!} changed it, so it only holds null; the conversion leaves it out and reads null where it was read.`
+        : `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
       span,
     };
     context.diagnostics.push(diagnostic);

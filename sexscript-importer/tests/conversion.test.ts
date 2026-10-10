@@ -147,6 +147,35 @@ function registerFixtures(
   }
 }
 
+// A note on a variable that a unit's source patch took the value out of names that patch, not the legacy script.
+test(
+  "a null-only variable's note names the source patch that took its value out",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-patched-"));
+    try {
+      const sourcePath = path.join(directory, "toy.groovy");
+      writeFileSync(
+        sourcePath,
+        ["def osName = null", 'if (osName == "mac") show("Speaking")', 'show("Done")', ""].join(
+          "\n",
+        ),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
+        sourcePatches: [
+          { id: "speech-ignored", removed: { "toy.groovy": ["def osName = detectSystem()"] } },
+        ],
+      });
+      assert.match(
+        emitTease(program!),
+        /osName is given no value in the script as the unit's patch speech-ignored changed it/u,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // A legacy image count becomes a tag query: each package image carries a generated tag for its full folder path, so
 // the images with the listed folder's tag are exactly its images. A name filter keeps the conversion-time count.
 test(

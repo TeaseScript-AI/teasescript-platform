@@ -11,7 +11,7 @@ import {
 import { emitTease } from "./emit-tease.ts";
 import { imageFolderTag, imageSidecar } from "./image-tags.ts";
 import { inventoryFiles } from "./inventory.ts";
-import { lowerParsedFile } from "./lower.ts";
+import { lowerParsedFile, SOURCE_PATCHES_FILE } from "./lower.ts";
 import { lowerPackage } from "./package.ts";
 import { parseAcceptedForms, type AcceptedForm } from "./workarounds.ts";
 import type { MediaFile } from "./pending.ts";
@@ -149,6 +149,7 @@ async function convertPackage(
   const files = await packageFiles(dataRoot);
   const internal = await internalScripts(sourceRoot);
   const versions = await releases(sourceRoot);
+  const patched = await sourcePatches(sourceRoot);
   const lowered = lowerPackage(parsed, {
     accepted,
     keepParagraphs,
@@ -158,6 +159,7 @@ async function convertPackage(
     ...(internal === null ? {} : { internalScripts: internal }),
     ...(heldScripts.length === 0 ? {} : { heldScripts }),
     ...(versions.length === 0 ? {} : { releases: versions }),
+    ...(patched.length === 0 ? {} : { sourcePatches: patched }),
   });
   const programs = lowered.composed;
   // Each file keeps its legacy folder and name (lowerPackage paths); the package starts at main.tease (ADR 0022): a
@@ -265,6 +267,35 @@ async function finalPackage(root: string): Promise<FinalPackageInput> {
  * The scripts of an assembled unit that are no entries of their own, from the `unit.json` the merged corpus keeps beside
  * a unit's scripts folder (`internalScripts`, paths from the scripts folder); null without one.
  */
+/** The lines the unit's source patches took out, which convert-corpus writes beside a staged unit's scripts folder. */
+async function sourcePatches(
+  scriptsRoot: string,
+): Promise<Array<{ id: string; removed: Record<string, string[]> }>> {
+  const text = await readFile(path.join(scriptsRoot, "..", SOURCE_PATCHES_FILE), "utf8").catch(
+    () => null,
+  );
+  if (text === null) return [];
+  const patches: unknown = JSON.parse(text);
+  const valid =
+    Array.isArray(patches) &&
+    patches.every(
+      (patch: unknown) =>
+        typeof patch === "object" &&
+        patch !== null &&
+        "id" in patch &&
+        typeof patch.id === "string" &&
+        "removed" in patch &&
+        typeof patch.removed === "object" &&
+        patch.removed !== null &&
+        Object.values(patch.removed).every(
+          (lines) => Array.isArray(lines) && lines.every((line) => typeof line === "string"),
+        ),
+    );
+  if (!valid)
+    fail(`${path.join(scriptsRoot, "..", SOURCE_PATCHES_FILE)} is not a list of patch lines.`);
+  return patches;
+}
+
 async function internalScripts(scriptsRoot: string): Promise<string[] | null> {
   const text = await readFile(path.join(scriptsRoot, "..", "unit.json"), "utf8").catch(() => null);
   if (text === null) return null;
