@@ -556,7 +556,8 @@ from, for comparisons. Each line has
 a label: `play` when a play step executed it, in any session; `chosen` when only play with chosen random outcomes did;
 `clock` when only steps after the wall clock was set did;
 `unreachable` when no execution can reach it from the session start, by an over-approximation of the plan's control
-flow in which a constant condition takes only its one way; and `unknown` otherwise. A condition is constant when it is a
+flow in which a constant condition takes only its one way and a function returns only to the calls of it that run;
+and `unknown` otherwise. A condition is constant when it is a
 literal, when the compiler proves it always true or false (`TSV046`), or when it reads only stored keys whose values
 this package fixes: a key no `save` of the package writes is never stored (such as legacy profile keys that other
 scripts wrote), and a key that every save writes as a literal holds one of those literals or nothing. Each
@@ -624,7 +625,9 @@ observed, so a line first run in a later session may still be reachable in a fir
 Next to each unit's report, `<unit>.report.md` is a playtest report for the script's creator (`--no-report` leaves it
 out; `tools/explore-report.ts` writes one from an existing report): the crashes and loops with no way out with the
 player's steps to each, the missed ways grouped by what they would need (a random draw, a saved value, another time, a
-typed answer, a count, a value the script sets), and the code that can never run. Each line not reached counts once,
+typed answer, a count, a value the script sets: a condition on a variable the script also sets in play, such as a
+game's state a saved game restores, `setInPlay` in the report, goes with these), why play stopped, and the code that
+can never run. Each line not reached counts once,
 under the missed way with the most code behind it (`ownLines`), so the groups add up to the lines not reached;
 conditions and keys are as the script writes them.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last

@@ -167,7 +167,9 @@ const GROUPS: readonly { source: string; title: string; about: string }[] = [
   {
     source: "variable",
     title: "Needs a value the script sets",
-    about: "The condition compares a value the script sets along the way.",
+    about:
+      "The condition compares a value the script sets along the way, also where a saved game or an earlier visit " +
+      "restores it.",
   },
 ];
 
@@ -303,7 +305,15 @@ function missedGroups(
       about,
       missed.filter(
         (branch) =>
-          !listed.has(branch) && Array.isArray(branch.sources) && branch.sources.includes(source),
+          !listed.has(branch) &&
+          Array.isArray(branch.sources) &&
+          // A value the script sets in play goes with those, also when stored values restore it.
+          (source === "storage"
+            ? branch.sources.includes(source) && branch.setInPlay !== true
+            : source === "variable"
+              ? branch.sources.includes(source) ||
+                (branch.setInPlay === true && branch.sources.includes("storage"))
+              : branch.sources.includes(source)),
       ),
     );
   group(
@@ -313,6 +323,22 @@ function missedGroups(
     missed.filter((branch) => !listed.has(branch)),
   );
   return groups;
+}
+
+/** Why the playtester stopped, as a sentence after the coverage. */
+function stopShown(search: Fields): string {
+  switch (search.stoppedBy) {
+    case "exhausted":
+      return " It tried everything it could think of.";
+    case "maxStates":
+      return ` It stopped at its limit of ${count(search.states).toLocaleString("en")} kept game states, so more play may reach more.`;
+    case "budget":
+      return " It stopped at its time budget, so more play may reach more.";
+    case "stalled":
+      return " It stopped when more play no longer reached anything new.";
+    default:
+      return " It stopped at its step budget, so more play may reach more.";
+  }
 }
 
 /** The report for one unit's explorer report. */
@@ -348,9 +374,7 @@ export function playtestReport(report: Fields): string {
       `${plural(visits, "visit")}: it pressed every button, picked every option, typed the answers the script compares ` +
       `with, came back later and at other times, and also chose the outcomes of random draws. It reached ` +
       `${figure(coverage.visitedLines)} of the ${figure(coverage.coverableLines)} lines that can run (${count(coverage.percent)}%).` +
-      (search.stoppedBy === "exhausted"
-        ? " It tried everything it could think of."
-        : " It stopped at its step budget, so more play may reach more."),
+      stopShown(search),
     "",
     `- Crashes: ${crashes.length}`,
     `- Loops with no way out: ${traps.length}`,

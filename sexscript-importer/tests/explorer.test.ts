@@ -1256,6 +1256,54 @@ test(
   },
 );
 
+test(
+  "the creator report names why play stopped, groups a value set in play with values the script sets also when a saved game restores it, and lists a function nothing calls whole as code that can never run",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function shout(text) {\n  say text\n  return text\n}\nfunction unused(n) {\n  say "One."\n  shout("x")\n' +
+      '  say "Two."\n  return n\n}\nlet health = 9\nlet start = choose fresh: "New game", saved: "Load game"\nif start == "saved" {\n' +
+      '  health = load("slot.health", default: 9)\n}\nshowButton "Fight"\nhealth = health - 1\nsave health as "slot.health"\n' +
+      'if health < -50 {\n  say "Fallen."\n}\nshout("End.")\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const fallen = result.coverage.unvisitedBranches.find((entry) => entry.line === 19);
+    assert.equal(fallen?.setInPlay, true, JSON.stringify(fallen));
+    assert.deepEqual(
+      result.coverage.files[0]?.unvisited.filter((range) => range.reach === "unreachable"),
+      [{ lines: "5-9", reach: "unreachable", reason: "no execution path from the session start" }],
+    );
+    const report = playtestReport(
+      JSON.parse(
+        JSON.stringify({
+          unit: "arena",
+          compile: { ok: true },
+          ...result,
+          search: { ...result.search, stoppedBy: "maxStates", states: 20_003 },
+        }),
+      ),
+    );
+    assert.match(report, /stopped at its limit of 20,003 kept game states/u);
+    const setsSection = report.split("### Needs a value the script sets")[1]?.split("###")[0] ?? "";
+    assert.match(setsSection, /`health < -50`/u, report);
+    assert.doesNotMatch(
+      report.split("### Needs something saved on an earlier visit")[1]?.split("###")[0] ?? "",
+      /health/u,
+    );
+    assert.match(report, /lines 5-9/u);
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

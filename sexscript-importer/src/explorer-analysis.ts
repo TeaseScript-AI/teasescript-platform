@@ -198,16 +198,44 @@ export function unreachableInstructions(
   constants: ReadonlyMap<number, boolean>,
 ): Uint8Array {
   const next = successors(plan, instructions, constants);
+  // A function returns only to the calls of it that run: the return point of a call is reached once the call and a
+  // return of the function are, not because another call of the function runs.
+  const functionOf = new Map<number, number>();
+  for (const definition of list(plan.functions)) {
+    const end = Number(definition.endInstruction);
+    for (let index = Number(definition.entryInstruction); index < end; index += 1)
+      functionOf.set(index, Number(definition.id));
+  }
+  const calls = new Map<number, number[]>();
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind !== "callFunction") return;
+    const id = Number(instruction.functionId);
+    calls.set(id, [...(calls.get(id) ?? []), index]);
+  });
+  const returned = new Set<number>();
   const reached = new Uint8Array(instructions.length);
-  const queue = [0];
-  reached[0] = 1;
-  for (let position = 0; position < queue.length; position += 1) {
-    for (const target of next[queue[position]!] ?? []) {
-      if (target >= 0 && target < instructions.length && reached[target] === 0) {
-        reached[target] = 1;
-        queue.push(target);
-      }
+  const queue: number[] = [];
+  const reach = (target: number) => {
+    if (target >= 0 && target < instructions.length && reached[target] === 0) {
+      reached[target] = 1;
+      queue.push(target);
     }
+  };
+  reach(0);
+  for (let position = 0; position < queue.length; position += 1) {
+    const index = queue[position]!;
+    const instruction = instructions[index]!;
+    if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
+      const owner = functionOf.get(index) ?? 0;
+      if (returned.has(owner)) continue;
+      returned.add(owner);
+      for (const call of calls.get(owner) ?? [])
+        if (reached[call] === 1) reach(Number(instructions[call]!.returnInstruction));
+      continue;
+    }
+    if (instruction.kind === "callFunction" && returned.has(Number(instruction.functionId)))
+      reach(Number(instruction.returnInstruction));
+    for (const target of next[index] ?? []) reach(target);
   }
   return reached.map((value) => 1 - value);
 }
@@ -752,6 +780,19 @@ export class DataFlow {
     const holds = holdsAt(expression, at, "value");
     if (holds) for (const id of visited) this.#holds.add(id);
     return holds;
+  }
+
+  /**
+   * Whether the code sets a variable in play, not only from a stored value: some assignment of it is no stored key's
+   * value ({@link holdsStored}), such as a literal, a sum, a loop's element, or a part assigned; as a game's state is,
+   * which a saved game may also restore. The variable as the code reads it (an identifier of a condition).
+   */
+  setInPlay(variable: unknown): boolean {
+    return this.#assignmentsOf(this.#keyOf(variable)).some(
+      ({ value, index }) =>
+        value.kind !== "parameter" &&
+        ![...this.flowOf(value).keys].some((key) => this.holdsStored(value, key, index)),
+    );
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */

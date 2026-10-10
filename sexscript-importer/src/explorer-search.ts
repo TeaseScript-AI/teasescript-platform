@@ -497,6 +497,11 @@ export interface UnvisitedBranch {
   /** The variables, stored keys, asks, and clock the missed way depends on, as far as the data flow shows. */
   dependsOn: string[];
   /**
+   * The condition reads a variable the code sets in play, not only from a stored value, such as a game's state that a
+   * saved game also restores ({@link DataFlow.setInPlay}).
+   */
+  setInPlay?: true;
+  /**
    * Coverable lines that no explored state ran and that the missed way leads to without passing code a state ran:
    * how much code waits behind it.
    */
@@ -4334,6 +4339,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     routeOf,
     session.randomChoices,
     (subject) => (times === null ? null : exactPart(subject, times)),
+    (condition) => identifiersIn(condition).some((node) => flow.setInPlay(node)),
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -5141,6 +5147,7 @@ function lineCoverage(
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
   clockPartOf: (subject: unknown) => string | null,
+  setInPlay: (condition: unknown) => boolean,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5426,6 +5433,7 @@ function lineCoverage(
       sources: directed === undefined ? [] : sourceKinds(directed.goals),
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
+      ...(setInPlay(condition) ? { setInPlay: true as const } : {}),
       behindLines: (regions[unvisitedBranches.length] = behind(missedTarget ? target : index + 1))
         .size,
       ownLines: 0,
