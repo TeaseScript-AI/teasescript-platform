@@ -2544,6 +2544,9 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       if (node.kind === "call" && node.name === COMPARE_HELPER && Array.isArray(node.positional))
         for (const side of node.positional) tested.add(nameOf(side) ?? "");
     });
+    // A number that may be null in arithmetic is a compile error once the variable says so, where the open read only
+    // failed at runtime on that path.
+    const unguarded = unguardedArithmetic(statement.body);
     const declarations = (items: readonly IrStatement[]): void => {
       for (const item of items) {
         if (
@@ -2555,7 +2558,8 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
           item.value.defaultValue === undefined &&
           tested.has(item.name) &&
           !copied.has(item.name) &&
-          !mixed.has(item.name)
+          !mixed.has(item.name) &&
+          !unguarded.has(item.name)
         )
           found.add(item);
         if (item.kind === "if") {
@@ -2571,6 +2575,135 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
     };
     declarations(statement.body);
   }
+  return found;
+}
+
+/**
+ * The variables of a function body that arithmetic (`+ - * / %`, negation, a compound assignment) reads where the
+ * body has not shown them to hold a value: a forward pass in statement order, which knows a variable holds one after
+ * a whole-number value is stored in it, in the branch of `x != null` that it took (also on the right of `and`), and
+ * after an `if` whose branches that reach its end all know it; a loop forgets what it sets.
+ */
+function unguardedArithmetic(body: readonly IrStatement[]): Set<string> {
+  const found = new Set<string>();
+  const nameOf = (value: IrExpression): string | null =>
+    value.kind === "variable" ? value.name : null;
+  const isNull = (value: IrExpression): boolean => value.kind === "literal" && value.value === null;
+  const union = (left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> =>
+    new Set([...left, ...right]);
+  // The variables that the condition, when it is `holds`, shows to hold a value.
+  const valuesWhen = (condition: IrExpression, holds: boolean): Set<string> => {
+    if (condition.kind !== "binary") return new Set();
+    if (condition.operator === (holds ? "and" : "or"))
+      return union(valuesWhen(condition.left, holds), valuesWhen(condition.right, holds));
+    const names = new Set<string>();
+    if (condition.operator === (holds ? "!=" : "==")) {
+      if (isNull(condition.right)) names.add(nameOf(condition.left) ?? "");
+      if (isNull(condition.left)) names.add(nameOf(condition.right) ?? "");
+    }
+    return names;
+  };
+  const operand = (value: IrExpression, known: ReadonlySet<string>): void => {
+    const name = nameOf(value);
+    if (name !== null && !known.has(name)) found.add(name);
+  };
+  const check = (value: IrExpression, known: ReadonlySet<string>): void => {
+    if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
+      check(value.left, known);
+      check(value.right, union(known, valuesWhen(value.left, value.operator === "and")));
+      return;
+    }
+    if (value.kind === "binary" && ["+", "-", "*", "/", "%"].includes(value.operator)) {
+      operand(value.left, known);
+      operand(value.right, known);
+    }
+    if (value.kind === "unary" && value.operator === "-") operand(value.value, known);
+    mapChildren(value, (child) => {
+      check(child, known);
+      return child;
+    });
+  };
+  // A value that is a number whenever it is computed: a literal number, an integer answer, or arithmetic.
+  const holdsValue = (value: IrExpression): boolean =>
+    (value.kind === "literal" && typeof value.value === "number") ||
+    (value.kind === "input" && value.input === "askInteger") ||
+    (value.kind === "binary" && ["+", "-", "*", "/", "%"].includes(value.operator)) ||
+    (value.kind === "unary" && value.operator === "-");
+  const leaves = (items: readonly IrStatement[]): boolean => {
+    const last = items.at(-1);
+    return (
+      last !== undefined && ["return", "exit", "goto", "break", "continue"].includes(last.kind)
+    );
+  };
+  const assignedIn = (items: readonly IrStatement[]): Set<string> => {
+    const names = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      if (!isRecord(value)) return;
+      if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+        names.add(String(value.target.name));
+      if (value.kind === "let" && typeof value.name === "string") names.add(value.name);
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(items);
+    return names;
+  };
+  const block = (items: readonly IrStatement[], start: ReadonlySet<string>): Set<string> => {
+    let known = new Set(start);
+    for (const item of items) {
+      if (item.kind === "function") continue;
+      if (item.kind === "if") {
+        check(item.condition, known);
+        const then = block(item.then, union(known, valuesWhen(item.condition, true)));
+        const otherwise = block(item.else, union(known, valuesWhen(item.condition, false)));
+        const reaching = [
+          ...(leaves(item.then) ? [] : [then]),
+          ...(leaves(item.else) ? [] : [otherwise]),
+        ];
+        known =
+          reaching.length === 0
+            ? new Set()
+            : new Set([...reaching[0]!].filter((name) => reaching.every((set) => set.has(name))));
+        continue;
+      }
+      if (
+        item.kind === "while" ||
+        item.kind === "repeat" ||
+        item.kind === "for" ||
+        item.kind === "switch"
+      ) {
+        const changed = assignedIn([item]);
+        const kept = new Set([...known].filter((name) => !changed.has(name)));
+        mapOwnExpressions(item, (value) => {
+          check(value, item.kind === "while" ? kept : known);
+          return value;
+        });
+        if (item.kind === "switch") {
+          for (const switchCase of item.cases) block(switchCase.body, known);
+          block(item.default, known);
+        } else block(item.body, kept);
+        known = kept;
+        continue;
+      }
+      mapOwnExpressions(item, (value) => {
+        check(value, known);
+        return value;
+      });
+      if (item.kind === "assign" && item.target.kind === "variable") {
+        if (item.operator !== "=") operand(item.target, known);
+        else if (holdsValue(item.value)) known.add(item.target.name);
+        else known.delete(item.target.name);
+      } else if (item.kind === "let") {
+        if (holdsValue(item.value)) known.add(item.name);
+        else known.delete(item.name);
+      }
+    }
+    return known;
+  };
+  block(body, new Set());
   return found;
 }
 

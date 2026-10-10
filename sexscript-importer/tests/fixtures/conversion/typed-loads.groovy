@@ -95,3 +95,15 @@ asked = loadInteger("game.asked")
 if (asked == null) { show("Nothing asked yet") }
 asked = readAsked()
 show("Asked " + (asked * 2))
+// A read that arithmetic uses where the function has not tested it stays open: Groovy failed there only at runtime,
+// on the path where the key is missing.
+def misbehaved = { ->
+	def summoned = loadInteger("game.summoned")
+	def talked = 0
+	if ((summoned != null && summoned != 0) || talked != 0)
+		show("Penalty " + (summoned * 10 + talked))
+	if (summoned != null && summoned > 1)
+		show("Summoned " + (summoned * 50))
+	return talked
+}
+show("Talked " + misbehaved())
