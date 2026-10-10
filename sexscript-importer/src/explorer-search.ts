@@ -2061,7 +2061,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   for (const definition of list(plan.functions))
     for (
       let index = Number(definition.entryInstruction);
-      index <= Number(definition.endInstruction);
+      index < Number(definition.endInstruction);
       index += 1
     )
       functionAt[index] = Number(definition.id);
@@ -4765,7 +4765,8 @@ function storageDistance(
 /**
  * What keeps directed search from a way, as one note. A stored value the condition itself needs that an explored
  * session left says so, whatever keys that value was copied from before; otherwise a note of the condition's own goals,
- * and only without one a note of its `else if` chain's, each a goal with progress before one no session stored.
+ * and only without one a note of its `else if` chain's, each a goal with progress before one no session stored. A note
+ * that no session stored a key, written before one did, gives the closest stored value instead.
  */
 export function noteOf(
   target:
@@ -4774,7 +4775,14 @@ export function noteOf(
         readonly guards: readonly { readonly goals: readonly Goal[] }[];
         readonly chains: ReadonlyMap<
           string,
-          { readonly best: number; readonly closest: { readonly distance: number } | null }
+          {
+            readonly best: number;
+            readonly closest: {
+              readonly distance: number;
+              readonly value: string;
+              readonly left: { readonly sessions: number };
+            } | null;
+          }
         >;
         readonly notes: ReadonlyMap<Goal, string>;
       }
@@ -4789,11 +4797,18 @@ export function noteOf(
     if (chain !== undefined && (chain.best === 0 || chain.closest?.distance === 0))
       return `needs ${describeNeed(goal.source.key, goal)}; a session from storage that has it did not reach the condition`;
   }
+  const noteFor = (goal: Goal): string | undefined => {
+    const note = target.notes.get(goal);
+    const closest =
+      goal.source.kind === "storage" ? target.chains.get(goal.source.key)?.closest : undefined;
+    if (note === undefined || closest == null || !note.endsWith("no explored session stored it"))
+      return note;
+    const sessions = closest.left.sessions;
+    return `needs ${describeNeed(goal.source.kind === "storage" ? goal.source.key : "", goal)}; best reached: ${closest.value} after ${sessions} session${sessions === 1 ? "" : "s"}`;
+  };
   // The condition's own notes, if any, before its chain's; within each, one with progress first.
   const pick = (goals: readonly Goal[]) => {
-    const noted = goals
-      .map((goal) => target.notes.get(goal))
-      .filter((note): note is string => note !== undefined);
+    const noted = goals.map(noteFor).filter((note): note is string => note !== undefined);
     return noted.find((note) => !note.endsWith("no explored session stored it")) ?? noted[0];
   };
   return pick(own) ?? pick(target.goals.filter((goal) => guarded.has(goal)));

@@ -1133,12 +1133,13 @@ const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
 /** Text methods whose literal argument an answer can match. */
 const TEXT_TESTS = new Set(["contains", "startsWith", "endsWith", "equals", "equalsIgnoreCase"]);
 
-/** The function each instruction is in, by its ID (its entry to end instruction); 0 for a file's own code. */
+/** The function each instruction is in, by its ID (from its entry to its end); 0 for a file's own code. */
 function functionsOf(plan: Data, length: number): Int32Array {
   const owner = new Int32Array(length);
   for (const definition of list(plan.functions)) {
-    const end = Math.min(Number(definition.endInstruction), length - 1);
-    for (let index = Number(definition.entryInstruction); index <= end; index += 1)
+    // A function's instructions run from its entry up to, not including, its end.
+    const end = Math.min(Number(definition.endInstruction), length);
+    for (let index = Number(definition.entryInstruction); index < end; index += 1)
       owner[index] = Number(definition.id);
   }
   return owner;
