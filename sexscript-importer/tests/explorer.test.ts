@@ -1012,6 +1012,24 @@ test(
     for (let index = 1; index <= 24; index += 1)
       copies += `let x${index} = x${index - 1}\nx${index} = x${index - 1}\n`;
     assert.deepEqual(compared(`${copies}if x24 > 7 {\n  say "Yes"\n}\nexit\n`), ["n > 7"]);
+    // Also when the last copy flows back into the first.
+    assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
+      "n > 7",
+    ]);
+    // A whole number is no truth; a load that may hold a truth among other kinds can.
+    assert.deepEqual(
+      compared(
+        'let item = "a"\nlet x = toInteger(load("n.${item}", default: 0))\nlet y = x == true\n' +
+          'if y == true {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["n.a"],
+    );
+    assert.deepEqual(
+      compared(
+        'let x: boolean | integer = load("n", default: 0)\nlet y = x == true\nif y == true {\n  say "Yes"\n}\nexit\n',
+      ),
+      ["n == true"],
+    );
   },
 );
 
@@ -1041,6 +1059,13 @@ test(
     ).coverage.unvisitedBranches.find((entry) => entry.line === 3);
     assert.ok(climb !== undefined && climb.attempts > 1, JSON.stringify(climb));
     assert.equal(climb.attempts, climb.chains?.[0]?.sessions);
+    // A value stored before the condition is first met: play going on from it and the next session are two attempts.
+    const stored = run(
+      'save true as "seen.flag"\nshowButton "Look"\nif load("seen.flag", default: false) and randomInteger(0..9) == 99 {\n' +
+        '  say "Never."\n}\nexit\n',
+      2000,
+    ).coverage.unvisitedBranches.find((entry) => entry.line === 3 && entry.missed === "true");
+    assert.equal(stored?.attempts, 2, JSON.stringify(stored));
     // A menu that stores a flag another one reads, where a next visit starts elsewhere: play goes on from the state that
     // stored it, in the same visit.
     const source = [

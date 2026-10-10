@@ -374,8 +374,8 @@ export class DataFlow {
    * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
   readonly #assigned = new Map<string, { value: Data; index: number }[]>();
-  /** {@link holdsStored} of variables, temporaries, and functions, by them, the key, and the kind of value needed. */
-  readonly #holds = new Map<string, boolean>();
+  /** The variables, temporaries, and functions that hold a stored key's value, by them, the key, and the kind needed. */
+  readonly #holds = new Set<string>();
   /** Each function's `returnValue` instructions, by its ID. */
   readonly #returns = new Map<number, number[]>();
   /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
@@ -404,7 +404,9 @@ export class DataFlow {
     instructions.forEach((instruction, index) => {
       if (instruction.kind !== "returnValue") return;
       const owner = this.functionAt(index);
-      this.#returns.set(owner, [...(this.#returns.get(owner) ?? []), index]);
+      const known = this.#returns.get(owner) ?? [];
+      known.push(index);
+      this.#returns.set(owner, known);
     });
     instructions.forEach((instruction, index) => {
       const stored =
@@ -502,49 +504,35 @@ export class DataFlow {
    * comparison of such a value with a constant compares the stored value; of anything else computed from it, such as
    * `todo - done` or a count added to, it does not. A variable, temporary, or function met again while this is worked
    * out (`x = x`, a function that calls itself) holds what its other values hold: the greatest answer that holds
-   * together, which is kept for later questions once it no longer rests on one still being worked out.
+   * together; those found to hold are kept for later questions.
    */
   holdsStored(expression: unknown, key: string, at: number | undefined): boolean {
     type Need = "value" | "truth" | "integer";
-    // The ones being worked out, by name, with their depth; the shallowest of them an answer so far rested on.
-    const working = new Map<string, number>();
-    let rests = Infinity;
+    // Each variable, temporary, and function is gone through once: one met again is being or was gone through without
+    // a value that is not the stored one, as the search stops at the first such. When none is found, all of them hold.
+    const visited = new Set<string>();
     const node = (
       name: string,
       need: Need,
       values: { value: unknown; at: number | undefined }[],
     ) => {
       const id = `${name}\u0000${key}\u0000${need}`;
-      const known = this.#holds.get(id);
-      if (known !== undefined) return known;
-      const depth = working.get(id);
-      if (depth !== undefined) {
-        rests = Math.min(rests, depth);
-        return true;
-      }
-      const mine = working.size;
-      working.set(id, mine);
-      const outer = rests;
-      rests = Infinity;
+      if (this.#holds.has(id) || visited.has(id)) return true;
+      visited.add(id);
       const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
-      const holds =
-        reading.length > 0 && reading.every((each) => holdsAt(each.value, each.at, need));
-      working.delete(id);
-      if (!holds || rests >= mine) this.#holds.set(id, holds);
-      rests = Math.min(outer, rests >= mine ? Infinity : rests);
-      return holds;
+      return reading.length > 0 && reading.every((each) => holdsAt(each.value, each.at, need));
     };
+    // A load's declared type that can hold the kind needed; an open one can.
+    const fits = (type: Data, need: Need): boolean =>
+      need === "value" ||
+      typeof type.kind !== "string" ||
+      type.kind === (need === "truth" ? "boolean" : "integer") ||
+      (type.kind === "union" && list(type.members).some((member) => fits(member, need)));
     const holdsAt = (expression: unknown, at: number | undefined, need: Need): boolean => {
       const value = record(expression);
       if (value.kind === "group") return holdsAt(value.expression, at, need);
-      if (value.kind === "storageLoad") {
-        const type = record(value.type);
-        const fits =
-          need === "value" ||
-          typeof type.kind !== "string" ||
-          type.kind === (need === "truth" ? "boolean" : "integer");
-        return fits && keyText(value.key) === key;
-      }
+      if (value.kind === "storageLoad")
+        return fits(record(value.type), need) && keyText(value.key) === key;
       if (value.kind === "identifier" && typeof value.name === "string")
         return node(
           `variable ${value.name}`,
@@ -554,12 +542,14 @@ export class DataFlow {
             at: each.index,
           })),
         );
+      // A whole number is no truth.
       if (value.kind === "call" && calleeName(value) === "toInteger") {
         const [only, ...rest] = list(value.arguments);
         return (
+          need !== "truth" &&
           only !== undefined &&
           rest.length === 0 &&
-          holdsAt(only.value, at, need === "truth" ? need : "integer")
+          holdsAt(only.value, at, "integer")
         );
       }
       // A truth compared with `true` is that truth (`load(k) == true`).
@@ -599,7 +589,9 @@ export class DataFlow {
       }
       return false;
     };
-    return holdsAt(expression, at, "value");
+    const holds = holdsAt(expression, at, "value");
+    if (holds) for (const id of visited) this.#holds.add(id);
+    return holds;
   }
 
   /** The function an instruction is in, by its ID; 0 for a file's own code. */

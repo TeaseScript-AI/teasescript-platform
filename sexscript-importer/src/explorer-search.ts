@@ -3818,7 +3818,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           });
       }
     }
-    target.attempts = plan.length + laterPlan.length;
+    // Besides any a stored-value goal's chain made already.
+    target.attempts += plan.length + laterPlan.length;
     for (const attempt of plan)
       (attempt.inputs.some(isClockInput) || (attempt.start?.wallClockMs ?? EPOCH_MS) !== EPOCH_MS
         ? clockAttempts
