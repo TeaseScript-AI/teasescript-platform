@@ -14531,6 +14531,17 @@ function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
   const types = context.types;
   const statements = nodeArray(body.statements);
   const kindOf = (value: AstNode | null): string | null => {
+    // The sum of a list variable of texts is text, as the helper that joins them gives (textSum).
+    const summed =
+      value?.kind === "methodCall" &&
+      constantString(value.method) === "sum" &&
+      nodeArray(asNode(value.arguments)?.items).length === 0
+        ? asNode(value.object)
+        : null;
+    if (summed?.kind === "variable") {
+      const elements = listElementType(summed, context);
+      if ((elements & STRING) !== 0 && onlyOf(elements, STRING | NULL)) return "Text";
+    }
     const type = inferType(value, types);
     if (onlyOf(type, STRING)) return "Text";
     if (onlyOf(type, BOOLEAN)) return "Boolean";

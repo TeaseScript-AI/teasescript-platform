@@ -2213,7 +2213,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   // Groovy sum() of texts: the first element with each later one joined to it, a null one as "null"; null for no
-  // element, and a failure, as Groovy's NullPointerException, where a null element is followed by another.
+  // element, the element itself for one, and a failure, as Groovy's NullPointerException, where a null first element
+  // is followed by another.
   textSum: {
     name: "sexscriptLegacyTextSum",
     build: () =>
@@ -2222,18 +2223,11 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["items"],
         [
           ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
-          letS("total", at(v("items"), lit(0))),
-          letS("position", lit(1)),
-          {
-            kind: "while",
-            condition: bin("<", v("position"), prop(v("items"), "length")),
-            body: [
-              set(v("total"), bin("+", v("total"), template(at(v("items"), v("position"))))),
-              set(v("position"), lit(1), "+="),
-            ],
-            span: null,
-          },
-          ret(v("total")),
+          ifS(bin("==", prop(v("items"), "length"), lit(1)), [ret(at(v("items"), lit(0)))]),
+          ifS(bin("==", at(v("items"), lit(0)), lit(null)), [
+            ret(bin("+", at(v("items"), lit(0)), template(at(v("items"), lit(1))))),
+          ]),
+          ret(call(v("items"), "join", lit(""))),
         ],
       ),
   },

@@ -45,13 +45,13 @@ function sexscriptLegacyTextSum(itemsValue4) {
   if itemsValue4.length == 0 {
     return null
   }
-  let totalValue = itemsValue4[0]
-  let position = 1
-  while position < itemsValue4.length {
-    totalValue += "${itemsValue4[position]}"
-    position += 1
+  if itemsValue4.length == 1 {
+    return itemsValue4[0]
   }
-  return totalValue
+  if itemsValue4[0] == null {
+    return itemsValue4[0] + "${itemsValue4[1]}"
+  }
+  return itemsValue4.join("")
 }
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
@@ -453,4 +453,8 @@ let sumResult = sexscriptLegacyTextSum(digits)
 if "012" == sumResult {
   say "All digits"
 }
+// The sum is text, so a text variable takes it without a variable of its own for a number.
+let answer = ""
+answer = sexscriptLegacyTextSum(digits)
+say "Answer ${answer}"
 exit

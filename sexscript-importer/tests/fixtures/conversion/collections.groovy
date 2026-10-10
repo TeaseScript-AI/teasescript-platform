@@ -175,3 +175,7 @@ show("Copy " + entryCopy.size())
 def digits = []
 3.times { digits << (it as String) }
 if ("012" == digits.sum()) show("All digits")
+// The sum is text, so a text variable takes it without a variable of its own for a number.
+def answer = ""
+answer = digits.sum()
+show("Answer " + answer)
