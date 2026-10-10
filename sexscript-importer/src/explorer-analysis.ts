@@ -406,6 +406,8 @@ export class DataFlow {
   readonly #defaults = new Map<string, Data>();
   /** The variable keys the code assigns or declares, apart from a call's arguments and a parameter's default. */
   readonly #assignedInCode = new Set<string>();
+  /** {@link #callFlow}, by call, constants, and depth; cleared each round of the fixpoint, kept after it. */
+  readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
   readonly #returnsByConstants = new Map<string, number[]>();
   /** {@link setInPlay} by scope key. */
@@ -547,6 +549,8 @@ export class DataFlow {
     // Propagate to a fixed point; each round only adds, so it ends.
     for (let round = 0; round < 50; round += 1) {
       let changed = false;
+      // A call's result, as the flows it reads may have grown in the round before.
+      this.#callFlows.clear();
       instructions.forEach((instruction, index) => {
         switch (instruction.kind) {
           case "storeTemporary":
@@ -760,9 +764,11 @@ export class DataFlow {
     // Each variable, temporary, and function is gone through once: one met again is being or was gone through, and
     // the question fails at the first value that is not the stored one. When none is found, all of them hold. A list
     // of values to look through, not recursion, as chains of copies and helpers can be long.
+    // `bound`: the constants the calls followed pass their functions' parameters (see #returnsFor).
+    type Bound = ReadonlyMap<string, SavedScalar>;
     const visited = new Set<string>();
-    const pending: { value: unknown; at: number | undefined; need: Need }[] = [
-      { value: expression, at, need: "value" },
+    const pending: { value: unknown; at: number | undefined; need: Need; bound: Bound }[] = [
+      { value: expression, at, need: "value", bound: new Map() },
     ];
     // A load's declared type that can hold the kind needed; an open one can.
     const fits = (type: Data, need: Need): boolean =>
@@ -775,18 +781,24 @@ export class DataFlow {
       name: string,
       need: Need,
       values: { value: unknown; at: number | undefined }[],
+      bound: Bound,
     ): boolean => {
-      const id = `${name}\u0000${key}\u0000${need}`;
+      const id = `${name}\u0000${key}\u0000${need}\u0000${bound.size === 0 ? "" : JSON.stringify([...bound])}`;
       if (this.#holds.has(id) || visited.has(id)) return true;
       visited.add(id);
       const reading = values.filter((each) => this.flowOf(each.value).keys.has(key));
-      for (const each of reading) pending.push({ ...each, need });
+      for (const each of reading) pending.push({ ...each, need, bound });
       return reading.length > 0;
     };
-    const step = (expression: unknown, at: number | undefined, need: Need): boolean => {
+    const step = (
+      expression: unknown,
+      at: number | undefined,
+      need: Need,
+      bound: Bound,
+    ): boolean => {
       const value = record(expression);
       if (value.kind === "group") {
-        pending.push({ value: value.expression, at, need });
+        pending.push({ value: value.expression, at, need, bound });
         return true;
       }
       if (value.kind === "storageLoad")
@@ -799,12 +811,13 @@ export class DataFlow {
             value: each.value,
             at: each.index,
           })),
+          bound,
         );
       // A whole number is no truth.
       if (value.kind === "call" && calleeName(value) === "toInteger") {
         const [only, ...rest] = list(value.arguments);
         if (need === "truth" || only === undefined || rest.length > 0) return false;
-        pending.push({ value: only.value, at, need: "integer" });
+        pending.push({ value: only.value, at, need: "integer", bound });
         return true;
       }
       // A truth compared with `true` is that truth (`load(k) == true`).
@@ -818,7 +831,7 @@ export class DataFlow {
               ? right
               : null;
         if (side === null) return false;
-        pending.push({ value: side, at, need: "truth" });
+        pending.push({ value: side, at, need: "truth", bound });
         return true;
       }
       if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
@@ -829,26 +842,28 @@ export class DataFlow {
             `temporary ${value.temporaryId} at ${at}`,
             need,
             held.map((store) => ({ value: store.value, at: store.index })),
+            bound,
           )
         );
       }
-      // A call's result: what the function returns, for this call's constant arguments when it is known.
+      // A call's result: what the function returns, for this call's constant arguments when it is known, also those
+      // the calls followed to it pass on.
       if (value.kind === "callResult" && typeof value.functionId === "number") {
         const id = value.functionId;
         const call = typeof value.call === "number" ? value.call : null;
         return node(
           call === null ? `function ${id}` : `call ${call}`,
           need,
-          (call === null ? (this.#returns.get(id) ?? []) : this.#returnsFor(call)).map((index) => ({
-            value: this.#instructions[index]!.value,
-            at: index,
-          })),
+          (call === null ? (this.#returns.get(id) ?? []) : this.#returnsFor(call, bound)).map(
+            (index) => ({ value: this.#instructions[index]!.value, at: index }),
+          ),
+          call === null ? new Map() : this.#constantArguments(call, bound),
         );
       }
       return false;
     };
     for (let item = pending.pop(); item !== undefined; item = pending.pop())
-      if (!step(item.value, item.at, item.need)) return false;
+      if (!step(item.value, item.at, item.need, item.bound)) return false;
     for (const id of visited) this.#holds.add(id);
     return true;
   }
@@ -877,35 +892,40 @@ export class DataFlow {
    */
   readsSetInPlay(expression: unknown, at: number): boolean {
     const seen = new Set<string>();
-    // A list of values to look through, not recursion, as chains of helpers can be long.
-    const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
+    // A list of values to look through, not recursion, as chains of helpers can be long; with the constants the calls
+    // followed pass their functions' parameters (see #returnsFor).
+    const pending: { value: unknown; at: number; bound: ReadonlyMap<string, SavedScalar> }[] = [
+      { value: expression, at, bound: new Map() },
+    ];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
-      const { value, at } = item;
+      const { value, at, bound } = item;
       if (Array.isArray(value)) {
-        for (const each of value) pending.push({ value: each, at });
+        for (const each of value) pending.push({ value: each, at, bound });
         continue;
       }
       if (!isRecord(value)) continue;
+      const context = bound.size === 0 ? "" : ` ${JSON.stringify([...bound])}`;
       if (value.kind === "identifier") {
         if (this.setInPlay(value)) return true;
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
-        const id = `temporary ${value.temporaryId} at ${at}`;
+        const id = `temporary ${value.temporaryId} at ${at}${context}`;
         if (seen.has(id)) continue;
         seen.add(id);
         for (const store of this.heldAt(value.temporaryId, at) ?? [])
-          pending.push({ value: store.value, at: store.index });
+          pending.push({ value: store.value, at: store.index, bound });
       } else if (value.kind === "callResult" && typeof value.functionId === "number") {
-        const id =
-          typeof value.call === "number" ? `call ${value.call}` : `function ${value.functionId}`;
+        const call = typeof value.call === "number" ? value.call : null;
+        const id = call === null ? `function ${value.functionId}` : `call ${call}${context}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        for (const index of typeof value.call === "number"
-          ? this.#returnsFor(value.call)
-          : (this.#returns.get(value.functionId) ?? []))
-          pending.push({ value: this.#instructions[index]!.value, at: index });
+        const inner = call === null ? new Map() : this.#constantArguments(call, bound);
+        for (const index of call === null
+          ? (this.#returns.get(value.functionId) ?? [])
+          : this.#returnsFor(call, bound))
+          pending.push({ value: this.#instructions[index]!.value, at: index, bound: inner });
       } else
         for (const [key, each] of Object.entries(value))
-          if (key !== "span") pending.push({ value: each, at });
+          if (key !== "span") pending.push({ value: each, at, bound });
     }
     return false;
   }
@@ -1477,6 +1497,16 @@ export class DataFlow {
     bound: ReadonlyMap<string, SavedScalar> = new Map(),
     depth = HELPER_DEPTH,
   ): Flow {
+    const memo = `${call} ${depth} ${bound.size === 0 ? "" : JSON.stringify([...bound])}`;
+    const known = this.#callFlows.get(memo);
+    if (known !== undefined) return known;
+    const found = this.#callFlowOf(call, bound, depth);
+    this.#callFlows.set(memo, found);
+    return found;
+  }
+
+  /** {@link #callFlow}, worked out. */
+  #callFlowOf(call: number, bound: ReadonlyMap<string, SavedScalar>, depth: number): Flow {
     const instruction = this.#instructions[call]!;
     const id = Number(instruction.functionId);
     const entry = this.#entryOf.get(id);
