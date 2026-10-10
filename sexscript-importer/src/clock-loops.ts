@@ -406,9 +406,10 @@ function inFrame(statements: IrStatement[], frame: string): IrStatement[] {
 
 /**
  * Where a clock value may be held, in assignment order: a variable holds one from a `let` or assignment whose value
- * reads the clock or another variable that holds one (`b = a`), until it is set to something else. For a loop body,
- * `held` is what a pass may end or continue with, over the passes; for a function body, `returns` whether a return
- * may give a clock value.
+ * reads the clock or is another variable that holds one (`b = a`), until it is set to something else; a value only
+ * computed from such a variable, such as an index into a list, holds none. For a loop body, `held` is what a pass may
+ * end or continue with, over the passes; for a function body, `returns` whether a return may give a value read from
+ * the clock or from a variable that holds one.
  */
 function clockValues(
   statements: readonly IrStatement[],
@@ -416,8 +417,8 @@ function clockValues(
   as: "loop" | "function",
 ): { held: Set<string>; returns: boolean } {
   let returns = false;
-  const fromClock = (value: unknown, held: ReadonlySet<string>): boolean =>
-    readsClock(value, clockFunctions) || [...held].some((name) => reads(value, name));
+  const fromClock = (value: IrExpression, held: ReadonlySet<string>): boolean =>
+    readsClock(value, clockFunctions) || (value.kind === "variable" && held.has(value.name));
   type Jumps = { continued: Set<string>; broken: Set<string> };
   // What the statements end with from what they start with, or null where they do not reach their end.
   const walk = (
@@ -439,7 +440,11 @@ function clockValues(
         if (kept || fromClock(item.value, held)) held.add(name);
         else held.delete(name);
       } else if (item.kind === "return") {
-        if (fromClock(item.value, held)) returns = true;
+        if (
+          readsClock(item.value, clockFunctions) ||
+          [...held].some((name) => reads(item.value, name))
+        )
+          returns = true;
         held = null;
       } else if (item.kind === "continue" || item.kind === "break") {
         for (const value of held)

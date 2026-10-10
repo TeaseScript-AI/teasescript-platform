@@ -132,3 +132,13 @@ while (copiedNow() < copiedEnd) show("Copied")
 def copiedEarly = { -> def first = 3; def second = first; first = getTime(); return second }
 def early = 0
 while (copiedEarly() > 0 && early < 3) { show("Early"); early++ }
+// A value only computed from the clock, such as the element a day picks, holds none, so this search only counts.
+def picks = ["a", "bb", "ccc"]
+def picked = null
+def seed = 0
+while (picked == null) {
+  def at = (Calendar.getInstance().get(Calendar.DAY_OF_YEAR) * 13 + seed * 23) % picks.size()
+  if (picks[at].length() > 2) picked = picks[at]
+  seed++
+}
+show(picked)

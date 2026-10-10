@@ -293,4 +293,16 @@ while copiedEarly() > 0 and early < 3 {
   say "Early"
   early += 1
 }
+// A value only computed from the clock, such as the element a day picks, holds none, so this search only counts.
+let picks = ["a", "bb", "ccc"]
+let picked: string? = null
+let seed = 0
+while picked == null {
+  let at = (((getDate() - toDate("${getDate().year}-01-01")).days + 1) * 13 + seed * 23) % picks.length
+  if picks[at].length > 2 {
+    picked = picks[at]
+  }
+  seed += 1
+}
+say picked
 exit
