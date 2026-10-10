@@ -143,10 +143,10 @@ function playerSteps(path: Fields): string[] {
 const GROUPS: readonly { source: string; title: string; about: string }[] = [
   {
     source: "storage",
-    title: "Would need something saved on an earlier visit",
+    title: "Would need another saved value",
     about:
-      "The condition reads a stored value. The playtester played further visits from what earlier ones saved, but none " +
-      "saved what this would need.",
+      "The condition reads what this visit or earlier ones saved. The playtester also played further visits from what " +
+      "earlier ones saved.",
   },
   {
     source: "clock",

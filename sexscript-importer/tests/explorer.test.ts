@@ -1628,7 +1628,7 @@ test(
       report.split("### Would need a value the script sets")[1]?.split("###")[0] ?? "";
     assert.match(setsSection, /`health < -50`/u, report);
     assert.doesNotMatch(
-      report.split("### Would need something saved on an earlier visit")[1]?.split("###")[0] ?? "",
+      report.split("### Would need another saved value")[1]?.split("###")[0] ?? "",
       /health/u,
     );
     assert.match(report, /lines 5-9/u);
