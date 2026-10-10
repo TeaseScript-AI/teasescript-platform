@@ -9608,6 +9608,14 @@ const STATIC_CONVERSIONS = new Map([
 ]);
 
 function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
+  // A conditional value, `for (def i = (cfgshuffle == 1) ? 2 : 3; …)` (MatchDares), is computed first, as in a statement.
+  if (node.kind === "declaration" || node.kind === "binary") {
+    const conditional = lowerConditionalStatement(
+      { kind: "expressionStatement", span: node.span, expression: node },
+      context,
+    );
+    if (conditional !== null) return conditional;
+  }
   if (node.kind === "declaration") return lowerDeclaration(node, node.span, context);
   if (node.kind === "binary") return lowerAssignment(node, node.span, context);
   if (node.kind === "postfix" || node.kind === "prefix")

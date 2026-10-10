@@ -75,4 +75,18 @@ let powerLevel = 4
 powerLevel += 1
 powerLevel = toInteger(min(powerLevel, 5))
 say "Power ${powerLevel}"
+// A conditional start or step of a C-style for is computed first, as in a statement (MatchDares' shuffled deck).
+let deckStart = askInteger "Shuffle?", prefill: 1
+let card = 3
+if deckStart == 1 {
+  card = 2
+}
+while card <= 5 {
+  say "Card ${card}"
+  if deckStart == 1 {
+    card += 1
+  } else {
+    card += 2
+  }
+}
 exit

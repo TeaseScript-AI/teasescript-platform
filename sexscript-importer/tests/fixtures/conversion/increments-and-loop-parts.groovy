@@ -48,3 +48,6 @@ rules.each { showRule(rules[ruleNumber++]) }
 int powerLevel = 4
 powerLevel = Math.min(++powerLevel, 5)
 show("Power " + powerLevel)
+// A conditional start or step of a C-style for is computed first, as in a statement (MatchDares' shuffled deck).
+def deckStart = getInteger("Shuffle?", 1)
+for (def card = (deckStart == 1) ? 2 : 3; card <= 5; card += (deckStart == 1) ? 1 : 2) show("Card " + card)
