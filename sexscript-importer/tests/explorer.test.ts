@@ -884,16 +884,6 @@ test(
       sources: new Map([["main.tease", source]]),
       diagnostics: [],
     }).coverage.unvisitedBranches;
-    console.log(
-      JSON.stringify(
-        missed.map((entry) => [
-          entry.condition?.text,
-          entry.missed,
-          entry.reach,
-          entry.parts.map((part) => part.needs),
-        ]),
-      ),
-    );
     const needsAt = (text: string) =>
       missed
         .filter((entry) => entry.condition?.text === text)
