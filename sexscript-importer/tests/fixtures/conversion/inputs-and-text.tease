@@ -67,4 +67,9 @@ for value in 5..=6 {
 if askBoolean "Who controls the key?", yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
   say "Fine."
 }
+// show() returned null, so a menu whose message is show(text) showed the text and then its options.
+let menuText = "Main menu"
+say menuText
+let menuChoice = choose 0: "Start", 1: "End"
+say "Chose ${menuChoice}"
 exit

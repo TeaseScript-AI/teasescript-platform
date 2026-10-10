@@ -37,3 +37,7 @@ if (getBoolean("Ready, ${honorific()}?", "Yes, ${honorific()}", "No")) show("Goo
 // FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
 // legacy button did, also where it is an askBoolean's noText.
 if (getBoolean("Who controls the key?", "I do", loadString("cuckold.hotwife") + " has it")) show("Fine.")
+// show() returned null, so a menu whose message is show(text) showed the text and then its options.
+def menuText = "Main menu"
+int menuChoice = getSelectedValue(show(menuText), ["Start", "End"])
+show("Chose " + menuChoice)

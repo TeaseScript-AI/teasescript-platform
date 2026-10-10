@@ -17343,6 +17343,11 @@ function pushPrompt(
   const otherArguments = (callParts(inputNode)?.arguments ?? []).filter(
     (argument) =>
       argument !== messageNode &&
+      // The `show(text)` that gave the message (lowerSelectedValue).
+      !(
+        legacyApiCall(argument, context)?.name === "show" &&
+        callParts(argument)?.arguments[0] === messageNode
+      ) &&
       argument !== evaluated &&
       !effects.includes(argument) &&
       !(
@@ -17425,6 +17430,10 @@ function lowerSelectedValue(
       "getSelectedValue() must have exactly two arguments.",
     );
   }
+  // show() returned null, so getSelectedValue(show(text), options) showed the text and then the options without a
+  // message of their own, as getSelectedValue(text, options) shows them.
+  const shown = legacyApiCall(args[0]!, context);
+  if (shown?.name === "show" && shown.arguments.length === 1) args = [shown.arguments[0]!, args[1]!];
   const message = lowerExpression(args[0]!, context);
   if (message === null) return null;
   const optionsNode = args[1]!;
