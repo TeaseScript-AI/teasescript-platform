@@ -10,9 +10,19 @@ return new Object() {
    .findAll { p -> p };
  };
  def xs = [0]
+ def ys = [0]
+ def zs = [0]
+ // A function of this file can call another file's code too: through a closure it runs, or in a default value.
+ def dispatch(f) { f() }
+ def pick(n = bump()) { return n }
  def main() {
   loadModules(this)
   xs += [bump()]
   show("xs " + xs)
+  def choices = [outer: { -> bump() }]
+  ys += [dispatch(choices.outer) as int]
+  show("ys " + ys)
+  zs += [pick()]
+  show("zs " + zs)
  }
 }.main();

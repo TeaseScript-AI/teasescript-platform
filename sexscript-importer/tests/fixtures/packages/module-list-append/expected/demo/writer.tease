@@ -2,5 +2,7 @@ global function loadWriterModule {
 }
 global function bump {
   xs = [8]
+  ys = [8]
+  zs = [8]
   return 7
 }

@@ -1,3 +1,9 @@
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "bump" {
+    return bump()
+  }
+}
 // A module's function sets the script's list while the value appended to it is computed: Groovy read the list
 // before, so the append keeps reading it first.
 // NOTE SX_DATA_FOLDER line 4: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
@@ -7,7 +13,21 @@ function loadModules {
   loadWriterModule()
 }
 global xs = [0]
+global ys = [0]
+global zs = [0]
+// A function of this file can call another file's code too: through a closure it runs, or in a default value.
+function dispatch(f) {
+  return sexscriptLegacyCall(f, [])
+}
+function pick(n = bump()) {
+  return n
+}
 loadModules()
 xs += [bump()]
 say "xs [${xs.join(", ")}]"
+let choices = { outer: "bump" }
+ys += [toInteger(dispatch(choices.outer))]
+say "ys [${ys.join(", ")}]"
+zs += [pick()]
+say "zs [${zs.join(", ")}]"
 exit

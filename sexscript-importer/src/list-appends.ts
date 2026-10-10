@@ -1,7 +1,6 @@
 import { isRecord } from "./ast.ts";
 import { ACTION_DISPATCHER } from "./helpers.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
-import { STEP_DRIVER } from "./tail-calls.ts";
 
 /** The helper that turns a value that may be a list or one element into a list (variable typing's `listPart`). */
 const LIST_PART = "sexscriptLegacyListPart";
@@ -28,8 +27,8 @@ export function withListAppends(statements: IrStatement[]): IrStatement[] {
     (call: Record<string, unknown>): boolean => {
       const local = scopes.local.has(base) && !scopes.script.has(base);
       const name = typeof call.name === "string" ? call.name : "";
-      if (call.name === ACTION_DISPATCHER || call.name === STEP_DRIVER)
-        return written.has(base) || (!local && foreign.size > 0);
+      // The dispatcher may run any closure the script keeps, which may call another file.
+      if (call.name === ACTION_DISPATCHER) return written.has(base) || !local;
       if (call.local !== true) return false;
       if (!defined.has(name) || foreign.has(name)) return !local;
       return written.has(base);
@@ -85,10 +84,16 @@ function foreignCallers(
         return;
       }
       if (!isRecord(value)) return;
-      if (value.kind === "call" && value.local === true && typeof value.name === "string")
+      // The action dispatcher may run any closure the script keeps, which may call another file.
+      if (
+        value.kind === "call" &&
+        (value.local === true || value.name === ACTION_DISPATCHER) &&
+        typeof value.name === "string"
+      )
         names.add(value.name);
       for (const child of Object.values(value)) visit(child);
     };
+    visit(statement.parameters);
     visit(statement.body);
     calls.set(statement.name, names);
   }
