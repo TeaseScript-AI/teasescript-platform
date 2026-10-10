@@ -1602,8 +1602,9 @@ function freeNames(statement: FunctionStatement): { variables: Set<string>; call
 
 /**
  * Whether a value is made of literals and operators only, so it can start a global (ADR 0022 §6.4; V30 §12 allows
- * side-effect-free operators), such as GuessMyNumber's `static float tau = 2 * Math.PI`. A division by a literal zero
- * stays where the legacy code failed.
+ * side-effect-free operators), such as GuessMyNumber's `static float tau = 2 * Math.PI`. A division by anything but
+ * a literal number that is no zero stays where the legacy code ran it, since the class's statics ran only when the class
+ * was first used and a global's start value runs at session start.
  */
 function isLiteralValue(value: IrExpression): boolean {
   switch (value.kind) {
@@ -1613,14 +1614,14 @@ function isLiteralValue(value: IrExpression): boolean {
     case "unary":
       return isLiteralValue(value.value);
     case "binary":
+      // A division only by a literal number that is no zero: one that may fail stays where the legacy code ran it.
       return (
         isLiteralValue(value.left) &&
         isLiteralValue(value.right) &&
-        !(
-          ["/", "%"].includes(value.operator) &&
-          value.right.kind === "literal" &&
-          Number(value.right.value) === 0
-        )
+        (!["/", "%"].includes(value.operator) ||
+          (value.right.kind === "literal" &&
+            typeof value.right.value === "number" &&
+            value.right.value !== 0))
       );
     case "list":
       return value.items.every(isLiteralValue);

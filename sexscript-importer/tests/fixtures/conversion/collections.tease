@@ -360,12 +360,14 @@ say "Marks ${marks.join(",")}"
 // start empty, or that holds maps, which it may make objects, stays a TODO.
 let shocks: (number | integer[] | string)[][] = []
 shocks.add([1.5, [100, 100], "SINE"])
+// NOTE SX_COLLECTION_TEXT_NESTED line 134: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
 let collectResult2 = []
 for it in shocks {
   collectResult2.add("${sexscriptLegacyListText(it)}")
 }
 say "Remove:"
 let chosen = choose sexscriptLegacyMenuOptions(collectResult2 + ["Back"], 0)
+// NOTE SX_COLLECTION_TEXT_NESTED line 135: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
 say "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}"
 let spare = []
 if askBoolean "Spare?" {

@@ -12548,7 +12548,16 @@ function listText(node: AstNode, context: LowerContext): TemplatePart[] | null |
   }
   const list = lowerExpression(node, context);
   if (list === null) return null;
-  if (!scalar) return [{ value: useHelper(context, "listText", [list]) }];
+  if (!scalar) {
+    addDiagnostic(
+      context,
+      "SX_COLLECTION_TEXT_NESTED",
+      "warning",
+      "Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.",
+      node.span,
+    );
+    return [{ value: useHelper(context, "listText", [list]) }];
+  }
   return [
     { text: "[" },
     { value: listJoin(list, { kind: "literal", value: ", " }) },
