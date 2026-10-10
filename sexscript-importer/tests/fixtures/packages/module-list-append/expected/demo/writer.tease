@@ -1,0 +1,6 @@
+global function loadWriterModule {
+}
+global function bump {
+  xs = [8]
+  return 7
+}

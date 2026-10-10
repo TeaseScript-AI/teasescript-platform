@@ -957,6 +957,7 @@ test(
       "global-locals",
       "entries",
       "module-files",
+      "module-list-append",
       "entry-hub",
       "entry-own-folder",
       "stand-alone",
