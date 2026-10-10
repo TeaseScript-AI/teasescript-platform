@@ -318,9 +318,6 @@ function optionValues(options: unknown): unknown[] | null {
   return found;
 }
 
-/** How many key patterns of saved values a plan may have before all cells of saved values meet each other. */
-const MEETING_PATTERNS = 256;
-
 /** How many stored keys' carriers ({@link DataFlow}) are kept at once, as each can reach much of a plan. */
 const CARRIER_KEYS = 32;
 
@@ -476,13 +473,7 @@ export class DataFlow {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
     cells: string[];
-    patterns: Map<string, string[]>;
-    unknown: boolean;
-    many: boolean;
   } | null = null;
-  /** {@link #cellsMeeting} by cell, and the matchers of key patterns by pattern. */
-  readonly #meetings = new Map<string, readonly string[]>();
-  readonly #keyMatchers = new Map<string, (key: string) => boolean>();
   /** {@link #callFlow}, by call, constants, and depth; cleared each round of the fixpoint, kept after it. */
   readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
@@ -931,7 +922,8 @@ export class DataFlow {
     for (let read = pending.pop(); read !== undefined; read = pending.pop())
       for (const reader of [
         ...(graph.readers.get(read) ?? []),
-        ...(read.startsWith("s ") ? this.#cellsMeeting(read, graph) : []),
+        // What any save stores may be what any load reads, through one cell of all of them.
+        ...(read === "s *" ? graph.cells : read.startsWith("s ") ? ["s *"] : []),
       ])
         if (!reached.has(reader)) {
           reached.add(reader);
@@ -952,9 +944,6 @@ export class DataFlow {
     readers: Map<string, string[]>;
     seeds: Map<string, string[]>;
     cells: string[];
-    patterns: Map<string, string[]>;
-    unknown: boolean;
-    many: boolean;
   } {
     const readers = new Map<string, string[]>();
     const seeds = new Map<string, string[]>();
@@ -999,89 +988,11 @@ export class DataFlow {
       else if (instruction.kind === "storageWrite")
         define(instruction.value, index, `s ${keyText(instruction.key) ?? "?"}`);
     });
-    // The cells of saved values: those whose keys can meet are linked when one is reached (#cellsMeeting).
+    // The cells of saved values, by key (`s ?` for one computed past knowing).
     const cells = new Set(
       [...readers.keys(), ...[...readers.values()].flat()].filter((each) => each.startsWith("s ")),
     );
-    const patterns = new Map<string, string[]>();
-    for (const cell of cells)
-      if (cell.includes(KEY_PLACEHOLDER)) {
-        const first = cell.slice(2).split(KEY_PLACEHOLDER)[0]!;
-        (patterns.get(first) ?? patterns.set(first, []).get(first)!).push(cell);
-      }
-    return {
-      readers,
-      seeds,
-      cells: [...cells].sort(),
-      patterns,
-      unknown: cells.has("s ?"),
-      many:
-        [...patterns.values()].reduce((count, each) => count + each.length, 0) > MEETING_PATTERNS,
-    };
-  }
-
-  /**
-   * The other cells of saved values whose key can be a cell's: one a pattern matches, either way, or any for a key
-   * computed past knowing (`s ?`). Cells of the same text are one; distinct literal keys never meet. Worked out once
-   * per cell, when a stored key's carriers first reach it, from the cells a pattern's first part can lead to: those
-   * whose text starts with it (in `cells`, sorted), and the patterns whose first part starts the cell's (`patterns`, by
-   * first part, at most {@link MEETING_PATTERNS} of them).
-   */
-  #cellsMeeting(
-    cell: string,
-    graph: {
-      readonly cells: readonly string[];
-      readonly patterns: ReadonlyMap<string, string[]>;
-      readonly unknown: boolean;
-      readonly many: boolean;
-    },
-  ): readonly string[] {
-    const known = this.#meetings.get(cell);
-    if (known !== undefined) return known;
-    // With very many patterns, which can each meet most others, every cell meets every other through one cell of all
-    // of them (`s *`): less exact, but the work stays in proportion to the cells.
-    if (graph.many) {
-      const all = cell === "s *" ? graph.cells : ["s *"];
-      this.#meetings.set(cell, all);
-      return all;
-    }
-    const text = cell.slice(2);
-    const wide = (other: string) => other === "?" || other.includes(KEY_PLACEHOLDER);
-    const matches = (pattern: string, key: string) =>
-      (
-        this.#keyMatchers.get(pattern) ??
-        this.#keyMatchers.set(pattern, keyMatcher(pattern)).get(pattern)!
-      )(key);
-    const candidates = new Set<string>();
-    if (text === "?") for (const other of graph.cells) candidates.add(other);
-    else {
-      if (graph.unknown) candidates.add("s ?");
-      for (const [first, patterns] of graph.patterns)
-        if (text.startsWith(first)) for (const pattern of patterns) candidates.add(pattern);
-      if (text.includes(KEY_PLACEHOLDER)) {
-        const first = `s ${text.split(KEY_PLACEHOLDER)[0]!}`;
-        let low = 0;
-        for (let high = graph.cells.length; low < high;) {
-          const middle = (low + high) >> 1;
-          if (graph.cells[middle]! < first) low = middle + 1;
-          else high = middle;
-        }
-        for (let index = low; graph.cells[index]?.startsWith(first) === true; index += 1)
-          candidates.add(graph.cells[index]!);
-      }
-    }
-    const found = [...candidates].filter((other) => {
-      const key = other.slice(2);
-      if (other === cell || (!wide(text) && !wide(key))) return false;
-      return (
-        text === "?" ||
-        key === "?" ||
-        (wide(text) && matches(text, key)) ||
-        (wide(key) && matches(key, text))
-      );
-    });
-    this.#meetings.set(cell, found);
-    return found;
+    return { readers, seeds, cells: [...cells] };
   }
 
   /**
