@@ -7,7 +7,8 @@ const DAY_WAIT_CODE = "TSV061";
 /**
  * A warning for every `wait` and timer whose length is written with a day or week unit, such as `wait 2 days`,
  * `timer (1..3) w`, or `wait 1 day + 2 h`. It counts scene time, which stops while the Player is closed, while such a
- * length almost always means real time. A length held in a variable or returned by a call is not checked.
+ * length almost always means real time. A length held in a variable, read from a list or object, or returned by a call
+ * is not checked.
  */
 export function dayWaitWarnings(program: Program, source: string): readonly Diagnostic[] {
   const found: Diagnostic[] = [];
@@ -52,8 +53,9 @@ export function dayWaitWarnings(program: Program, source: string): readonly Diag
 }
 
 /**
- * Whether a length has a day or week unit outside a call: after it, or within it, as in `1 day + 2 h`. A unit after a
- * value makes that value a count, so a day within it, as in `(elapsed / 1 day) s`, is no length.
+ * Whether a length has a day or week unit: after it, or on a duration written in it, also within arithmetic, as in
+ * `1 day + 2 h`. A unit after a value makes that value a count, so a day within it, as in `(elapsed / 1 day) s`, is no
+ * length.
  */
 function inDaysOrWeeks(waiting: WaitStatement | TimerStatement | TimerExpression): boolean {
   if (waiting.unit !== null) return waiting.unit === "d" || waiting.unit === "w";
