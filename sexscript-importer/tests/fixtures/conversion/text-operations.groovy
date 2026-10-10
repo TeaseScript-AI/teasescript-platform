@@ -35,3 +35,8 @@ show(trail)
 def fields = "a,b,,c;d".tokenize(",;")
 def stamp = String.format("%02d:%02d, %.1f%%", 7, 5, 12.345)
 show("${fields.size()} fields at ${stamp}")
+// Java split() dropped the empty part after a last separator, as in Baccarat's picture lists; a part read at a fixed
+// position is the same either way.
+def pictures = loadString("game.pictures") ?: "a.jpg|b.jpg|"
+def pictureList = pictures.split("\\|")
+show("" + pictureList.size() + " pictures, first " + pictures.split("\\|")[0])

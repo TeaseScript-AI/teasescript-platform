@@ -280,6 +280,8 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
+  /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
+  indexedSplits: Set<AstNode>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -1481,6 +1483,7 @@ export function lowerParsedFile(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
+    indexedSplits: new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -2633,6 +2636,7 @@ function lowerHelperMethod(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
+    indexedSplits: new Set(),
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -10731,6 +10735,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
+    // A part of a split read at a fixed position, `text.split(",")[1]`, is the same with or without trailing empty parts.
+    const fixed = indexNode === null ? undefined : constantValue(indexNode);
+    if (
+      targetNode?.kind === "methodCall" &&
+      constantString(targetNode.method) === "split" &&
+      typeof fixed === "number" &&
+      Number.isInteger(fixed) &&
+      fixed >= 0
+    )
+      context.indexedSplits.add(targetNode);
     // A map literal indexed in place is a lookup table (#536).
     const inlineTable = targetNode?.kind === "map";
     const target =
@@ -13363,20 +13377,26 @@ function textOperation(
       if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
       // Plain characters, and metacharacters escaped as in the patterns `\|` or `\.`, match themselves.
       if (!/^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator)) return undefined;
+      const target = lowerExpression(targetNode, context);
+      if (target === null) return null;
+      const plain: IrExpression = { kind: "literal", value: separator.replace(/\\(.)/gu, "$1") };
+      // A part read at a fixed position is the same where it exists, and a written text that does not end with the
+      // separator has no trailing empty part; elsewhere a helper drops the trailing empty parts that Java dropped.
+      const written = literalText(targetNode);
+      const separatorText = String(plain.value);
+      if (
+        context.indexedSplits.has(node) ||
+        (written !== null && written !== "" && !written.endsWith(separatorText))
+      )
+        return member("split", [plain], target);
       addDiagnostic(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
-        "warning",
-        "Java split() drops trailing empty parts; TeaseScript split() keeps them.",
+        "info",
+        "Java split() dropped trailing empty parts, which TeaseScript split() keeps; a helper drops them.",
         node.span,
       );
-      const target = lowerExpression(targetNode, context);
-      if (target === null) return null;
-      return member(
-        "split",
-        [{ kind: "literal", value: separator.replace(/\\(.)/gu, "$1") }],
-        target,
-      );
+      return useHelper(context, "split", [target, plain]);
     }
     case "substring":
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;

@@ -219,7 +219,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   where Java counted UTF-16 units, `trim()` also removes non-breaking spaces, and `uppercaseFirst()` turns a leading
   `ß` into `SS`. A literal with a character outside the Basic Multilingual Plane, such as an emoji, gets a `NOTE` on a
   length, `substring`, `indexOf`, or `lastIndexOf` (`SX_TEXT_CODE_POINTS`); text known only at runtime does not. Java
-  `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`); a separator whose
+  `split()` dropped trailing empty parts, which TeaseScript `split()` keeps, so a helper drops them
+  (`sexscriptLegacySplit`), except for a part read at a fixed position, `text.split(",")[1]`, and a written text that
+  does not end with the separator (Baccarat's picture lists end with `|`); a separator whose
   regular-expression metacharacters are escaped, as `"\\|"` or `/\./`, splits at the plain character. Groovy
   `join()` printed nested lists and maps, which the accepted `join()` rejects, so a list known to hold them is
   reported (`SX_LIST_JOIN`), also when they reach it through an alias (`ys = xs`) or a later `add`, `<<`, or `+=`; a

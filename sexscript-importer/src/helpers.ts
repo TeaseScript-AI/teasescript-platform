@@ -205,6 +205,7 @@ export type HelperName =
   | "switchButton"
   | "switchButtonId"
   | "tokenize"
+  | "split"
   | "concat"
   | "count"
   | "indexOf"
@@ -315,6 +316,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "askInteger",
   "askNumber",
   "tokenize",
+  "split",
   "sendImage",
   "switchButtonId",
   "switchButton",
@@ -624,6 +626,49 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   // Groovy tokenize(): the parts between any of the delimiter characters, without empty parts.
+  // Java split() of text by a plain separator: TeaseScript split() without the trailing empty parts Java dropped, the
+  // empty text giving one empty part, as in Java.
+  split: {
+    name: "sexscriptLegacySplit",
+    build: () => {
+      const parts = v("parts");
+      return fn(
+        "sexscriptLegacySplit",
+        ["text", "separator"],
+        [
+          letS("parts", {
+            kind: "methodCall",
+            target: v("text"),
+            name: "split",
+            arguments: [v("separator")],
+          }),
+          ifS(bin("==", v("text"), lit("")), [ret(parts)]),
+          {
+            kind: "while",
+            condition: bin(
+              "and",
+              bin(">", prop(parts, "length"), lit(0)),
+              bin("==", prop(parts, "last"), lit("")),
+            ),
+            body: [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "methodCall",
+                  target: parts,
+                  name: "removeLast",
+                  arguments: [],
+                },
+                span: null,
+              },
+            ],
+            span: null,
+          },
+          ret(parts),
+        ],
+      );
+    },
+  },
   tokenize: {
     name: "sexscriptLegacyTokenize",
     build: () =>
