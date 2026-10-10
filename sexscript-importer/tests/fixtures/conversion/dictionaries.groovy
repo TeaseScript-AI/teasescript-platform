@@ -124,6 +124,9 @@ STATE.choices -= "Spank"
 show("Choices " + STATE.choices.size() + " at level " + STATE.level)
 STATE.choices.clear()
 show("Choices after clearing: " + STATE.choices.size())
+// A list parameter that clear() empties was the caller's list too, which a TeaseScript parameter is not.
+def emptyAll = { List all -> def emptied = all.clear(); show("Emptied " + all.size()) }
+emptyAll(["x"])
 // A closure whose last expression gives a map with fixed names returns that map too, so its calls stay maps.
 def TABLE_KEY = "human"
 Map storedTable = load("game.table")

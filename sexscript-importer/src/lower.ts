@@ -13597,7 +13597,7 @@ function lowerObjectMethodCallExpression(
   }
   const changes =
     (name === "add" && argumentsNodes.length === 1) ||
-    (name === "pop" && argumentsNodes.length === 0) ||
+    ((name === "pop" || name === "clear") && argumentsNodes.length === 0) ||
     (name === "remove" &&
       argumentsNodes.length === 1 &&
       onlyOf(inferType(argumentsNodes[0]!, context.types), NUMBER));
@@ -17362,16 +17362,22 @@ function pushPrompt(
     isHoistable(root, inputNode, context, messageNode) &&
     otherArguments.every((argument) => isPure(argument, context));
   if (ordered && effects.length > 0 && computed !== null) {
-    const temporary = (value: IrExpression, base: string): IrExpression => {
+    const temporary = (value: IrExpression, base: string, capture = false): IrExpression => {
       const name = freshName(base, context);
-      context.prelude.push({ kind: "let", name, value, span: inputNode.span });
+      context.prelude.push({
+        kind: "let",
+        name,
+        value,
+        span: inputNode.span,
+        ...(capture ? { capture } : {}),
+      });
       return { kind: "variable", name };
     };
     // The question's text is read before the computed arguments, which may change what it reads, unless it is fixed.
     const fixed =
       message.kind === "literal" ||
       (message.kind === "template" && message.parts.every((part) => "text" in part));
-    if (!fixed) message = temporary(message, "question");
+    if (!fixed) message = temporary(message, "question", isPure(messageNode, context));
     computed.nodes.forEach((node, index) => {
       if (effects.includes(node))
         computed.values[index] = temporary(computed.values[index]!, computed.base ?? "option");

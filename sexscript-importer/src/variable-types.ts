@@ -2500,23 +2500,36 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
       Number.isInteger(value.value) &&
       value.decimal !== true) ||
       (value.kind === "unary" && value.operator === "-" && isWhole(value.value)));
-  // A value that keeps a variable a whole number or null: null, a whole number, a whole-number read, or the variable
-  // itself added to, subtracted from, or multiplied by such numbers.
-  const keepsWhole = (value: unknown, name: string): boolean =>
-    isNull(value) ||
+  // A whole number: a whole literal, a whole-number read, an integer input, toInteger(), the variable itself, or the
+  // sum, difference, product, remainder, or negation of such numbers.
+  const wholeValue = (value: unknown, name: string): boolean =>
     isWhole(value) ||
+    nameOf(value) === name ||
     (isRecord(value) &&
       ((value.kind === "load" && value.integer === true && value.defaultValue === undefined) ||
+        (value.kind === "input" && value.input === "askInteger") ||
+        (value.kind === "call" &&
+          (value.name === "toInteger" || value.name === "sexscriptLegacyAskInteger")) ||
+        (value.kind === "unary" && value.operator === "-" && wholeValue(value.value, name)) ||
         (value.kind === "binary" &&
-          (value.operator === "+" || value.operator === "-" || value.operator === "*") &&
-          [value.left, value.right].every((side) => nameOf(side) === name || isWhole(side)))));
+          ["+", "-", "*", "%"].includes(String(value.operator)) &&
+          wholeValue(value.left, name) &&
+          wholeValue(value.right, name))));
+  // A value that keeps a variable a whole number or null.
+  const keepsWhole = (value: unknown, name: string): boolean =>
+    isNull(value) || wholeValue(value, name);
   for (const statement of statements) {
     if (statement.kind !== "function") continue;
     const tested = new Set<string>();
     const copied = new Set<string>();
     const mixed = new Set<string>();
     walk(statement.body, (node) => {
-      if (node.kind === "let" || (node.kind === "assign" && node.operator === "="))
+      // The importer's own capture of a value to show, such as a question read before an input's prefill, is no copy
+      // that could take the read's null on to another variable.
+      if (
+        (node.kind === "let" && node.capture !== true) ||
+        (node.kind === "assign" && node.operator === "=")
+      )
         copied.add(nameOf(node.value) ?? "");
       const target = node.kind === "assign" ? nameOf(node.target) : null;
       if (
