@@ -1061,6 +1061,32 @@ test(
       );
     assert.deepEqual(computedBy("function relay(n, m = echo(n))"), ["score"]);
     assert.deepEqual(computedBy("function relay(n, m = n + 1)"), ["score"]);
+    // Nor one that reaches what it returns through a part, a choice's value, a save, or another function's parameter;
+    // and an argument that is no stored value is not the stored default it replaces.
+    const reached = (body: string, before = "") =>
+      compared(
+        `${before}function relay(n) {\n  if n == 0 {\n    return n\n  }\n${body}\n}\n` +
+          'if relay(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n',
+      );
+    assert.deepEqual(reached("  let x = [0]\n  x[0] = n + 1\n  return x[0]"), ["score"]);
+    assert.deepEqual(reached('  let x = choose [{ text: "More", value: n + 1 }]\n  return x'), [
+      "score",
+    ]);
+    assert.deepEqual(reached('  save n + 1 as "other"\n  return load("other", default: 0)'), [
+      "score",
+      "other > 7",
+    ]);
+    assert.deepEqual(
+      reached("  setter(n + 1)\n  return x", "let x = 0\nfunction setter(p) {\n  x = p\n}\n"),
+      ["score"],
+    );
+    assert.deepEqual(
+      compared(
+        'function echo(n = load("score", default: 0)) {\n  let x = n\n  return x\n}\nif echo(8) > 7 {\n' +
+          '  say "Yes"\n}\nexit\n',
+      ),
+      ["score"],
+    );
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",

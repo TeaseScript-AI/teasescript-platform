@@ -277,13 +277,52 @@ function merge(into: Flow, from: Flow): boolean {
   return into.asks.size + into.keys.size + Number(into.clock) !== before;
 }
 
-/** The name of a variable that an assignment target writes, also through a property or an index. */
-function targetName(target: unknown): string | null {
+/**
+ * The name of a variable that an assignment target writes, also through a property or an index, and through the
+ * reference the compiler prepares for a part (`x[0] = ...`), from the `prepareReference` before instruction `at`.
+ */
+function targetName(target: unknown, instructions: readonly Data[], at: number): string | null {
   const value = record(target);
   if (value.kind === "identifier" && typeof value.name === "string") return value.name;
-  if (value.kind === "property" || value.kind === "index") return targetName(value.object);
+  if (value.kind === "property" || value.kind === "index")
+    return targetName(value.object, instructions, at);
+  if (value.kind === "preparedReference" && typeof value.temporaryId === "number")
+    for (let index = at - 1; index >= 0 && index >= at - PREPARED_REACH; index -= 1) {
+      const instruction = instructions[index]!;
+      if (
+        instruction.kind === "prepareReference" &&
+        instruction.destinationTemporary === value.temporaryId
+      )
+        return targetName(instruction.expression, instructions, index);
+    }
   return null;
 }
+
+/**
+ * The values a list of choice options gives (`[{ text: "Yes", value: true }, ...]`, also in nested lists); null for
+ * options of another form.
+ */
+function optionValues(options: unknown): unknown[] | null {
+  const value = record(options);
+  if (value.kind === "object") {
+    const given = list(value.properties).find((property) => property.name === "value");
+    return given === undefined ? null : [given.value];
+  }
+  if (value.kind !== "list") return null;
+  const found: unknown[] = [];
+  for (const element of list(value.elements)) {
+    const values = optionValues(element);
+    if (values === null) return null;
+    found.push(...values);
+  }
+  return found;
+}
+
+/** How many stored keys' carriers ({@link DataFlow}) are kept at once, as each can reach much of a plan. */
+const CARRIER_KEYS = 32;
+
+/** How many instructions before an assignment the reference it writes through is prepared, at most. */
+const PREPARED_REACH = 256;
 
 /** The literal text of an expression, such as a storage key. */
 function literalText(expression: unknown): string | null {
@@ -425,6 +464,9 @@ export class DataFlow {
   /** The contexts of {@link #enter}, by ID; each call's arguments by the scope key of the parameter they give. */
   readonly #callContexts = new Map<string, CallContext>();
   readonly #argumentsByCall = new Map<number, ReadonlyMap<string, Data>>();
+  readonly #parameterKeys = new Map<number, ReadonlySet<string>>();
+  /** Where each temporary is cleared, by its ID, in order ({@link #temporaryNode}). */
+  readonly #clearsOf = new Map<number, number[]>();
   /** {@link #carriers} by stored key, and the graph they are reached in, worked out when first needed. */
   readonly #carriersOf = new Map<string, ReadonlySet<string>>();
   #carrierGraph: { readers: Map<string, string[]>; seeds: Map<string, string[]> } | null = null;
@@ -464,8 +506,11 @@ export class DataFlow {
    * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
   readonly #assigned = new Map<string, { value: Data; index: number }[]>();
-  /** The variables, temporaries, and functions that hold a stored key's value, by them, the key, and the kind needed. */
-  readonly #holds = new Set<string>();
+  /**
+   * The variables, temporaries, and functions that hold a stored key's value, by them, the key, and the kind needed;
+   * with whether a load of the key was found through them (one that only holds values from elsewhere was not).
+   */
+  readonly #holds = new Map<string, boolean>();
   /** Each function's `returnValue` instructions, by its ID. */
   readonly #returns = new Map<number, number[]>();
   /** The stores of each temporary, by its ID: its `storeTemporary`s and the calls whose result it takes, in order. */
@@ -547,6 +592,11 @@ export class DataFlow {
       this.#returns.set(owner, known);
     });
     instructions.forEach((instruction, index) => {
+      if (instruction.kind === "clearTemporary" && typeof instruction.temporaryId === "number") {
+        const clears = this.#clearsOf.get(instruction.temporaryId) ?? [];
+        clears.push(index);
+        this.#clearsOf.set(instruction.temporaryId, clears);
+      }
       const stored =
         instruction.kind === "storeTemporary"
           ? instruction.temporaryId
@@ -620,7 +670,7 @@ export class DataFlow {
                 ) || changed;
             break;
           case "assign": {
-            const name = targetName(instruction.target);
+            const name = targetName(instruction.target, instructions, index);
             if (name === null) break;
             const key = this.scopeKey(name, index);
             if (round === 0 && this.#addsToItself(name, instruction.value)) this.#counters.add(key);
@@ -733,11 +783,12 @@ export class DataFlow {
     context: CallContext | null,
   ): { value: unknown; at: number; context: CallContext | null }[] {
     const argument = this.#argumentIn(context, key);
-    // Outside a call followed, a parameter holds whatever a call gives it (its marker); in one, what this call gives it,
-    // or its default for one it leaves out.
+    // Outside a call followed to its function, a parameter holds whatever a call gives it (its marker); in one, what
+    // this call gives it, or its default for one it leaves out.
+    const own = context !== null && this.#parameterKeysOf(context.call).has(key);
     const assigned = this.#assignmentsOf(key).filter(
       ({ value, index }) =>
-        context === null ||
+        !own ||
         (value.kind !== "parameter" &&
           (argument === undefined || this.#instructions[index]?.kind !== "bindDefaultParameter")),
     );
@@ -751,6 +802,22 @@ export class DataFlow {
         context,
       })),
     ];
+  }
+
+  /** The scope keys of the parameters of the function a call calls. */
+  #parameterKeysOf(call: number): ReadonlySet<string> {
+    const id = Number(this.#instructions[call]!.functionId);
+    let found = this.#parameterKeys.get(id);
+    if (found === undefined) {
+      const entry = this.#entryOf.get(id);
+      found = new Set(
+        entry === undefined
+          ? []
+          : (this.#parameterNames.get(id) ?? []).map((name) => this.scopeKey(name, entry)),
+      );
+      this.#parameterKeys.set(id, found);
+    }
+    return found;
   }
 
   /** The argument a context's call gives a parameter, by its scope key; undefined for another key or one left out. */
@@ -839,7 +906,12 @@ export class DataFlow {
   /** What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what. */
   #carriers(key: string): ReadonlySet<string> {
     const known = this.#carriersOf.get(key);
-    if (known !== undefined) return known;
+    if (known !== undefined) {
+      // The most recent last, as the oldest give way to new keys.
+      this.#carriersOf.delete(key);
+      this.#carriersOf.set(key, known);
+      return known;
+    }
     const graph = (this.#carrierGraph ??= this.#readersGraph());
     const reached = new Set<string>(graph.seeds.get(key) ?? []);
     const pending = [...reached];
@@ -850,13 +922,15 @@ export class DataFlow {
           pending.push(reader);
         }
     this.#carriersOf.set(key, reached);
+    if (this.#carriersOf.size > CARRIER_KEYS)
+      this.#carriersOf.delete(this.#carriersOf.keys().next().value!);
     return reached;
   }
 
   /**
    * What each value the plan sets reads ({@link #readsOf}), as the values that read each; and by stored key, the values
-   * whose flow reads it. A variable, a temporary, a function's result (`r <function>`), and a parameter, which every
-   * call's argument sets.
+   * whose flow reads it. A variable, a temporary ({@link #temporaryNode}), a function's result (`r <function>`), and a
+   * parameter, which every call's argument sets.
    */
   #readersGraph(): { readers: Map<string, string[]>; seeds: Map<string, string[]> } {
     const readers = new Map<string, string[]>();
@@ -872,19 +946,78 @@ export class DataFlow {
         if (value.kind !== "parameter") define(value, index, `v ${key}`);
     this.#instructions.forEach((instruction, index) => {
       const owner = this.functionAt(index);
-      if (instruction.kind === "storeTemporary")
-        define(instruction.value, index, `t ${owner} ${String(instruction.temporaryId)}`);
-      else if (instruction.kind === "callFunction") {
-        if (typeof instruction.destinationTemporary === "number")
+      const temporary =
+        instruction.kind === "storeTemporary"
+          ? instruction.temporaryId
+          : instruction.destinationTemporary;
+      const into = typeof temporary === "number" ? this.#temporaryNode(temporary, index) : null;
+      if (instruction.kind === "callFunction") {
+        if (into !== null)
           define(
             { kind: "callResult", functionId: instruction.functionId, call: index },
             index,
-            `t ${owner} ${instruction.destinationTemporary}`,
+            into,
           );
         for (const [key, argument] of this.#argumentsOf(index)) define(argument, index, `v ${key}`);
-      } else if (instruction.kind === "returnValue") define(instruction.value, index, `r ${owner}`);
+      } else if (instruction.kind === "interaction") {
+        // An answer may be one of the values the options give (not their texts, nor the prompt's).
+        const ui = record(instruction.ui ?? instruction.preparedUi);
+        if (into !== null && typeof ui.optionsTemporary === "number") {
+          const stores = this.heldAt(ui.optionsTemporary, index);
+          const values = stores?.map((store) => ({ ...store, values: optionValues(store.value) }));
+          if (values === undefined || values.some((store) => store.values === null))
+            define({ kind: "temporary", temporaryId: ui.optionsTemporary }, index, into);
+          else
+            for (const store of values)
+              for (const value of store.values!) define(value, store.index, into);
+        }
+      } else if (into !== null) define(instruction.value ?? instruction.expression, index, into);
+      else if (instruction.kind === "returnValue") define(instruction.value, index, `r ${owner}`);
+      else if (instruction.kind === "storageWrite")
+        define(instruction.value, index, `s ${keyText(instruction.key) ?? "?"}`);
     });
+    // A stored value is read by the loads whose key can be the one saved: the same text, one a pattern matches, or
+    // either computed past knowing (`?`).
+    const cells = [...readers.keys(), ...[...readers.values()].flat()].filter((each) =>
+      each.startsWith("s "),
+    );
+    const written = [...new Set(cells)];
+    const matchers = new Map(written.map((cell) => [cell, keyMatcher(cell.slice(2))]));
+    for (const from of written)
+      for (const into of written) {
+        const [saved, loaded] = [from.slice(2), into.slice(2)];
+        if (
+          from !== into &&
+          (saved === "?" ||
+            loaded === "?" ||
+            matchers.get(from)!(loaded) ||
+            matchers.get(into)!(saved))
+        )
+          (readers.get(from) ?? readers.set(from, []).get(from)!).push(into);
+      }
     return { readers, seeds };
+  }
+
+  /**
+   * A temporary at instruction `at`, for {@link #mayCarry}: by its function, its ID, and the last time its function
+   * cleared it before (a temporary lives within one expression, and its ID is used again after it is cleared), so that
+   * every instruction that puts a value in it there, a call, an answer, or a store, is one of what it reads.
+   */
+  #temporaryNode(temporaryId: number, at: number): string {
+    let clears = this.#clearsOf.get(temporaryId);
+    if (clears === undefined) {
+      clears = [];
+      this.#clearsOf.set(temporaryId, clears);
+    }
+    let low = 0;
+    for (let high = clears.length; low < high;) {
+      const middle = (low + high) >> 1;
+      if (clears[middle]! < at) low = middle + 1;
+      else high = middle;
+    }
+    const owner = this.functionAt(at);
+    const clear = low > 0 ? clears[low - 1]! : -1;
+    return `t ${owner} ${temporaryId} ${clear >= 0 && this.functionAt(clear) === owner ? clear : "-"}`;
   }
 
   /**
@@ -907,16 +1040,18 @@ export class DataFlow {
       } else if (value.kind === "identifier" && typeof value.name === "string")
         for (const key of this.#keysRead(this.#keyOf(value))) found.push(`v ${key}`);
       else if (value.kind === "temporary" && typeof value.temporaryId === "number")
-        found.push(`t ${this.functionAt(at)} ${value.temporaryId}`);
-      else if (value.kind === "callResult" && typeof value.functionId === "number") {
+        found.push(this.#temporaryNode(value.temporaryId, at));
+      else if (value.kind === "storageLoad") {
+        // What a save stored there, and the default; not what the key is made of.
+        found.push(`s ${keyText(value.key) ?? "?"}`);
+        pending.push(value.default);
+      } else if (value.kind === "callResult" && typeof value.functionId === "number") {
         found.push(`r ${value.functionId}`);
         if (typeof value.call === "number")
           for (const argument of list(this.#instructions[value.call]?.arguments))
             found.push(...this.#readsOf(argument.value, value.call));
       } else
-        for (const [key, each] of Object.entries(value))
-          if (key !== "span" && !(value.kind === "storageLoad" && key === "key"))
-            pending.push(each);
+        for (const [key, each] of Object.entries(value)) if (key !== "span") pending.push(each);
     }
     return found;
   }
@@ -1005,17 +1140,24 @@ export class DataFlow {
     // `context`: the call followed to the value, whose arguments its function's parameters are (see #enter). `loose`:
     // a value kept as it may carry the key's value (#mayCarry), though its flow in the context does not read it.
     type Context = CallContext | null;
+    // `from`: the variable, temporary, or call whose value it is ("" for the expression itself).
     type Item = {
       value: unknown;
       at: number | undefined;
       need: Need;
       context: Context;
       loose: boolean;
+      from: string;
     };
     // Only a value that reads the key can be its value: the values kept loosely below read nothing else.
     if (!this.#flowIn(expression, at, null).keys.has(key)) return false;
     const visited = new Set<string>();
-    const pending: Item[] = [{ value: expression, at, need: "value", context: null, loose: false }];
+    const pending: Item[] = [
+      { value: expression, at, need: "value", context: null, loose: false, from: "" },
+    ];
+    // The question holds only where a load of the key is found: the values each one is of, and those with such a load.
+    const parents = new Map<string, string[]>();
+    const loads = new Set<string>();
     // A load's declared type that can hold the kind needed; an open one can.
     const fits = (type: Data, need: Need): boolean =>
       need === "value" ||
@@ -1032,29 +1174,39 @@ export class DataFlow {
       values: { value: unknown; at: number | undefined; context: Context }[],
       context: Context,
       loose: boolean,
+      from: string,
     ): boolean => {
       const id = `${name}\u0000${key}\u0000${need}\u0000${context?.id ?? ""}${loose ? "\u0000~" : ""}`;
-      if (this.#holds.has(id) || visited.has(id)) return true;
+      parents.set(id, [...(parents.get(id) ?? []), from]);
+      const known = this.#holds.get(id);
+      if (known !== undefined) {
+        if (known) loads.add(id);
+        return true;
+      }
+      if (visited.has(id)) return true;
       visited.add(id);
       let reading = 0;
       for (const each of values)
         if (this.#flowIn(each.value, each.at, each.context).keys.has(key)) {
-          pending.push({ ...each, need, loose: false });
+          pending.push({ ...each, need, loose: false, from: id });
           reading += 1;
         } else if (this.#mayCarry(each.value, each.at, key)) {
-          pending.push({ ...each, need, loose: true });
+          pending.push({ ...each, need, loose: true, from: id });
           reading += 1;
         }
       return reading > 0 || loose;
     };
-    const step = ({ value: expression, at, need, context, loose }: Item): boolean => {
+    const step = ({ value: expression, at, need, context, loose, from }: Item): boolean => {
       const value = record(expression);
       if (value.kind === "group") {
-        pending.push({ value: value.expression, at, need, context, loose });
+        pending.push({ value: value.expression, at, need, context, loose, from });
         return true;
       }
-      if (value.kind === "storageLoad")
-        return fits(record(value.type), need) && keyText(value.key) === key;
+      if (value.kind === "storageLoad") {
+        if (!fits(record(value.type), need) || keyText(value.key) !== key) return false;
+        loads.add(from);
+        return true;
+      }
       if (value.kind === "identifier" && typeof value.name === "string")
         return node(
           `variable ${this.#keyOf(value)}`,
@@ -1062,12 +1214,13 @@ export class DataFlow {
           this.#valuesIn(this.#keyOf(value), context),
           context,
           loose,
+          from,
         );
       // A whole number is no truth.
       if (value.kind === "call" && calleeName(value) === "toInteger") {
         const [only, ...rest] = list(value.arguments);
         if (need === "truth" || only === undefined || rest.length > 0) return false;
-        pending.push({ value: only.value, at, need: "integer", context, loose });
+        pending.push({ value: only.value, at, need: "integer", context, loose, from });
         return true;
       }
       // A truth compared with `true` is that truth (`load(k) == true`).
@@ -1081,7 +1234,7 @@ export class DataFlow {
               ? right
               : null;
         if (side === null) return false;
-        pending.push({ value: side, at, need: "truth", context, loose });
+        pending.push({ value: side, at, need: "truth", context, loose, from });
         return true;
       }
       if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
@@ -1094,6 +1247,7 @@ export class DataFlow {
             held.map((store) => ({ value: store.value, at: store.index, context })),
             context,
             loose,
+            from,
           )
         );
       }
@@ -1118,14 +1272,24 @@ export class DataFlow {
           })),
           context,
           loose,
+          from,
         );
       }
       return false;
     };
     for (let item = pending.pop(); item !== undefined; item = pending.pop())
       if (!step(item)) return false;
-    for (const id of visited) this.#holds.add(id);
-    return true;
+    // Those with a load of the key, and the values they are of in turn; the expression must be one.
+    const grounded = new Set(loads);
+    const climbing = [...loads];
+    for (let id = climbing.pop(); id !== undefined; id = climbing.pop())
+      for (const parent of parents.get(id) ?? [])
+        if (!grounded.has(parent)) {
+          grounded.add(parent);
+          climbing.push(parent);
+        }
+    for (const id of visited) this.#holds.set(id, grounded.has(id));
+    return grounded.has("");
   }
 
   /**
@@ -1426,7 +1590,7 @@ export class DataFlow {
         if (instruction.kind === "callFunction") code.calls.push(instruction);
         const bound =
           instruction.kind === "assign"
-            ? [targetName(instruction.target)]
+            ? [targetName(instruction.target, this.#instructions, index)]
             : instruction.kind === "declareBinding" || instruction.kind === "declareGlobal"
               ? [instruction.name]
               : instruction.kind === "loopStart"
@@ -1729,7 +1893,7 @@ export class DataFlow {
         assigned(instruction.name, record(instruction.value), index);
       if (instruction.kind === "assign") {
         const target = record(instruction.target);
-        const name = targetName(instruction.target);
+        const name = targetName(instruction.target, instructions, index);
         if (name === null) return;
         assigned(
           name,
@@ -2829,7 +2993,7 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
   instructions.forEach((instruction, index) => {
     const name =
       instruction.kind === "assign"
-        ? targetName(instruction.target)
+        ? targetName(instruction.target, instructions, index)
         : (instruction.kind === "declareBinding" || instruction.kind === "declareGlobal") &&
             typeof instruction.name === "string"
           ? instruction.name

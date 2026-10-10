@@ -634,7 +634,9 @@ typed answer, a count, a value the script sets: a condition on a variable the sc
 game's state a saved game restores, `setInPlay` in the report, goes with these), why play stopped, and the code that
 can never run. Each line not reached counts once,
 under the missed way with the most code behind it (`ownLines`), so the groups add up to the lines not reached;
-conditions and keys are as the script writes them.
+conditions and keys are as the script writes them. A needed comparison with a saved value (`needs score > 7`) is a
+static reading of the code, shown where the analysis finds that the condition compares the saved value itself: it can
+leave the comparison out where it does not follow how a value gets there, and is not proven right in every case.
 `--replay` plays the path of a crash, trap, or reached way again with the run's seed, prints the transcript of its last
 session, and for a crash exits 0 only when the same failure returns. A
 runtime operation that throws, such as one whose event sequence runs out (`TSR101`), or a stored state the runtime
