@@ -1024,7 +1024,8 @@ export class DataFlow {
    * The other cells of saved values whose key can be a cell's: one a pattern matches, either way, or any for a key
    * computed past knowing (`s ?`). Cells of the same text are one; distinct literal keys never meet. Worked out once
    * per cell, when a stored key's carriers first reach it, from the cells a pattern's first part can lead to: those
-   * whose text starts with it (in `cells`, sorted), and the patterns whose first part starts the cell's (`patterns`).
+   * whose text starts with it (in `cells`, sorted), and the patterns whose first part starts the cell's (`patterns`, by
+   * first part, at most {@link MEETING_PATTERNS} of them).
    */
   #cellsMeeting(
     cell: string,
@@ -1055,9 +1056,8 @@ export class DataFlow {
     if (text === "?") for (const other of graph.cells) candidates.add(other);
     else {
       if (graph.unknown) candidates.add("s ?");
-      for (let length = 0; length <= text.length; length += 1)
-        for (const pattern of graph.patterns.get(text.slice(0, length)) ?? [])
-          candidates.add(pattern);
+      for (const [first, patterns] of graph.patterns)
+        if (text.startsWith(first)) for (const pattern of patterns) candidates.add(pattern);
       if (text.includes(KEY_PLACEHOLDER)) {
         const first = `s ${text.split(KEY_PLACEHOLDER)[0]!}`;
         let low = 0;
