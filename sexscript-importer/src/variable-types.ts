@@ -2471,8 +2471,9 @@ function guardedCompare(
 /**
  * The declarations in functions that a whole-number storage read without a default starts, `let age = load(k)` for
  * loadInteger(k), and that their function tests for null or orders (`sexscriptLegacyCompare`) but copies into no
- * other variable: the read gives a whole number or null, which their type then says, so that such a test narrows them.
- * Elsewhere the read stays as open as a `load`, also where a copy would take its null on.
+ * other variable, and sets only to whole numbers or null: the read gives a whole number or null, which their type then
+ * says, so that such a test narrows them. Elsewhere the read stays as open as a `load`, also where a copy would take
+ * its null on, or where a later value, such as a parameter's or a text, may be of another type.
  */
 function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrStatement> {
   const found = new Set<IrStatement>();
@@ -2492,13 +2493,37 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
     isRecord(value) && value.kind === "variable" && typeof value.name === "string"
       ? value.name
       : null;
+  const isWhole = (value: unknown): boolean =>
+    isRecord(value) &&
+    ((value.kind === "literal" &&
+      typeof value.value === "number" &&
+      Number.isInteger(value.value) &&
+      value.decimal !== true) ||
+      (value.kind === "unary" && value.operator === "-" && isWhole(value.value)));
+  // A value that keeps a variable a whole number or null: null, a whole number, a whole-number read, or the variable
+  // itself added to, subtracted from, or multiplied by such numbers.
+  const keepsWhole = (value: unknown, name: string): boolean =>
+    isNull(value) ||
+    isWhole(value) ||
+    (isRecord(value) &&
+      ((value.kind === "load" && value.integer === true && value.defaultValue === undefined) ||
+        (value.kind === "binary" &&
+          (value.operator === "+" || value.operator === "-" || value.operator === "*") &&
+          [value.left, value.right].every((side) => nameOf(side) === name || isWhole(side)))));
   for (const statement of statements) {
     if (statement.kind !== "function") continue;
     const tested = new Set<string>();
     const copied = new Set<string>();
+    const mixed = new Set<string>();
     walk(statement.body, (node) => {
       if (node.kind === "let" || (node.kind === "assign" && node.operator === "="))
         copied.add(nameOf(node.value) ?? "");
+      const target = node.kind === "assign" ? nameOf(node.target) : null;
+      if (
+        target !== null &&
+        !(node.operator === "=" ? keepsWhole(node.value, target) : isWhole(node.value))
+      )
+        mixed.add(target);
       if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
         if (isNull(node.right)) tested.add(nameOf(node.left) ?? "");
         if (isNull(node.left)) tested.add(nameOf(node.right) ?? "");
@@ -2516,7 +2541,8 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
           item.value.integer === true &&
           item.value.defaultValue === undefined &&
           tested.has(item.name) &&
-          !copied.has(item.name)
+          !copied.has(item.name) &&
+          !mixed.has(item.name)
         )
           found.add(item);
         if (item.kind === "if") {

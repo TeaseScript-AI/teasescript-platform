@@ -109,4 +109,27 @@ function loadAsText(keyword, defaultValue) {
   }
 }
 say "Text ${loadAsText("game.squares", "none")}"
+// A read that the function tests for null but then sets to a parameter's value or to text stays open: the value
+// may be of another type, and the text needs no number at all.
+function readDefault(key, fallbackValue) {
+  let x = sexscriptLegacyLoadInteger(key)
+  if x == null {
+    say "Default"
+    x = fallbackValue
+  }
+  return x
+}
+let counts = { count: 0 }
+// NOTE SX_SHARED_MAP_WRITE line 74: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+counts.count = readDefault("game.missing", 7)
+say "Count ${counts.count}"
+function readText {
+  let x = sexscriptLegacyLoadInteger("game.missing")
+  if x != null {
+    say "Saved"
+  }
+  x = "text"
+  return x
+}
+say "Read ${readText()}"
 exit

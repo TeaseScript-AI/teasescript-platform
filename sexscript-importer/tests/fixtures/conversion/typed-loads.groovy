@@ -63,3 +63,20 @@ def loadAsText = { keyword, defaultValue ->
 		return stored
 }
 show("Text " + loadAsText("game.squares", "none"))
+// A read that the function tests for null but then sets to a parameter's value or to text stays open: the value
+// may be of another type, and the text needs no number at all.
+def readDefault = { key, fallback ->
+	def x = loadInteger(key)
+	if (x == null) { show("Default"); x = fallback }
+	return x
+}
+def counts = [count: 0]
+counts.count = readDefault("game.missing", 7)
+show("Count " + counts.count)
+def readText = { ->
+	def x = loadInteger("game.missing")
+	if (x != null) { show("Saved") }
+	x = "text"
+	return x
+}
+show("Read " + readText())
