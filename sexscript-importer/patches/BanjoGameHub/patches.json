@@ -18,7 +18,7 @@
       "id": "hit-or-stay-played-key",
       "layer": "source",
       "category": "e",
-      "reason": "Hit or Stay reads and saves whether the player already met an opponent under Banjo.fourheroes.played_<opponent>, Four Heroes' key, while its own reset clears Banjo.hitorstay.played_<opponent> and every other game uses its own prefix: so a Four Heroes game made Hit or Stay greet the opponent as met before, and Hit or Stay's reset never cleared it. Use Banjo.hitorstay.played_.",
+      "reason": "Hit or Stay tells whether the player already played it against an opponent by Banjo.fourheroes.played_<opponent>, Four Heroes' per-game flag, while its own reset clears Banjo.hitorstay.played_<opponent> and every other game keeps its own played flag: so after a Four Heroes game against an opponent, Hit or Stay skipped its first-game greeting for them, and its reset did not bring the greeting back. Use Banjo.hitorstay.played_.",
       "diff": "hit-or-stay-played-key.diff"
     },
     {

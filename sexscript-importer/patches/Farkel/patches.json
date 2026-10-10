@@ -11,7 +11,7 @@
       "id": "ruined-lower-limit",
       "layer": "source",
       "category": "e",
-      "reason": "For a ruined orgasm the punishment limits are placeholders, and the lower one is 0, which the bet algorithm divides by (50/minPunish) when the agreed chance to cum is below 50, which any chance is allowed to be: Groovy failed with a division by zero there. For this choice the computed punishment is replaced by a random one, and only the minimum the mistress accepts follows from it, as it already did for a chance of 50 or more: make the placeholder 1.",
+      "reason": "For a ruined orgasm the punishment limits are placeholders, and the lower one is 0, which the bet algorithm divides by (50/minPunish) when the agreed chance to cum is below 50, which any chance is allowed to be: Groovy failed with a division by zero there. For this choice the calculated punishment and its calculated minimum are discarded, and the negotiation uses a random one: make the placeholder 1.",
       "diff": "ruined-lower-limit.diff"
     },
     {
