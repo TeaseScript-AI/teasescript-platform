@@ -122,6 +122,8 @@ export interface WaitStatement {
   readonly duration: Expression;
   /** The unit after the duration, kept apart because a wait, like a timer, may take a range with a unit. */
   readonly unit: DurationUnit | null;
+  /** The length as written, with its unit, such as `(1..3) min`. */
+  readonly lengthSpan: SourceSpan;
   readonly span: SourceSpan;
 }
 
@@ -138,6 +140,8 @@ export interface TimerParts {
   readonly display: TimerDisplay | Expression | null;
   readonly duration: Expression;
   readonly unit: DurationUnit | null;
+  /** The length as written, with its unit, such as `(1..3) min`. */
+  readonly lengthSpan: SourceSpan;
   readonly label: Expression | null;
   readonly repeat: boolean;
   readonly persist: boolean;

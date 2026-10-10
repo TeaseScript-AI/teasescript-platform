@@ -1,5 +1,6 @@
 import type { Block, FileTarget, InteractionExpression, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
+import { dayWaitWarnings } from "./day-waits.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
@@ -325,6 +326,7 @@ function checkProject(
           freshLabels.get(files[index]!.result.path) ?? new Set(),
           types.flow,
         ),
+        ...dayWaitWarnings(files[index]!.result.program, files[index]!.source),
       ]),
     );
     return files.some((file) => hasErrors(file.result.diagnostics))
