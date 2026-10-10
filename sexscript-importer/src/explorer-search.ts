@@ -16,6 +16,7 @@ import {
   goalsFor,
   KEY_PLACEHOLDER,
   keyMatcher,
+  loadDefaultCheck,
   namesIn,
   callsClock,
   successors,
@@ -3469,7 +3470,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
       const taken = session.branches[index]! | session.clockBranches[index]!;
       if (taken !== 1 && taken !== 2) return;
-      if (allConstants.has(index) || Number(instruction.target) === index + 1) return;
+      if (
+        allConstants.has(index) ||
+        Number(instruction.target) === index + 1 ||
+        loadDefaultCheck(instructions, index)
+      )
+        return;
       const way: 0 | 1 = taken === 1 ? 1 : 0;
       const code = index * 2 + way;
       const known = targets.get(code);
@@ -5289,8 +5295,9 @@ function lineCoverage(
     const play = session.branches[index]! | session.chosenBranches[index]!;
     const clock = session.clockBranches[index]!;
     const target = Number(instruction.target);
-    // A condition play never evaluated, or with both ways equal, is not listed.
-    if (play === 0 || play === 3 || target === index + 1) return;
+    // A condition play never evaluated, or with both ways equal, is not listed; nor one the compiler added.
+    if (play === 0 || play === 3 || target === index + 1 || loadDefaultCheck(instructions, index))
+      return;
     const condition = record(instruction.condition ?? instruction.expression);
     if (condition.kind === "literal") return;
     const way = play === 1 ? 1 : 0;

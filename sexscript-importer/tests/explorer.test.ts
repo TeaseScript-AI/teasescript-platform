@@ -1079,6 +1079,30 @@ test(
   },
 );
 
+test(
+  "the condition the compiler adds for a load whose default calls a function is no missed way, while the author's test of a load is",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'function blank(text) {\n  return text\n}\nsave "Ada" as "pupil.name"\nsave "x" as "pupil.seat"\nshowButton "Roll call"\n' +
+      'say "Hello ${load("pupil.name", default: blank(""))}."\nif load("pupil.seat", default: "") == "" {\n' +
+      '  say "No seat."\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const missed = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches.map((entry) => entry.line);
+    assert.deepEqual(missed, [8]);
+  },
+);
+
 test("a missed way's note tells what the condition itself needs: a stored value a session left before keys it was copied from, and its own value before its else-if chain's", () => {
   const goal = (
     key: string,

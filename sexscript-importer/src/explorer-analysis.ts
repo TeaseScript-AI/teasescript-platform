@@ -1846,6 +1846,39 @@ export interface ClockDifference extends Constants {
 }
 
 /**
+ * Whether the condition at `index` is the one the compiler adds for a load whose default calls a function
+ * (`load(k, default: f())`): the load without its default into a temporary, then whether that gave nothing, before the
+ * default is computed. The author wrote no such condition: whether the default is used shows in the lines of what it
+ * calls.
+ */
+export function loadDefaultCheck(instructions: readonly Data[], index: number): boolean {
+  const instruction = instructions[index];
+  const before = instructions[index - 1];
+  if (instruction?.kind !== "jumpIfFalse" || before?.kind !== "storeTemporary") return false;
+  const condition = record(instruction.condition);
+  const [left, right, loaded] = [
+    record(condition.left),
+    record(condition.right),
+    record(before.value),
+  ];
+  const span = record(condition.span);
+  const same = (other: Data) =>
+    isRecord(other.span) && other.span.so === span.so && other.span.eo === span.eo;
+  return (
+    condition.kind === "binary" &&
+    condition.operator === "==" &&
+    left.kind === "temporary" &&
+    left.temporaryId === before.temporaryId &&
+    right.kind === "literal" &&
+    right.value === null &&
+    same(right) &&
+    loaded.kind === "storageLoad" &&
+    loaded.default === null &&
+    same(loaded)
+  );
+}
+
+/**
  * The differences of clock reads the code times something with (`start = getTimestamp().toSeconds()`, a button, then
  * `took = getTimestamp().toSeconds() - start`), with the conditions shortly after that compare the difference and the
  * constants they compare it with (`took < 5`); also a difference a condition takes itself.

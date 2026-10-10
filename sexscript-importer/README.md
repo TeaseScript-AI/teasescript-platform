@@ -570,7 +570,9 @@ The report `<out>/<unit>.json` has these parts:
   label (`play`, `chosen` with random choices, `clock`, `unreachable`, `unknown`);
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
-- each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
+- each condition and loop that play reached but left only one way (not the one the compiler adds for a load whose
+  default calls a function, `load(k, default: f())`, which directed search does not aim at either: whether the
+  default is used shows in the lines of what it calls), with its source, the missed way, its first line,
   what it depends on (`dependsOn`: variables, stored keys, asks, the clock), the directed attempts (the planned ones,
   each session of a stored value's chain, and play going on from a state that stored the value), its label, and the
   reason, when known; `behindLines`, the coverable lines no state ran that the missed way leads to through code no state
