@@ -1064,6 +1064,15 @@ test(
             },
           ],
         );
+        // What the scene read, which it saves: every toy of the club's list.
+        const storage = new Map<string, RuntimeValue>();
+        const ran = projectResult.runner(
+          shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+          {},
+          { storage },
+        );
+        assert.equal(ran.status, "halted");
+        assert.equal(storage.get("scene.laid"), "clamps whip cane ");
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
@@ -1817,6 +1826,51 @@ test(
 );
 
 // Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
+// The hierarchical storage fixture says what the same script said with legacy storage (PropertiesWorker, ported to
+// Groovy as an oracle): elements read and rebuilt, a key that is a value first, a shorter list, a null element, and the
+// subtree a null save removes.
+test(
+  "the hierarchical-storage fixture says what legacy storage gave the script",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const tease = readFileSync(
+      fileURLToPath(new URL("./fixtures/conversion/hierarchical-storage.tease", import.meta.url)),
+      "utf8",
+    );
+    const { plan } = compileSource(tease);
+    assert.ok(plan !== undefined);
+    const said: string[] = [];
+    const note = (events: readonly PacedEvent[]): void => {
+      for (const event of events) if (event.kind === "say") said.push(event.text ?? "");
+    };
+    let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+    note(step.events);
+    for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
+      const observed = observeTime(
+        plan,
+        step.snapshot,
+        step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+      );
+      note(observed.events);
+      step = run(plan, observed.snapshot);
+      note(step.events);
+    }
+    assert.equal(step.snapshot.status, "halted");
+    assert.deepEqual(said, [
+      "Lay out clamps whip cane ",
+      "Visits 2 3",
+      "Days 4 2 true",
+      "Level 3 5",
+      "Again 2 true null true",
+      "Reset true true true",
+    ]);
+  },
+);
+
 test(
   "an input's question shows what it read before its pre-filled value was computed",
   { skip: parserUnavailable },

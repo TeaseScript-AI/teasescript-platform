@@ -18,7 +18,11 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * key with no literal text at all is unknown and stays as it is, and so are the references of photos the conversion
  * keeps under their paths.
  */
-export function withLegacyStorage(programs: readonly MigrationProgram[]): MigrationProgram[] {
+export function withLegacyStorage(
+  programs: readonly MigrationProgram[],
+  /** Whether the first program is the package's main.tease, which holds the helpers as global functions for all. */
+  shared: boolean,
+): MigrationProgram[] {
   const calls = new Map<string, Array<{ call: CallExpression; caller: Scope }>>();
   const keys: Array<{ key: IrExpression; caller: Scope }> = [];
   for (const program of programs) {
@@ -74,11 +78,12 @@ export function withLegacyStorage(programs: readonly MigrationProgram[]): Migrat
     }
     return found.length === 0 ? null : found;
   };
+  // The shapes of each key; the references of photos the conversion keeps under their paths are no legacy keys, so a
+  // key that is only such a reference has none, and an unresolved key null.
   const known = new Map<IrExpression, string[] | null>();
   for (const { key, caller } of keys) {
     const found = shapes(key, caller, 0, variableShapes);
-    // The references of photos the conversion keeps under their paths are no legacy keys.
-    known.set(key, found?.some((shape) => shape.startsWith(SENT_IMAGE_PREFIX)) ? null : found);
+    known.set(key, found?.filter((shape) => !shape.startsWith(SENT_IMAGE_PREFIX)) ?? null);
   }
   const all = [...new Set([...known.values()].flatMap((found) => found ?? []))];
   // The shapes that can be an element of another shape of the package, or have one.
@@ -90,8 +95,12 @@ export function withLegacyStorage(programs: readonly MigrationProgram[]): Migrat
         hierarchical.add(child);
       }
   if (hierarchical.size === 0) return [...programs];
-  const routed = (key: IrExpression): boolean =>
-    known.get(key)?.some((shape) => hierarchical.has(shape)) === true;
+  // A key that may be one of them goes through the helpers, and so does a key no shape resolves, which may be one too:
+  // they store and read every key as legacy did, so that all accesses see one layout.
+  const routed = (key: IrExpression): boolean => {
+    const found = known.get(key);
+    return found === null || found?.some((shape) => hierarchical.has(shape)) === true;
+  };
 
   // The helpers' own names may not be those of a file's variables or functions, which they would hide.
   const taken = new Set(
@@ -101,7 +110,23 @@ export function withLegacyStorage(programs: readonly MigrationProgram[]): Migrat
       ),
     ),
   );
-  return programs.map((program) => {
+  const helpers = helperStatements(new Set(["storedSave", "storedLoad"] as const)).map(
+    (helper): IrStatement => ({
+      ...withFreshNames(helper, taken),
+      ...(shared ? { global: true } : {}),
+    }),
+  );
+  const withHelpers = (statements: IrStatement[]): IrStatement[] => {
+    const order = helperDefinitionOrder(helpers[0]!);
+    const at = statements.findIndex((statement) => {
+      const position = helperDefinitionOrder(statement);
+      return position < 0 || position > order;
+    });
+    const place = at < 0 ? statements.length : at;
+    return [...statements.slice(0, place), ...helpers, ...statements.slice(place)];
+  };
+  let usedAnywhere = false;
+  const rewritten = programs.map((program) => {
     let used = false;
     const expression = (value: IrExpression): IrExpression => {
       const routes = value.kind === "load" && value.rebuilds === true && routed(value.key);
@@ -119,6 +144,18 @@ export function withLegacyStorage(programs: readonly MigrationProgram[]): Migrat
       statements.map((statement): IrStatement => {
         if (helperDefinitionOrder(statement) >= 0) return statement;
         const next = mapOwnExpressions(withNestedBlocks(statement, block), expression);
+        // A rebuilt value may hold elements of other types than the saves wrote, such as a null element, so the
+        // variable it starts takes it open, without the type that the saves gave the read.
+        if (
+          next.kind === "let" &&
+          statement.kind === "let" &&
+          statement.value.kind === "load" &&
+          statement.value.rebuilds === true &&
+          routed(statement.value.key)
+        ) {
+          const { type: _type, ...open } = next;
+          return open;
+        }
         if (
           (statement.kind !== "save" && statement.kind !== "delete") ||
           (next.kind !== "save" && next.kind !== "delete") ||
@@ -142,20 +179,12 @@ export function withLegacyStorage(programs: readonly MigrationProgram[]): Migrat
       });
     const statements = block(program.statements);
     if (!used) return program;
-    const helpers = helperStatements(new Set(["storedSave", "storedLoad"] as const)).map((helper) =>
-      withFreshNames(helper, taken),
-    );
-    const order = helperDefinitionOrder(helpers[0]!);
-    const at = statements.findIndex((statement) => {
-      const position = helperDefinitionOrder(statement);
-      return position < 0 || position > order;
-    });
-    const place = at < 0 ? statements.length : at;
-    return {
-      ...program,
-      statements: [...statements.slice(0, place), ...helpers, ...statements.slice(place)],
-    };
+    usedAnywhere = true;
+    return { ...program, statements: shared ? statements : withHelpers(statements) };
   });
+  if (!shared || !usedAnywhere) return rewritten;
+  const [main, ...others] = rewritten;
+  return [{ ...main!, statements: withHelpers(main!.statements) }, ...others];
 }
 
 type FunctionStatement = Extract<IrStatement, { kind: "function" }>;

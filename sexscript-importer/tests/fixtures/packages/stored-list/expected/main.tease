@@ -32,8 +32,12 @@ global function sexscriptLegacySave(key, value) {
           names.add("${name}.${entry}")
           values.add(inner)
         }
-      } else if item != null {
-        save item as name
+      } else {
+        if item == null {
+          save "null" as name
+        } else {
+          save item as name
+        }
         kept.add(name)
       }
     }

@@ -1062,19 +1062,20 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const moduleFiles = withModuleFiles(noted, files);
-  const withClasses = withLegacyStorage(
-    withBooleanResultTruths(
-      noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
-    ),
+  const withClasses = withBooleanResultTruths(
+    noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
   );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withStorageDefaults(
-      withNullableParameters(
-        withClasses.map((program, index) =>
-          index === entryIndex ? withProfile(program, withClasses) : program,
+    const programs = withLegacyStorage(
+      withStorageDefaults(
+        withNullableParameters(
+          withClasses.map((program, index) =>
+            index === entryIndex ? withProfile(program, withClasses) : program,
+          ),
         ),
+        false,
       ),
       false,
     );
@@ -1151,12 +1152,15 @@ export function lowerPackage(
       main: legacyMain === null ? 0 : legacyMain + 1,
     },
   );
+  // Legacy storage's elements go through helpers in main.tease, after the reads got their defaults and the profile its
+  // prompts, which read the native storage operations (legacy-storage.ts).
+  const stored = withLegacyStorage(nullable, true);
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
-  const chained = withoutRepeatedChainText(nullable.slice(1), paths);
+  const chained = withoutRepeatedChainText(stored.slice(1), paths);
   const [main, ...programs] =
     legacyMain === null
-      ? withoutUnusedHelpers([nullable[0]!, ...chained])
-      : [nullable[0]!, ...withoutUnusedHelpers(chained)];
+      ? withoutUnusedHelpers([stored[0]!, ...chained])
+      : [stored[0]!, ...withoutUnusedHelpers(chained)];
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,

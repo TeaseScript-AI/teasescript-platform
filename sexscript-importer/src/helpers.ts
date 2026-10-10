@@ -1307,10 +1307,13 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
                           },
                         ],
                         [
-                          ifS(bin("!=", v("item"), lit(null)), [
-                            { kind: "save", key: v("name"), value: v("item"), span: null },
-                            add("kept", v("name")),
-                          ]),
+                          // An element that is null was stored as the text "null", which load() reads as null.
+                          ifS(
+                            bin("==", v("item"), lit(null)),
+                            [{ kind: "save", key: v("name"), value: lit("null"), span: null }],
+                            [{ kind: "save", key: v("name"), value: v("item"), span: null }],
+                          ),
+                          add("kept", v("name")),
                         ],
                       ),
                     ],
@@ -1345,7 +1348,14 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["key", "whenMissing"],
         [
           letS("value", { kind: "load", key: v("key"), defaultValue: lit(null) }),
-          ifS(bin("==", v("value"), lit(null)), [
+          // A key stored itself is its value, the text "null" being null; only a key not stored has elements to read.
+          letS("present", bin("!=", v("value"), lit(null))),
+          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+            ifS(bin("==", call(v("value"), "lowercase"), lit("null")), [
+              set(v("value"), lit(null)),
+            ]),
+          ]),
+          ifS(not(v("present")), [
             storedKeys(),
             letS("prefix", template(v("key"), ".")),
             typedLet("parts", "string[]", { kind: "list", items: [] }),
@@ -1361,6 +1371,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ]),
             letS("numbered", lit(true)),
             forS("part", v("parts"), [
+              // Legacy took elements whose names start with a digit for a list, so an empty name makes a dict.
+              ifS(bin("==", prop(v("part"), "length"), lit(0)), [set(v("numbered"), lit(false))]),
               letS("position", lit(0)),
               {
                 kind: "while",

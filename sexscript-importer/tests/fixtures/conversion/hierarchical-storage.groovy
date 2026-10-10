@@ -23,6 +23,9 @@ show("Days " + days.size() + " " + days[1] + " " + (days[2] == null))
 save("club.level", 3)
 save("club.level.kink", 5)
 show("Level " + load("club.level") + " " + loadInteger("club.level.kink"))
+// A shorter list replaces every element of a longer one, and a null element stays a null element.
+save("club.toys", ["gag", null])
+show("Again " + load("club.toys").size() + " " + (load("club.toys")[1] == null) + " " + loadString("club.toys.1") + " " + (loadString("club.toys.2") == null))
 // save(key, null) removes the key with all its elements.
 save("club", null)
 show("Reset " + (load("club.toys") == null) + " " + (loadInteger("club.level.kink") == null) + " " + (load("club") == null))
