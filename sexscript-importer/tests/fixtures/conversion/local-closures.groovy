@@ -29,3 +29,11 @@ if (getBoolean("Hurry?")) {
 	def wait = { seconds -> show("Skipping ${seconds} seconds") }
 }
 wait(1)
+// A closure that gets itself as its parameter, and calls it, calls itself directly, as every call passes it.
+def again = { again, times ->
+	if (times > 0) {
+		show("Again " + times)
+		again(again, times - 1)
+	}
+}
+again(again, 2)

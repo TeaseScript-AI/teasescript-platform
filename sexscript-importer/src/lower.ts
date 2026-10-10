@@ -2,6 +2,7 @@ import { datePatternFields, datePatternKind } from "./java-time.ts";
 import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
+import { withLoopedTailCalls } from "./tail-calls.ts";
 import {
   constantString,
   groovyParameters,
@@ -262,6 +263,8 @@ interface LowerContext {
   integerVariables: ReadonlySet<string>;
   /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
   integerArrays: ReadonlySet<string>;
+  /** Calls through a closure parameter that only ever holds one closure of the script, by call (fixedClosureCalls). */
+  fixedClosureCalls: ReadonlyMap<AstNode, string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
   /**
@@ -1546,6 +1549,7 @@ export function lowerParsedFile(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
     changingPaths: new Set(),
@@ -1649,6 +1653,7 @@ export function lowerParsedFile(
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
+    context.fixedClosureCalls = fixedClosureCalls(body);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
@@ -2410,7 +2415,7 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
-  const result = enforceVariableTypes(statements, helperResults);
+  const result = enforceVariableTypes(withLoopedTailCalls(statements), helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
@@ -2701,6 +2706,7 @@ function lowerHelperMethod(
     bindings: new Map(),
     integerVariables: new Set(),
     integerArrays: new Set(),
+    fixedClosureCalls: new Map(),
     textVariables: new Set(),
     walkedEntries: new Map(),
     changingPaths: new Set([
@@ -4400,7 +4406,7 @@ function legacyApiCall(
 ): { name: string; arguments: AstNode[] } | null {
   const call = callParts(node);
   if (call === null || !call.inherited) return null;
-  if (callsHostOfOwnName(call.name, call.arguments.length, context)) return call;
+  if (callsHostOfOwnName(call.name, call.arguments.length, node, context)) return call;
   const shadowed =
     context.functions.has(call.name) ||
     context.packageFunctions.has(call.name) ||
@@ -4410,14 +4416,26 @@ function legacyApiCall(
 }
 
 /**
- * Inside the closure a variable defines, the variable is not defined yet, so a call of its name with another number
- * of arguments than the closure takes called the SexScript method of that name, as in
- * `def getRandom = { low, high -> low + getRandom(high - low) }`.
+ * Inside the closure a variable defines, the variable is not defined yet, so a call of its name called the SexScript
+ * method of that name, as in `def getRandom = { low, high -> low + getRandom(high - low) }` or
+ * `def waitWithGauge = { float wTime -> if (wTime > 0) waitWithGauge(wTime) }`, unless a parameter or local of that
+ * name holds a closure to call there, `def wait = { wait, n -> wait(wait, n - 1) }`; where no such method exists, the
+ * call failed, and a call with the closure's number of arguments stays a call of the closure.
  */
-function callsHostOfOwnName(name: string, count: number, context: LowerContext): boolean {
+function callsHostOfOwnName(
+  name: string,
+  count: number,
+  node: AstNode,
+  context: LowerContext,
+): boolean {
   if (context.currentFunction?.name !== name) return false;
   const info = context.functions.get(name);
-  return info !== undefined && (count < info.minArgs || count > info.maxArgs);
+  return (
+    info !== undefined &&
+    ((SEXSCRIPT_API_METHODS.has(name) && !isVisibleLocal(name, node, context)) ||
+      count < info.minArgs ||
+      count > info.maxArgs)
+  );
 }
 
 /** Whether a parameter or local of the current function, visible at `node`, has this name. */
@@ -6993,9 +7011,10 @@ function lowerCallStatement(
     }));
   }
   if (
-    context.functions.has(call.name) ||
-    context.packageFunctions.has(call.name) ||
-    context.helperFunctions.has(call.name)
+    !callsHostOfOwnName(call.name, call.arguments.length, node, context) &&
+    (context.functions.has(call.name) ||
+      context.packageFunctions.has(call.name) ||
+      context.helperFunctions.has(call.name))
   ) {
     const expression = lowerExpression(node, context);
     return expression === null
@@ -15095,6 +15114,146 @@ function integerVariables(body: AstNode, keys: BindingKeys): Set<string> {
   return names;
 }
 
+/**
+ * The calls through a closure parameter that only ever holds one closure of the script, with that closure:
+ * Puzzle_Challenge's `def introo = { introo -> ... introo(introo) }`, called as `introo(introo)`, passes the closure
+ * itself on and on. Each call of a closure the script defines at its top passes, at the parameter's position, that
+ * closure by name, or a parameter that holds it. A closure or such a parameter used in any other way than as a call
+ * or an argument of one, such as stored, returned, or passed to the legacy API, may be called where this does not
+ * see, so its parameters hold anything.
+ */
+function fixedClosureCalls(body: AstNode): Map<AstNode, string> {
+  const closures = new Map<string, AstNode>();
+  for (const statement of nodeArray(body.statements)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const name = expression?.kind === "declaration" ? variableName(expression.left) : null;
+    const closure = asNode(expression?.right);
+    if (name !== null && closure?.kind === "closure") closures.set(name, closure);
+  }
+  const result = new Map<AstNode, string>();
+  if (closures.size === 0) return result;
+  // A name resolves to a parameter (its closure and position), another local, or a closure of the script's top.
+  type Resolved = { parameter: string } | { closure: string } | null;
+  const parameters = new Map<string, { closure: string; index: number }>();
+  const calls: Array<{ node: AstNode; callee: Resolved; args: Resolved[] }> = [];
+  // References used another way than as a call or an argument of one.
+  const escaped: Resolved[] = [];
+  let counter = 0;
+  const visit = (value: unknown, scopes: ReadonlyArray<Map<string, string | null>>): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, scopes);
+      return;
+    }
+    if (!isAstNode(value)) {
+      if (isRecord(value)) for (const child of Object.values(value)) visit(child, scopes);
+      return;
+    }
+    const node = value;
+    const resolve = (name: string | null): Resolved => {
+      if (name === null) return null;
+      for (let at = scopes.length - 1; at >= 0; at -= 1)
+        if (scopes[at]!.has(name)) {
+          const key = scopes[at]!.get(name)!;
+          return key === null ? null : { parameter: key };
+        }
+      return closures.has(name) ? { closure: name } : null;
+    };
+    if (node.kind === "closure") {
+      const scope = new Map<string, string | null>();
+      const owner = [...closures].find(([, closure]) => closure === node)?.[0] ?? null;
+      (groovyParameters(node.parameters) ?? []).forEach((parameter, index) => {
+        counter += 1;
+        const key = `${parameter.name}#${counter}`;
+        if (owner !== null) parameters.set(key, { closure: owner, index });
+        scope.set(parameter.name, owner === null ? null : key);
+      });
+      if (node.parameterSpecified !== true) scope.set("it", null);
+      for (const child of Object.values(node)) visit(child, [...scopes, scope]);
+      return;
+    }
+    if (node.kind === "declaration") {
+      visit(node.right, scopes);
+      for (const target of [asNode(node.left)]) {
+        const name = variableName(target);
+        if (name !== null && scopes.length > 0) scopes.at(-1)!.set(name, null);
+      }
+      return;
+    }
+    if (node.kind === "variable") {
+      const resolved = resolve(variableName(node));
+      if (resolved !== null && variableName(node) !== "this") escaped.push(resolved);
+      return;
+    }
+    if (node.kind === "methodCall" && node.implicitThis === true) {
+      const callee = resolve(constantString(node.method));
+      const argumentNodes = nodeArray(asNode(node.arguments)?.items);
+      // An argument of another call, such as one of the legacy API, may keep the closure.
+      if (callee === null) {
+        visit(argumentNodes, scopes);
+        return;
+      }
+      calls.push({
+        node,
+        callee,
+        args: argumentNodes.map((argument) =>
+          argument.kind === "variable" ? resolve(variableName(argument)) : null,
+        ),
+      });
+      for (const argument of argumentNodes)
+        if (argument.kind !== "variable") visit(argument, scopes);
+      return;
+    }
+    for (const child of Object.values(node)) visit(child, scopes);
+  };
+  visit(body.statements, []);
+  // The closure each parameter holds, or "any"; a parameter no call reaches holds nothing yet.
+  const holds = new Map<string, string>();
+  const target = (resolved: Resolved): string | null => {
+    if (resolved === null) return null;
+    if ("closure" in resolved) return resolved.closure;
+    return holds.get(resolved.parameter) ?? null;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    const anyOf = new Set(
+      escaped.flatMap((resolved) => {
+        const closure = target(resolved);
+        return closure === null || closure === "any" ? [] : [closure];
+      }),
+    );
+    const merge = (key: string, closure: string): void => {
+      const now = holds.get(key);
+      const next = now === undefined || now === closure ? closure : "any";
+      if (next !== now) {
+        holds.set(key, next);
+        changed = true;
+      }
+    };
+    for (const [key, { closure }] of parameters) if (anyOf.has(closure)) merge(key, "any");
+    for (const call of calls) {
+      const callee = target(call.callee);
+      if (callee === null || callee === "any") continue;
+      for (const [key, { closure, index }] of parameters) {
+        if (closure !== callee) continue;
+        const argument = call.args[index];
+        if (argument === undefined || argument === null) {
+          merge(key, "any");
+          continue;
+        }
+        const value = "closure" in argument ? argument.closure : holds.get(argument.parameter);
+        if (value !== undefined) merge(key, value);
+      }
+    }
+  }
+  for (const call of calls) {
+    if (call.callee === null || !("parameter" in call.callee)) continue;
+    const closure = holds.get(call.callee.parameter);
+    if (closure !== undefined && closure !== "any") result.set(call.node, closure);
+  }
+  return result;
+}
+
 /** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
 function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
   const names = new Set<string>();
@@ -16072,7 +16231,12 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   // closure value it holds.
   if (context.helperMainParameter === null && isVisibleLocal(call.name, node, context)) {
     const args = lowerArguments(call.arguments, context);
-    return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
+    if (args === null) return null;
+    // A parameter that only ever holds one closure calls it without the dispatcher, which a call would cost a level of.
+    const fixed = context.fixedClosureCalls.get(node);
+    return fixed === undefined
+      ? actionCall({ kind: "variable", name: call.name }, args, context)
+      : { kind: "call", name: fixed, positional: args, named: {}, local: true };
   }
   const helperInfo = context.helperFunctions.get(call.name);
   if (helperInfo !== undefined) {
@@ -16130,7 +16294,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
   }
-  const functionInfo = callsHostOfOwnName(call.name, call.arguments.length, context)
+  const functionInfo = callsHostOfOwnName(call.name, call.arguments.length, node, context)
     ? undefined
     : context.functions.get(call.name);
   // Groovy called a closure of one parameter without an argument with null.

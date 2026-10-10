@@ -389,6 +389,13 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
   reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`). A condition or assignment whose `&&`/`||` chain asks,
   such as `getBoolean(a) && getBoolean(b) && getBoolean(c)`, is computed step by step and asks each question only
   where the short circuit reaches it.
+- Deep recursion: Groovy's stack let a script nest thousands of calls, where a TeaseScript session stops at its
+  call-depth limit (`TSR047`) and slows down well before it. A call in tail position leaves nothing of its caller to
+  run, so a function that returns a call of itself, or ends with one and returns nothing, loops instead; functions of
+  a file that call each other so run as steps of one driver, `sexscriptLegacyRunSteps`, which every other call of them
+  goes through. A call that more of its caller follows still nests, and so do cycles through a global function, a
+  function kept as a value, or a module's function. SpankedHeroRPG's world changes became tail calls by a category-e
+  patch.
 
 ## Type enforcement findings (#519, #526, #530)
 

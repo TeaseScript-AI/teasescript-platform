@@ -17,6 +17,25 @@ function getRandom(low, high) {
   return low + sexscriptLegacyRandom(high - low)
 }
 say "Roll ${getRandom(3, 6)}"
+// The same holds for a call with the closure's own number of arguments.
+function waitWithGauge(seconds) {
+  if seconds > 0 {
+    timer seconds s
+  }
+}
+waitWithGauge(2)
+// A parameter of the closure's own name holds a closure, which the call calls.
+function waitValue(waitValue2, n) {
+  while true {
+    if n > 0 {
+      say "Wait ${n}"
+      n -= 1
+      continue
+    }
+    return
+  }
+}
+waitValue("waitValue", 2)
 // A closure of one parameter called without an argument gets null.
 function greet(who) {
   if who == null {
@@ -32,7 +51,7 @@ function sleep {
 }
 sleep()
 // A flag that later holds a number is false at 0, as Groovy truth was.
-// NOTE SX_UNION_TYPE line 11: Groovy let 'playing' hold values of several types; TeaseScript declares it 'boolean | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if playing is boolean { ... }
+// NOTE SX_UNION_TYPE line 17: Groovy let 'playing' hold values of several types; TeaseScript declares it 'boolean | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if playing is boolean { ... }
 let playing: boolean | integer = true
 while (playing is boolean and playing == true) or (playing is number and playing != 0) {
   if askBoolean "Stop?" {

@@ -13,6 +13,13 @@
       "category": "e",
       "reason": "The alchemist's quest runs flowers (1), ferns (2), mushrooms (3), then Fairy Dust (4), as its declaration, the item names, the mushroom step (which sets 4) and the loot (dust drops at stage 4) all have it, but the Fairy Dust delivery tests questAlchemy==2. So at stage 4 handing in the dust did nothing and the quest could not be completed, while at stage 2 dust without ferns completed it early. Test questAlchemy==4.",
       "diff": "alchemy-dust-stage.diff"
+    },
+    {
+      "id": "world-changes-return",
+      "layer": "source",
+      "category": "e",
+      "reason": "A world (worldStart, worldTown, worldWild, worldCave, worldForest, worldEnd) changes to another by calling it from inside its room loop, so every change nests one more call, which Groovy's deep stack allowed; the stack only unwinds when the game ends, and each caller then runs what follows its call, with endReached already true. A TeaseScript session allows fewer levels, so the game stopped after about a thousand world changes. Each world change inside a room loop now returns the call (85 sites: worldCave 48, worldForest 20, worldWild 6, worldEnd 5, worldTown 4, worldStart 2), so the converted worlds run one after another without nesting. What followed a world call ran only in that final unwinding. Moved before the return: `locationVisit = false` after `worldEnd(\"arrested\")` in the three house robberies (town-house1, town-house2, town-house3); every location sets locationVisit to true before its loop reads it, so no later visit sees the difference. Moved to the callers: the camp's Quit option (makeCamp) called `worldEnd(\"quitmenu\")` inside the camp menu; it now sets room to \"quitmenu\" and ends the camp as before, and the two campsites that call makeCamp (cave-c2 in worldCave, forest-b5 in worldForest) return `worldEnd(\"quitmenu\")` when room is \"quitmenu\". Dropped with the unwinding: after quitting from a camp, the campsite's direction menu, which showed again once the game ended (the two campsites); and the re-checks of the loop around a world call, which ended anyway: the room loop (endReached was true) at every site, and the loop the call stood in at 9 sites, whose flag the case had already cleared (camped in makeCamp, titlemenu after loading a save in worldStart, locationVisit in 7 location menus of worldTown, worldWild and worldForest).",
+      "diff": "world-changes-return.diff"
     }
   ]
 }
