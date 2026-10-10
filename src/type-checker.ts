@@ -4734,6 +4734,145 @@ class TypeChecker {
   }
 
   /**
+   * The arguments of a method of a date or time value or a calendar duration (V30 §35): the conversions and `add` take
+   * their options by name, `add` also one duration first, and the other methods nothing. A union of receivers takes
+   * only the options every member takes. Name validation checks `zone:`, which must be written as text.
+   */
+  #checkTemporalArguments(
+    expression: CallExpression,
+    property: Identifier,
+    receivers: readonly StaticType[],
+    values: readonly StaticType[],
+  ): void {
+    const method = property.name;
+    const taken = receivers.map((member) => temporalOptions(member, method));
+    if (taken.some((options) => options === undefined)) {
+      // A format follows the player's settings.
+      if (expression.arguments.length > 0)
+        this.#report(
+          typeCode.argumentCount,
+          method.startsWith("format")
+            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
+            : `${method}() takes no arguments.`,
+          property.span,
+        );
+      return;
+    }
+    const allowed = taken[0]!.filter((option) =>
+      taken.every((options) => options!.includes(option)),
+    );
+    const given = expression.arguments.map((argument, index) => ({
+      argument,
+      type: values[index]!,
+    }));
+    const positional = given.filter(({ argument }) => argument.kind === "positionalArgument");
+    const named = given.flatMap(({ argument, type }) =>
+      argument.kind === "namedArgument" ? [{ argument, type }] : [],
+    );
+    for (const { argument } of named)
+      if (!allowed.includes(argument.name.name))
+        this.#report(
+          typeCode.unknownNamedArgument,
+          `${method}() has no option '${argument.name.name}:'. Its options are ${optionList(allowed)}.`,
+          argument.name.span,
+        );
+    if (method === "add") {
+      if (positional.length !== 1)
+        this.#report(
+          typeCode.argumentCount,
+          "add() takes one duration or calendar duration, as in 'add(1 calendar day)'.",
+          property.span,
+        );
+      else
+        this.#checkAddedAmount(
+          receivers,
+          positional[0]!.argument.value,
+          positional[0]!.type,
+          named.length > 0,
+        );
+    } else if (positional.length > 0)
+      this.#report(
+        typeCode.argumentCount,
+        `${method}() takes only the options ${optionList(allowed)}, each with its name.`,
+        property.span,
+      );
+    if (method === "toDuration") {
+      const from = named.find(({ argument }) => argument.name.name === "from");
+      if (from === undefined)
+        this.#report(
+          typeCode.argumentCount,
+          "toDuration() needs its start as 'from:', as in 'span.toDuration(from: getAbsoluteDateTime())'. A calendar day or month has a length only from a start.",
+          property.span,
+        );
+      else
+        this.#reportUnless(
+          from.type,
+          (member) => isScalar(member, "datetime", "absoluteDateTime"),
+          from.argument.value,
+          "toDuration(from:) starts at a date and time or an absolute date and time",
+          () =>
+            members(from.type).some((member) => isScalar(member, "date"))
+              ? " Give the date a clock time, as in 'toDateTime(day, toTime(\"00:00\"))'."
+              : "",
+        );
+    }
+    for (const { argument, type } of named) {
+      const name = argument.name.name;
+      const texts = OPTION_TEXTS.get(name);
+      if (texts === undefined || !allowed.includes(name)) continue;
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "string"),
+        argument.value,
+        `'${name}:' takes text, such as "${texts.at(-1)!}"`,
+      );
+      const text = staticText(argument.value);
+      if (text !== undefined && !texts.includes(text))
+        this.#report(
+          typeCode.invalidOperand,
+          `'${name}:' takes ${choiceList(texts)}, not "${text}".`,
+          argument.value.span,
+        );
+    }
+  }
+
+  /**
+   * The duration `add` moves a value by: a date or a date and time moves only by calendar units without exact time, as
+   * with `+`, and an absolute date and time by either, with options only for a calendar duration.
+   */
+  #checkAddedAmount(
+    receivers: readonly StaticType[],
+    amount: Expression,
+    type: StaticType,
+    options: boolean,
+  ): void {
+    // A union of local values and an absolute one takes what both take, and each problem is reported once.
+    const local = receivers.find((receiver) => !isScalar(receiver, "absoluteDateTime"));
+    if (local !== undefined) {
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "calendarDuration"),
+        amount,
+        `add() on ${describeValue(local)} takes a calendar duration, such as '1 calendar day'`,
+      );
+      this.#checkLocalCalendarOffset(local, amount, amount.span);
+      return;
+    }
+    this.#reportUnless(
+      type,
+      (member) => isScalar(member, "duration", "calendarDuration"),
+      amount,
+      "add() takes a duration or a calendar duration",
+    );
+    if (options && isKnown(type) && members(type).every((member) => isScalar(member, "duration")))
+      this.#report(
+        typeCode.invalidOperand,
+        "add() with a duration takes no options. 'zone:', 'disambiguation:', and 'overflow:' apply to a calendar duration.",
+        amount.span,
+      );
+  }
+
+  /**
    * The number or duration `expression` is known to have at compile time, folded once per expression from its operands'
    * known values. Iterative, so a long chain of steps does not deepen the native stack.
    */
@@ -5290,15 +5429,8 @@ class TypeChecker {
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
-      // The methods of date and time values take no arguments; a format follows the player's settings.
-      if (all.every(isTemporal) && expression.arguments.length > 0)
-        this.#report(
-          typeCode.argumentCount,
-          method.startsWith("format")
-            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
-            : `${method}() takes no arguments.`,
-          callee.property.span,
-        );
+      if (all.every((member) => isTemporal(member) || isScalar(member, "calendarDuration")))
+        this.#checkTemporalArguments(expression, callee.property, all, values);
       const result = all.length === 1 ? results[0]! : union(results.map((result) => result!));
       // A value of unknown type as the default makes the result unknown, so a place checks it when the script runs.
       return fallback === undefined ? result : union([result, plainType(fallback)]);
@@ -8002,10 +8134,13 @@ function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | und
   return undefined;
 }
 
-/** The result of a method of a date or time value, or `undefined` when it has none (V30 §35). */
+/** The result of a method of a date or time value or a calendar duration, or `undefined` when it has none (V30 §35). */
 function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | undefined {
+  if (kind === "calendarDuration") return method === "toDuration" ? DURATION_TYPE : undefined;
   if (!TEMPORAL_KINDS.has(kind)) return undefined;
   switch (method) {
+    case "add":
+      return kind === "time" ? undefined : scalarType(kind);
     case "toISO":
       return STRING_TYPE;
     case "formatDate":
@@ -8024,6 +8159,41 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
     default:
       return undefined;
   }
+}
+
+/**
+ * The options a method of this receiver takes (V30 §35), or `undefined` when it takes no arguments: the zone it counts
+ * in, how a local time that the zone skips or repeats resolves, and what a day that the target month lacks becomes.
+ */
+function temporalOptions(receiver: StaticType, method: string): readonly string[] | undefined {
+  if (method === "toDuration" && isScalar(receiver, "calendarDuration"))
+    return ["from", "zone", "disambiguation", "overflow"];
+  if (method === "toAbsoluteDateTime" && isScalar(receiver, "datetime"))
+    return ["zone", "disambiguation"];
+  if (method === "toDateTime" && isScalar(receiver, "absoluteDateTime")) return ["zone"];
+  if (method === "add")
+    return isScalar(receiver, "absoluteDateTime")
+      ? ["zone", "disambiguation", "overflow"]
+      : ["overflow"];
+  return undefined;
+}
+
+/** The texts each option that takes text accepts, the default first. */
+const OPTION_TEXTS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["disambiguation", ["compatible", "earlier", "later", "reject"]],
+  ["overflow", ["constrain", "reject"]],
+]);
+
+function optionList(options: readonly string[]): string {
+  const names = options.map((option) => `'${option}:'`);
+  return names.length < 2
+    ? (names[0] ?? "none")
+    : `${names.slice(0, -1).join(", ")}${names.length > 2 ? "," : ""} and ${names.at(-1)!}`;
+}
+
+function choiceList(texts: readonly string[]): string {
+  const quoted = texts.map((text) => `"${text}"`);
+  return `${quoted.slice(0, -1).join(", ")}${quoted.length > 2 ? "," : ""} or ${quoted.at(-1)!}`;
 }
 
 /** Property names whose write on a media handle first waits for the previous message's pacing. */
@@ -8561,8 +8731,10 @@ function operatorMessage(
       return `A date and time has no time zone, so it cannot move by elapsed time. Convert it first, as in '(${label}.toAbsoluteDateTime() ${operator} ${durationText(expression.right)}).toDateTime()', or use calendar units to keep the clock time.`;
     if (operator === "-" && isScalar(left!, "datetime") && isScalar(right!, "datetime"))
       return `A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with 'toDate(${label}) - toDate(${expressionLabel(expression.right) ?? "value"})', or convert both with toAbsoluteDateTime() for the elapsed time.`;
-    if (isScalar(left!, "absoluteDateTime") && isScalar(right!, "calendarDuration"))
-      return `An absolute date and time has no calendar. Convert it first, as in '(${label}.toDateTime() ${operator} ${durationText(expression.right, "1 calendar day")}).toAbsoluteDateTime()'.`;
+    if (isScalar(left!, "absoluteDateTime") && isScalar(right!, "calendarDuration")) {
+      const amount = durationText(expression.right, "1 calendar day");
+      return `An absolute date and time has no calendar, so '${operator}' cannot move it by calendar units. Use add(...), which counts them in the player's time zone, as in '${label}.add(${operator === "-" ? (/^(?:[\w.]+|\d[\d.]* (?:calendar )?[a-z]+)$/u.test(amount) ? `-${amount}` : `-(${amount})`) : amount})'.`;
+    }
     // An absolute date and time or a date and time moves by a duration written after it.
     if (isScalar(left!, "absoluteDateTime", "datetime")) {
       const subject = describeValue(left!);

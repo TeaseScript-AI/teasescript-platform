@@ -51,7 +51,10 @@ interface StorageHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
-  temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number };
+  temporalCapture(namedZones?: readonly string[]): {
+    temporalContext: TemporalContext;
+    wallClockMs: number;
+  };
   editSavedData(edit: {
     key: string;
     value: SerializableRuntimeValue;
@@ -72,7 +75,7 @@ interface StorageHost {
 }
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
-  temporalContext?: () => TemporalContext;
+  temporalContext?: (namedZones: readonly string[]) => TemporalContext;
 }) => StorageHost;
 
 before(async () => {
@@ -97,7 +100,7 @@ function deferred() {
 function createHost(
   context: TestContext,
   provider: ScriptStorageProvider,
-  temporalContext?: () => TemporalContext,
+  temporalContext?: (namedZones: readonly string[]) => TemporalContext,
 ) {
   // Event targets are the only browser surface these storage-only scripts use; no media elements are created.
   for (const name of ["document", "window"]) {
@@ -462,7 +465,7 @@ for (const [name, source, expected] of [
 
 test("Vue host resolves the player's zone and presentation again at Start and at Continue", async (context) => {
   let account = AMSTERDAM;
-  let resolved = 0;
+  const resolved: (readonly string[])[] = [];
   const { host } = createHost(
     context,
     {
@@ -472,15 +475,18 @@ test("Vue host resolves the player's zone and presentation again at Start and at
       replace: async () => {},
       clear: async () => {},
     },
-    () => {
-      resolved++;
+    (namedZones) => {
+      resolved.push(namedZones);
       return account;
     },
   );
   context.mock.method(Date, "now", () => utc("2026-10-04T16:00:00"));
   await host.loadScriptStorage();
+  // The script names a zone, whose rules Continue asks for with the player's.
+  const source =
+    'function there(moment) {\n    return moment.toDateTime(zone: "America/New_York")\n}\nlet day = choose [toDate("2026-10-04")]\nsay day\nexit';
   host.prepare(() =>
-    createPlayerRuntimeSession('let day = choose [toDate("2026-10-04")]\nsay day\nexit', {
+    createPlayerRuntimeSession(source, {
       ...host.scriptStorageOptions(),
       ...host.temporalCapture(),
     }),
@@ -500,7 +506,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   host.activate();
   const continued = playerRuntimeSnapshot(host.session.value!);
   assert.ok(continued);
-  assert.equal(resolved, 2);
+  assert.deepEqual(resolved, [[], ["America/New_York"]]);
   assert.deepEqual(
     continued.temporalCaptures.map((capture) => [capture.context.zone.name, capture.epochMs]),
     [

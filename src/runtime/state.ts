@@ -5,6 +5,7 @@ import {
   type RuntimeRandomControlSnapshot,
 } from "./random-control.js";
 import {
+  contextZonesProblem,
   DEFAULT_TEMPORAL_CONTEXT,
   frozenTemporalContext,
   isValidEpochMilliseconds,
@@ -129,7 +130,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 72;
+export const RUNTIME_SNAPSHOT_VERSION = 73;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -557,6 +558,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     if (problem !== null) throw new RangeError(`temporalContext is malformed: ${problem}`);
     // EVIDENCE: validation: temporalContextProblem accepted the captured option.
     temporalContext = frozenTemporalContext(capturedOptions.temporalContext as TemporalContext);
+    const unnamed = contextZonesProblem(temporalContext, plan.timeZones);
+    if (unnamed !== null) throw new RangeError(`temporalContext is malformed: ${unnamed}`);
   }
   const wallClockMs = capturedOptions.wallClockMs ?? null;
   if (

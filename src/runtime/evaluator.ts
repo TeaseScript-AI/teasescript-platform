@@ -1,5 +1,6 @@
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
+  calendarDurationMethod,
   combinedDateAndTime,
   compareTemporal,
   hasTemporalMethod,
@@ -1544,6 +1545,7 @@ export class Evaluator {
         );
       return;
     }
+    if (isCalendarDuration(receiver) && method === "toDuration") return;
     if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
@@ -2185,6 +2187,16 @@ export class Evaluator {
     }
     if (expression.callee.kind === "property" && isTemporal(receiver)) {
       return temporalMethod(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        currentTemporalContext(this.snapshot),
+        expression.span,
+      );
+    }
+    if (expression.callee.kind === "property" && isCalendarDuration(receiver)) {
+      return calendarDurationMethod(
         receiver,
         expression.callee.name,
         positional,

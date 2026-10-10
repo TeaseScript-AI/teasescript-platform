@@ -4,6 +4,7 @@ import { captureExternalData } from "../../external-data-capture.js";
 import { interruptFrame } from "../activations.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import {
+  contextZonesProblem,
   frozenTemporalContext,
   isValidEpochMilliseconds,
   temporalContextProblem,
@@ -91,6 +92,8 @@ function recordCapturedContinueCapture(
   if (temporalContext !== undefined) {
     // EVIDENCE: validation: temporalContextProblem accepted the captured context above.
     context = frozenTemporalContext(temporalContext as TemporalContext);
+    const unnamed = contextZonesProblem(context, captured.plan.timeZones);
+    if (unnamed !== null) return invalid(`temporalContext is malformed: ${unnamed}`);
   }
   const sinceEventSequence = current.nextEventSequence;
   // A capture replaces the previous one only when nothing happened in between: same boundary, no new event.

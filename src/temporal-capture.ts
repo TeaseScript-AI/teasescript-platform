@@ -1,10 +1,12 @@
 /**
  * Host-side capture of the zone rules and presentation settings that `temporal.ts` computes with (#532). This is the
  * only temporal code that reads `Intl`; a host calls it when a session starts or continues, and the engine records the
- * result, so a restored or replayed session never consults host locale or time-zone data.
+ * result, so a restored or replayed session never consults host locale or time-zone data. The compiler asks it whether
+ * a zone that a script names exists.
  */
 
 import {
+  isZoneName,
   presentationSettingsProblem,
   ZONE_RULES_END_MILLISECONDS,
   ZONE_RULES_START_MILLISECONDS,
@@ -24,9 +26,43 @@ const SCAN_STEP_MS = 86_400_000;
 
 const capturedZones = new Map<string, ZoneRules>();
 
-/** The zone rules and presentation of a player's IANA time zone and locale, for a session to record. */
-export function captureTemporalContext(timeZone: string, locale: string): TemporalContext {
-  return { zone: captureZoneRules(timeZone), presentation: capturePresentationSettings(locale) };
+/**
+ * The zone rules and presentation of a player's IANA time zone and locale, with the rules of each zone a script names
+ * (`plan.timeZones`), for a session to record. Throws a `RangeError` for a zone or locale this host cannot capture.
+ */
+export function captureTemporalContext(
+  timeZone: string,
+  locale: string,
+  namedZones: readonly string[] = [],
+): TemporalContext {
+  const context = {
+    zone: captureZoneRules(timeZone),
+    presentation: capturePresentationSettings(locale),
+  };
+  return namedZones.length === 0
+    ? context
+    : { ...context, namedZones: namedZones.map(captureNamedZoneRules) };
+}
+
+/**
+ * The rules of a zone a script names, under the name as the script writes it, which the host's own name for the zone
+ * may differ from, as `Asia/Calcutta` for `Asia/Kolkata`. Throws a `RangeError` for a zone this host does not know.
+ */
+export function captureNamedZoneRules(name: string): ZoneRules {
+  return { ...captureZoneRules(name), name };
+}
+
+/** Whether a script may name the zone: `UTC`, or an IANA name that this host's time-zone data knows. */
+export function isKnownTimeZone(name: string): boolean {
+  if (name === "UTC") return true;
+  if (!isZoneName(name)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: name });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) return false;
+    throw error;
+  }
 }
 
 /**
