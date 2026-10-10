@@ -7385,7 +7385,10 @@ function lowerCollectionAssignment(
         const variables = new Map(context.types.variables);
         variables.set(accumulator, LIST);
         context.types = { ...context.types, variables };
-        const statements = collectReturnsBody(argument!.closure, syntheticVariable(accumulator, span));
+        const statements = collectReturnsBody(
+          argument!.closure,
+          syntheticVariable(accumulator, span),
+        );
         body = lowerStatementList(statements!, null, context);
         break;
       }
@@ -7524,7 +7527,10 @@ function collectReturnsBody(closure: AstNode, accumulator: AstNode): AstNode[] |
       return {
         kind: "block",
         span: node.span,
-        statements: [add(asNode(node.value), node.span), { kind: "continue", span: node.span, label: null }],
+        statements: [
+          add(asNode(node.value), node.span),
+          { kind: "continue", span: node.span, label: null },
+        ],
       };
     }
     const nested = inJump || ["for", "while", "doWhile", "switch"].includes(node.kind);
@@ -8870,9 +8876,11 @@ function nullOnlyTruth(node: AstNode, context: LowerContext): boolean | null {
   }
   if (node.kind !== "binary") return null;
   const [left, right] = [asNode(node.left), asNode(node.right)];
-  if (node.operator === "&&") return left !== null && nullOnlyTruth(left, context) === false ? false : null;
+  if (node.operator === "&&")
+    return left !== null && nullOnlyTruth(left, context) === false ? false : null;
   if (node.operator !== "==" && node.operator !== "!=") return null;
-  if (!nullOnly(left) || !nullOnly(right) || (isNullConstant(left!) && isNullConstant(right!))) return null;
+  if (!nullOnly(left) || !nullOnly(right) || (isNullConstant(left!) && isNullConstant(right!)))
+    return null;
   return node.operator === "==";
 }
 
@@ -10221,7 +10229,10 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
       }
-      if (!context.writeTargets.has(node) && context.nullOnly.has(bindingKey(node, context.bindings) ?? ""))
+      if (
+        !context.writeTargets.has(node) &&
+        context.nullOnly.has(bindingKey(node, context.bindings) ?? "")
+      )
         return { kind: "literal", value: null };
       if (
         context.checksUndefinedVariables &&
