@@ -3479,6 +3479,15 @@ including on another device, the gap does not consume timer time and the timer c
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
+A `wait` or timer whose length is written in days or weeks gets warning `TSV061` (owner decision, 2026-10-10) on that
+length, as such a length almost always means real time. That is a day or week unit (`d`, `day`, `days`, `w`, `week`, or
+`weeks`) after the length or within it outside a call, as in `timer (1..3) days` and `wait 1 day + 2 h`, but not one
+within a count before another unit, as in `wait (elapsed / 1 day) s`. A length held in a variable is not checked:
+
+```text
+wait 2 days     // TSV061: 'wait 2 days' counts only time while the Player is open, so closing the Player pauses it.
+```
+
 Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
 longer than that can never end; the compiler rejects one it can see, such as `wait 1e15 s`, and any other is a runtime
 error.
@@ -3709,6 +3718,8 @@ Static analysis should warn, but not necessarily fail compilation, when:
 - statements are unreachable;
 - an `exit` is declared but unreachable;
 - a `wait` adds no time because the message before it takes longer to read (`TSV060`, [§27](#27-timers));
+- a `wait` or timer has a length written in days or weeks, which counts only time while the Player is open (`TSV061`,
+  [§27](#time));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
   or an unconditional top-level `goto` back to an earlier label of its file, whose loop is the statements between them.
   A `break`, `return`, `end`, `exit`, any other `goto`, a file `call`, or a call of an author, host, or library function
