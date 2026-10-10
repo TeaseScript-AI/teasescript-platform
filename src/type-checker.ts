@@ -5393,7 +5393,10 @@ class TypeChecker {
     // Every member of a union must have the method (ADR 0021 rule 3.5). `add` on a date or time value and `add` on a
     // collection are different methods, so a union of both kinds has neither.
     const all = members(value);
-    const mixedAdd = method === "add" && all.some(isTemporal) && !all.every(isTemporal);
+    const mixedAdd =
+      method === "add" &&
+      all.some(isTemporal) &&
+      all.some((member) => isListOrSet(resolved(member)));
     const results = all.map((member) =>
       mixedAdd && isTemporal(member) ? undefined : memberMethodType(member, method),
     );

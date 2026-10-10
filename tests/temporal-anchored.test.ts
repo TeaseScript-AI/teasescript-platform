@@ -362,6 +362,11 @@ test("the compiler checks zones, options, and amounts that it knows", () => {
     ]).map(([code]) => code),
     ["TSV043"],
   );
+  // A date that may be null takes 'add' once it is checked.
+  assert.deepEqual(
+    diagnostics(["function move(value: date?) {", "    say value.add(1 calendar day)", "}"]),
+    [["TSV043", "'value' may be null. Check it first: if value != null { ... }"]],
+  );
   // `add` on a date or time value is not a collection's `add`, so a union of both has neither.
   for (const amount of ["1 day", "dynamic(1 day)"])
     assert.deepEqual(
