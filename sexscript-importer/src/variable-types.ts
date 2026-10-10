@@ -707,6 +707,7 @@ function analyse(
   results: ReadonlyMap<string, TeaseType>,
 ): Analysis {
   const testedIntegerReads = nullTestedIntegerReads(statements);
+  const nullStored = nullStoredNames(statements);
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1076,11 +1077,18 @@ function analyse(
           analysis.indexes.add(child);
         } else {
           plainCompares.delete(child);
-          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too.
-          const nullable = (side: number): boolean =>
-            compared[side]!.kind === "variable" &&
-            [left!, right!][side]!.kind === "optional" &&
-            plain(nonNull([left!, right!][side]!)) === "number";
+          // A number variable that may be null beside a settled number, `x == null or x < 5`, which narrows it too. One
+          // that a null is stored in keeps the helper: where the compiler knows it holds null, the comparison after
+          // the test does not compile.
+          const nullable = (side: number): boolean => {
+            const value = compared[side]!;
+            return (
+              value.kind === "variable" &&
+              !nullStored.has(value.name) &&
+              [left!, right!][side]!.kind === "optional" &&
+              plain(nonNull([left!, right!][side]!)) === "number"
+            );
+          };
           const settledNumber = (side: number): boolean =>
             plain([left!, right!][side]!) === "number" && settledValue(compared[side]!);
           const side =
@@ -2525,6 +2533,32 @@ function nullTestedIntegerReads(statements: readonly IrStatement[]): Set<IrState
     declarations(statement.body);
   }
   return found;
+}
+
+/** The names of the variables that a null literal is stored in, by a `let` or an assignment. */
+function nullStoredNames(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const stored =
+      isRecord(value.value) && value.value.kind === "literal" && value.value.value === null;
+    if (stored && value.kind === "let" && typeof value.name === "string") names.add(value.name);
+    if (
+      stored &&
+      value.kind === "assign" &&
+      isRecord(value.target) &&
+      value.target.kind === "variable" &&
+      typeof value.target.name === "string"
+    )
+      names.add(value.target.name);
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statements);
+  return names;
 }
 
 /** Whether evaluating a value can neither fail nor change anything: a literal, a variable, or `+`, `-`, `*` of these. */

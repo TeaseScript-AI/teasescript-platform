@@ -35,6 +35,24 @@ function sexscriptLegacyArray(size, value) {
   }
   return items
 }
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
 // A list that the code compares with null keeps its null start, since null and an empty list differ there.
 let answers: string[]? = null
 function fill {
@@ -71,4 +89,16 @@ if base == null or base < 0 {
   base = 0
 }
 say "Base ${base + 1}"
+// A number set to null keeps the helper comparison, since after the null the compiler knows it holds null.
+let level = null
+if level == null {
+  say "No level"
+}
+level = 1
+level = null
+if sexscriptLegacyCompare(level, 0) < 0 {
+  say "Below"
+} else {
+  say "Not below"
+}
 exit

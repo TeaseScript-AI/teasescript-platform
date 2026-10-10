@@ -62,3 +62,10 @@ def findFirst = { list, from ->
 	return -1
 }
 show("First " + findFirst([1, 3, 5], 0))
+// A counter whose loop sets it with a conditional, or that a closure's default reads, stays declared where it was.
+def round
+for (round = (getRandom(1) == 0 ? 1 : 2); round < 3; round++) show("Round " + round)
+def lap
+def lastLap = { seen = lap -> return seen }
+for (lap = 0; lap < 2; lap++) show("Lap " + lap)
+show("Last lap " + lastLap())

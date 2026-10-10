@@ -21,3 +21,9 @@ if (getRandom(2) == 0) restore()
 def base = square
 if (base < 0) base = 0
 show("Base " + (base + 1))
+// A number set to null keeps the helper comparison, since after the null the compiler knows it holds null.
+def level = null
+if (level == null) show("No level")
+level = 1
+level = null
+if (level < 0) show("Below") else show("Not below")

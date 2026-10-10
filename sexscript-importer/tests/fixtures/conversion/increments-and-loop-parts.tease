@@ -113,4 +113,25 @@ function findFirst(listValue, from) {
   return -1
 }
 say "First ${findFirst([1, 3, 5], 0)}"
+// A counter whose loop sets it with a conditional, or that a closure's default reads, stays declared where it was.
+let roundValue = 0
+if randomInteger(0..1) == 0 {
+  roundValue = 1
+} else {
+  roundValue = 2
+}
+while roundValue < 3 {
+  say "Round ${roundValue}"
+  roundValue += 1
+}
+let lap = 0
+function lastLap(seen = lap) {
+  return seen
+}
+lap = 0
+while lap < 2 {
+  say "Lap ${lap}"
+  lap += 1
+}
+say "Last lap ${lastLap()}"
 exit

@@ -15607,7 +15607,11 @@ function loopOnlyCounters(body: AstNode, keys: BindingKeys): Set<string> {
       for (const item of value) visit(item, inside, closure);
       return;
     }
-    if (!isAstNode(value)) return;
+    // A closure's parameters, with their defaults, are records of their own.
+    if (!isAstNode(value)) {
+      if (isRecord(value)) for (const child of Object.values(value)) visit(child, inside, closure);
+      return;
+    }
     const node = value;
     const declaration = node.kind === "declaration" ? bindingKey(asNode(node.left), keys) : null;
     if (declaration !== null && declared.has(declaration)) {
@@ -15637,7 +15641,10 @@ function loopOnlyCounters(body: AstNode, keys: BindingKeys): Set<string> {
   return new Set([...declared].filter((key) => !outside.has(key)));
 }
 
-/** The variable a C-style `for` sets in its first part, `for (i = start; ...)`, or null. */
+/**
+ * The variable a C-style `for` sets in its first part, `for (i = start; ...)`, with a value that is one assignment
+ * and reads not the variable itself: no conditional, which becomes an `if` of assignments, and no question; or null.
+ */
 function cStyleCounter(node: AstNode, keys: BindingKeys): string | null {
   const collection = asNode(node.collection);
   if (
@@ -15647,9 +15654,23 @@ function cStyleCounter(node: AstNode, keys: BindingKeys): string | null {
   )
     return null;
   const [initial] = nodeArray(collection.items);
-  return initial?.kind === "binary" && text(initial.operator) === "="
-    ? bindingKey(asNode(initial.left), keys)
-    : null;
+  const counter =
+    initial?.kind === "binary" && text(initial.operator) === "="
+      ? bindingKey(asNode(initial.left), keys)
+      : null;
+  if (counter === null) return null;
+  let plain = true;
+  walkAst(asNode(initial!.right), (part) => {
+    if (
+      part.kind === "ternary" ||
+      part.kind === "elvis" ||
+      part.kind === "closure" ||
+      isPromptingCall(part) ||
+      (part.kind === "variable" && bindingKey(part, keys) === counter)
+    )
+      plain = false;
+  });
+  return plain ? counter : null;
 }
 
 function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
