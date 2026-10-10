@@ -1236,6 +1236,33 @@ test(
 );
 
 test(
+  "a state whose directed lead is spent goes back to its own place without being put back for ever",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Play over its share puts a play state back behind a state after a chosen draw, again and again with no work done
+    // in between, until it is expanded.
+    const source =
+      'let n = 0\nwhile n < 1000 {\n  showButton "Step"\n  n += 1\n  let draw = randomInteger(0..=1)\n' +
+      '  if draw == 1 {\n    showButton "One"\n  } else {\n    showButton "Zero"\n  }\n}\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      budgetOps: 1500,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      randomChoices: true,
+      cells: true,
+    });
+    assert.equal(result.search.stoppedBy, "operations");
+  },
+);
+
+test(
   "a run counts as exhausted only once the draws whose outcomes were not all offered have offered the rest",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

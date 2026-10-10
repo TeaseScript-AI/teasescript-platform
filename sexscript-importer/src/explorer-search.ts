@@ -1871,6 +1871,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         )
       : queue(playRank));
   const crashes = new Map<string, CrashReport>();
+  /** The runtime operations when each state whose lead was spent was last put back in its own place. */
+  const putBack = new Map<number, number>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
   /** With forward time: the wall clock where each state stands, by ID. */
@@ -4148,12 +4150,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       frontier.push(node.id, order(node));
       continue;
     }
-    // A lead that was spent, or whose target was reached, gives its states back their own place.
-    if (depthFrontier === null && node.lead !== null && !leads(node) && frontier.size > 0) {
+    // A lead that was spent, or whose target was reached, gives its states back their own place; but not again before
+    // any work was done since it last did (the frontier, which orders by cells, can pick the same state again, and two
+    // such states would be put back in turn for ever).
+    if (
+      depthFrontier === null &&
+      node.lead !== null &&
+      !leads(node) &&
+      frontier.size > 0 &&
+      putBack.get(node.id) !== session.operations
+    ) {
       const own = order(node);
       const next = frontier.pop()!;
       frontier.push(next, order(nodes[next]!));
       if (before(order(nodes[next]!), own)) {
+        putBack.set(node.id, session.operations);
         frontier.push(node.id, own);
         continue;
       }
