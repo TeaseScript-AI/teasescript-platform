@@ -1,3 +1,4 @@
+import { withPhotoEnds } from "./photo-ends.ts";
 import { datePatternFields, datePatternKind } from "./java-time.ts";
 import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
@@ -1849,7 +1850,7 @@ export function lowerParsedFile(
     mixin === null
       ? undefined
       : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
-  const typedStatements = withLegacyMarkup(
+  const markedStatements = withLegacyMarkup(
     withEnforcedTypes(
       withSetUpActions(
         withDirectClosureCalls(
@@ -1870,6 +1871,18 @@ export function lowerParsedFile(
     context,
     stripsTags,
   );
+  const typedStatements = withPhotoEnds(markedStatements, (statement) => {
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_PHOTO_MISSING_END",
+      severity: "warning",
+      message:
+        "getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.",
+      span: statement.span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    return diagnostic;
+  });
   // The truth and ordering helpers go where variable typing wrote all their tests plainly.
   for (const [helper, name] of [
     ["truth", "sexscriptLegacyTruth"],

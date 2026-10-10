@@ -404,6 +404,9 @@ toInteger((showButton "Done") / 1 s)`, as in Domme3's `popup.groovy`, whose `t` 
 - Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
   it open a file chooser titled with the message. `takePhoto()` returns a photo reference or null; the file-chooser
   fallback and the message are dropped with a `NOTE`, and the Player decides how the photo is taken (3 corpus sites).
+  A script that used the photo without testing it for null (`file.toLowerCase()`) failed where none came; there the
+  session ends, with a `NOTE` (`SX_PHOTO_MISSING_END`, owner decision 2026-10-10), right after the photo and before a
+  later use that no earlier test covers. A script that tests the photo for null keeps its own handling.
 - Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
   reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`). A condition or assignment whose `&&`/`||` chain asks,

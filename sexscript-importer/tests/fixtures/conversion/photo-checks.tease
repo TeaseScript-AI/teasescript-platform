@@ -1,0 +1,32 @@
+// A photo the script tests for null keeps the script's own handling of a photo that did not come.
+// NOTE SX_CAMERA_FALLBACK line 2: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let proof: string? = takePhoto()
+if proof == null {
+  say "No photo, no outfit check."
+} else {
+  showImage proof
+}
+// A photo the script uses without a test ends the session where none came, as the legacy script failed there.
+// NOTE SX_CAMERA_FALLBACK line 6: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let face: string? = takePhoto()
+// NOTE SX_PHOTO_MISSING_END line 6: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
+if face == null {
+  exit
+}
+say "Your photo: ${face.lowercase()}"
+// A photo taken in a loop ends the session where it did not come, and so does a use of it after the loop.
+let shot: string? = ""
+for it in 0..2 {
+  // NOTE SX_CAMERA_FALLBACK line 10: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+  shot = takePhoto()
+  // NOTE SX_PHOTO_MISSING_END line 10: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
+  if shot == null {
+    exit
+  }
+}
+// NOTE SX_PHOTO_MISSING_END line 11: getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.
+if shot == null {
+  exit
+}
+say "Last photo: ${shot.lowercase()}"
+exit
