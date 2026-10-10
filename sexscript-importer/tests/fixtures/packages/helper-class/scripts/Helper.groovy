@@ -14,6 +14,13 @@ class Helper {
   def static turns(main, count) {
     return count * tau
   }
+  // A method that the scripts call keeps its parameter's type open, also where its own calls give it a number.
+  static def check(main, n) {
+    def value = n
+    if (n == 0) value = null
+    main.show("Result ${value}")
+  }
+  static def start(main) { check(main, 1.5) }
   // Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
   def static percentChance(main, percent) {
     switch (main.getRandom(99) + 1) {

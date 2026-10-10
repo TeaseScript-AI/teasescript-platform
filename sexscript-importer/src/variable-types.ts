@@ -1125,7 +1125,9 @@ function analyse(
       if (child.kind !== "call" || calls?.counts.has(child.name) !== true || child.local !== true)
         return;
       const types = child.positional.map((argument) => typeOf(argument, scope));
-      passed.set(child.name, [...(passed.get(child.name) ?? []), types]);
+      const known = passed.get(child.name);
+      if (known === undefined) passed.set(child.name, [types]);
+      else known.push(types);
     });
   };
   const statement = (item: IrStatement, scope: Scope): void => {
@@ -1467,10 +1469,14 @@ function analyse(
         assignsVariable(item.body, parameter.name)
       )
         return;
+      // A call that leaves the parameter out gives it its default, which only a literal shows here: another default
+      // may read an earlier parameter.
       const given = types.map((call) =>
         scalarName(
           call[index] ??
-            (parameter.defaultValue === null ? NULL : typeOf(parameter.defaultValue, root)),
+            (parameter.defaultValue?.kind === "literal"
+              ? typeOf(parameter.defaultValue, root)
+              : NULL),
         ),
       );
       if (

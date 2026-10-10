@@ -2251,6 +2251,8 @@ function lowerHelperCompilationUnit(
   if (root === null || root.kind !== "compilationUnit") {
     throw new Error("lowerHelperCompilationUnit requires a compilation unit");
   }
+  // A helper class's methods are there for the scripts, whose calls this file does not see.
+  baseContext.sharesFunctions = true;
   const topLevel = asNode(root.topLevel);
   if (topLevel !== null && topLevel.kind === "block" && nodeArray(topLevel.statements).length > 0) {
     addDiagnostic(

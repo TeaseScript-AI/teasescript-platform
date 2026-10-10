@@ -149,3 +149,12 @@ numSeries = 12
 numSeries += 3
 swats(numSeries / 4)
 swats(2)
+// A default that reads an earlier parameter gives the parameter no type of the calls: this call leaves it out and
+// passes a text through it.
+limit = 1.5
+def check = { limit, n = limit ->
+	def value = n
+	if (n == 0) value = null
+	show("Result ${value}")
+}
+check("good")
