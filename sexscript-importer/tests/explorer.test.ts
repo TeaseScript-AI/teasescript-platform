@@ -2569,9 +2569,15 @@ test(
       const model = clockModel(plan, instructions);
       const [comparison] = [...model.comparisons.values()][0] ?? [];
       assert.ok(comparison !== undefined, span);
+      // As the runtime keeps a file's own variable: in that file's frame.
       const kept = timeContext({
-        globals: [
-          { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+        frames: [
+          {
+            file: 0,
+            bindings: [
+              { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+            ],
+          },
         ],
       });
       return [3600, 40 * 3600].map((seconds) =>
@@ -3574,6 +3580,67 @@ test(
     );
     const [equal] = [...orderedModel.comparisons.values()][0]!;
     assert.equal(flipGap(equal!, orderedModel, timeContext({}), EPOCH_MS), 4_321_000);
+  },
+);
+
+test(
+  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's binding of the name",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const cases: [string, { path: string; source: string }[]][] = [
+      [
+        "receiver",
+        [
+          {
+            path: "main.tease",
+            source:
+              'let stamp = getAbsoluteDateTime() - 2 h\nshowButton "Check"\nif elapsed(getAbsoluteDateTime() - 1 h) > 5400 {\n' +
+              '  say "Wrong."\n} else {\n  say "Right."\n}\nexit\n',
+          },
+          {
+            path: "helper.tease",
+            source:
+              "global function elapsed(stamp) {\n  return getAbsoluteDateTime().toSeconds() - stamp.toSeconds()\n}\n",
+          },
+        ],
+      ],
+      [
+        "another function's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              'function caller {\n  let offset = 100\n  let hour = getDateTime().hour - 1\n  showButton "Check"\n' +
+              "  callee()\n}\ncaller()\nexit\n",
+          },
+          {
+            path: "helper.tease",
+            source:
+              "global function callee {\n  let offset = 0\n  let hour = getDateTime().hour + offset\n" +
+              '  if hour == 12 {\n    say "Right."\n  } else {\n    say "Wrong."\n  }\n}\n',
+          },
+        ],
+      ],
+    ];
+    for (const [name, files] of cases) {
+      const { plan } = engine.compileProject(files, { builtins: [] });
+      assert.ok(isRecord(plan), name);
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const session = new Session(engine, plan, 1);
+      const before = session.start();
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()].flat();
+      assert.ok(comparison !== undefined, name);
+      // At the state's own clock, the comparison comes out as the runtime then says.
+      const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
+      assert.deepEqual(after?.texts, ["Right."], name);
+      const holds = holdsAt(comparison, model, timeContext(before.snapshot), EPOCH_MS);
+      assert.equal(holds, name === "receiver" ? false : true, name);
+    }
   },
 );
 

@@ -171,7 +171,8 @@ function scoped(plan: Data, instructions: readonly Data[]) {
         key,
         value.kind === "identifier" && key === "name" && typeof item === "string"
           ? resolve(item, index)
-          : key === "span" || (key === "callee" && value.kind === "call")
+          : key === "span" ||
+              (key === "callee" && value.kind === "call" && record(item).kind === "identifier")
             ? item
             : renameField(item, index),
       ]),
@@ -804,9 +805,14 @@ type Value =
   | { readonly kind: "data"; readonly data: Data }
   | undefined;
 
-/** A state to evaluate in: its variables by innermost binding, and its stored values by key. */
+/**
+ * A state to evaluate in: its variables by innermost binding, also by the scope that holds them as the model names
+ * them ({@link scoped}): a function's own in that function's frames, a file's own in that file's; and its stored values
+ * by key.
+ */
 export interface TimeContext {
   readonly bindings: ReadonlyMap<string, unknown>;
+  readonly scoped: ReadonlyMap<string, unknown>;
   readonly storage: ReadonlyMap<string, unknown>;
 }
 
@@ -912,8 +918,9 @@ function valueAt(expression: unknown, reading: Reading): Value {
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
-        const bare = bareName(node.name);
-        if (context.bindings.has(bare)) return runtimeValue(context.bindings.get(bare));
+        // A variable named by its scope takes only a binding of that scope; another, the innermost of its name.
+        const state = node.name === bareName(node.name) ? context.bindings : context.scoped;
+        if (state.has(node.name)) return runtimeValue(state.get(node.name));
         // Not set yet in the state: from the one value it is set to, as the session will set it.
         const set = model.once.get(node.name);
         if (set === undefined || reading.memo.has(set))
@@ -1423,7 +1430,7 @@ export function storedHolds(
   const value = valueAt(condition, {
     temporaries: none,
     model,
-    context: { bindings, storage },
+    context: { bindings, scoped: new Map(), storage },
     now: 0,
     inside: new Map(),
     memo: new Map(),
@@ -1434,13 +1441,28 @@ export function storedHolds(
 /** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */
 export function timeContext(snapshot: Data): TimeContext {
   const bindings = new Map<string, unknown>();
+  const scoped = new Map<string, unknown>();
   for (const binding of list(snapshot.globals))
     if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-  for (const frame of list(snapshot.frames))
+  // The scope each frame belongs to: that of the function whose call's frames start at or before it, unless a file's
+  // call started since; else the file of the nearest frame before it that names one (its own code, also in its blocks).
+  const calls = list(snapshot.callFrames);
+  let owner: string | null = null;
+  let file: string | null = null;
+  list(snapshot.frames).forEach((frame, depth) => {
+    for (const call of calls)
+      if (call.scopeBaseDepth === depth)
+        owner = call.kind === "function" ? `function ${String(call.functionId)}` : null;
+    if (typeof frame.file === "number") file = `file ${frame.file}`;
+    const scope = owner ?? file;
     for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+      if (typeof binding.name === "string") {
+        bindings.set(binding.name, binding.value);
+        if (scope !== null) scoped.set(`${binding.name}\u0001${scope}`, binding.value);
+      }
+  });
   const storage = new Map<string, unknown>();
   for (const entry of list(snapshot.scriptStorage))
     if (typeof entry.key === "string") storage.set(entry.key, entry.value);
-  return { bindings, storage };
+  return { bindings, scoped, storage };
 }
