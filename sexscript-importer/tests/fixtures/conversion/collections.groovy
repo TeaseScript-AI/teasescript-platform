@@ -179,3 +179,7 @@ if ("012" == digits.sum()) show("All digits")
 def answer = ""
 answer = digits.sum()
 show("Answer " + answer)
+// The sum of a list without elements is null, which Groovy ordered below every number (ShockJack's shock times).
+def shockTimes = []
+while (shockTimes.sum() < 5) shockTimes.add(2)
+show("Shocks " + shockTimes.size())

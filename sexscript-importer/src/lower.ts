@@ -9721,6 +9721,16 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
  */
 function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   if (node.kind === "methodCall") {
+    // Groovy sum() of a list without elements is null (ShockJack's `while (shockTimeList.sum() < stime)`).
+    const receiver = asNode(node.object);
+    if (
+      constantString(node.method) === "sum" &&
+      receiver !== null &&
+      nodeArray(asNode(node.arguments)?.items).length === 0 &&
+      !(receiver.kind === "list" && nodeArray(receiver.items).length > 0) &&
+      receiver.kind !== "range"
+    )
+      return true;
     const name = legacyApiCall(node, context)?.name ?? "";
     if (DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name)) return true;
     // A function of the package whose returns include null, such as a stored value or a `return null`.
