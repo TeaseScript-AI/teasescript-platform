@@ -15,6 +15,8 @@ import { exactMilliseconds, successors } from "./explorer-analysis.ts";
  */
 
 type Data = Readonly<Record<string, unknown>>;
+/** A value of the plan's data: a record, a list, or a plain value. */
+type PlanField = Data | readonly PlanField[] | string | number | boolean | null | undefined;
 
 function record(value: unknown): Data {
   return isRecord(value) ? value : {};
@@ -109,6 +111,120 @@ export interface ClockModel {
    * state has no value for them yet, such as at the start of a session.
    */
   readonly once: ReadonlyMap<string, Definition>;
+  /** An expression of the plan read at instruction `at`, its variables named as the model names them ({@link scoped}). */
+  readonly scope: (expression: unknown, at: number) => PlanField;
+}
+
+/**
+ * The plan's instructions and functions with each variable named by where it is declared, so that variables of the same
+ * name in different functions or files are different variables to the model: a function's own (a parameter, a `let` in
+ * its code, the innermost such function first) as `name\u0001function <id>`; one a file's top level declares, read
+ * there or in a function of that file, as `name\u0001file <index>`; any other, such as a global, by its name alone. A
+ * called function's name is not a variable. {@link bareName} gives the name a state's bindings have.
+ */
+function scoped(plan: Data, instructions: readonly Data[]) {
+  const functions = list(plan.functions);
+  const files = list(plan.files);
+  const fileAt = (index: number) =>
+    files.findIndex(
+      (file) => index >= Number(file.startInstruction) && index < Number(file.endInstruction),
+    );
+  // The innermost function each instruction is in: the larger ranges first, the smaller ones over them.
+  const functionAt = new Array<number | null>(instructions.length).fill(null);
+  const size = (definition: Data) =>
+    Number(definition.endInstruction) - Number(definition.entryInstruction);
+  for (const definition of [...functions].sort((left, right) => size(right) - size(left)))
+    for (
+      let index = Number(definition.entryInstruction);
+      index < Math.min(Number(definition.endInstruction), instructions.length);
+      index += 1
+    )
+      functionAt[index] = Number(definition.id);
+  const declared = new Map<string, Set<string>>();
+  const declare = (scope: string, name: unknown) => {
+    if (typeof name === "string")
+      (declared.get(scope) ?? declared.set(scope, new Set()).get(scope)!).add(name);
+  };
+  const entries = new Map<number, number>();
+  for (const definition of functions) {
+    entries.set(Number(definition.id), Number(definition.entryInstruction));
+    for (const parameter of list(definition.parameters))
+      declare(`function ${String(definition.id)}`, parameter.name);
+  }
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind !== "declareBinding") return;
+    const owner = functionAt[index];
+    declare(owner === null ? `file ${fileAt(index)}` : `function ${owner}`, instruction.name);
+  });
+  const resolve = (name: string, index: number): string => {
+    const owner = functionAt[index] ?? null;
+    if (owner !== null && declared.get(`function ${owner}`)?.has(name) === true)
+      return `${name}\u0001function ${owner}`;
+    const file = fileAt(owner === null ? index : (entries.get(owner) ?? index));
+    if (declared.get(`file ${file}`)?.has(name) === true) return `${name}\u0001file ${file}`;
+    return name;
+  };
+  /** A record of the plan with its variables' names scoped where instruction `index` reads them. */
+  const rename = (value: Data, index: number): Data =>
+    Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        value.kind === "identifier" && key === "name" && typeof item === "string"
+          ? resolve(item, index)
+          : key === "span" || (key === "callee" && value.kind === "call")
+            ? item
+            : renameField(item, index),
+      ]),
+    );
+  const renameField = (item: unknown, index: number): PlanField => {
+    if (Array.isArray(item)) return item.map((each) => renameField(each, index));
+    if (isRecord(item)) return rename(item, index);
+    return typeof item === "string" ||
+      typeof item === "number" ||
+      typeof item === "boolean" ||
+      item === null
+      ? item
+      : undefined;
+  };
+  // A declaration's and a loop's variables are named on the instruction itself.
+  const named = new Set(["name", "variable", "valueVariable"]);
+  const renamed = instructions.map((instruction, index) =>
+    Object.fromEntries(
+      Object.entries(rename(instruction, index)).map(([key, item]) => [
+        key,
+        named.has(key) &&
+        typeof item === "string" &&
+        (instruction.kind === "declareBinding" || instruction.kind === "loopStart")
+          ? resolve(item, index)
+          : item,
+      ]),
+    ),
+  );
+  const renamedFunctions = functions.map((definition) =>
+    Object.fromEntries(
+      Object.entries(definition).map(([key, item]) => [
+        key,
+        key === "parameters"
+          ? list(item).map((parameter) =>
+              typeof parameter.name === "string"
+                ? {
+                    ...parameter,
+                    name: resolve(parameter.name, Number(definition.entryInstruction)),
+                  }
+                : parameter,
+            )
+          : item,
+      ]),
+    ),
+  );
+  const scope = (expression: unknown, at: number): PlanField => renameField(expression, at);
+  return { instructions: renamed, functions: renamedFunctions, scope };
+}
+
+/** The name a variable the model names has in a state's bindings ({@link scoped}). */
+function bareName(name: string): string {
+  const cut = name.indexOf("\u0001");
+  return cut < 0 ? name : name.slice(0, cut);
 }
 
 /** A definition no variable has, to look up a missing one. */
@@ -333,8 +449,10 @@ export function exactPart(
   expression: unknown,
   model: ClockModel,
   temporaries: ReadonlyMap<number, Data> = new Map(),
+  at?: number,
 ): string | null {
-  const value = record(expression);
+  // An expression of the plan, read at `at`, has its variables named as the model names them.
+  const value = record(at === undefined ? expression : model.scope(expression, at));
   const held = (item: Data) =>
     item.kind === "temporary" && typeof item.temporaryId === "number"
       ? record(temporaries.get(item.temporaryId))
@@ -402,8 +520,8 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
  * The clock comparisons of a plan: in each condition and `while` loop, every comparison (also `in` a range) one of
  * whose sides reads the clock, also through variables and temporaries set from it.
  */
-export function clockModel(plan: Data, instructions: readonly Data[]): ClockModel {
-  const functions = list(plan.functions);
+export function clockModel(plan: Data, original: readonly Data[]): ClockModel {
+  const { instructions, functions, scope } = scoped(plan, original);
   const { pure, clock: clockFunctions } = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
@@ -504,6 +622,7 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     functions,
     instructions,
     once,
+    scope,
   };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
   // through variables computed so), and is not a bare clock read, which is a time kept to measure from. Updates of the
@@ -588,6 +707,8 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
         )
       )
         continue;
+      // A variable only ever set to literals and updated from itself is not computed from the clock.
+      if (values.every(({ value }) => namesOf(value).has(name))) continue;
       const composed = compose(name, values);
       if (composed === null) ambiguous.add(name);
       else definitions.set(name, composed);
@@ -791,7 +912,8 @@ function valueAt(expression: unknown, reading: Reading): Value {
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
-        if (context.bindings.has(node.name)) return runtimeValue(context.bindings.get(node.name));
+        const bare = bareName(node.name);
+        if (context.bindings.has(bare)) return runtimeValue(context.bindings.get(bare));
         // Not set yet in the state: from the one value it is set to, as the session will set it.
         const set = model.once.get(node.name);
         if (set === undefined || reading.memo.has(set))
@@ -910,7 +1032,10 @@ function runFunction(id: number, args: readonly Data[], reading: Reading): Value
   const frame: Frame = { locals: new Map(), values: new Map(), depth, steps };
   const supplied = new Set<number>();
   for (const argument of args) {
-    const index = parameters.findIndex((parameter) => parameter.name === argument.parameterName);
+    // A call names its function's parameters by their names alone.
+    const index = parameters.findIndex(
+      (parameter) => bareName(String(parameter.name)) === argument.parameterName,
+    );
     if (index < 0) return undefined;
     const value = valueAt(argument.value, caller);
     if (value === undefined) return undefined;
@@ -1186,6 +1311,47 @@ export function flipGap(
 }
 
 /**
+ * Where a comparison of parts of the date or time comes out `wanted` for a session that starts at least `earliest` after
+ * `now`, in a state read as `context` (such as a session's start): for each of its first `count` windows, the runs of
+ * moments between the ones the parts change at ({@link boundaries}) in which it holds `wanted`, the gap to just inside
+ * the window's start and to just before its end, as a condition in front of it may let only one of them through. Null
+ * when it cannot be read at `now`, or reads no part.
+ */
+export function windowEdges(
+  comparison: ClockComparison,
+  model: ClockModel,
+  context: TimeContext,
+  now: number,
+  wanted: boolean,
+  count: number,
+  earliest: number,
+): number[] | null {
+  if (comparison.parts.size === 0 || holdsAt(comparison, model, context, now) === undefined)
+    return null;
+  const moments = [
+    now + earliest,
+    ...boundaries(comparison.parts, now).filter((at) => at > now + earliest),
+  ];
+  const edges: number[] = [];
+  let start: number | null = null;
+  let windows = 0;
+  for (const at of moments) {
+    const holds = holdsAt(comparison, model, context, at) === wanted;
+    if (holds && start === null) {
+      start = at;
+      edges.push(at - now);
+    } else if (!holds && start !== null) {
+      // Just before the change back, which `at` is MARGIN past.
+      edges.push(Math.max(start, at - MARGIN - 2 * MINUTE) - now);
+      start = null;
+      windows += 1;
+      if (windows >= count) break;
+    }
+  }
+  return [...new Set(edges)];
+}
+
+/**
  * The pairs of values whose meeting may change a comparison: its two sides (a range's bounds each with the value), and
  * for a side that a script's function computes from its arguments (also through the temporary that holds its result),
  * each two of those arguments, as `compare(a, b) <= 0` changes only where `a` and `b` meet.
@@ -1243,6 +1409,8 @@ export function storedHolds(
     functions: [],
     instructions: [],
     once: new Map(),
+    // Stored values alone are read here, no expression of the plan at an instruction.
+    scope: () => undefined,
   };
   const none = new Map<number, Data>();
   if (!isRecord(condition)) return undefined;

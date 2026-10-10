@@ -3578,6 +3578,50 @@ test(
 );
 
 test(
+  "a next visit starts within the hours a session-start clock value is compared with, also of a helper's own variable of that name",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // `hour` is the helper's own variable and the file's, computed differently: each is its own. A visit that comes
+    // back after the player went to sleep greets the morning only between 09:00 and 11:59, which no fixed gap from the
+    // first visit's noon lands in.
+    const helper =
+      'global function lateHour {\n  save load("late", default: 0) as "late"\n  let hour = getDateTime().hour\n' +
+      "  if hour < 4 {\n    hour = hour + 24\n  }\n  return hour\n}\n";
+    const source =
+      'let hour = lateHour()\nif load("run", default: "") == "sleep" {\n  switch hour {\n    case 9..=11 {\n' +
+      '      say "Good morning."\n    }\n    default {\n      say "Hello."\n    }\n  }\n}\nshowButton "Sleep"\n' +
+      'save "sleep" as "run"\nexit\n';
+    const files = [
+      { path: "main.tease", source },
+      { path: "clock.tease", source: helper },
+    ];
+    const { plan } = engine.compileProject(files, { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      budgetOps: 5000,
+      maxStates: 5000,
+      sources: new Map(files.map((file) => [file.path, file.source])),
+      diagnostics: [],
+      later: true,
+    });
+    const line = source.split("\n").findIndex((text) => text.includes("Good morning.")) + 1;
+    const main = result.coverage.files.find((file) => file.path === "main.tease");
+    assert.ok(main !== undefined);
+    assert.ok(
+      !main.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return line >= from && line <= to;
+      }),
+      JSON.stringify(main.unvisited),
+    );
+  },
+);
+
+test(
   "with session seeds, a later visit draws with a seed of its own, which its replay draws with too",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

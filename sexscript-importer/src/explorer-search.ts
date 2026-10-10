@@ -31,12 +31,14 @@ import {
 } from "./explorer-analysis.ts";
 import { FAR, TreasureMap } from "./explorer-guidance.ts";
 import {
+  type ClockComparison,
   clockModel,
   exactPart,
   flipGap,
   holdsAt,
   storedHolds,
   timeContext,
+  windowEdges,
 } from "./explorer-time.ts";
 import {
   EPOCH_MS,
@@ -1909,6 +1911,39 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * The start of a session from an explored state's storage (`origin`; the first session for none), `gap` after the
    * wall clock where that state stands: a play start for a positive gap, as time goes forward.
    */
+  /**
+   * For a missed way whose condition is one comparison of parts of the date or time, read as a session from `start`'s
+   * storage starts: the gaps to the edges of the first two windows in which it comes out that way ({@link
+   * windowEdges}), for whole sessions to start at instead of {@link LATER_GAPS}; null for another condition.
+   */
+  const sessionWindows = (
+    target: Target,
+    comparisons: readonly ClockComparison[],
+    start: Start,
+  ): number[] | null => {
+    if (times === null || comparisons.length !== 1) return null;
+    const comparison = comparisons[0]!;
+    // The condition itself is the comparison: no other part decides the way.
+    let condition = record(
+      instructions[target.instruction]!.condition ?? instructions[target.instruction]!.expression,
+    );
+    while (condition.kind === "group" || condition.kind === "temporary")
+      condition =
+        condition.kind === "group"
+          ? record(condition.expression)
+          : record(comparison.temporaries.get(Number(condition.temporaryId)));
+    if (condition.kind !== "binary" || condition.operator !== comparison.operator) return null;
+    const now = start.origin === null ? EPOCH_MS : wallEnd[start.origin]!;
+    return windowEdges(
+      comparison,
+      times,
+      timeContext({ scriptStorage: start.storage }),
+      now,
+      target.way === 0,
+      2,
+      NEXT_SESSION_GAP,
+    );
+  };
   const laterStart = (origin: number | null, storage: readonly StorageEntry[], gap: number) => ({
     origin,
     storage,
@@ -3914,7 +3949,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           (!direct || witnessNode === null) &&
           fullPath.length <= MAX_SUFFIX
         )
-          for (const gap of LATER_GAPS)
+          for (const gap of sessionWindows(target, comparisons, witnessStart) ?? LATER_GAPS)
             laterPlan.push({
               target: code,
               from: null,
@@ -4481,7 +4516,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     watched,
     routeOf,
     session.randomChoices,
-    (subject) => (times === null ? null : exactPart(subject, times)),
+    (subject, at) => (times === null ? null : exactPart(subject, times, new Map(), at)),
     (condition, at) => flow.readsSetInPlay(condition, at),
     savedFirstChecks(plan, instructions, constants, flow),
     drawnSites,
@@ -5300,7 +5335,7 @@ function lineCoverage(
   watched: ReadonlyMap<string, readonly Watch[]>,
   routeOf: (node: number) => { at: string; inputs: number },
   randomChoices: boolean,
-  clockPartOf: (subject: unknown) => string | null,
+  clockPartOf: (subject: unknown, at: number) => string | null,
   setInPlay: (condition: unknown, at: number) => boolean,
   savedFirst: ReadonlyMap<number, { key: string; way: boolean }>,
   drawnSites: ReadonlySet<string>,
@@ -5477,7 +5512,7 @@ function lineCoverage(
       const stored = instructions[at]!;
       if (stored.kind !== "storeTemporary" || stored.temporaryId !== form.temporary) continue;
       const subject = compactSpan(record(stored.value).span);
-      const part = clockPartOf(stored.value);
+      const part = clockPartOf(stored.value, at);
       return {
         case: form.kind,
         ...(drawnWithin(stored.value, files[at]!) ? { drawsAtRandom: true as const } : {}),
