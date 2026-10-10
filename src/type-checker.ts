@@ -5390,9 +5390,13 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // Every member of a union must have the method (ADR 0021 rule 3.5).
+    // Every member of a union must have the method (ADR 0021 rule 3.5). `add` on a date or time value and `add` on a
+    // collection are different methods, so a union of both kinds has neither.
     const all = members(value);
-    const results = all.map((member) => memberMethodType(member, method));
+    const mixedAdd = method === "add" && all.some(isTemporal) && !all.every(isTemporal);
+    const results = all.map((member) =>
+      mixedAdd && isTemporal(member) ? undefined : memberMethodType(member, method),
+    );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
       const handles = all.every((member) => ["timer", "media"].includes(resolved(member).kind));
