@@ -1053,6 +1053,14 @@ test(
       ),
       ["score > 7"],
     );
+    // Nor one another helper it calls computes in a variable of its own, or a default computes through a helper.
+    const computedBy = (helper: string) =>
+      compared(
+        `function echo(n) {\n  let x = n + 1\n  return x\n}\n${helper} {\n  if n == 0 {\n    return n\n  }\n` +
+          '  return m\n}\nif relay(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n',
+      );
+    assert.deepEqual(computedBy("function relay(n, m = echo(n))"), ["score"]);
+    assert.deepEqual(computedBy("function relay(n, m = n + 1)"), ["score"]);
     // Also when the last copy flows back into the first.
     assert.deepEqual(compared(`${copies}x0 = x24\nif x24 > 7 {\n  say "Yes"\n}\nexit\n`), [
       "n > 7",

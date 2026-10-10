@@ -417,14 +417,17 @@ export class DataFlow {
   readonly #entryOf = new Map<number, number>();
   /** Each function's parameter names, by ID, in order. */
   readonly #parameterNames = new Map<number, string[]>();
-  /** The default value of each parameter that has one, by its scope key. */
+  /** The default value of each parameter that has one, by its scope key; and the instruction that binds it. */
   readonly #defaults = new Map<string, Data>();
+  readonly #defaultAt = new Map<string, number>();
   /** The variable keys the code assigns or declares, apart from a parameter's default. */
   readonly #assignedInCode = new Set<string>();
   /** The contexts of {@link #enter}, by ID; each call's arguments by the scope key of the parameter they give. */
   readonly #callContexts = new Map<string, CallContext>();
   readonly #argumentsByCall = new Map<number, ReadonlyMap<string, Data>>();
-  readonly #ownKeysOf = new Map<number, readonly string[]>();
+  /** {@link #carriers} by stored key, and the graph they are reached in, worked out when first needed. */
+  readonly #carriersOf = new Map<string, ReadonlySet<string>>();
+  #carrierGraph: { readers: Map<string, string[]>; seeds: Map<string, string[]> } | null = null;
   /** {@link #callFlow}, by call, constants, and depth; cleared each round of the fixpoint, kept after it. */
   readonly #callFlows = new Map<string, Flow>();
   /** {@link #returnsFor}, by function and constant arguments. */
@@ -730,16 +733,23 @@ export class DataFlow {
     context: CallContext | null,
   ): { value: unknown; at: number; context: CallContext | null }[] {
     const argument = this.#argumentIn(context, key);
+    // Outside a call followed, a parameter holds whatever a call gives it (its marker); in one, what this call gives it,
+    // or its default for one it leaves out.
     const assigned = this.#assignmentsOf(key).filter(
       ({ value, index }) =>
-        argument === undefined ||
-        (value.kind !== "parameter" && this.#instructions[index]?.kind !== "bindDefaultParameter"),
+        context === null ||
+        (value.kind !== "parameter" &&
+          (argument === undefined || this.#instructions[index]?.kind !== "bindDefaultParameter")),
     );
     return [
       ...(argument === undefined
         ? []
         : [{ value: argument, at: context!.call, context: context!.outer }]),
-      ...assigned.map(({ value, index }) => ({ value, at: index, context })),
+      ...assigned.map(({ value, index }) => ({
+        value: value.kind === "parameter" ? { kind: "parameter", key } : value,
+        at: index,
+        context,
+      })),
     ];
   }
 
@@ -787,9 +797,9 @@ export class DataFlow {
   }
 
   /**
-   * The flows of a context's call in its function ({@link CallContext.flows}): of each parameter, the argument's, read
-   * where the call is, or for one left out its default's, read with the parameters before it; and of each variable of the
-   * function's own, as what it sets it to reads those (`let m = n + 1`), with what it assigns the parameters.
+   * The flows of the parameters a context's call gives its function ({@link CallContext.flows}): the argument's, read
+   * where the call is, or for one left out its default's, read with the parameters before it. A variable the function
+   * sets from them keeps its own flow: what may carry a stored value is kept apart ({@link #mayCarry}).
    */
   #flowsIn(context: CallContext | null): ReadonlyMap<string, Flow> | undefined {
     if (context === null) return undefined;
@@ -806,37 +816,107 @@ export class DataFlow {
         flows.set(
           key,
           argument === undefined
-            ? this.flowOf(value, flows)
+            ? this.#flowAt(value, this.#defaultAt.get(key)!, flows, context.constants, HELPER_DEPTH)
             : this.#flowIn(argument, context.call, context.outer),
         );
-    }
-    const own = this.#ownKeys(id);
-    for (let round = 0, changed = true; changed && round < 50; round += 1) {
-      changed = false;
-      for (const key of own)
-        for (const { value, index } of this.#assigned.get(key) ?? []) {
-          if (
-            value.kind === "parameter" ||
-            this.#instructions[index]?.kind === "bindDefaultParameter"
-          )
-            continue;
-          const flow = flows.get(key) ?? flows.set(key, emptyFlow()).get(key)!;
-          changed =
-            merge(flow, this.#flowAt(value, index, flows, context.constants, HELPER_DEPTH)) ||
-            changed;
-        }
     }
     context.flows = flows;
     return flows;
   }
 
-  /** The variable keys of a function's own code ({@link scopeKey}) that it assigns, by function. */
-  #ownKeys(id: number): readonly string[] {
-    let found = this.#ownKeysOf.get(id);
-    if (found === undefined) {
-      const suffix = `\u0001function ${id}`;
-      found = [...this.#assigned.keys()].filter((key) => key.endsWith(suffix));
-      this.#ownKeysOf.set(id, found);
+  /**
+   * Whether a value at instruction `at` may carry a stored key's value, whatever the flows of a call's context miss
+   * (a helper's own variable set from a parameter): its flow reads the key, or it reads a variable, a temporary, or a
+   * function's result that a value reading the key may reach, a parameter taking every call's argument
+   * ({@link #carriers}). Flow-insensitive, over the whole plan, and without a limit of rounds, so that it misses none.
+   */
+  #mayCarry(value: unknown, at: number | undefined, key: string): boolean {
+    if (this.flowOf(value).keys.has(key)) return true;
+    const carriers = this.#carriers(key);
+    return this.#readsOf(value, at ?? 0).some((each) => carriers.has(each));
+  }
+
+  /** What may carry a stored key's value ({@link #mayCarry}): reached from what reads it along what reads what. */
+  #carriers(key: string): ReadonlySet<string> {
+    const known = this.#carriersOf.get(key);
+    if (known !== undefined) return known;
+    const graph = (this.#carrierGraph ??= this.#readersGraph());
+    const reached = new Set<string>(graph.seeds.get(key) ?? []);
+    const pending = [...reached];
+    for (let read = pending.pop(); read !== undefined; read = pending.pop())
+      for (const reader of graph.readers.get(read) ?? [])
+        if (!reached.has(reader)) {
+          reached.add(reader);
+          pending.push(reader);
+        }
+    this.#carriersOf.set(key, reached);
+    return reached;
+  }
+
+  /**
+   * What each value the plan sets reads ({@link #readsOf}), as the values that read each; and by stored key, the values
+   * whose flow reads it. A variable, a temporary, a function's result (`r <function>`), and a parameter, which every
+   * call's argument sets.
+   */
+  #readersGraph(): { readers: Map<string, string[]>; seeds: Map<string, string[]> } {
+    const readers = new Map<string, string[]>();
+    const seeds = new Map<string, string[]>();
+    const define = (value: unknown, at: number, into: string) => {
+      for (const read of this.#readsOf(value, at))
+        (readers.get(read) ?? readers.set(read, []).get(read)!).push(into);
+      for (const key of this.flowOf(value).keys)
+        (seeds.get(key) ?? seeds.set(key, []).get(key)!).push(into);
+    };
+    for (const [key, assignments] of this.#assigned)
+      for (const { value, index } of assignments)
+        if (value.kind !== "parameter") define(value, index, `v ${key}`);
+    this.#instructions.forEach((instruction, index) => {
+      const owner = this.functionAt(index);
+      if (instruction.kind === "storeTemporary")
+        define(instruction.value, index, `t ${owner} ${String(instruction.temporaryId)}`);
+      else if (instruction.kind === "callFunction") {
+        if (typeof instruction.destinationTemporary === "number")
+          define(
+            { kind: "callResult", functionId: instruction.functionId, call: index },
+            index,
+            `t ${owner} ${instruction.destinationTemporary}`,
+          );
+        for (const [key, argument] of this.#argumentsOf(index)) define(argument, index, `v ${key}`);
+      } else if (instruction.kind === "returnValue") define(instruction.value, index, `r ${owner}`);
+    });
+    return { readers, seeds };
+  }
+
+  /**
+   * What an expression at instruction `at` reads, for {@link #mayCarry}: `v <key>` for each variable key it reads (a
+   * parameter's marker, its own key), `t <function> <id>` for a temporary, and for a call's result its arguments' and
+   * `r <function>` for what the function returns; not what a load's key is made of, which picks the stored value and
+   * is no part of it.
+   */
+  #readsOf(expression: unknown, at: number): string[] {
+    const found: string[] = [];
+    const pending: unknown[] = [expression];
+    for (let value = pending.pop(); value !== undefined; value = pending.pop()) {
+      if (Array.isArray(value)) {
+        for (const each of value) pending.push(each);
+        continue;
+      }
+      if (!isRecord(value)) continue;
+      if (value.kind === "parameter") {
+        if (typeof value.key === "string") found.push(`v ${value.key}`);
+      } else if (value.kind === "identifier" && typeof value.name === "string")
+        for (const key of this.#keysRead(this.#keyOf(value))) found.push(`v ${key}`);
+      else if (value.kind === "temporary" && typeof value.temporaryId === "number")
+        found.push(`t ${this.functionAt(at)} ${value.temporaryId}`);
+      else if (value.kind === "callResult" && typeof value.functionId === "number") {
+        found.push(`r ${value.functionId}`);
+        if (typeof value.call === "number")
+          for (const argument of list(this.#instructions[value.call]?.arguments))
+            found.push(...this.#readsOf(argument.value, value.call));
+      } else
+        for (const [key, each] of Object.entries(value))
+          if (key !== "span" && !(value.kind === "storageLoad" && key === "key"))
+            pending.push(each);
     }
     return found;
   }
@@ -922,12 +1002,20 @@ export class DataFlow {
     // Each variable, temporary, and function is gone through once: one met again is being or was gone through, and
     // the question fails at the first value that is not the stored one. When none is found, all of them hold. A list
     // of values to look through, not recursion, as chains of copies and helpers can be long.
-    // `context`: the call followed to the value, whose arguments its function's parameters are (see #enter).
+    // `context`: the call followed to the value, whose arguments its function's parameters are (see #enter). `loose`:
+    // a value kept as it may carry the key's value (#mayCarry), though its flow in the context does not read it.
     type Context = CallContext | null;
+    type Item = {
+      value: unknown;
+      at: number | undefined;
+      need: Need;
+      context: Context;
+      loose: boolean;
+    };
+    // Only a value that reads the key can be its value: the values kept loosely below read nothing else.
+    if (!this.#flowIn(expression, at, null).keys.has(key)) return false;
     const visited = new Set<string>();
-    const pending: { value: unknown; at: number | undefined; need: Need; context: Context }[] = [
-      { value: expression, at, need: "value", context: null },
-    ];
+    const pending: Item[] = [{ value: expression, at, need: "value", context: null, loose: false }];
     // A load's declared type that can hold the kind needed; an open one can.
     const fits = (type: Data, need: Need): boolean =>
       need === "value" ||
@@ -935,31 +1023,34 @@ export class DataFlow {
       type.kind === (need === "truth" ? "boolean" : "integer") ||
       (type.kind === "union" && list(type.members).some((member) => fits(member, need)));
     // A variable, temporary, or call in a context: its values that read the key, at least one, are looked through in
-    // turn, each in its own context.
+    // turn, each in its own context; also those that may carry a parameter's value, as what the flows of a call's
+    // context find can miss some (a helper's own variable set from a parameter), loosely: one of those that reads
+    // nothing after all is a value from elsewhere.
     const node = (
       name: string,
       need: Need,
       values: { value: unknown; at: number | undefined; context: Context }[],
       context: Context,
+      loose: boolean,
     ): boolean => {
-      const id = `${name}\u0000${key}\u0000${need}\u0000${context?.id ?? ""}`;
+      const id = `${name}\u0000${key}\u0000${need}\u0000${context?.id ?? ""}${loose ? "\u0000~" : ""}`;
       if (this.#holds.has(id) || visited.has(id)) return true;
       visited.add(id);
-      const reading = values.filter((each) =>
-        this.#flowIn(each.value, each.at, each.context).keys.has(key),
-      );
-      for (const each of reading) pending.push({ ...each, need });
-      return reading.length > 0;
+      let reading = 0;
+      for (const each of values)
+        if (this.#flowIn(each.value, each.at, each.context).keys.has(key)) {
+          pending.push({ ...each, need, loose: false });
+          reading += 1;
+        } else if (this.#mayCarry(each.value, each.at, key)) {
+          pending.push({ ...each, need, loose: true });
+          reading += 1;
+        }
+      return reading > 0 || loose;
     };
-    const step = (
-      expression: unknown,
-      at: number | undefined,
-      need: Need,
-      context: Context,
-    ): boolean => {
+    const step = ({ value: expression, at, need, context, loose }: Item): boolean => {
       const value = record(expression);
       if (value.kind === "group") {
-        pending.push({ value: value.expression, at, need, context });
+        pending.push({ value: value.expression, at, need, context, loose });
         return true;
       }
       if (value.kind === "storageLoad")
@@ -970,12 +1061,13 @@ export class DataFlow {
           need,
           this.#valuesIn(this.#keyOf(value), context),
           context,
+          loose,
         );
       // A whole number is no truth.
       if (value.kind === "call" && calleeName(value) === "toInteger") {
         const [only, ...rest] = list(value.arguments);
         if (need === "truth" || only === undefined || rest.length > 0) return false;
-        pending.push({ value: only.value, at, need: "integer", context });
+        pending.push({ value: only.value, at, need: "integer", context, loose });
         return true;
       }
       // A truth compared with `true` is that truth (`load(k) == true`).
@@ -989,7 +1081,7 @@ export class DataFlow {
               ? right
               : null;
         if (side === null) return false;
-        pending.push({ value: side, at, need: "truth", context });
+        pending.push({ value: side, at, need: "truth", context, loose });
         return true;
       }
       if (value.kind === "temporary" && typeof value.temporaryId === "number" && at !== undefined) {
@@ -1001,6 +1093,7 @@ export class DataFlow {
             need,
             held.map((store) => ({ value: store.value, at: store.index, context })),
             context,
+            loose,
           )
         );
       }
@@ -1024,12 +1117,13 @@ export class DataFlow {
             context: inner,
           })),
           context,
+          loose,
         );
       }
       return false;
     };
     for (let item = pending.pop(); item !== undefined; item = pending.pop())
-      if (!step(item.value, item.at, item.need, item.context)) return false;
+      if (!step(item)) return false;
     for (const id of visited) this.#holds.add(id);
     return true;
   }
@@ -1621,6 +1715,7 @@ export class DataFlow {
         if (name !== undefined) {
           assigned(name, record(instruction.value), index);
           this.#defaults.set(this.scopeKey(name, index), record(instruction.value));
+          this.#defaultAt.set(this.scopeKey(name, index), index);
         }
       }
       if (instruction.kind === "loopStart")
@@ -1734,7 +1829,16 @@ export class DataFlow {
           // A default may read the parameters before it.
           const value = this.#defaults.get(key);
           if (value !== undefined)
-            substitute.set(key, this.flowOf(value, new Map([...substituted, ...substitute])));
+            substitute.set(
+              key,
+              this.#flowAt(
+                value,
+                this.#defaultAt.get(key)!,
+                new Map([...substituted, ...substitute]),
+                this.#constantArguments(call, bound),
+                depth,
+              ),
+            );
         }
       }
     }
