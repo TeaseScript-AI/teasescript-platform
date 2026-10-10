@@ -798,6 +798,9 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges. A right
   side not proven to be a list or one element (`[] + impl` with a parameter) goes through a generated helper that
   returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
+  An append to a list, `list += [x]` also on a map's field or a list's element, changes the list in place, `add()` or
+  `addAll()`, instead of building a new list from a copy on every pass of a loop; where a call in the appended value
+  may run a function that changes the list, the append stays `+`, which reads the list first, as Groovy did.
 
 - Actions a browser cannot do (owner decision 2026-10-05): questions and notices that the importer adds come from a
   global speaker `system` (title "System"), declared once in `main.tease` or in a lone script. Device commands kept

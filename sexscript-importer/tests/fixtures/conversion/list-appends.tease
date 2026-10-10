@@ -1,0 +1,27 @@
+// Appends to a list change it in place, add() or addAll(), instead of building a new list from a copy each time:
+// on a variable, a map's field, and a list's element, also where the appended value is computed.
+function doubled(n) {
+  return n * 2
+}
+let counts = []
+let record = { items: [], name: "record" }
+let rows = [[], []]
+for i in 0..3 {
+  counts.add(i)
+  counts.add(doubled(i))
+  // NOTE SX_SHARED_MAP_WRITE line 10: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+  record.items.add(i)
+  rows[0].addAll([i, i])
+  rows[1].add(i)
+}
+say "Counts ${counts.length}, items ${record.items.length}, rows ${rows[0].length} and ${rows[1].length}"
+
+// A value whose call may change the list it is appended to is computed after the list is read, as Groovy did.
+let log = []
+function remember(text) {
+  log.add("remembered")
+  return text
+}
+log += [remember("first")]
+say "Log ${log.length}"
+exit

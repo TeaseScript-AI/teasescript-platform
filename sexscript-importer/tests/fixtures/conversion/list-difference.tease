@@ -16,7 +16,7 @@ let picked = sexscriptLegacyValue(load("picked", default: ""))
 function pickToy {
   let toys = ["paddle", "crop", "cane"]
   if askBoolean "Add the strap?" {
-    toys += ["strap"]
+    toys.add("strap")
   }
   if picked != null and picked != "" {
     toys = sexscriptLegacyListMinus(toys, [picked])

@@ -3,6 +3,7 @@ import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import { withLoopedTailCalls } from "./tail-calls.ts";
+import { withListAppends } from "./list-appends.ts";
 import {
   constantString,
   groovyParameters,
@@ -2774,7 +2775,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
       },
     ]);
   }
-  if (replaced.size === 0 && staleText.size === 0) return result.statements;
+  if (replaced.size === 0 && staleText.size === 0) return withListAppends(result.statements);
   const replace = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((statement): IrStatement[] => {
       if (isStale(statement)) return [];
@@ -2801,7 +2802,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
           return [statement];
       }
     });
-  return replace(result.statements);
+  return withListAppends(replace(result.statements));
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
