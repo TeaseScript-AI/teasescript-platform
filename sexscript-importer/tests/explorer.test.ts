@@ -1038,7 +1038,7 @@ test(
 );
 
 test(
-  "a stored value a condition needs is aimed at by its sessions, counted as attempts, and by play going on from the state that stored it",
+  "a stored value a condition needs is aimed at by its sessions, counted as attempts, and with stored-value leads by play going on from the state that stored it",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -1053,6 +1053,7 @@ test(
         maxStates: 100_000,
         sources: new Map([["main.tease", source]]),
         diagnostics: [],
+        storedLeads: true,
       });
     };
     // Each visit climbs one higher: the sessions toward the summit are the way's attempts.

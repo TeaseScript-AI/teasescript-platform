@@ -370,6 +370,13 @@ export interface ExploreOptions {
    */
   readonly followChains?: boolean;
   /**
+   * Stored-value leads: once per stored-value chain, the play state that first stored a value a condition needs, or its
+   * open successors in the same session, take the first place for a directed attempt's expansions, as the condition
+   * may come later in the same visit. On the 13-unit gate they cost coverage (DisciplineClinic -3.3, Domme3 -1.5,
+   * jewell -1.6); off by default.
+   */
+  readonly storedLeads?: boolean;
+  /**
    * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
    * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
    * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
@@ -3286,7 +3293,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (best.distance === 0) {
       // Play goes on from the state that stored the value, in its own session, as well as in a next session from its
       // storage: the condition may come later in the same visit.
-      if (!found.led) {
+      if (options.storedLeads === true && !found.led) {
         found.led = true;
         leadOnFrom(best.left.node, code);
         target.attempts += 1;
