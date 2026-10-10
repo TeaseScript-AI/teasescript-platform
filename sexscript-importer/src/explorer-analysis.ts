@@ -402,6 +402,10 @@ export class DataFlow {
   readonly #entryOf = new Map<number, number>();
   /** Each function's parameter names, by ID, in order. */
   readonly #parameterNames = new Map<number, string[]>();
+  /** The default value of each parameter that has one, by its scope key. */
+  readonly #defaults = new Map<string, Data>();
+  /** The variable keys the code assigns or declares, apart from a call's arguments and a parameter's default. */
+  readonly #assignedInCode = new Set<string>();
   /** {@link setInPlay} by scope key. */
   readonly #inPlay = new Map<string, boolean>();
   /** The instructions where each file's code, its functions' included, starts and ends (exclusive), by file. */
@@ -553,10 +557,8 @@ export class DataFlow {
           case "callFunction": {
             if (typeof instruction.destinationTemporary === "number")
               changed =
-                merge(
-                  this.#temporary(instruction.destinationTemporary),
-                  this.#function(Number(instruction.functionId)),
-                ) || changed;
+                merge(this.#temporary(instruction.destinationTemporary), this.#callFlow(index)) ||
+                changed;
             // The arguments are the values of the function's parameters.
             const entry = this.#entryOf.get(Number(instruction.functionId));
             if (entry !== undefined)
@@ -1130,8 +1132,11 @@ export class DataFlow {
     return this.#code.get(functionId) ?? empty();
   }
 
-  /** The asks, stored keys, and clock reads an expression's value comes from. */
-  flowOf(expression: unknown): Flow {
+  /**
+   * The asks, stored keys, and clock reads an expression's value comes from; `substitute` gives some variable keys
+   * other flows (a call's arguments for the function's parameters, see {@link #callFlow}).
+   */
+  flowOf(expression: unknown, substitute?: ReadonlyMap<string, Flow>): Flow {
     const flow = emptyFlow();
     const walk = (value: unknown): void => {
       if (Array.isArray(value)) {
@@ -1140,7 +1145,8 @@ export class DataFlow {
       }
       if (!isRecord(value)) return;
       if (value.kind === "identifier" && typeof value.name === "string") {
-        const known = this.#variableFlow(this.#keyOf(value));
+        const key = this.#keyOf(value);
+        const known = substitute?.get(key) ?? this.#variableFlow(key);
         if (known !== undefined) merge(flow, known);
       } else if (value.kind === "temporary" && typeof value.temporaryId === "number") {
         const known = this.#temporaries.get(value.temporaryId);
@@ -1155,8 +1161,12 @@ export class DataFlow {
       } else if (value.kind === "call" && CLOCK_GETTERS.has(calleeName(value) ?? "")) {
         flow.clock = true;
       } else if (value.kind === "callResult" && typeof value.functionId === "number") {
-        const known = this.#functions.get(value.functionId);
-        if (known !== undefined) merge(flow, known);
+        merge(
+          flow,
+          typeof value.call === "number"
+            ? this.#callFlow(value.call)
+            : (this.#functions.get(value.functionId) ?? emptyFlow()),
+        );
       }
       for (const [key, item] of Object.entries(value))
         if (key !== "span" && key !== "typeCheck") walk(item);
@@ -1376,6 +1386,14 @@ export class DataFlow {
       const known = this.#assigned.get(key) ?? [];
       known.push({ value, index });
       this.#assigned.set(key, known);
+      const kind = instructions[index]?.kind;
+      if (
+        kind === "assign" ||
+        kind === "declareBinding" ||
+        kind === "declareGlobal" ||
+        kind === "loopStart"
+      )
+        this.#assignedInCode.add(key);
     };
     for (const definition of list(plan.functions))
       for (const parameter of list(definition.parameters))
@@ -1400,7 +1418,10 @@ export class DataFlow {
         const name = this.#parameterNames.get(Number(instruction.functionId))?.[
           Number(instruction.parameterIndex)
         ];
-        if (name !== undefined) assigned(name, record(instruction.value), index);
+        if (name !== undefined) {
+          assigned(name, record(instruction.value), index);
+          this.#defaults.set(this.scopeKey(name, index), record(instruction.value));
+        }
       }
       if (instruction.kind === "loopStart")
         for (const name of [instruction.variable, instruction.valueVariable])
@@ -1436,6 +1457,35 @@ export class DataFlow {
     return [expression.left, expression.right].some(
       (side) => record(side).kind === "identifier" && record(side).name === name,
     );
+  }
+
+  /**
+   * The flow of a call's result: what the function returns, with the parameters it returns as they are (`return
+   * whenMissing`) read as this call's arguments, not as every call's, and a parameter the call leaves out as its default;
+   * not a parameter the function assigns. One level deep: a value the function computes from a parameter keeps every
+   * call's.
+   */
+  #callFlow(call: number): Flow {
+    const instruction = this.#instructions[call]!;
+    const id = Number(instruction.functionId);
+    const entry = this.#entryOf.get(id);
+    const substitute = new Map<string, Flow>();
+    if (entry !== undefined) {
+      const given = new Map(
+        list(instruction.arguments).map((argument) => [argument.parameterName, argument.value]),
+      );
+      for (const name of this.#parameterNames.get(id) ?? []) {
+        const key = this.scopeKey(name, entry);
+        // A parameter the function assigns holds more than what the call passed.
+        if (this.#assignedInCode.has(key)) continue;
+        const value = given.has(name) ? given.get(name) : this.#defaults.get(key);
+        if (value !== undefined) substitute.set(key, this.flowOf(value));
+      }
+    }
+    const flow = emptyFlow();
+    for (const index of this.#returns.get(id) ?? [])
+      merge(flow, this.flowOf(this.#instructions[index]!.value, substitute));
+    return flow;
   }
 
   #variable(name: string): Flow {

@@ -1295,6 +1295,16 @@ test(
         '  return answer\n}\nif readAnswer() == 1234 {\n  say "Matched."\n}\nexit\n',
     ).find((condition) => condition.line === 8);
     assert.deepEqual(echoed?.sources, ["ask"]);
+    // A helper's result is what this call passed it, not what every call passed.
+    const passed = analyzed(
+      'function orElse(text, missing) {\n  return missing\n}\nlet a = load("game.a", default: 0)\n' +
+        'let b = load("game.b", default: 0)\nshowButton "Go"\nif orElse("x", b) > 1 {\n  say "B."\n}\n' +
+        'if orElse("y", a) > 1 {\n  say "A."\n}\nexit\n',
+    ).filter((condition) => condition.line === 7 || condition.line === 10);
+    assert.deepEqual(
+      passed.map((condition) => condition.sources),
+      [["game.b"], ["game.a"]],
+    );
     const fallen = analyzed(
       'let health = load("slot.health", default: 9)\nhealth = health - 1\nswitch health {\n  case -50 {\n' +
         '    say "Fallen."\n  }\n}\nexit\n',
@@ -1710,9 +1720,14 @@ test(
     });
     // Also through the helper `owns` calls with its own parameter.
     const sharp = result.coverage.unvisitedBranches.find((entry) => entry.line === 16);
-    assert.deepEqual(sharp?.dependsOn, ["stored gear.knife", "stored pack.knife"]);
+    assert.deepEqual([...(sharp?.dependsOn ?? [])].sort(), [
+      "stored gear.knife",
+      "stored pack.knife",
+    ]);
     assert.deepEqual(
-      sharp?.parts.map((part) => [part.needs, part.status, part.closest?.value]),
+      sharp?.parts
+        .map((part) => [part.needs, part.status, part.closest?.value])
+        .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
       [
         ["stored gear.knife == true", "unmet", "gear.knife = false"],
         ["stored pack.knife == true", "unmeasured", undefined],
