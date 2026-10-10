@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "The settings menu stores getString's answer in MaxMultiplier for one statement, then sets it to -1 or to the number the text gives, so the variable holds a number again on every path; TeaseScript variables keep one type, so the text gets its own variable, maxMultiplierText, and MaxMultiplier and Multiplier, which copies it, stay numbers.",
       "diff": "max-multiplier-text.diff"
+    },
+    {
+      "id": "holiday-date",
+      "layer": "source",
+      "category": "b",
+      "reason": "getHolidays builds each holiday with new Date().copyWith(year:, month:, dayOfMonth:), a Date method that TeaseScript has no form for; the script only counts the days between dates, which ignore the time of day, so new Date(year - 1900, month - 1, day), which the converter takes as a date, gives the same counts, also for days past the month's end.",
+      "diff": "holiday-date.diff"
     }
   ]
 }
