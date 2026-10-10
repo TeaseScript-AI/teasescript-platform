@@ -924,10 +924,12 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     case "assign": {
-      const value = evaluator.evaluate(instruction.value);
-      if (instruction.typeCheck !== undefined)
-        assertValueType(value, instruction.typeCheck, instruction.value.span);
-      evaluator.assign(instruction.target, value);
+      if (!evaluator.appendAssigned(instruction.target, instruction.value, instruction.typeCheck)) {
+        const value = evaluator.evaluate(instruction.value);
+        if (instruction.typeCheck !== undefined)
+          assertValueType(value, instruction.typeCheck, instruction.value.span);
+        evaluator.assign(instruction.target, value);
+      }
       advance(snapshot);
       return;
     }

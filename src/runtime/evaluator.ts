@@ -1373,6 +1373,57 @@ export class Evaluator {
   }
 
   /**
+   * Runs `items += more`, or `items = items + more`, while the variable holds a list. The joined list starts with the
+   * variable's own elements, so copies of the added ones are appended in place, as `addAll` adds them, instead of a
+   * copy of the whole list for every addition. The result, its type check, its failures, and the prepared references
+   * it freezes are those of the assignment. Gives `false`, having evaluated nothing, for any other assignment, and
+   * while Debug traces, which explains the joined value.
+   */
+  public appendAssigned(
+    target: AssignmentTargetPlan,
+    value: ExpressionPlan,
+    typeCheck: TypeCheckPlan | undefined,
+  ): boolean {
+    if (
+      this.trace !== null ||
+      target.kind !== "identifier" ||
+      value.kind !== "binary" ||
+      value.operator !== "+" ||
+      value.left.kind !== "identifier" ||
+      value.left.name !== target.name ||
+      (typeCheck !== undefined && typeCheck.type.kind !== "list")
+    )
+      return false;
+    const location = findBindingLocation(this.snapshot, this.plan, target.name);
+    if (location === undefined) return false;
+    const list = location.binding.value;
+    if (!isList(list)) return false;
+    const left = this.evaluate(value.left);
+    const right = this.evaluate(value.right);
+    // The compiler reads the variable before a user call in `more`, so without one `more` changes the list only in
+    // place. Every store into the variable fits its type, so the joined list fits when the added elements do.
+    if (
+      left !== list ||
+      !isList(right) ||
+      (typeCheck !== undefined && !matchesValueType(right, typeCheck.type))
+    ) {
+      const joined = this.#binary(value, left, right);
+      if (typeCheck !== undefined) assertValueType(joined, typeCheck, value.span);
+      this.assign(target, joined);
+      return true;
+    }
+    detachPreparedReferencesForMutation(this.snapshot, {
+      rootFrameId: location.frame.id,
+      rootName: target.name,
+      path: [],
+    });
+    // Copies are taken first, so a list can add itself.
+    const added = right.items.map((item) => cloneCapturedSerializableValue(item));
+    for (const item of added) list.items.push(item);
+    return true;
+  }
+
+  /**
    * `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. Gives
    * the reference to store and the value it selects, which the debug trace shows instead of the reference.
    */
