@@ -981,20 +981,27 @@ export class DataFlow {
     const cells = [...readers.keys(), ...[...readers.values()].flat()].filter((each) =>
       each.startsWith("s "),
     );
+    // Cells of the same text are one; only a pattern or an unknown key can stand for another.
     const written = [...new Set(cells)];
-    const matchers = new Map(written.map((cell) => [cell, keyMatcher(cell.slice(2))]));
-    for (const from of written)
-      for (const into of written) {
-        const [saved, loaded] = [from.slice(2), into.slice(2)];
+    const wide = written.filter((cell) => cell === "s ?" || cell.includes(KEY_PLACEHOLDER));
+    const matchers = new Map<string, (key: string) => boolean>();
+    const matches = (pattern: string, text: string) =>
+      (matchers.get(pattern) ?? matchers.set(pattern, keyMatcher(pattern)).get(pattern)!)(text);
+    for (const pattern of wide) {
+      for (const other of written) {
+        const [saved, text] = [pattern.slice(2), other.slice(2)];
         if (
-          from !== into &&
+          other !== pattern &&
           (saved === "?" ||
-            loaded === "?" ||
-            matchers.get(from)!(loaded) ||
-            matchers.get(into)!(saved))
-        )
-          (readers.get(from) ?? readers.set(from, []).get(from)!).push(into);
+            text === "?" ||
+            matches(saved, text) ||
+            (text.includes(KEY_PLACEHOLDER) && matches(text, saved)))
+        ) {
+          (readers.get(pattern) ?? readers.set(pattern, []).get(pattern)!).push(other);
+          (readers.get(other) ?? readers.set(other, []).get(other)!).push(pattern);
+        }
       }
+    }
     return { readers, seeds };
   }
 
