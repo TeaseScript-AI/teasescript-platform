@@ -851,7 +851,7 @@ test(
       // A range is a list in Groovy, so its elements are appended.
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
       // A value that may be a list or one element is decided at runtime; a function result is a list.
-      assert.match(output, /^ {2}items \+= sexscriptLegacyListPart\(more\)$/mu);
+      assert.match(output, /^ {2}items\.addAll\(sexscriptLegacyListPart\(more\)\)$/mu);
       assert.match(output, /^ {2}items \+= extra\(\)$/mu);
       // A list literal is checked element by element, as the compiler does; mixed elements need a union.
       assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
