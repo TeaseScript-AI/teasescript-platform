@@ -2216,7 +2216,7 @@ class TypeChecker {
     if (result !== undefined && isScalar(value, "calendarDuration"))
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
     if (result !== undefined && !isKnown(result)) {
-      if (place.inferred === undefined) this.#checkUnknownCompound(place, kept, statement);
+      this.#checkUnknownCompound(place, kept, statement);
       // A place or a value that so far held only null is checked as null too, in case no store gives it another value.
       const slots =
         this.diagnostics.length === reported
@@ -2284,7 +2284,7 @@ class TypeChecker {
 
   /**
    * Reports `+=` or `-=` with an operation of unknown result when no type that operation can give, added to or
-   * subtracted from any type the place may hold, could fit the place's written type, as text never comes from `/`.
+   * subtracted from any type the place may hold, could fit the place's type, as text never comes from `/`.
    */
   #checkUnknownCompound(place: Place, kept: StaticType, statement: AssignmentStatement): void {
     const operation = unwrap(statement.value);
@@ -2459,8 +2459,7 @@ class TypeChecker {
         this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       return;
     }
-    const unfit =
-      place.inferred === undefined ? this.#unfitResults(expression, value, place.type) : undefined;
+    const unfit = this.#unfitResults(expression, value, place.type);
     if (unfit !== undefined) {
       const text = operationText(expression);
       // Another place suggests the type the operator gives for numbers, which is what such a value usually holds.
