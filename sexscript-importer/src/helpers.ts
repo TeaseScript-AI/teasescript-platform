@@ -217,6 +217,7 @@ export type HelperName =
   | "listMax"
   | "listMin"
   | "listSum"
+  | "textSum"
   | "loadFirstTrue"
   | "max"
   | "menuOptions"
@@ -291,6 +292,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMax",
   "listMin",
   "listSum",
+  "textSum",
   "max",
   "min",
   "fixed",
@@ -2206,6 +2208,31 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
           letS("total", lit(0)),
           forS("item", v("items"), [set(v("total"), v("item"), "+=")]),
+          ret(v("total")),
+        ],
+      ),
+  },
+  // Groovy sum() of texts: the first element with each later one joined to it, a null one as "null"; null for no
+  // element, and a failure, as Groovy's NullPointerException, where a null element is followed by another.
+  textSum: {
+    name: "sexscriptLegacyTextSum",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextSum",
+        ["items"],
+        [
+          ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
+          letS("total", at(v("items"), lit(0))),
+          letS("position", lit(1)),
+          {
+            kind: "while",
+            condition: bin("<", v("position"), prop(v("items"), "length")),
+            body: [
+              set(v("total"), bin("+", v("total"), template(at(v("items"), v("position"))))),
+              set(v("position"), lit(1), "+="),
+            ],
+            span: null,
+          },
           ret(v("total")),
         ],
       ),

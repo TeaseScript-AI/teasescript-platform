@@ -13688,11 +13688,11 @@ function lowerObjectMethodCallExpression(
       case "min":
         return useHelper(context, "listMin", [target]);
       case "sum": {
-        // Groovy sum() adds numbers and joins texts, so a list of texts only is its elements joined, `xs.join("")`
-        // (ToyExpanded's number memory game); an empty list, null in Groovy, joins to the empty text.
+        // Groovy sum() adds numbers and joins texts, so a list of texts sums with the helper that joins them as Groovy
+        // did, null elements included (ToyExpanded's number memory game).
         const elements = listElementType(targetNode, context);
-        if (elements !== 0 && onlyOf(elements, STRING))
-          return listJoin(target, { kind: "literal", value: "" });
+        if ((elements & STRING) !== 0 && onlyOf(elements, STRING | NULL))
+          return useHelper(context, "textSum", [target]);
         // The helper adds numbers only.
         if (!onlyOf(elements, NUMBER)) {
           return unsupportedExpression(

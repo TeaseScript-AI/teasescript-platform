@@ -757,16 +757,9 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
   const add = (name: string | null, type: ValueType): void => {
     if (name !== null) added.set(name, (added.get(name) ?? 0) | type);
   };
-  // An element that is a text cast keeps the null its value may be: Groovy's `null as String` is null.
-  const elementType = (item: AstNode): ValueType => {
-    const type = inferType(item, environment);
-    if (item.kind !== "cast" || type !== STRING) return type;
-    const value = asNode(item.value);
-    return value === null || (inferType(value, environment) & NULL) !== 0 ? STRING | NULL : STRING;
-  };
   const itemsType = (list: AstNode): ValueType =>
     (Array.isArray(list.items) ? list.items : []).reduce(
-      (type: ValueType, item) => type | (isAstNode(item) ? elementType(item) : UNKNOWN),
+      (type: ValueType, item) => type | (isAstNode(item) ? inferType(item, environment) : UNKNOWN),
       0,
     );
   const appendList = (name: string | null, list: AstNode): void => {
@@ -783,14 +776,14 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       const items = Array.isArray(args?.items) ? args.items.filter(isAstNode) : [];
       const last = items.at(-1);
       if ((method === "add" || method === "push" || method === "leftShift") && last !== undefined)
-        add(name, elementType(last));
+        add(name, inferType(last, environment));
       if (method === "addAll" && last !== undefined) appendList(name, last);
       return;
     }
     if (node.kind === "binary" && (node.operator === "<<" || node.operator === "+=")) {
       const right = asNode(node.right);
       if (right === null) return;
-      if (node.operator === "<<") add(variableName(node.left), elementType(right));
+      if (node.operator === "<<") add(variableName(node.left), inferType(right, environment));
       else if ((inferType(right, environment) & LIST) !== 0)
         appendList(variableName(node.left), right);
       else add(variableName(node.left), inferType(right, environment));

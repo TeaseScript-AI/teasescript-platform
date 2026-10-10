@@ -41,6 +41,18 @@ function sexscriptLegacyListMax(itemsValue3) {
   }
   return best
 }
+function sexscriptLegacyTextSum(itemsValue4) {
+  if itemsValue4.length == 0 {
+    return null
+  }
+  let totalValue = itemsValue4[0]
+  let position = 1
+  while position < itemsValue4.length {
+    totalValue += "${itemsValue4[position]}"
+    position += 1
+  }
+  return totalValue
+}
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
@@ -86,11 +98,11 @@ function sexscriptLegacySplit(text, separator) {
   }
   return partsValue2
 }
-function sexscriptLegacyReversed(itemsValue4) {
+function sexscriptLegacyReversed(itemsValue5) {
   let result = []
-  let index = itemsValue4.length - 1
+  let index = itemsValue5.length - 1
   while index >= 0 {
-    result.add(itemsValue4[index])
+    result.add(itemsValue5[index])
     index -= 1
   }
   return result
@@ -437,7 +449,7 @@ let digits = []
 for it in 0..3 {
   digits.add(sexscriptLegacyCastText(it))
 }
-let sumResult = digits.join("")
+let sumResult = sexscriptLegacyTextSum(digits)
 if "012" == sumResult {
   say "All digits"
 }
