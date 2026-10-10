@@ -37,3 +37,10 @@ def again = { again, times ->
 	}
 }
 again(again, 2)
+// A function that took the legacy script object as `main` called its methods as SexScript's; a call passes null in its
+// place, and a whole default that a call passes a fraction takes fractions (jeuxdemain_femme's animations).
+def pulse = { main, speed = 1 ->
+	main.show("Pulse " + speed)
+}
+pulse(this, 0.5)
+pulse(this)

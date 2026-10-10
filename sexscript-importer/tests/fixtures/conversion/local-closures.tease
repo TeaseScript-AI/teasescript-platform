@@ -75,4 +75,11 @@ function again(againValue, times) {
   }
 }
 again("again", 2)
+// A function that took the legacy script object as `main` called its methods as SexScript's; a call passes null in its
+// place, and a whole default that a call passes a fraction takes fractions (jeuxdemain_femme's animations).
+function pulse(main, speed: number = 1) {
+  say "Pulse ${speed}"
+}
+pulse(null, 0.5)
+pulse(null)
 exit

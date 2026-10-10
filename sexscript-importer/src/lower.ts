@@ -77,7 +77,11 @@ import {
   withLiftedLocals,
   withPassedLocals,
 } from "./captured-locals.ts";
-import { withListAliasesAsPaths, withTupleAssignments } from "./list-aliases.ts";
+import {
+  mapChildren as mapAstChildren,
+  withListAliasesAsPaths,
+  withTupleAssignments,
+} from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
@@ -245,6 +249,8 @@ interface LowerContext {
   } | null;
   /** Functions generated from closure values, emitted at the program root. */
   closureFunctions: IrStatement[];
+  /** The positions at which a call of each script function passes a value that may hold a fraction. */
+  fractionalArguments: ReadonlyMap<string, ReadonlySet<number>>;
   /** The locals of their functions that closure values read or set, which the next lowering lifts (lowerParsedFile). */
   capturedLocals: CapturedLocal[];
   /** The closure values whose captured locals this lowering passes or lifts, by spanKey, with those locals' names. */
@@ -1931,6 +1937,7 @@ function lowerFileOnce(
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
+    fractionalArguments: new Map(),
     capturedLocals: found.locals,
     resolvedClosures: new Map(),
     excludedClosures: new Map(),
@@ -2032,6 +2039,7 @@ function lowerFileOnce(
     );
     context.bindings = bindingKeys(desugared, file.sourceName);
     body = splitScratchVariables(desugared, context);
+    body = withHostArguments(body);
     // Changes through an element or an iterated item reach the list they came from, as Groovy's shared lists did.
     body = withListAliasesAsPaths(
       withTupleAssignments(body, (base) => freshName(base, context)),
@@ -2082,6 +2090,7 @@ function lowerFileOnce(
     context.constantInitializers = declarationInitializers(body, context.types);
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.fractionalArguments = fractionalArguments(body, context);
     context.integerArrays = integerArrays(body, context.bindings);
     context.loopOnlyCounters = loopOnlyCounters(body, context.bindings);
     context.fixedClosureCalls = fixedClosureCalls(body);
@@ -3282,6 +3291,7 @@ function lowerHelperMethod(
       ),
     },
     closureFunctions: baseContext.closureFunctions,
+    fractionalArguments: new Map(),
     // A helper class's methods are not script functions, whose locals withLiftedLocals lifts.
     capturedLocals: [],
     resolvedClosures: new Map(),
@@ -5600,10 +5610,15 @@ function lowerClosureDeclaration(
         (item: unknown) => isRecord(item) && item.name === record.name,
       );
       const declared = isRecord(raw) ? text(raw.type)?.replace(/^java\.(lang|math)\./u, "") : null;
+      // So does an untyped one with a whole default that a call passes a fraction (jeuxdemain_femme's
+      // `animationTeton(this, 0.5, 10)` for `bPMT = 1`).
+      const position = closureParameters.indexOf(record);
       const fractional =
-        declared !== null &&
-        declared !== undefined &&
-        ["float", "double", "Float", "Double", "BigDecimal", "Number"].includes(declared) &&
+        ((declared !== null &&
+          declared !== undefined &&
+          ["float", "double", "Float", "Double", "BigDecimal", "Number"].includes(declared)) ||
+          ((declared === null || declared === undefined || declared === "Object") &&
+            context.fractionalArguments.get(name)?.has(position) === true)) &&
         defaultValue?.kind === "literal" &&
         typeof defaultValue.value === "number" &&
         Number.isInteger(defaultValue.value);
@@ -10274,6 +10289,47 @@ const WHOLE_NUMBER_METHODS = new Set([
   "floor",
   "ceil",
 ]);
+
+/**
+ * For each script function, the positions at which one of its calls passes a value that may give a fraction: a
+ * fractional literal, a division, or a variable assigned one, also through `+`, `-`, `*`, and `%`.
+ */
+function fractionalArguments(body: AstNode, context: LowerContext): Map<string, Set<number>> {
+  const gives = (node: AstNode | null, seen: Set<string>): boolean => {
+    if (node === null) return false;
+    if (node.kind === "constant")
+      return typeof node.value === "number" && !Number.isInteger(node.value);
+    if (node.kind === "unaryMinus" || node.kind === "unaryPlus")
+      return gives(asNode(node.value), seen);
+    if (node.kind === "binary") {
+      const operator = text(node.operator) ?? "";
+      if (operator === "/") return true;
+      return (
+        ["+", "-", "*", "%"].includes(operator) &&
+        (gives(asNode(node.left), seen) || gives(asNode(node.right), seen))
+      );
+    }
+    if (node.kind !== "variable") return false;
+    const key = bindingKey(node, context.bindings);
+    if (key === null || seen.has(key) || context.integerVariables.has(key)) return false;
+    seen.add(key);
+    return [
+      ...(context.assignedValues.get(key) ?? []),
+      ...(context.compoundValues.get(key) ?? []),
+    ].some((value) => gives(value, seen));
+  };
+  const result = new Map<string, Set<number>>();
+  walkAst(body, (node) => {
+    if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+    const name = constantString(node.method);
+    if (name === null || !context.functions.has(name)) return;
+    nodeArray(asNode(node.arguments)?.items).forEach((argument, position) => {
+      if (gives(argument, new Set()))
+        result.set(name, new Set([...(result.get(name) ?? []), position]));
+    });
+  });
+  return result;
+}
 
 /**
  * Whether a Groovy number may hold a fraction: a fractional literal, a division (which gave a decimal where it did not
@@ -18354,6 +18410,46 @@ function sourceTextOf(node: AstNode, context: LowerContext): string {
   lines[lines.length - 1] = lines.at(-1)!.slice(0, span.endColumn - 1);
   lines[0] = lines[0]!.slice(span.column - 1);
   return singleLine(lines.map((line) => line.trim()).join(" "));
+}
+
+/**
+ * A script function whose parameter is named `main` took the legacy script object, `f(this, …)`, whose methods it called
+ * as `main.show(…)`, which convert as the SexScript calls they were (callParts); the script object has no TeaseScript
+ * value, so a call passes null there instead, which the function only hands on (jeuxdemain_femme's animations and
+ * punishments, every call of which was a TODO).
+ */
+function withHostArguments(body: AstNode): AstNode {
+  const positions = new Map<string, number>();
+  walkAst(body, (node) => {
+    const closure = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (closure?.kind !== "closure" || name === null) return;
+    const position = (groovyParameters(closure.parameters) ?? []).findIndex(
+      (parameter) => parameter.name === "main",
+    );
+    if (position >= 0) positions.set(name, position);
+  });
+  if (positions.size === 0) return body;
+  const rewrite = (node: AstNode): AstNode => {
+    const changed = mapAstChildren(node, rewrite);
+    const call = changed.kind === "methodCall" && changed.implicitThis === true ? changed : null;
+    const position = call === null ? undefined : positions.get(constantString(call.method) ?? "");
+    const list = call === null ? null : asNode(call.arguments);
+    const items = nodeArray(list?.items);
+    if (position === undefined || list === null || variableName(items[position]) !== "this")
+      return changed;
+    const span = items[position]!.span;
+    return {
+      ...changed,
+      arguments: {
+        ...list,
+        items: items.map((item, index) =>
+          index === position ? { kind: "constant", span, value: null } : item,
+        ),
+      },
+    };
+  };
+  return rewrite(body);
 }
 
 function callParts(
