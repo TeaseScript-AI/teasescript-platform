@@ -7,6 +7,15 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return optionsValue
 }
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 // Menus built from runtime lists: written options keep their index, list elements follow.
 let offenses = ["Being late", "Being rude"]
 offenses.add("Lying")
@@ -124,5 +133,17 @@ while p < pendingOffenses.length {
     say "Pending: ${pendingOffenses[p]}"
   }
   p += 1
+}
+// A menu of a list followed by a written option gives a position past the end of the list for that option, where
+// Groovy read null, as DungeonTrials' weapon choice.
+let weapons = ["Sword", "Bow"]
+say "Which weapon?"
+let weaponPick = choose sexscriptLegacyMenuOptions(weapons + ["No weapon"], 0)
+// NOTE SX_INDEX_PAST_END line 74: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+// NOTE SX_INDEX_PAST_END line 75: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(weapons, weaponPick) == "Sword" {
+  say "You draw the sword."
+} else if sexscriptLegacyItemAt(weapons, weaponPick) == null {
+  say "You go unarmed."
 }
 exit

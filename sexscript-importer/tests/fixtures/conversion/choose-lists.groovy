@@ -67,3 +67,9 @@ while (p < pendingOffenses.size()) {
 	if (loadBoolean("pending." + pendingOffenses[p])) show("Pending: " + pendingOffenses[p])
 	p++
 }
+// A menu of a list followed by a written option gives a position past the end of the list for that option, where
+// Groovy read null, as DungeonTrials' weapon choice.
+def weapons = ["Sword", "Bow"]
+def weaponPick = getSelectedValue("Which weapon?", weapons + ["No weapon"])
+if (weapons[weaponPick] == "Sword") show("You draw the sword.")
+else if (weapons[weaponPick] == null) show("You go unarmed.")

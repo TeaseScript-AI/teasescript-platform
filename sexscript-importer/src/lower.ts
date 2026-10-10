@@ -9052,10 +9052,17 @@ function plainCharacters(
 }
 
 /**
- * Whether a list position can be one past the end: a random position plus a positive number, `getRandom(n) + 1` for a
- * 1-based pick, a list's size, or a variable assigned one of these.
+ * Whether a position in the list `target` can be one past its end: a random position plus a positive number,
+ * `getRandom(n) + 1` for a 1-based pick, a list's size, a menu choice from the list followed by written options
+ * (DungeonTrials' `getSelectedValue(text, weapons + ["No weapon"])`, whose last option is past the end), or a variable
+ * assigned one of these.
  */
-function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+function mayIndexPastEnd(
+  node: AstNode,
+  context: LowerContext,
+  target: AstNode | null = null,
+  seen = new Set<string>(),
+): boolean {
   if (node.kind === "binary" && text(node.operator) === "+") {
     const [left, right] = [asNode(node.left), asNode(node.right)];
     const random = (side: AstNode | null): boolean =>
@@ -9070,12 +9077,24 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
   if (node.kind === "methodCall" && constantString(node.method) === "size") return true;
   if (node.kind === "property" && ["size", "length"].includes(constantString(node.property) ?? ""))
     return true;
+  if (node.kind === "methodCall" && legacyApiCall(node, context)?.name === "getSelectedValue") {
+    const options = nodeArray(asNode(node.arguments)?.items)[1];
+    const written =
+      options?.kind === "binary" && text(options.operator) === "+" ? asNode(options.right) : null;
+    const listName = target === null ? null : variableName(target);
+    return (
+      written?.kind === "list" &&
+      nodeArray(written.items).length > 0 &&
+      listName !== null &&
+      variableName(asNode(options!.left)) === listName
+    );
+  }
   if (node.kind === "variable") {
     const key = bindingKey(node, context.bindings);
     if (key === null || seen.has(key)) return false;
     seen.add(key);
     return (context.assignedValues.get(key) ?? []).some((value) =>
-      mayIndexPastEnd(value, context, seen),
+      mayIndexPastEnd(value, context, target, seen),
     );
   }
   return false;
@@ -10900,7 +10919,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     // position for null.
     if (
       !context.writeTargets.has(node) &&
-      (mayIndexPastEnd(indexNode, context) || nullComparedReads.has(node))
+      (mayIndexPastEnd(indexNode, context, targetNode) || nullComparedReads.has(node))
     ) {
       addDiagnostic(
         context,
