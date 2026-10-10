@@ -16,6 +16,7 @@ run_patch_publication_group() {
 run_short_checks_group() {
   python3 -B "$script_dir/test-compact-unittest.py"
   bash "$script_dir/test-run-compact.sh"
+  bash "$script_dir/test-select-local-agent-check.sh"
   bash "$script_dir/run-compact.sh" \
     --label source-bundle-workflow \
     --log "$log_dir/source-bundle-workflow.log" \

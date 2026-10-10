@@ -71,8 +71,8 @@ It runs each local-agent producer, consumer, workflow-contract, and compact-outp
 suite exactly once. Individual files remain useful for focused development, and
 normal CI uses only this canonical command to prevent duplicate execution and
 test-list drift. Pull-request CI runs it when the change touches one of the
-repository paths it reads (listed in `.github/workflows/ci.yml`); every push to
-`main` runs it.
+repository paths it reads (`tools/local-agent/select-local-agent-check.sh`);
+every push to `main` runs it.
 
 Verified patch publication uses a trusted change-scope profile instead of always
 repeating every suite before the candidate is pushed. Workflow and local-agent

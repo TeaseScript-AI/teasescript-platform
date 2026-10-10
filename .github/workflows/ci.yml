@@ -32,15 +32,11 @@ jobs:
       - name: Select local-agent tooling check
         id: local-agent
         run: |
-          # The tooling suites read only these repository paths (and run on the Node version from .nvmrc), so a pull
-          # request that changes none of them cannot change their result. Every push to main runs them.
-          inputs='^(\.github/|tools/local-agent/|tools/chatgpt-project-agent/|tools/setup-chatgpt-project-agent\.sh$|docs/chatgpt-project/|\.nvmrc$)'
-          changed=$(git diff --name-only HEAD^1 HEAD)
-          if [ "$GITHUB_EVENT_NAME" != pull_request ] || grep -qE "$inputs" <<<"$changed"; then
-            echo run=true >> "$GITHUB_OUTPUT"
+          # A pull request runs the tooling suites only when it changes one of their inputs; every push to main runs them.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            bash tools/local-agent/select-local-agent-check.sh HEAD^1 HEAD >>"$GITHUB_OUTPUT"
           else
-            echo "No pull-request change touches the local-agent tooling inputs; skipping its check."
-            echo run=false >> "$GITHUB_OUTPUT"
+            echo run=true >>"$GITHUB_OUTPUT"
           fi
       - name: Validate local-agent tooling
         if: ${{ steps.local-agent.outputs.run == 'true' }}
