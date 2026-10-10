@@ -4420,9 +4420,10 @@ class Parser {
     const elements: Expression[] = [];
     this.#skipNewlines();
     while (!this.#check(closing) && !this.#check(TokenKind.EndOfFile)) {
+      const elementStart = this.#current;
       const value = yield* parseChild(this.#parseRequiredExpressionTask());
       if (value === null) {
-        this.#synchronizeDelimited(closing);
+        this.#synchronizeDelimited(closing, elementStart);
       } else {
         elements.push(value);
       }
@@ -4447,12 +4448,13 @@ class Parser {
       // A statement on a line of its own ends a literal left open, as after `let o = {`; `let: 1` stays a property.
       if (this.#previous().kind === TokenKind.Newline && this.#isRecoveredTopLevelStatement())
         break;
+      const propertyStart = this.#current;
       if (!isPropertyName(this.#peek())) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedPropertyName,
           "Expected an object property name.",
         );
-        this.#synchronizeDelimited(TokenKind.RightBrace);
+        this.#synchronizeDelimited(TokenKind.RightBrace, propertyStart);
         break;
       }
       const name = this.#identifier(this.#advance());
@@ -4461,7 +4463,7 @@ class Parser {
           parserDiagnosticCode.expectedColon,
           "Expected ':' after the object property name.",
         );
-        this.#synchronizeDelimited(TokenKind.RightBrace);
+        this.#synchronizeDelimited(TokenKind.RightBrace, propertyStart);
         break;
       }
       const value = yield* parseChild(this.#parseColonValueTask(true));
@@ -4505,9 +4507,10 @@ class Parser {
       if (this.#previous().kind === TokenKind.Newline && this.#isRecoveredTopLevelStatement())
         break;
       const keyStart = this.#peek();
+      const entryStart = this.#current;
       const key = yield* parseChild(this.#parseDictKey());
       if (key === null) {
-        this.#synchronizeDelimited(TokenKind.RightBrace);
+        this.#synchronizeDelimited(TokenKind.RightBrace, entryStart);
         break;
       }
       if (!this.#match(TokenKind.Colon)) {
@@ -4515,7 +4518,7 @@ class Parser {
           parserDiagnosticCode.expectedColon,
           "Expected ':' after the dict key.",
         );
-        this.#synchronizeDelimited(TokenKind.RightBrace);
+        this.#synchronizeDelimited(TokenKind.RightBrace, entryStart);
         break;
       }
       const value = yield* parseChild(this.#parseColonValueTask(true));
@@ -4862,11 +4865,17 @@ class Parser {
   /**
    * Skips a malformed element to the next comma or the closer, or to a statement that starts a line, which no element
    * can be: the closer is then missing, and the statement still parses, as after `let v = [` on a line of its own.
-   * Brackets the element opens are skipped whole. A closer that none of them opened and that starts a line belongs to
-   * what encloses the literal, such as the `}` of a block around `let v = [`, and is left to it.
+   * Brackets the element opens, from `from`, where it starts, are skipped whole, also those it opened before it failed.
+   * A closer that none of them opened and that starts a line belongs to what encloses the literal, such as the `}` of a
+   * block around `let v = [`, and is left to it.
    */
-  #synchronizeDelimited(closing: TokenKind): void {
+  #synchronizeDelimited(closing: TokenKind, from: number): void {
     let depth = 0;
+    for (let index = from; index < this.#current; index += 1) {
+      const kind = this.tokens[index]!.kind;
+      if (OPENING_TOKENS.has(kind)) depth += 1;
+      else if (CLOSING_TOKENS.has(kind) && depth > 0) depth -= 1;
+    }
     while (
       !(depth === 0 && (this.#check(TokenKind.Comma) || this.#check(closing))) &&
       !(

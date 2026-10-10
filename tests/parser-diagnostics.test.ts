@@ -120,11 +120,26 @@ test("a missing closing delimiter is reported where its line ends, and the next 
     );
     assert.deepEqual(statementKinds(result), ["ifStatement", "exitStatement"], open);
   }
-  // A stray closer within the line stays part of the malformed element.
-  assert.deepEqual(
-    parse("let v = [1, }, 2]\nexit").diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP012"],
-  );
+  // A stray closer within the line stays part of the malformed element, and so does a closer on a line of its own that
+  // a bracket the element opened before it failed is waiting for. The elements after it still parse.
+  for (const [source, codes, elements] of [
+    ["let v = [1, }, 2]\nexit", ["TSP012"], 2],
+    ["let v = [(1 +\n)\n, 3]\nexit", ["TSP012"], 1],
+    ["let v = [dict{[(1\n2\n)]:3}, 4]\nexit", ["TSP017"], 2],
+  ] as const) {
+    const result = parse(source);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      codes,
+      source,
+    );
+    const declaration = result.program.statements[0];
+    assert.equal(declaration?.kind, "letStatement", source);
+    if (declaration?.kind !== "letStatement") continue;
+    assert.equal(declaration.initializer.kind, "listLiteral", source);
+    if (declaration.initializer.kind !== "listLiteral") continue;
+    assert.equal(declaration.initializer.elements.length, elements, source);
+  }
   // A line that starts with a value or a property named like a statement keyword stays in the literal.
   for (const source of ['let v = [\n    say "x"\n]\nexit', "let v = {\n    let: 1\n}\nexit"])
     assert.deepEqual(parse(source).diagnostics, [], source);
