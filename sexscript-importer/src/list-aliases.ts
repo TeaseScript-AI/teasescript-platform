@@ -54,8 +54,9 @@ const COMPOUND_OPERATORS = new Map([
  */
 export function withListAliasesAsPaths(body: AstNode, fresh: (base: string) => string): AstNode {
   const negative = negativeNames(body);
-  const replaced = replacedSlots(body);
-  return scope(loops(body, fresh, replaced), fresh, negative, replaced);
+  const replaced = new Set([...replacedSlots(body), ...sharedLists(body)]);
+  const movers = closureMoves(body);
+  return scope(loops(body, fresh, replaced, movers), fresh, negative, replaced, movers);
 }
 
 /** The list variables whose slots the body replaces or moves anywhere: `rows[0] = [5]`, `rows.set(…)`, a swap. */
@@ -79,6 +80,120 @@ function replacedSlots(body: AstNode): Set<string> {
       variableName(node.object) !== null
     )
       names.add(variableName(node.object)!);
+  });
+  return names;
+}
+
+type Moves = ReadonlyMap<string, ReadonlySet<string>>;
+
+/**
+ * For each closure of the script, the list variables that it, or a closure it calls, sets again, empties, or moves the
+ * elements of, other than by appending: a call of it may run while an element taken from such a list is in use.
+ */
+function closureMoves(body: AstNode): Map<string, Set<string>> {
+  const closures = new Map<string, AstNode>();
+  walkAst(body, (node) => {
+    const name =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")
+        ? variableName(node.left)
+        : null;
+    const value = asNode(node.right);
+    if (name !== null && value?.kind === "closure") closures.set(name, value);
+  });
+  const direct = new Map<string, Set<string>>();
+  const called = new Map<string, Set<string>>();
+  for (const [name, closure] of closures) {
+    const moved = new Set<string>();
+    const calls = new Set<string>();
+    walkAst(closure, (node) => {
+      const set =
+        node.kind === "binary" && ASSIGNING_OPERATORS.has(String(node.operator))
+          ? variableName(node.left)
+          : null;
+      if (set !== null) moved.add(set);
+      const method = node.kind === "methodCall" ? constantString(node.method) : null;
+      const appends =
+        method !== null &&
+        APPENDING_METHODS.has(method) &&
+        nodeArray(asNode(node.arguments)?.items).length === 1;
+      const receiver = node.kind === "methodCall" ? variableName(node.object) : null;
+      if (method !== null && CHANGING_METHODS.has(method) && !appends && receiver !== null)
+        moved.add(receiver);
+      const sorted = movedByCollections(node);
+      if (sorted !== null) moved.add(sorted);
+      const callee = calledClosure(node);
+      if (callee !== null && closures.has(callee)) calls.add(callee);
+    });
+    direct.set(name, moved);
+    called.set(name, calls);
+  }
+  const moves = new Map<string, Set<string>>();
+  for (const name of closures.keys()) {
+    const moved = new Set<string>();
+    const seen = new Set<string>();
+    const pending = [name];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      direct.get(next)?.forEach((list) => moved.add(list));
+      pending.push(...(called.get(next) ?? []));
+    }
+    moves.set(name, moved);
+  }
+  return moves;
+}
+
+/** The closure a node calls by name, `f(…)` or `f.call(…)`, or null. */
+function calledClosure(node: AstNode): string | null {
+  if (node.kind !== "methodCall") return null;
+  const method = constantString(node.method);
+  if (node.implicitThis === true) return method;
+  return method === "call" ? variableName(node.object) : null;
+}
+
+/** Whether the node calls a closure that may set `list` again, empty it, or move its elements (closureMoves). */
+function callsMoving(node: AstNode, list: string, movers: Moves): boolean {
+  let found = false;
+  walkAst(node, (child) => {
+    const callee = calledClosure(child);
+    if (callee !== null && movers.get(callee)?.has(list) === true) found = true;
+  });
+  return found;
+}
+
+/**
+ * The list variables that the script also reaches under another name, which may then replace or move their slots
+ * unseen: set to another variable, put into a list or a map, passed to a function of the script or added to another
+ * list, or returned.
+ */
+function sharedLists(body: AstNode): Set<string> {
+  const functions = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind === "declaration" && asNode(node.right)?.kind === "closure") {
+      const name = variableName(node.left);
+      if (name !== null) functions.add(name);
+    }
+  });
+  const names = new Set<string>();
+  const shared = (value: AstNode | null): void => {
+    const name = variableName(value);
+    if (name !== null) names.add(name);
+  };
+  walkAst(body, (node) => {
+    if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "="))
+      shared(asNode(node.right));
+    if (node.kind === "list") nodeArray(node.items).forEach(shared);
+    if (node.kind === "map")
+      nodeArray(node.entries).forEach((entry) => shared(asNode(entry.value)));
+    if (node.kind === "return") shared(asNode(node.value));
+    if (node.kind === "methodCall") {
+      const method = constantString(node.method) ?? "";
+      const passes =
+        (node.implicitThis === true && functions.has(method)) ||
+        ["add", "push", "put", "leftShift", "addAll", "call"].includes(method);
+      if (passes) nodeArray(asNode(node.arguments)?.items).forEach(shared);
+    }
+    if (node.kind === "binary" && node.operator === "<<") shared(asNode(node.right));
   });
   return names;
 }
@@ -124,14 +239,46 @@ function computedCompound(node: AstNode, name: string): boolean {
     if (child.kind !== "binary" || !COMPOUND_OPERATORS.has(String(child.operator))) return;
     const left = asNode(child.left);
     if (left === null || left.kind === "variable" || rootName(left) !== name) return;
-    for (let at: AstNode | null = left; at !== null && at.kind !== "variable";) {
-      if (at.kind === "binary") {
-        const position = asNode(at.right);
-        if (position !== null && position.kind !== "constant" && position.kind !== "variable")
-          found = true;
-        at = asNode(at.left);
-      } else at = asNode(at.object);
-    }
+    if (!plainPositions(left)) found = true;
+  });
+  return found;
+}
+
+/**
+ * Whether every position in an element or property chain, `rows[i][0]`, is a variable or a number of at least 0, which
+ * reading it twice reads the same and which an element read through its list can take.
+ */
+function plainPositions(target: AstNode): boolean {
+  for (let at: AstNode | null = target; at !== null && at.kind !== "variable";) {
+    if (at.kind === "binary") {
+      const position = asNode(at.right);
+      const plain =
+        position === null ||
+        position.kind === "variable" ||
+        (position.kind === "constant" &&
+          (typeof position.value !== "number" || position.value >= 0));
+      if (!plain) return false;
+      at = asNode(at.left);
+    } else at = asNode(at.object);
+  }
+  return true;
+}
+
+/**
+ * Whether the node reads or writes an element of the variable at a negative position, `row[-1]`, which Groovy counted
+ * from the end and which the conversion writes for a variable, not for an element read through its list.
+ */
+function negativeAccess(node: AstNode, name: string): boolean {
+  let found = false;
+  walkAst(node, (child) => {
+    if (child.kind !== "binary" || child.operator !== "[" || variableName(child.left) !== name)
+      return;
+    const position = asNode(child.right);
+    if (
+      position?.kind === "unaryMinus" ||
+      (position?.kind === "constant" && typeof position.value === "number" && position.value < 0)
+    )
+      found = true;
   });
   return found;
 }
@@ -146,7 +293,8 @@ function plainCompounds(node: AstNode, list: string): AstNode {
     operator === undefined ||
     left === null ||
     left.kind === "variable" ||
-    rootName(left) !== list
+    rootName(left) !== list ||
+    !plainPositions(left)
   )
     return changed;
   return {
@@ -275,14 +423,16 @@ function loops(
   node: AstNode,
   fresh: (base: string) => string,
   replaced: ReadonlySet<string>,
+  movers: Moves,
 ): AstNode {
-  const result = mapChildren(node, (child) => loops(child, fresh, replaced));
+  const result = mapChildren(node, (child) => loops(child, fresh, replaced, movers));
   if (result.kind === "for") {
     const list = asNode(result.collection);
     const item = typeof result.variable === "string" ? result.variable : null;
     const body = asNode(result.body);
     if (list?.kind !== "variable" || item === null || body === null) return result;
-    if (replaced.has(variableName(list)!)) return result;
+    if (replaced.has(variableName(list)!) || callsMoving(body, variableName(list)!, movers))
+      return result;
     return itemLoop(result, variableName(list)!, item, body, fresh) ?? result;
   }
   if (result.kind === "expressionStatement") {
@@ -296,7 +446,8 @@ function loops(
     const body = asNode(closure.body);
     // A `return` in the closure went on with the next element, which a loop would have to write otherwise.
     if (parameters.length !== 1 || body === null || returnsInPlace(body)) return result;
-    if (replaced.has(variableName(list)!)) return result;
+    if (replaced.has(variableName(list)!) || callsMoving(body, variableName(list)!, movers))
+      return result;
     return itemLoop(result, variableName(list)!, parameters[0]!, body, fresh) ?? result;
   }
   return result;
@@ -312,7 +463,12 @@ function itemLoop(
 ): AstNode | null {
   if (!changes(body, item) || sets(body, item) || sets(body, list) || moves(body, list, false))
     return null;
-  if (declares(body, list) || variableOnlyChange(body, item) || computedCompound(body, item))
+  if (
+    declares(body, list) ||
+    variableOnlyChange(body, item) ||
+    computedCompound(body, item) ||
+    negativeAccess(body, item)
+  )
     return null;
   const span = loop.span;
   const index = fresh(`${item}Index`);
@@ -353,8 +509,9 @@ function scope(
   fresh: (base: string) => string,
   negative: ReadonlySet<string>,
   replaced: ReadonlySet<string>,
+  movers: Moves,
 ): AstNode {
-  const nested = mapChildren(node, (child) => scope(child, fresh, negative, replaced));
+  const nested = mapChildren(node, (child) => scope(child, fresh, negative, replaced, movers));
   const block =
     nested.kind === "closure" ? asNode(nested.body) : nested.kind === "block" ? nested : null;
   if (block?.kind !== "block") return nested;
@@ -363,8 +520,15 @@ function scope(
     const declared = declaration(statement);
     if (declared === null) continue;
     rewritten =
-      elementVariable(rewritten, declared.name, declared.value, fresh, negative, replaced) ??
-      rewritten;
+      elementVariable(
+        rewritten,
+        declared.name,
+        declared.value,
+        fresh,
+        negative,
+        replaced,
+        movers,
+      ) ?? rewritten;
   }
   if (rewritten === block) return nested;
   return nested.kind === "closure" ? { ...nested, body: rewritten } : rewritten;
@@ -378,6 +542,7 @@ function elementVariable(
   fresh: (base: string) => string,
   negative: ReadonlySet<string>,
   replaced: ReadonlySet<string>,
+  movers: Moves,
 ): AstNode | null {
   // Every write takes an element of one list variable; a closure that reads the variable keeps it.
   let list: string | null = null;
@@ -408,7 +573,13 @@ function elementVariable(
   const source: string = list;
   if (sets(block, source, true) || moves(block, source, true) || closureDeclares(block, source))
     return null;
-  if (replaced.has(source) || variableOnlyChange(block, name) || computedCompound(block, name))
+  if (
+    replaced.has(source) ||
+    callsMoving(block, source, movers) ||
+    variableOnlyChange(block, name) ||
+    computedCompound(block, name) ||
+    negativeAccess(block, name)
+  )
     return null;
   if (placeholder && !usesFollowTakes(block, name, source)) return null;
   const index = fresh(`${name}Index`);
