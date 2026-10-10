@@ -19,6 +19,7 @@ import {
   keyMatcher,
   loadDefaultCheck,
   callsClock,
+  callsRandom,
   successors,
   unreachableInstructions,
   savedFirstChecks,
@@ -517,6 +518,11 @@ export interface UnvisitedBranch {
    * saved game also restores ({@link DataFlow.setInPlay}).
    */
   setInPlay?: true;
+  /**
+   * The condition, or the subject of its `switch`, has a random draw in its code: a call of one of the language's random
+   * functions, or a draw play made there.
+   */
+  drawsAtRandom?: true;
   /**
    * The stored key a null test reads, where the missed way is its null way and every way to the read has saved the key
    * before or found it saved: the way runs only when a save of the key failed ({@link savedFirstChecks}).
@@ -1766,6 +1772,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     );
   /** With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there. */
   const randomTried = new Set<string>();
+  /** The places of the random draws play made (the runtime's sites, `path:line:column`). */
+  const drawnSites = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
   /**
@@ -2395,6 +2403,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (first)
       candidates.push({ parent: parent?.id ?? null, input, start: startIndex, items: stepItems });
+    for (const draw of step.draws) if (typeof draw.site === "string") drawnSites.add(draw.site);
     if (parent !== null && input !== null) offerChoices(parent, input, step);
     for (const way of step.ways) {
       const instruction = way >> 1;
@@ -4475,6 +4484,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     (subject) => (times === null ? null : exactPart(subject, times)),
     (condition, at) => flow.readsSetInPlay(condition, at),
     savedFirstChecks(plan, instructions, constants, flow),
+    drawnSites,
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -5293,6 +5303,7 @@ function lineCoverage(
   clockPartOf: (subject: unknown) => string | null,
   setInPlay: (condition: unknown, at: number) => boolean,
   savedFirst: ReadonlyMap<number, { key: string; way: boolean }>,
+  drawnSites: ReadonlySet<string>,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5431,6 +5442,31 @@ function lineCoverage(
    * A condition the script wrote as a `switch` case: its form, and what the switch compares, from where the switch
    * stored it, the nearest store of its temporary before the case (with its text, and the part of the clock it is).
    */
+  // The draws play made, by file: their lines and columns.
+  const drawnIn = new Map<string, [number, number][]>();
+  for (const site of drawnSites) {
+    const found = /^(.*):(\d+):(\d+)$/u.exec(site);
+    if (found === null) continue;
+    const places = drawnIn.get(found[1]!) ?? [];
+    places.push([Number(found[2]), Number(found[3])]);
+    drawnIn.set(found[1]!, places);
+  }
+  /**
+   * Whether an expression of `file` has a random draw in its code: a call of one of the language's random functions, or
+   * a draw play made there (a pick from a list, which only a list's `random` makes).
+   */
+  const drawnWithin = (expression: unknown, file: string): boolean => {
+    if (callsRandom(expression)) return true;
+    const span = compactSpan(record(expression).span);
+    if (span === null) return false;
+    const before = (line: number, column: number, otherLine: number, otherColumn: number) =>
+      line < otherLine || (line === otherLine && column <= otherColumn);
+    return (drawnIn.get(file) ?? []).some(
+      ([line, column]) =>
+        before(span.line, span.column, line, column) &&
+        before(line, column, span.endLine, span.endColumn),
+    );
+  };
   const caseAt = (index: number, condition: unknown): Partial<UnvisitedBranch> => {
     const form = caseForm(condition);
     const span = compactSpan(record(condition).span);
@@ -5444,6 +5480,7 @@ function lineCoverage(
       const part = clockPartOf(stored.value);
       return {
         case: form.kind,
+        ...(drawnWithin(stored.value, files[at]!) ? { drawsAtRandom: true as const } : {}),
         ...(subject === null || files[at] !== files[index]
           ? {}
           : { subject: short(source.slice(subject.start, subject.end)) }),
@@ -5571,6 +5608,7 @@ function lineCoverage(
       line: lineOf[index] ?? 0,
       condition: conditionText(instruction, files[index]!, sources),
       missed: wayName(instruction, way),
+      ...(drawnWithin(condition, files[index]!) ? { drawsAtRandom: true as const } : {}),
       ...(instruction.kind === "jumpIfFalse" ? caseAt(index, condition) : {}),
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,

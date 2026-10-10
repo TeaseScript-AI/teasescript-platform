@@ -1656,6 +1656,124 @@ test(
       /`again == null` being true, 1 line behind it; every way here saves fx\.pack first/u,
     );
     assert.doesNotMatch(failed, /fx\.gone|fx\.maybe/u);
+    // A template's pattern is no key, also where a literal key has the same text.
+    const nul = [
+      'let suffix = choose "\u0000", ""',
+      'save [1] as "fx.${suffix}"',
+      'let items: integer[]? = load "fx.\u0000", default: null',
+      "if items == null {",
+      '  say "No such key."',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const nulPlan = engine.compileProject([{ path: "main.tease", source: nul }], {
+      builtins: [],
+    }).plan;
+    assert.ok(isRecord(nulPlan));
+    const nulBranch = explore(engine, nulPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3,
+      maxStates: 100_000,
+      later: false,
+      sources: new Map([["main.tease", nul]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches.find((entry) => entry.condition?.text === "items == null");
+    assert.deepEqual([nulBranch?.reach, nulBranch?.savedFirst], ["unknown", undefined]);
+  },
+);
+
+test("the creator report says what a stored-value entry depends on, also for a key that must be missing or a value a visit had", () => {
+  const entry = (line: number, extra: Record<string, unknown>) => ({
+    kind: "if",
+    path: "main.tease",
+    line,
+    condition: { text: `cell${line} == null` },
+    missed: "true",
+    reach: "unknown",
+    sources: ["storage"],
+    dependsOn: [`stored cell${line}`],
+    behindLines: 1,
+    ownLines: 1,
+    parts: [],
+    ...extra,
+  });
+  const report = playtestReport({
+    unit: "cells",
+    compile: { ok: true },
+    search: { operations: 20, sessions: 2, stoppedBy: "operations" },
+    crashes: [],
+    traps: [],
+    coverage: {
+      coverableLines: 4,
+      visitedLines: 2,
+      percent: 50,
+      reach: { play: 2, unknown: 2, unreachable: 0 },
+      files: [],
+      unvisitedBranches: [
+        entry(3, {
+          reason:
+            "needs cell3 = nothing stored; a session from storage that has it did not reach the condition",
+        }),
+        entry(7, { best: { needs: "stored cell7 != 0", value: "1", distance: 0, session: 2 } }),
+      ],
+    },
+  });
+  const stored = /### Depends on saved values[^#]*/u.exec(report)?.[0] ?? "";
+  assert.match(
+    stored,
+    /`main\.tease:3`.*a visit that started from saved data that meets this did not get back/u,
+  );
+  assert.match(stored, /`main\.tease:7`.*a visit had it \(1\) but did not get back to this point/u);
+  assert.doesNotMatch(report, /needed value saved|another saved value|earlier visit/u);
+});
+
+test(
+  "the creator report groups a condition as a random draw only where play drew in its code",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      "function randomConstant {",
+      "  return 0",
+      "}",
+      "if randomConstant() == 7 {",
+      '  say "Never seven."',
+      "}",
+      'let shown = "randomInteger("',
+      'if shown == "randomInteger(7" {',
+      '  say "Never text."',
+      "}",
+      "if randomInteger(1..=3) == 9 {",
+      '  say "Never nine."',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const drawn = result.coverage.unvisitedBranches
+      .filter((entry) => entry.drawsAtRandom === true)
+      .map((entry) => entry.condition?.text);
+    assert.deepEqual(drawn, ["randomInteger(1..=3) == 9"]);
+    const random =
+      /### Behind a random draw[^#]*/u.exec(
+        playtestReport(
+          JSON.parse(JSON.stringify({ unit: "draws", compile: { ok: true }, ...result })),
+        ),
+      )?.[0] ?? "";
+    assert.match(random, /randomInteger\(1\.\.=3\) == 9/u);
+    assert.doesNotMatch(random, /randomConstant|shown ==/u);
   },
 );
 

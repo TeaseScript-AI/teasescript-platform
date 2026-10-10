@@ -172,13 +172,11 @@ const GROUPS: readonly { source: string; title: string; about: string }[] = [
 ];
 
 /**
- * A condition that draws at random itself, by the language's random functions (`percentChance`, `.random`, ...), or a
- * case of a `switch` on such a draw.
+ * A condition with a random draw in its own code, or a case of a `switch` whose subject has one (`drawsAtRandom`); a
+ * report from before that field has none.
  */
 function drawsAtRandom(branch: Fields): boolean {
-  return [text(fields(branch.condition).text), text(branch.subject)].some((written) =>
-    /\b(?:chance|percentChance|random\w*)\s*\(|\.random\b/u.test(written),
-  );
+  return branch.drawsAtRandom === true;
 }
 
 /** One part of the date or time a `switch` compares, as a reader says it. */
@@ -308,7 +306,7 @@ function missedGroups(
   group(
     "random",
     "Behind a random draw",
-    "The condition draws at random itself.",
+    "The condition, or the subject of its switch, has a random draw in its code.",
     missed.filter((branch) => !listed.has(branch) && drawsAtRandom(branch)),
   );
   for (const { source, title, about } of GROUPS)

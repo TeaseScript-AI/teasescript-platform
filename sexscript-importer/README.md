@@ -654,8 +654,9 @@ reachable (game logic such as an item the game never gives stays unproven), so t
 depends on and not that more play reaches it. A test of a saved value for null whose missed way is the null one, where
 every way to the read has saved the key before (with a value that is never null) or found it saved, and nothing deletes
 the key or may save null to it, is grouped as running only if a save failed (`savedFirst`, the key): a save to
-persistent storage can fail and the script then goes on, so such a way is no code that can never run. Each line not
-reached counts once,
+persistent storage can fail and the script then goes on, so such a way is no code that can never run. A missed way is
+grouped behind a random draw when its condition, or the subject of its `switch`, calls one of the language's random
+functions or play made a draw there (`drawsAtRandom`). Each line not reached counts once,
 under the missed way with the most code behind it (`ownLines`), so the groups add up to the lines not reached;
 conditions and keys are as the script writes them. A needed comparison with a saved value (`needs score > 7`) is a
 static reading of the code, shown where the analysis finds that the condition compares the saved value itself: it can

@@ -337,7 +337,8 @@ export function savedFirstChecks(
       const pattern = keyText(instruction.key);
       if (pattern !== null && !keysMayMatch(pattern, key)) return;
       if (instruction.value === null || !neverNull(instruction.value)) kept = false;
-      else if (pattern === key) stops.add(index);
+      // Only a literal key is the key: a template's pattern is no key, whatever text it has.
+      else if (literalText(instruction.key) === key) stops.add(index);
     });
     if (!kept || stops.size === 0) continue;
     if ((work += instructions.length) > SAVED_FIRST_WORK) break;
@@ -3515,6 +3516,30 @@ export function callsClock(expression: unknown): boolean {
   if (!isRecord(expression)) return false;
   if (expression.kind === "call" && CLOCK_GETTERS.has(calleeName(expression) ?? "")) return true;
   return Object.entries(expression).some(([key, item]) => key !== "span" && callsClock(item));
+}
+
+/** The language's functions that draw at random; a function of the script's own is called by `callFunction` instead. */
+const RANDOM_FUNCTIONS = new Set([
+  "random",
+  "chance",
+  "randomInteger",
+  "randomWeighted",
+  "randomNormal",
+  "randomBeta",
+  "randomPert",
+]);
+
+/** Whether an expression calls one of the language's random functions ({@link RANDOM_FUNCTIONS}). */
+export function callsRandom(expression: unknown): boolean {
+  if (Array.isArray(expression)) return expression.some(callsRandom);
+  if (!isRecord(expression)) return false;
+  if (
+    expression.kind === "call" &&
+    record(expression.callee).kind === "identifier" &&
+    RANDOM_FUNCTIONS.has(calleeName(expression) ?? "")
+  )
+    return true;
+  return Object.entries(expression).some(([key, item]) => key !== "span" && callsRandom(item));
 }
 
 /** Whether a stored key, given by its text or a pattern with {@link KEY_PLACEHOLDER} parts, matches a key. */
