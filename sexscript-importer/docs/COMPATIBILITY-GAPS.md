@@ -830,7 +830,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   global speaker `system` (title "System"), declared once in `main.tease` or in a lone script. Device commands kept
   in variables such as `estim_start` or `lock_finish`, and `switchbox_on`, become persistent permanent buttons with the
   device's state (`Estim: RUNNING`, `Lock: LOCKED`, `Power: ON`); `openCdTrays()` shows `CD tray: OPEN` until clicked
-  (`SX_DEVICE_STATE`, `SX_SWITCH_BUTTON`). `System.getProperty("user.name")`, `"user.home"`, and the player's folder are
+  (`SX_DEVICE_STATE`, `SX_SWITCH_BUTTON`), so a self-bondage key release that opened the tray releases nothing: a known
+  fidelity difference that stays (owner decision 2026-10-10). `System.getProperty("user.name")`, `"user.home"`, and the player's folder are
   asked once and saved; a network hardware address becomes a random ID made once; `useEmailAddress()` asks the email
   address once and says that no email is sent (`SX_OS_INFO`, `SX_EMAIL`). Text files that the package writes only
   through a `File` of one path keep their text in storage under `file:` and the path (`SX_STORED_FILE`); `useFile()` of
