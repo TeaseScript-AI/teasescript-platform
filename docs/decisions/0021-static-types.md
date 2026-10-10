@@ -122,9 +122,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    `while` body, and after an early `return`, `exit`, `break`, or `continue`. `x != null` and `x == null` narrow like
    `x is not null` and `x is null`.
 2. An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-   `reward` is known to be an `integer`. The result of an operation on a value of unknown type is never `null`, so
-   storing it narrows a declared optional to its non-null type: after `x = d + 1`, `x: integer?` holds an `integer`. A
-   loaded value or a call result of unknown type may be `null` and narrows nothing.
+   `reward` is known to be an `integer`.
 3. Tests can overlap, because an integer is also a number. An `else` branch keeps only what the test provably excludes.
 4. Only plain variables narrow; `door.locked` and `items[0]` do not.
 5. A `wait`, an interaction, a function call, or another suspension cancels narrowed facts for every variable that a
