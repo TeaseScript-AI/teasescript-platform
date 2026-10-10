@@ -480,6 +480,9 @@ export class DataFlow {
   >();
   /** {@link #savedReach}, worked out when first needed; and the steps all {@link #carriers} searches took. */
   #saved: ReadonlySet<string> | null = null;
+  /** {@link #unknownCarriers}, worked out when first needed; and the keys a call gave a helper's `load key`. */
+  #unknown: { readonly own: ReadonlySet<string>; readonly saved: boolean } | null | undefined;
+  readonly #resolvedKeys = new Set<string>();
   #carrierWork = 0;
   #carrierGraph: {
     readers: Map<string, string[]>;
@@ -522,8 +525,8 @@ export class DataFlow {
    * a part of it `{ kind: "part", of }`, which read the keys of what they come from but are none of its values.
    */
   readonly #assigned = new Map<string, { value: Data; index: number }[]>();
-  /** By a variable of a function's own, the parameters that name a load's key it holds ({@link #keyParameters}). */
-  #keyParametersOf: Map<string, Set<string>> | null = null;
+  /** {@link #keyedLocal}, worked out for all variables when first needed. */
+  #keyedLocals: Set<string> | null = null;
   /**
    * The variables, temporaries, and functions that hold a stored key's value, by them, the key, and the kind needed;
    * with whether a load of the key was found through them (one that only holds values from elsewhere was not).
@@ -913,17 +916,25 @@ export class DataFlow {
    * Whether a value at instruction `at` may carry a stored key's value, whatever the flows of a call's context miss
    * (a helper's own variable set from a parameter): its flow reads the key, or it reads a variable, a temporary, or a
    * function's result that a value reading the key may reach, a parameter taking every call's argument
-   * ({@link #carriers}). Flow-insensitive, over the whole plan, and without a limit of rounds, so that it misses none.
-   * Null when it is not known, past the work the carriers may take: a value that reads nothing carries nothing.
+   * ({@link #carriers}), or, for a key a call gives a helper's `load key`, that such a load may reach
+   * ({@link #unknownCarriers}).
+   * Flow-insensitive, over the whole plan, and without a limit of rounds, so that it misses none. Null when it is not
+   * known, past the work the carriers may take: a value that reads nothing carries nothing.
    */
   #mayCarry(value: unknown, at: number | undefined, key: string): boolean | null {
     if (this.flowOf(value).keys.has(key)) return true;
     const reads = this.#readsOf(value, at ?? 0);
     if (reads.length === 0) return false;
     const carriers = this.#carriers(key);
-    if (carriers === null) return null;
-    const shared = carriers.saved ? this.#savedReach() : null;
-    return reads.some((each) => carriers.own.has(each) || shared?.has(each) === true);
+    // For a key a call gave a helper's `load key`, also what such loads may carry.
+    const unknown = this.#resolvedKeys.has(key)
+      ? this.#unknownCarriers()
+      : { own: new Set<string>(), saved: false };
+    if (carriers === null || unknown === null) return null;
+    const shared = carriers.saved || unknown.saved ? this.#savedReach() : null;
+    return reads.some(
+      (each) => carriers.own.has(each) || unknown.own.has(each) || shared?.has(each) === true,
+    );
   }
 
   /**
@@ -941,7 +952,36 @@ export class DataFlow {
       return known;
     }
     const graph = (this.#carrierGraph ??= this.#readersGraph());
-    const own = new Set<string>(graph.seeds.get(key) ?? []);
+    const found = this.#reachFrom(graph.seeds.get(key) ?? []);
+    if (found === null) return null;
+    this.#carriersOf.set(key, found);
+    if (this.#carriersOf.size > CARRIER_KEYS)
+      this.#carriersOf.delete(this.#carriersOf.keys().next().value!);
+    return found;
+  }
+
+  /**
+   * What a load whose key a parameter names (`load key` in a helper, `s ?parameter`) may carry, of whichever key a call
+   * gives it ({@link #loadKey}): reached from what reads it, as {@link #carriers} reaches from what reads a key. Null
+   * past the carriers' work.
+   */
+  #unknownCarriers(): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
+    if (this.#unknown === undefined) {
+      const graph = (this.#carrierGraph ??= this.#readersGraph());
+      this.#unknown = this.#reachFrom(graph.readers.get("s ?parameter") ?? []);
+    }
+    return this.#unknown;
+  }
+
+  /**
+   * What `seeds` reach along what reads what (`own`), and whether that reaches a saved value (`saved`), where the search
+   * stops; each step counts toward {@link CARRIER_WORK}, past which it is null.
+   */
+  #reachFrom(
+    seeds: readonly string[],
+  ): { readonly own: ReadonlySet<string>; readonly saved: boolean } | null {
+    const graph = (this.#carrierGraph ??= this.#readersGraph());
+    const own = new Set<string>(seeds);
     let saved = false;
     const pending = [...own];
     for (let read = pending.pop(); read !== undefined; read = pending.pop()) {
@@ -956,11 +996,7 @@ export class DataFlow {
           pending.push(reader);
         }
     }
-    const found = { own, saved };
-    this.#carriersOf.set(key, found);
-    if (this.#carriersOf.size > CARRIER_KEYS)
-      this.#carriersOf.delete(this.#carriersOf.keys().next().value!);
-    return found;
+    return { own, saved };
   }
 
   /** All that the saved values reach along what reads what, every cell of them included ({@link #carriers}). */
@@ -1084,7 +1120,10 @@ export class DataFlow {
         found.push(this.#temporaryNode(value.temporaryId, at));
       else if (value.kind === "storageLoad") {
         // What a save stored there, and the default; not what the key is made of.
-        found.push(`s ${keyText(value.key) ?? "?"}`);
+        // A load whose key a parameter names (`load key` in a helper) has a cell of its own ({@link #unknownCarriers}).
+        found.push(
+          `s ${keyText(value.key) ?? (this.#parameterNamed(value.key) ? "?parameter" : "?")}`,
+        );
         pending.push(value.default);
       } else if (value.kind === "callResult" && typeof value.functionId === "number") {
         found.push(`r ${value.functionId}`);
@@ -2075,7 +2114,7 @@ export class DataFlow {
    * call's result, also in a temporary that holds it, is read as that call's result with the `bound` constants and
    * `substitute` for its arguments ({@link #callFlow}), `depth` calls deep. With constants, a load's key that a
    * parameter names is the text the call gives it ({@link #loadKey}), also for a variable of the function's own that
-   * holds such a load or a value computed from one ({@link #keyParameters}).
+   * holds such a load or a value computed from one ({@link #keyedLocal}).
    */
   #flowAt(
     expression: unknown,
@@ -2085,6 +2124,7 @@ export class DataFlow {
     depth: number,
   ): Flow {
     const flow = emptyFlow();
+    const texts = [...bound.values()].some((each) => typeof each === "string");
     const followed = new Set<string>();
     const pending: { value: unknown; at: number }[] = [{ value: expression, at }];
     for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
@@ -2112,16 +2152,10 @@ export class DataFlow {
         value.kind === "callResult"
       ) {
         merge(flow, this.flowOf(value, substitute));
-        // A variable of the function's own that holds a load whose key a parameter the call gives a text names is read
-        // as its assignments are, with the constants.
-        const key = value.kind === "identifier" && bound.size > 0 ? this.#keyOf(value) : "";
-        if (
-          key !== "" &&
-          !followed.has(key) &&
-          [...this.#keyParameters(key)].some(
-            (parameter) => typeof bound.get(parameter) === "string",
-          )
-        ) {
+        // With a text among the constants, a variable of the function's own that holds a load whose key a variable
+        // names, or a value computed from one, is read as its assignments are.
+        const key = value.kind === "identifier" && texts ? this.#keyOf(value) : "";
+        if (key !== "" && !followed.has(key) && this.#keyedLocal(key)) {
           followed.add(key);
           for (const each of this.#assigned.get(key) ?? [])
             pending.push({ value: each.value, at: each.index });
@@ -2159,51 +2193,68 @@ export class DataFlow {
     const text = keyText(key);
     if (text !== null || record(key).kind !== "identifier") return text;
     const constant = bound.get(this.#keyOf(key));
-    return typeof constant === "string" ? constant : null;
+    if (typeof constant !== "string") return null;
+    this.#resolvedKeys.add(constant);
+    return constant;
   }
 
   /**
-   * The parameters that name the key of a load (`load key`) that a variable of a function's own holds, also through the
-   * function's own variables it is computed from (`let more = value + 1`). Worked out for all such variables at once,
-   * as each one's parameters grow by those of the variables it reads.
+   * Whether a variable of a function's own holds a load whose key a variable names (`load key`), or a value its code
+   * computes from one: through the function's own variables, the temporaries it reads, and the arguments of the calls
+   * whose results it reads. Worked out for all such variables at once.
    */
-  #keyParameters(key: string): ReadonlySet<string> {
-    if (this.#keyParametersOf === null) {
-      const found = new Map<string, Set<string>>();
+  #keyedLocal(key: string): boolean {
+    if (this.#keyedLocals === null) {
+      const keyed = new Set<string>();
       const readers = new Map<string, string[]>();
       for (const [variable, assignments] of this.#assigned) {
         if (!variable.includes("\u0001function ")) continue;
-        const own = new Set<string>();
-        found.set(variable, own);
-        const pending: unknown[] = assignments.map((each) => each.value);
-        for (let value = pending.pop(); value !== undefined; value = pending.pop()) {
+        const pending: { value: unknown; at: number }[] = assignments.map((each) => ({
+          value: each.value,
+          at: each.index,
+        }));
+        for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+          const { value, at } = item;
           if (Array.isArray(value)) {
-            pending.push(...value);
+            for (const each of value) pending.push({ value: each, at });
             continue;
           }
           if (!isRecord(value)) continue;
           if (value.kind === "storageLoad" && record(value.key).kind === "identifier")
-            own.add(this.#keyOf(value.key));
+            keyed.add(variable);
           else if (value.kind === "identifier") {
             const read = this.#keyOf(value);
             if (read.includes("\u0001function "))
               (readers.get(read) ?? readers.set(read, []).get(read)!).push(variable);
-          }
+          } else if (value.kind === "temporary" && typeof value.temporaryId === "number")
+            // The stores of a temporary come before where it is read: each is looked through once.
+            for (const store of this.heldAt(value.temporaryId, at) ?? [])
+              pending.push({ value: store.value, at: store.index });
+          else if (value.kind === "callResult" && typeof value.call === "number")
+            for (const argument of list(this.#instructions[value.call]?.arguments))
+              pending.push({ value: argument.value, at: value.call });
           for (const [field, each] of Object.entries(value))
-            if (field !== "span") pending.push(each);
+            if (field !== "span") pending.push({ value: each, at });
         }
       }
-      const pending = [...found.keys()].filter((variable) => found.get(variable)!.size > 0);
+      const pending = [...keyed];
       for (let variable = pending.pop(); variable !== undefined; variable = pending.pop())
-        for (const reader of readers.get(variable) ?? []) {
-          const into = found.get(reader)!;
-          const before = into.size;
-          for (const parameter of found.get(variable)!) into.add(parameter);
-          if (into.size > before) pending.push(reader);
-        }
-      this.#keyParametersOf = found;
+        for (const reader of readers.get(variable) ?? [])
+          if (!keyed.has(reader)) {
+            keyed.add(reader);
+            pending.push(reader);
+          }
+      this.#keyedLocals = keyed;
     }
-    return this.#keyParametersOf.get(key) ?? new Set();
+    return this.#keyedLocals.has(key);
+  }
+
+  /** Whether an expression is a parameter of the function whose code reads it. */
+  #parameterNamed(expression: unknown): boolean {
+    if (record(expression).kind !== "identifier") return false;
+    return (this.#assigned.get(this.#keyOf(expression)) ?? []).some(
+      (each) => each.value.kind === "parameter",
+    );
   }
 
   /** The arguments of a call that are constants, by the scope key of the parameter they give (see {@link #returnsFor}). */

@@ -1106,6 +1106,25 @@ test(
       ),
       ["score"],
     );
+    // Nor when it returns such a value another helper computes, from the value or from its own load of the key.
+    const computedElsewhere =
+      "  let more = inc(VALUE)\n  if more > 3 {\n    return more\n  }\n  return value";
+    assert.deepEqual(
+      named(
+        '"score"',
+        computedElsewhere.replace("VALUE", "value"),
+        "function inc(n) {\n  return n + 1\n}\n",
+      ),
+      ["score"],
+    );
+    assert.deepEqual(
+      named(
+        '"score"',
+        computedElsewhere.replace("VALUE", "key"),
+        "function inc(key) {\n  return (load key, default: 0) + 1\n}\n",
+      ),
+      ["score"],
+    );
     assert.deepEqual(named('"score"', undefined, 'let other = loadInteger("other")\n'), [
       "score > 7",
     ]);
