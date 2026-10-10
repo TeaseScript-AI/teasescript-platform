@@ -136,37 +136,40 @@ function playerSteps(path: Fields): string[] {
   return lines;
 }
 
-/** What a missed way depends on, as the report's groups take it, the most telling first. */
+/**
+ * What a missed way would depend on, as the report's groups take it, the most telling first. A missed way is one the
+ * analysis could not prove can never run, which does not make it reachable: the texts say what it would need.
+ */
 const GROUPS: readonly { source: string; title: string; about: string }[] = [
   {
     source: "storage",
-    title: "Needs something saved on an earlier visit",
+    title: "Would need something saved on an earlier visit",
     about:
-      "The condition reads a stored value. The playtester played further visits from what earlier ones saved, but not " +
-      "far enough to save what this needs.",
+      "The condition reads a stored value. The playtester played further visits from what earlier ones saved, but none " +
+      "saved what this would need.",
   },
   {
     source: "clock",
-    title: "Needs a visit at another time or date",
+    title: "Would need a visit at another time or date",
     about:
       "The condition reads the clock. The playtester came back later and at other times of day, but not at a time that " +
       "makes this true.",
   },
   {
     source: "ask",
-    title: "Needs a particular typed answer",
+    title: "Would need a particular typed answer",
     about:
       "The condition compares what the player typed. The playtester also typed the values the script compares with, " +
       "but none reached this.",
   },
   {
     source: "counter",
-    title: "Needs a count to reach a value",
+    title: "Would need a count to reach a value",
     about: "The condition compares a value the script counts up or down.",
   },
   {
     source: "variable",
-    title: "Needs a value the script sets",
+    title: "Would need a value the script sets",
     about:
       "The condition compares a value the script sets along the way, also where a saved game or an earlier visit " +
       "restores it.",
@@ -230,7 +233,7 @@ function ownLines(branch: Fields): number {
 
 /** What the playtester found out about a stored value a missed way needs, in words. */
 const STORED_REASONS: readonly [RegExp, string][] = [
-  [/no explored session stored it/u, "no visit saved the value it needs"],
+  [/no explored session stored it/u, "no visit saved the value it would need"],
   [
     /a session from storage that has it did not reach the condition/u,
     "a visit with the needed value saved did not get back to this point",
@@ -258,8 +261,8 @@ function missedWay(branch: Fields, measurable: boolean): string {
     needs === ""
       ? ""
       : best.distance === 0
-        ? `; needs ${needs}: a visit had it (${value}) but did not get back to this point`
-        : `; needs ${needs}, closest reached: ${value}` +
+        ? `; would need ${needs}: a visit had it (${value}) but did not get back to this point`
+        : `; would need ${needs}, closest reached: ${value}` +
           (count(best.session) > 1 ? ` (on visit ${count(best.session)})` : "");
   const depends = (Array.isArray(branch.dependsOn) ? branch.dependsOn : []).map(text);
   const reason = STORED_REASONS.find(([pattern]) => pattern.test(text(branch.reason)));
@@ -319,7 +322,7 @@ function missedGroups(
   group(
     "none",
     "Not reached in this playtest",
-    "No input, saved value, time, or answer the playtester could tell was needed; more play may reach these.",
+    "No input, saved value, time, or answer the playtester could tell would be needed. Some of these may never run.",
     missed.filter((branch) => !listed.has(branch)),
   );
   return groups;
@@ -373,7 +376,7 @@ export function playtestReport(report: Fields): string {
     `An automatic playtester played this script for ${count(search.operations).toLocaleString("en")} engine steps, over ` +
       `${plural(visits, "visit")}: it pressed every button, picked every option, typed the answers the script compares ` +
       `with, came back later and at other times, and also chose the outcomes of random draws. It reached ` +
-      `${figure(coverage.visitedLines)} of the ${figure(coverage.coverableLines)} lines that can run (${count(coverage.percent)}%).` +
+      `${figure(coverage.visitedLines)} of the ${figure(coverage.coverableLines)} lines that may run (${count(coverage.percent)}%).` +
       stopShown(search),
     "",
     `- Crashes: ${crashes.length}`,
@@ -445,6 +448,8 @@ export function playtestReport(report: Fields): string {
       "## What the playtester could not reach",
       "",
       "Each entry is a condition play reached but always took the same way, with the code behind its other way. " +
+        "The playtester could not prove that this code can never run, which does not make it reachable: some of it " +
+        "may never run, such as code behind an item the game never gives. " +
         "Entries inside a block that was not reached are left out, as reaching the outer one comes first." +
         (addsUp
           ? " A line behind more than one entry is counted once, under the one with the most code behind it."

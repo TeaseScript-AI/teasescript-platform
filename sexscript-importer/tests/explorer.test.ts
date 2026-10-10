@@ -1619,10 +1619,16 @@ test(
       ),
     );
     assert.match(report, /stopped at its limit of 20,003 kept game states/u);
-    const setsSection = report.split("### Needs a value the script sets")[1]?.split("###")[0] ?? "";
+    // A missed way is only not proven unreachable: the report does not present it as reachable.
+    assert.match(
+      report,
+      /could not prove that this code can never run, which does not make it reachable/u,
+    );
+    const setsSection =
+      report.split("### Would need a value the script sets")[1]?.split("###")[0] ?? "";
     assert.match(setsSection, /`health < -50`/u, report);
     assert.doesNotMatch(
-      report.split("### Needs something saved on an earlier visit")[1]?.split("###")[0] ?? "",
+      report.split("### Would need something saved on an earlier visit")[1]?.split("###")[0] ?? "",
       /health/u,
     );
     assert.match(report, /lines 5-9/u);
