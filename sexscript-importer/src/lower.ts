@@ -4415,14 +4415,18 @@ function legacyApiCall(
 }
 
 /**
- * Inside the closure a variable defines, the variable is not defined yet, so a call of its name with another number
- * of arguments than the closure takes called the SexScript method of that name, as in
- * `def getRandom = { low, high -> low + getRandom(high - low) }`.
+ * Inside the closure a variable defines, the variable is not defined yet, so a call of its name called the SexScript
+ * method of that name, as in `def getRandom = { low, high -> low + getRandom(high - low) }` or
+ * `def waitWithGauge = { float wTime -> if (wTime > 0) waitWithGauge(wTime) }`; where no such method exists, the
+ * call failed, and a call with the closure's number of arguments stays a call of the closure.
  */
 function callsHostOfOwnName(name: string, count: number, context: LowerContext): boolean {
   if (context.currentFunction?.name !== name) return false;
   const info = context.functions.get(name);
-  return info !== undefined && (count < info.minArgs || count > info.maxArgs);
+  return (
+    info !== undefined &&
+    (SEXSCRIPT_API_METHODS.has(name) || count < info.minArgs || count > info.maxArgs)
+  );
 }
 
 /** Whether a parameter or local of the current function, visible at `node`, has this name. */
@@ -6998,9 +7002,10 @@ function lowerCallStatement(
     }));
   }
   if (
-    context.functions.has(call.name) ||
-    context.packageFunctions.has(call.name) ||
-    context.helperFunctions.has(call.name)
+    !callsHostOfOwnName(call.name, call.arguments.length, context) &&
+    (context.functions.has(call.name) ||
+      context.packageFunctions.has(call.name) ||
+      context.helperFunctions.has(call.name))
   ) {
     const expression = lowerExpression(node, context);
     return expression === null
