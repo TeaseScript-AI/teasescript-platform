@@ -38,7 +38,8 @@ show("Processing.")
 wait(5)
 show("Processing.")
 wait(5)
-// A variable that starts empty and gets its text in a switch case is said (Domme2's menu greetings).
+// A variable that starts empty and gets its text in switch cases is said where it is not empty: no case may apply,
+// where legacy only cleared the display (Domme2's menu greetings).
 def greeting = ""
 switch (getRandom(2)) {
 	case 0: greeting = "Did you behave yourself?"; break

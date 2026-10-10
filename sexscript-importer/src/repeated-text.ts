@@ -741,8 +741,9 @@ function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | 
 /**
  * An empty legacy text only cleared the display, which a chat has no use for: a `say` of a blank literal, or of a
  * variable that the program declares once with a blank literal and never assigns again, goes, and so does that
- * variable's declaration where nothing reads it any more. Other text stays. `variables` is false for a module, whose
- * variables other files may write.
+ * variable's declaration where nothing reads it any more. A variable that starts blank and gets its text only in switch
+ * cases may stay blank on a path no case covers, so its `say` stays only where it is not empty (Domme's report prompt,
+ * two of five draws). Other text stays. `variables` is false for a module, whose variables other files may write.
  */
 export function withoutBlankText(
   statements: IrStatement[],
@@ -750,18 +751,27 @@ export function withoutBlankText(
   variables = true,
 ): IrStatement[] {
   const writes = new Map<string, number>();
+  // The writes outside switch cases.
+  const plainWrites = new Map<string, number>();
   const blankStarts = new Set<string>();
   // Every part is scanned, also one without a kind of its own, such as a switch case, whose body may write a variable.
-  const scan = (value: unknown): void => {
+  const scan = (value: unknown, inCase = false): void => {
     if (Array.isArray(value)) {
-      value.forEach(scan);
+      for (const item of value) scan(item, inCase);
       return;
     }
     if (typeof value !== "object" || value === null) return;
     if (!("kind" in value)) {
-      Object.values(value).forEach(scan);
+      for (const item of Object.values(value)) scan(item, inCase);
       return;
     }
+    if (value.kind === "switch" && "cases" in value && "default" in value) {
+      if ("value" in value) scan(value.value, inCase);
+      scan(value.cases, true);
+      scan(value.default, true);
+      return;
+    }
+    const before = new Map(writes);
     if (value.kind === "let" && "name" in value && typeof value.name === "string") {
       writes.set(value.name, (writes.get(value.name) ?? 0) + 1);
       if ("value" in value && isBlank(value.value)) blankStarts.add(value.name);
@@ -783,7 +793,11 @@ export function withoutBlankText(
       for (const parameter of value.parameters)
         if (typeof parameter === "object" && parameter !== null && "name" in parameter)
           writes.set(String(parameter.name), (writes.get(String(parameter.name)) ?? 0) + 2);
-    Object.values(value).forEach(scan);
+    if (!inCase)
+      for (const [name, count] of writes)
+        if (count !== before.get(name))
+          plainWrites.set(name, (plainWrites.get(name) ?? 0) + count - (before.get(name) ?? 0));
+    for (const item of Object.values(value)) scan(item, inCase);
   };
   scan(statements);
   const blank = (value: IrExpression): boolean =>
@@ -792,9 +806,39 @@ export function withoutBlankText(
       value.kind === "variable" &&
       blankStarts.has(value.name) &&
       writes.get(value.name) === 1);
+  // A blank start that only switch cases write again.
+  const caseText = (value: IrExpression): value is Extract<IrExpression, { kind: "variable" }> =>
+    variables &&
+    value.kind === "variable" &&
+    blankStarts.has(value.name) &&
+    plainWrites.get(value.name) === 1 &&
+    (writes.get(value.name) ?? 0) > 1;
   let dropped = 0;
   const drop = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((item): IrStatement[] => {
+      if (item.kind === "say" && caseText(item.value)) {
+        diagnostics.push({
+          code: "SX_BLANK_TEXT_GUARD",
+          severity: "info",
+          message:
+            "Only switch cases give this text a value, so it stays empty where none applies, where legacy only cleared the display; it is said where it is not empty.",
+          span: item.span,
+        });
+        return [
+          {
+            kind: "if",
+            condition: {
+              kind: "binary",
+              operator: "!=",
+              left: item.value,
+              right: { kind: "literal", value: "" },
+            },
+            then: [item],
+            else: [],
+            span: item.span,
+          },
+        ];
+      }
       if (item.kind === "say" && blank(item.value)) {
         dropped += 1;
         diagnostics.push({
