@@ -497,6 +497,28 @@ test("a type test inside parentheses or brackets continues before '|', and 'is' 
 
 test("an assignment narrows the variable to the assigned value's type", () => {
   assert.deepEqual(errors("let reward: integer | string = 10\nlet points = reward + 1\nexit"), []);
+  // An operation never gives null, so its result of unknown type, which the runtime checks against the variable's
+  // type, narrows a declared optional like a known value; a loaded value or a call result of unknown type may be null.
+  const inFunction = (...body: string[]): string =>
+    ["function f(d) {", ...body.map((line) => `    ${line}`), "}", "f(1)", "exit"].join("\n");
+  assert.deepEqual(
+    errors(
+      inFunction(
+        "let x: integer? = null",
+        "x = d + 1",
+        "say x + 1",
+        "let y: integer | string | null = -d",
+        "say y is integer",
+        "let z: integer? = d * 2",
+        "say z + 1",
+      ),
+    ),
+    [],
+  );
+  assert.deepEqual(errors(inFunction("let x: integer? = null", "x = d", "say x + 1")), [
+    ["TSV043", "x"],
+  ]);
+  assert.deepEqual(errors(inFunction("let x: integer? = f(d)", "say x + 1")), [["TSV043", "x"]]);
   assert.deepEqual(
     errors(
       'let reward: integer | string = 10\nreward = "x"\nlet points = reward + 1\nexit',

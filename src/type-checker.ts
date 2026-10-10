@@ -1966,7 +1966,7 @@ class TypeChecker {
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
-    this.#assigned(variable, value);
+    this.#assigned(variable, this.#storedType(variable, written, value));
   }
 
   /**
@@ -1975,6 +1975,20 @@ class TypeChecker {
    */
   #sharedLocal(site: VariableSite): Sharing | false {
     return this.#sharedWrites.get(site) ?? false;
+  }
+
+  /**
+   * The type a variable holds directly after a store (rule 5.2): the stored value's, or for the result of an operation
+   * on a value of unknown type, which the runtime checks against the variable's type, that type without null, because
+   * an operation never gives null. A loaded value or a call result of unknown type may be null.
+   */
+  #storedType(variable: Variable, expression: Expression, value: StaticType): StaticType {
+    return !isKnown(value) &&
+      isNullable(variable.type) &&
+      isKnown(nonNullType(variable.type)) &&
+      this.#unknownOperations.has(unwrap(expression))
+      ? nonNullType(variable.type)
+      : value;
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -2195,7 +2209,11 @@ class TypeChecker {
         ),
       );
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
-      if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
+      if (variable !== undefined)
+        this.#assigned(
+          variable,
+          this.#storedType(variable, statement.value, this.#capture(statement.value)),
+        );
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";

@@ -1178,7 +1178,9 @@ let level: integer = saved   // valid: saved is an integer here
 ```
 
 - An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-  `reward` is an `integer`.
+  `reward` is an `integer`. The result of an operation on a value of unknown type is never `null`, so storing it narrows
+  a declared optional to its non-null type: after `x = d + 1`, `x: integer?` is an `integer`. A loaded value or a call
+  result of unknown type may be `null` and narrows nothing.
 - Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
   `is integer` is still a `number`.
 - Only plain variables narrow; `door.locked` and `items[0]` do not.
