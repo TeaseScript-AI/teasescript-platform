@@ -31,4 +31,38 @@ function addPoints(i) {
   say "Points ${p}"
 }
 addPoints(1000000)
+// A loop that polls the clock with nothing that waits, as ZapEdgeStrip's dice roll, waits a tenth of a second each
+// pass where it reads the clock again, and shows its texts in one message that changes in place.
+let rollUntil = getAbsoluteDateTime().toSeconds() + 2
+let rolled = 0
+let now = getAbsoluteDateTime().toSeconds()
+let frame: messageHandle? = null
+while now < rollUntil {
+  rolled = randomInteger(0..6) + 1
+  if frame == null {
+    frame = say "Rolling ${rolled}", instant
+  } else {
+    frame.text = "Rolling ${rolled}"
+  }
+  wait 0.1 s
+  now = getAbsoluteDateTime().toSeconds()
+}
+say "You rolled ${rolled}"
+// So does one whose condition reads the clock itself, as Nim's closing window.
+let windowEnd = getAbsoluteDateTime().toSeconds() + 3
+let frame2: messageHandle? = null
+while getAbsoluteDateTime().toSeconds() < windowEnd {
+  if frame2 == null {
+    frame2 = say "Now's your chance!", instant
+  } else {
+    frame2.text = "Now's your chance!"
+  }
+  wait 0.1 s
+}
+// A loop whose body waits already is left as it is.
+let paced = getAbsoluteDateTime().toSeconds() + 2
+while getAbsoluteDateTime().toSeconds() < paced {
+  say "Tick"
+  wait 1 s
+}
 exit

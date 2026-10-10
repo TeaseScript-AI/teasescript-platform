@@ -31,3 +31,23 @@ def addPoints = { i ->
 	show("Points ${p}")
 }
 addPoints(1000000)
+// A loop that polls the clock with nothing that waits, as ZapEdgeStrip's dice roll, waits a tenth of a second each
+// pass where it reads the clock again, and shows its texts in one message that changes in place.
+def rollUntil = getTime() + 2
+def rolled = 0
+def now = getTime()
+while (now < rollUntil) {
+	rolled = getRandom(6) + 1
+	show("Rolling " + rolled)
+	now = getTime()
+}
+show("You rolled " + rolled)
+// So does one whose condition reads the clock itself, as Nim's closing window.
+def windowEnd = getTime() + 3
+while (getTime() < windowEnd) show("Now's your chance!")
+// A loop whose body waits already is left as it is.
+def paced = getTime() + 2
+while (getTime() < paced) {
+	show("Tick")
+	wait(1)
+}

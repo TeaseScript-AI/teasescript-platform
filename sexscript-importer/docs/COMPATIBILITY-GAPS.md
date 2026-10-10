@@ -687,6 +687,13 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   are, since the pacing rule below only touches waits right after a `say`; other loops keep one message per pass, a
   module's code outside its functions keeps its texts, and a later text that repeats a handle's current text says only
   what it adds.
+- Clock loops: a legacy loop that polled the clock until a time passed (`getTime()`, `System.currentTimeMillis()`)
+  ran on real time, but a TeaseScript clock advances only at waits, and a text's reading time passes none. A loop that
+  only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`); one with nothing else
+  that waits, such as ZapEdgeStrip's dice roll or Nim's closing window, waits a tenth of a second each pass where it
+  reads the clock again, and its texts become one message that changes in place, as the legacy display redrew one
+  text (`SX_CLOCK_LOOP`). A wait in a loop that polls the clock stays, also after a text whose reading time would
+  replace it elsewhere (`SX_WAIT_CLOCK`).
 - Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
   the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
   more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an

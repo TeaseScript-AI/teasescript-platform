@@ -1,3 +1,4 @@
+import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import {
@@ -1744,6 +1745,7 @@ export function lowerParsedFile(
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
+  texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withReadingTimes(texts, diagnostics);
   texts = withoutRepeatedText(texts, diagnostics);
@@ -2199,20 +2201,23 @@ function lowerHelperCompilationUnit(
   const typedStatements = withoutCutReadingTimes(
     withReadingTimes(
       withMessageHandles(
-        withElapsedDurations(
-          withFillableLoads(
-            withParsedLoads(
-              withSwitchLadders(
-                withCounterLoops(
-                  withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+        withClockLoopTicks(
+          withElapsedDurations(
+            withFillableLoads(
+              withParsedLoads(
+                withSwitchLadders(
+                  withCounterLoops(
+                    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                  ),
                 ),
+                baseContext.syntheticHelpers,
               ),
-              baseContext.syntheticHelpers,
+              true,
             ),
+            diagnostics,
             true,
           ),
           diagnostics,
-          true,
         ),
         diagnostics,
         false,

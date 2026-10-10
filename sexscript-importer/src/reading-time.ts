@@ -72,6 +72,16 @@ export function withReadingTimes(
       const waitIndex = sound === -1 ? next[index]! : next[sound]!;
       const wait = nested[waitIndex];
       if (wait?.kind !== "wait" || wait.visible) return;
+      // In a loop that polls the clock, the wait is the time the loop waits for: a text's reading time passes no time.
+      if (wait.clock === true) {
+        report(
+          "SX_WAIT_CLOCK",
+          "The legacy wait after this text paces a loop that polls the clock, whose time passes only at waits, so it stays and the text appears without reading time.",
+          statement,
+        );
+        result[index] = sound === -1 ? { ...statement, instant: true } : soundBeat(statement);
+        return;
+      }
       const milliseconds = literalMilliseconds(wait);
       const after = nested[next[waitIndex]!];
       if (statement.speaker === SYSTEM_SPEAKER) {

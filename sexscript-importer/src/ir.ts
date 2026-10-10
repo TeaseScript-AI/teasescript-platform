@@ -92,6 +92,7 @@ export type IrStatement =
    * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
    * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
    * `unit` is that of the number `duration`, or null where `duration` is a duration value (withElapsedDurations).
+   * `clock` marks a wait in a loop that polls the clock, where it is the time the loop waits for (withClockLoopTicks).
    */
   | (IrBase & {
       kind: "wait";
@@ -99,6 +100,7 @@ export type IrStatement =
       visible: boolean;
       unit: "s" | "ms" | null;
       afterText?: true;
+      clock?: true;
     })
   /**
    * `timeout` is a number of seconds, or a duration where it is a duration literal or `durationTimeout` marks it
