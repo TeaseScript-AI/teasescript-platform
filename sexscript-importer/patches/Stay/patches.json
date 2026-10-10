@@ -1,0 +1,46 @@
+{
+  "patches": [
+    {
+      "id": "file-test-variable",
+      "layer": "source",
+      "category": "b",
+      "reason": "testexists keeps the File it tests in a variable named x, a name another closure uses for a number; the conversion matches a file test by its variable's name, so the test became a TODO and GamesExists stayed null, which an `if` cannot test. The File variable is named testfile.",
+      "diff": "file-test-variable.diff"
+    },
+    {
+      "id": "enhancement-starts",
+      "layer": "source",
+      "category": "b",
+      "reason": "$icb, $ict, $cpt, $cpb, and $cp3 hold the numbers of enhancements, which initenh sets before any of them is read, and `next` walks a list of them while it is not null; declared without a value, they made `next` a whole number that cannot be null (2 compile errors). They start at 0, which differs only if the enhancements were read before initenh ran.",
+      "diff": "enhancement-starts.diff"
+    },
+    {
+      "id": "option-starts",
+      "layer": "source",
+      "category": "b",
+      "reason": "optenh and optrep are set by initoptions before the options menu offers them as the pre-checked answers of getBooleans; declared without a value, the menu's list could hold null, which legacy getBooleans failed on and TeaseScript's prefill: does not take. They start as false.",
+      "diff": "option-starts.diff"
+    },
+    {
+      "id": "debug-marker",
+      "layer": "source",
+      "category": "b",
+      "reason": "The debug view writes the text \"☠\" into cntenh[0], a list of counts, to show an unset enhancement number, which a TeaseScript list of whole numbers cannot hold (2 compile errors). The view now shows \"☠\" for number 0 without storing it; only the debug view (debugrand) runs this.",
+      "diff": "debug-marker.diff"
+    },
+    {
+      "id": "counted-appends",
+      "layer": "source",
+      "category": "b",
+      "reason": "startcorner writes cornerlist[ncornerlist] twice and stay[nstay] once, where the counter is always the list's length (newdeck and joindeck return exactly the counted entries), which appended in Groovy; a TeaseScript list writes only positions it has (TSR025 at the start), so these writes append.",
+      "diff": "counted-appends.diff"
+    },
+    {
+      "id": "enhancement-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "enhavail and cntenh record the id and the count of each enhancement at its number, for numbers with gaps, and are tested for null at numbers not recorded yet; a Groovy list grew with nulls up to each number, where a TeaseScript list writes only positions it has (TSR025 at the start). enhavail becomes a map from number to id, which reads and writes the same; number 0, no enhancement, held 0 so that it never counted as free, and holds the empty text, as a map has one value type. cntenh starts with a 0 for every number up to the highest, $n, so its null test never adds one; the debug view shows 0 instead of null for an enhancement never picked, and lists enhavail's ids.",
+      "diff": "enhancement-lists.diff"
+    }
+  ]
+}
