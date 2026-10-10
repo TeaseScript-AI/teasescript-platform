@@ -17058,6 +17058,32 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       context.popupTimers += 1;
       const start = context.popupTimers === 1 ? "popupStart" : `popupStart${context.popupTimers}`;
+      // Legacy timing started once the message was computed.
+      let message = args[0]!;
+      if (!isPure(call.arguments[0]!, context)) {
+        const name = start.replace("popupStart", "popupMessage");
+        context.prelude.push({ kind: "let", name, value: message, span: node.span });
+        message = { kind: "variable", name };
+      }
+      // The workaround's OK button closes the popup, so its waiting time is the popup's, in whole seconds as legacy
+      // counted them.
+      if (!context.accepted.has("showPopup")) {
+        const [text] = popupStatements(message, node.span, context);
+        context.prelude.push(text!);
+        return {
+          kind: "call",
+          name: "toInteger",
+          positional: [
+            {
+              kind: "binary",
+              operator: "/",
+              left: { kind: "button", label: { kind: "literal", value: "OK" }, timeout: null },
+              right: { kind: "duration", value: 1, unit: "s" },
+            },
+          ],
+          named: {},
+        };
+      }
       const seconds = currentSeconds();
       addDiagnostic(
         context,
@@ -17066,13 +17092,6 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.`,
         node.span,
       );
-      // Legacy timing started once the message was computed.
-      let message = args[0]!;
-      if (!isPure(call.arguments[0]!, context)) {
-        const name = start.replace("popupStart", "popupMessage");
-        context.prelude.push({ kind: "let", name, value: message, span: node.span });
-        message = { kind: "variable", name };
-      }
       context.prelude.push(
         { kind: "let", name: start, value: seconds, span: node.span },
         ...popupStatements(message, node.span, context),
