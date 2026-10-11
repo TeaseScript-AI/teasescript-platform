@@ -19,16 +19,16 @@ function sexscriptLegacyItemAt(listValue, position) {
 // Menus built from runtime lists: written options keep their index, list elements follow.
 let offenses = ["Being late", "Being rude"]
 offenses.add("Lying")
-say "What do you confess?"
+say "What do you confess?", instant
 let pick = choose 0: "Back", sexscriptLegacyMenuOptions(offenses, 1)
 if pick > 0 {
-  say "You confessed: ${offenses[pick - 1]}"
+  say "You confessed: ${offenses[pick - 1]}", instant
 }
 
 let levels = ["Low", "High"]
-say "Which level?"
+say "Which level?", instant
 let level = choose sexscriptLegacyMenuOptions(levels, 0)
-say "Level ${levels[level]}"
+say "Level ${levels[level]}", instant
 
 let toys = [
   { lbl: "Plug", id: "plug" },
@@ -39,46 +39,46 @@ for it in toys {
   menuTexts.add(it.lbl)
 }
 let toy = toys[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].id
-say "Toy: ${toy}"
+say "Toy: ${toy}", instant
 
 let again = 0
 while again == 0 {
-  say "Again?"
+  say "Again?", instant
   again = choose 0: "Back", sexscriptLegacyMenuOptions(levels, 1)
 }
 
 // The same menu reached again with other option texts.
 let options = ["Low", "High"]
 for roundValue in 1..=2 {
-  say "Pick one"
+  say "Pick one", instant
   let picked = choose sexscriptLegacyMenuOptions(options, 0)
-  say "Picked ${options[picked]}"
+  say "Picked ${options[picked]}", instant
   options = ["Plug", "Clamps"]
 }
 // Written options after a runtime list join it, so their positions follow the list's.
 let mistresses = ["Vera", "Anna"]
-say "Who will see you?"
+say "Who will see you?", instant
 let pickMistress = choose sexscriptLegacyMenuOptions(mistresses + ["Back"], 0)
 if pickMistress == mistresses.length {
-  say "Back"
+  say "Back", instant
 } else {
-  say "Mistress ${mistresses[pickMistress]}"
+  say "Mistress ${mistresses[pickMistress]}", instant
 }
 // Records added to a list with a field that is null in some of them: Groovy read each record's own field.
 let resets: object[] = []
 resets.add({ lbl: "Full reset", ID: 2 })
 resets.add({ lbl: "Back", ID: null })
-say "Reset?"
+say "Reset?", instant
 let menuTexts2 = []
 for it in resets {
   menuTexts2.add(it.lbl)
 }
 let reset: integer? = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
-say "Reset ${reset}"
+say "Reset ${reset}", instant
 // Records put in front of a list by concatenation count too.
 let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
 choices = [{ lbl: "Nothing", act: null }] + choices
-say "Choices ${choices.length}"
+say "Choices ${choices.length}", instant
 // A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
 let strict = askBoolean "Strict?"
 let tasks = [
@@ -93,9 +93,9 @@ let menuTexts3 = []
 for it in tasks {
   menuTexts3.add(it.name)
 }
-say conditional
+say conditional, instant
 let task = choose sexscriptLegacyMenuOptions(menuTexts3, 0)
-say "Task ${task}"
+say "Task ${task}", instant
 // A field that some records leave null may be null where it is read, and its truth is a plain test.
 let picked: integer? = 1
 while picked != null and picked != 0 {
@@ -103,10 +103,10 @@ while picked != null and picked != 0 {
   for it in resets {
     menuTexts4.add(it.lbl)
   }
-  say "Again?"
+  say "Again?", instant
   picked = resets[(choose sexscriptLegacyMenuOptions(menuTexts4, 0))].ID
   if picked != null and picked != 0 {
-    say "Reset ${picked}"
+    say "Reset ${picked}", instant
   }
 }
 // simpletimer: a menu over a list a loop built with one option for each saved timer after "New" names a timer where
@@ -119,10 +119,10 @@ let timerNames = ["*** New ***"]
 for timerValue in timers {
   timerNames.add(timerValue.name)
 }
-say "Which timer?"
+say "Which timer?", instant
 let timerChoice = choose sexscriptLegacyMenuOptions(timerNames, 0)
 if timerChoice != 0 {
-  say "Timer ${timers[timerChoice - 1].name}"
+  say "Timer ${timers[timerChoice - 1].name}", instant
 }
 // DisciplineClinic's pending offenses: a counter from 0 that only grows reads the list while it is below its size.
 let pendingOffenses = ["late", "rude"]
@@ -130,20 +130,20 @@ let p = pendingOffenses.length
 p = 0
 while p < pendingOffenses.length {
   if load("pending.${pendingOffenses[p]}", default: false) == true {
-    say "Pending: ${pendingOffenses[p]}"
+    say "Pending: ${pendingOffenses[p]}", instant
   }
   p += 1
 }
 // A menu of a list followed by a written option gives a position past the end of the list for that option, where
 // Groovy read null, as DungeonTrials' weapon choice.
 let weapons = ["Sword", "Bow"]
-say "Which weapon?"
+say "Which weapon?", instant
 let weaponPick = choose sexscriptLegacyMenuOptions(weapons + ["No weapon"], 0)
 // NOTE SX_INDEX_PAST_END line 74: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 // NOTE SX_INDEX_PAST_END line 75: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(weapons, weaponPick) == "Sword" {
-  say "You draw the sword."
+  say "You draw the sword.", instant
 } else if sexscriptLegacyItemAt(weapons, weaponPick) == null {
-  say "You go unarmed."
+  say "You go unarmed.", instant
 }
 exit

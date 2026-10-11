@@ -86,9 +86,9 @@ function sexscriptLegacySlice(value, from, to, exclusive = false) {
 }
 let name = "Anna"
 let count = 3
-say "Hello ${name}, you have ${count + 1} tasks."
-say "Literal \${not interpolated} and \"quotes\""
-say "Path C:\\temp\tTab"
+say "Hello ${name}, you have ${count + 1} tasks.", instant
+say "Literal \${not interpolated} and \"quotes\"", instant
+say "Path C:\\temp\tTab", instant
 // Text with HTML that a variable keeps or a function receives becomes markup where it is written.
 let rulesTitle = """
   # Rules
@@ -96,7 +96,7 @@ let rulesTitle = """
 
 """
 function announce(message) {
-  say "${rulesTitle}${message}"
+  say "${rulesTitle}${message}", instant
 }
 announce("You may **not** touch")
 // A text shown character by character, as a typewriter effect, goes through its characters without markup markers.
@@ -104,7 +104,7 @@ function reveal(message) {
   let appeared = ""
   for c in sexscriptLegacyItems(sexscriptLegacyPlainText(message)) {
     appeared = "${appeared}${c}"
-    say appeared
+    say appeared, instant
   }
 }
 reveal("You may **not** touch")
@@ -117,7 +117,7 @@ dialog += """
   ${counts[1]} swats
 
 """
-say dialog
+say dialog, instant
 // A text read by a range is the part from its first through its last position, also counted from the end; text minus a
 // part drops its first occurrence; text times a count of unknown type repeats it.
 let code = "ABCDOEFO"
@@ -125,15 +125,15 @@ let cut = 3
 function stars(countValue) {
   return "*".repeat(toInteger(countValue))
 }
-say "${code.substring(0, 3)}${code.substring(code.length - 2)}${sexscriptLegacySlice(code, 1, cut, true)}${sexscriptLegacySlice(code, cut, -1)}${sexscriptLegacyTextMinus(code, "O")}${stars(cut)}"
+say "${code.substring(0, 3)}${code.substring(code.length - 2)}${sexscriptLegacySlice(code, 1, cut, true)}${sexscriptLegacySlice(code, cut, -1)}${sexscriptLegacyTextMinus(code, "O")}${stars(cut)}", instant
 // Groovy iterated null zero times.
-say "Pick one?"
+say "Pick one?", instant
 let picked: string? = "red"
 if (choose 0: "none", 1: "red") == "none" {
   picked = null
 }
 for c in sexscriptLegacyItems(picked) {
-  say c
+  say c, instant
 }
 // Removing a part from text in place drops its first occurrence (Banjo's gear).
 let gear = " Torch. Rope. Torch. "
@@ -143,5 +143,5 @@ function loadGear {
 }
 gear = sexscriptLegacyTextMinus(gear, " Torch. ")
 gear = sexscriptLegacyTextMinus(gear, " Rope. ")
-say "Gear:${gear}"
+say "Gear:${gear}", instant
 exit

@@ -2,5 +2,5 @@
 // global the greeting reads.
 let mistress: (string | integer)[][] = []
 mistress = [["Vera", 2]]
-say "The cellar belongs to ${mistress[0][0]}"
+say "The cellar belongs to ${mistress[0][0]}", instant
 exit

@@ -16,14 +16,13 @@ const ARITHMETIC = new Set(["+", "-", "*", "/", "%"]);
 /**
  * A loop that polls the clock until a time passes, such as ZapEdgeStrip's dice roll, `while t1 < t2 { r = …; say …; t1 =
  * now }`: the legacy player spun on real time while its display showed the texts, but a TeaseScript clock advances only
- * at waits, and a text's reading time passes none, so such a loop runs out of its instruction budget (TSR037). The
+ * at waits, and a text passes none, so such a loop runs out of its instruction budget (TSR037). The
  * condition reads the clock directly, through a variable the body sets from it, or through a function that returns
  * it. Unless every pass surely makes the clock advance (a wait of a time known to be more than none, a button, an ask,
  * audio played to its end, or a call of a function every way through which does, not skipped by `continue` or by
  * the other operand of `and` or `or`), each pass starts with a wait of a tenth of a second, which a `continue` cannot
  * skip; where nothing in the loop may wait at all, it only redrew its texts, which become one message that changes in
- * place (V30 "Updatable messages"). The waits of a clock loop, and of the functions it calls, stay rather than become a
- * text's reading time (withReadingTimes). Display-only countdowns became timers before (withVisibleCountdowns).
+ * place (V30 "Updatable messages"). Display-only countdowns became timers before (withVisibleCountdowns).
  */
 export function withClockLoopTicks(
   statements: IrStatement[],
@@ -46,8 +45,6 @@ export function withClockLoopTicks(
     functions,
     (body, found) => passEnd(body, "return", found) === "advances",
   );
-  // The functions a clock loop calls, also through others, whose waits are its time.
-  const callees = new Set<string>();
   const taken = usedNames(statements);
   const fresh = (base: string): string => {
     let name = base;
@@ -65,16 +62,12 @@ export function withClockLoopTicks(
         ![...clocked].some((name) => reads(nested.condition, name))
       )
         return [nested];
-      // The functions the condition and the body call, whose waits a pass may rely on.
-      for (const name of calledFunctions([nested.condition, ...nested.body], functions))
-        callees.add(name);
-      // A loop whose condition, or every way back to it, surely makes the clock advance keeps its waits, which a
-      // text's reading time would not replace.
+      // A loop whose condition, or every way back to it, surely makes the clock advance needs no tick.
       if (
         advancesIn(nested.condition, advancing) ||
         passEnd(nested.body, "continue", advancing) === "advances"
       )
-        return [{ ...nested, body: clockWaits(nested.body) }];
+        return [nested];
       // Only a loop that waits nowhere only redraws its texts, which become one message.
       const redraws = !some(nested.body, (node) => mayWaitHere(node, mayWait, functions));
       const message = redraws
@@ -106,7 +99,6 @@ export function withClockLoopTicks(
               duration: { kind: "literal", value: TICK_SECONDS },
               visible: false,
               unit: "s",
-              clock: true,
               span: nested.span,
             },
           ],
@@ -122,7 +114,7 @@ export function withClockLoopTicks(
         type: "absoluteDateTime?",
         span: nested.span,
       };
-      const body = [...tick, ...clockWaits(nested.body)];
+      const body = [...tick, ...nested.body];
       const speakers = new Set(says(body).map((say) => say.speaker));
       if (!redraws || says(body).length === 0 || speakers.size !== 1)
         return [note, start, { ...nested, body }];
@@ -140,11 +132,7 @@ export function withClockLoopTicks(
         { ...nested, body: inFrame(body, frame) },
       ];
     });
-  return block(statements).map((statement) =>
-    statement.kind === "function" && callees.has(statement.name)
-      ? { ...statement, body: clockWaits(statement.body) }
-      : statement,
-  );
+  return block(statements);
 }
 
 /**
@@ -327,17 +315,6 @@ function mayWaitHere(
 
 type Say = Extract<IrStatement, { kind: "say" }>;
 
-/** The statements with their waits marked as the time a clock loop waits for. */
-function clockWaits(statements: IrStatement[]): IrStatement[] {
-  return statements.map((item) =>
-    item.kind === "wait"
-      ? { ...item, clock: true }
-      : item.kind === "function"
-        ? item
-        : withNestedBlocks(item, clockWaits),
-  );
-}
-
 /** The texts a loop body says itself, not those of functions it defines. */
 function says(statements: readonly IrStatement[]): Say[] {
   const found: Say[] = [];
@@ -381,7 +358,6 @@ function inFrame(statements: IrStatement[], frame: string): IrStatement[] {
             value: {
               kind: "message",
               value: item.value,
-              instant: true,
               ...(item.speaker === undefined ? {} : { speaker: item.speaker }),
             },
             span: item.span,
@@ -506,30 +482,6 @@ function readsClock(value: unknown, clockFunctions: ReadonlySet<string>): boolea
 
 function reads(value: unknown, name: string): boolean {
   return some(value, (node) => node.kind === "variable" && node.name === name);
-}
-
-/** The functions that statements call, also through the functions those call. */
-function calledFunctions(
-  statements: unknown,
-  functions: ReadonlyMap<string, IrStatement[]>,
-): Set<string> {
-  const found = new Set<string>();
-  const visit = (value: unknown): void => {
-    some(value, (node) => {
-      if (
-        node.kind === "call" &&
-        typeof node.name === "string" &&
-        functions.has(node.name) &&
-        !found.has(node.name)
-      ) {
-        found.add(node.name);
-        visit(functions.get(node.name));
-      }
-      return false;
-    });
-  };
-  visit(statements);
-  return found;
 }
 
 /** The names of `functions` for which `test` holds, growing until it holds for no other. */

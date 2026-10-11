@@ -24,11 +24,11 @@ function pickToy {
   picked = toys.random
 }
 pickToy()
-say "Use the ${picked}"
+say "Use the ${picked}", instant
 let rounds = [1, 2, 3, 4]
 rounds = sexscriptLegacyListMinus(rounds, [2])
 rounds = sexscriptLegacyListMinus(rounds, [1, 4])
-say "Rounds left: ${rounds.length}"
+say "Rounds left: ${rounds.length}", instant
 // A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
 function pickOwned(itemKeys) {
   for key in itemKeys {
@@ -43,7 +43,7 @@ function pickOwned(itemKeys) {
     return null
   }
 }
-say "Bring the ${pickOwned(["toys.paddle", "toys.crop"])}"
+say "Bring the ${pickOwned(["toys.paddle", "toys.crop"])}", instant
 // A list whose type is not proven, such as a closure result, read with the legacy size property.
 function collected {
   let found = []
@@ -52,11 +52,11 @@ function collected {
 }
 let got = collected()
 if got.length > 0 {
-  say "Found ${got.length}"
+  say "Found ${got.length}", instant
 }
 // A list appended to and assigned to itself, list = list << value, appends once.
 let lessons = []
 lessons.add("Spelling")
 lessons.add("Manners")
-say "Lessons: ${lessons.length}"
+say "Lessons: ${lessons.length}", instant
 exit

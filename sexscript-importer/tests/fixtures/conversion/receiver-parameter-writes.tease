@@ -19,5 +19,5 @@ for stackIndex in 0..stacks.length {
 for stackIndex2 in 0..stacks.length {
   stacks[stackIndex2].clear()
 }
-say "Queue ${queue[0]}, stacks ${stacks[0].length}"
+say "Queue ${queue[0]}, stacks ${stacks[0].length}", instant
 exit

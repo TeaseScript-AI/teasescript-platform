@@ -1,16 +1,16 @@
 // Groovy allows `$` in names; TeaseScript names keep the letters and digits.
 let score = 3
 score += 1
-say "Score ${score}"
+say "Score ${score}", instant
 // Consecutive C-style loops may each declare the same counter, which Groovy scoped to its own loop.
 let i = 0
 while i < 2 {
-  say "Round ${i}"
+  say "Round ${i}", instant
   i += 1
 }
 i = 5
 while i > 3 {
-  say "Back ${i}"
+  say "Back ${i}", instant
   i -= 1
 }
 // Groovy and Java number conversions of number text read the same values as the TeaseScript conversions.
@@ -19,19 +19,19 @@ let count = toInteger(typed)
 let strokes = toInteger(typed)
 let pace = toNumber(typed) / 2
 let ratio = toNumber("1.5")
-say "Count ${count + strokes} at ${pace * ratio}"
+say "Count ${count + strokes} at ${pace * ratio}", instant
 // A classic loop counter that a later block declares again gets another name there.
 let row = 0
 while row < 2 {
-  say "Row ${row}"
+  say "Row ${row}", instant
   row += 1
 }
 if askBoolean "Again?" {
   let rowValue = 5
-  say "Row ${rowValue}"
+  say "Row ${rowValue}", instant
 }
 // Groovy ranged over characters too.
 let letters = ["A", "B", "C"] + ["x", "y"]
 // NOTE SX_LIST_JOIN line 23: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say letters.join("")
+say letters.join(""), instant
 exit

@@ -78,7 +78,7 @@ function sexscriptLegacyReplaceChars(text, chars, keep, replacement, runs) {
 // equals() compares values like ==.
 let name = "Anna"
 if name == "Anna" {
-  say "Hello Anna"
+  say "Hello Anna", instant
 }
 // A list returned by a closure is not proven to be a list; clone() and toArray() give the list itself, since lists
 // copy on assignment, and remove() with a position removes and returns that element.
@@ -93,7 +93,7 @@ let position = 1
 let removed = hand.removeAt(position)
 // NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
-say "Removed ${removed}, ${copy.length} copied, ${asArray.length} in the array"
+say "Removed ${removed}, ${copy.length} copied, ${asArray.length} in the array", instant
 // A compound assignment used as a value changes the variable first.
 let points = 10
 points -= 3
@@ -106,11 +106,11 @@ if true {
     ready = true
   }
 }
-say "Ready: ${ready}, points ${points}"
+say "Ready: ${ready}, points ${points}", instant
 // Groovy iterated text by character; a value not proven to be text or a list goes through a helper.
 let word = "abc"
 for letter in word.split("") {
-  say letter
+  say letter, instant
 }
 function spell(text) {
   let shown = ""
@@ -119,32 +119,32 @@ function spell(text) {
   }
   return shown
 }
-say spell(word)
+say spell(word), instant
 // Groovy read null one past the end of a list, which a 1-based random pick relies on.
 let positions = [" ", "otk"]
 let pick = sexscriptLegacyRandom(positions.length) + 1
 // NOTE SX_INDEX_PAST_END line 39: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(positions, pick) == "otk" {
-  say "Over my knee"
+  say "Over my knee", instant
 }
 // Java replaceAll() with a regular expression that text operations express.
 let serial = "ab12-x|[y]"
 // NOTE SX_SAY_MARKUP line 42: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
-say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}"
+say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}", instant
 // Menu options from a value not proven to be a list are offered as one, as Groovy required.
 function rooms {
   return ["Hall", "Garden"]
 }
 let roomList = rooms()
-say "Where to?"
+say "Where to?", instant
 let room = choose sexscriptLegacyMenuOptions(roomList, 0)
-say "Going to ${roomList[room]}"
+say "Going to ${roomList[room]}", instant
 // A call that passes null for a parameter whose default gives it a type: the parameter takes null too.
 function afterLock(pre: boolean? = false) {
   if sexscriptLegacyTruth(pre) {
-    say "Before"
+    say "Before", instant
   } else {
-    say "After"
+    say "After", instant
   }
 }
 afterLock(null)

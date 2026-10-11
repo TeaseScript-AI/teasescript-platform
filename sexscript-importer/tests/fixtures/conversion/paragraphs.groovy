@@ -1,5 +1,5 @@
-// The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
-// the Player's reading time.
+// The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each said at
+// once, and the wait after the text stays whole.
 def name = "Ann"
 show("Do you deserve a break?\n\nWell, ${name}, let's check.")
 wait(3)

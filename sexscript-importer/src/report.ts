@@ -205,34 +205,6 @@ export interface FeasibilityReport {
     picksKept: number;
   };
   /**
-   * Literal waits right after a text (withReadingTimes): `replaced` by the Player's reading time, or `kept` as longer
-   * than 1.5 times it, or kept as the `beats` of texts without letters or a loop's `ticks`, or replaced and kept
-   * again before a beat (`keptForBeats`); `keptPaced` texts that keep their reading time where a replaced
-   * wait's may still run; kept waits after a split text that withParagraphs `shortened` or `dropped`. A sound that
-   * starts between a text and its wait makes the text a beat where the wait stays (`soundBeats`), and starts before
-   * its text where the wait goes (`soundsWithText`). A split text whose last paragraph's reading time would outlast
-   * the wait after it (TSV060) shows whole at once, each paragraph said at once, where waits that another wait or a
-   * timer follows set its timing (`timed`), where a long kept wait leaves less before a statement that the reading time
-   * does not cover (`paragraphsWhole`), and where a wait restored before a beat follows it (`paragraphsBeforeBeat`, part
-   * of `keptForBeats`); before a statement that it covers, the rest of the long kept wait goes (`paragraphWaitsRead`).
-   */
-  readingWaits: {
-    replaced: number;
-    kept: number;
-    keptPaced: number;
-    beats: number;
-    keptForBeats: number;
-    ticks: number;
-    soundBeats: number;
-    soundsWithText: number;
-    timed: number;
-    paragraphsWhole: number;
-    paragraphsBeforeBeat: number;
-    paragraphWaitsRead: number;
-    shortened: number;
-    dropped: number;
-  };
-  /**
    * Buttons whose waiting time stays a duration (withElapsedDurations): comparisons of a button's seconds with a number
    * (`compared`), and variables that hold such a duration (`variables`).
    */
@@ -401,22 +373,6 @@ export function analyzeFeasibility(
       picks: 0,
       picksKept: 0,
     },
-    readingWaits: {
-      replaced: 0,
-      kept: 0,
-      keptPaced: 0,
-      beats: 0,
-      keptForBeats: 0,
-      ticks: 0,
-      soundBeats: 0,
-      soundsWithText: 0,
-      timed: 0,
-      paragraphsWhole: 0,
-      paragraphsBeforeBeat: 0,
-      paragraphWaitsRead: 0,
-      shortened: 0,
-      dropped: 0,
-    },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
     storageReads: {
@@ -558,20 +514,6 @@ export function analyzeFeasibility(
       else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
       else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
       else if (code === "SX_PARAGRAPHS_KEPT") report.paragraphs.kept += 1;
-      else if (code === "SX_WAIT_READING") report.readingWaits.replaced += 1;
-      else if (code === "SX_WAIT_KEPT") report.readingWaits.kept += 1;
-      else if (code === "SX_WAIT_KEPT_PACED") report.readingWaits.keptPaced += 1;
-      else if (code === "SX_WAIT_BEAT") report.readingWaits.beats += 1;
-      else if (code === "SX_WAIT_FOR_BEAT") report.readingWaits.keptForBeats += 1;
-      else if (code === "SX_WAIT_TICK") report.readingWaits.ticks += 1;
-      else if (code === "SX_WAIT_SOUND_BEAT") report.readingWaits.soundBeats += 1;
-      else if (code === "SX_SOUND_WITH_TEXT") report.readingWaits.soundsWithText += 1;
-      else if (code === "SX_WAIT_TIMED") report.readingWaits.timed += 1;
-      else if (code === "SX_PARAGRAPH_WAIT_WHOLE") report.readingWaits.paragraphsWhole += 1;
-      else if (code === "SX_PARAGRAPH_WAIT_BEAT") report.readingWaits.paragraphsBeforeBeat += 1;
-      else if (code === "SX_PARAGRAPH_WAIT_READ") report.readingWaits.paragraphWaitsRead += 1;
-      else if (code === "SX_PARAGRAPH_WAIT") report.readingWaits.shortened += 1;
-      else if (code === "SX_PARAGRAPH_WAIT_DROPPED") report.readingWaits.dropped += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
       else if (code === "SX_BUTTON_DURATION_VARIABLE") report.buttonDurations.variables += 1;
       else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;

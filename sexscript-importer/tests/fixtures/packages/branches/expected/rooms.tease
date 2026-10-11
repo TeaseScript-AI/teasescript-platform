@@ -1,2 +1,2 @@
-say "The rooms"
+say "The rooms", instant
 exit

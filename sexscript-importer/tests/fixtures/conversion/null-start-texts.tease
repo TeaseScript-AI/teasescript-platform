@@ -18,13 +18,13 @@ if askBoolean "Finished?" {
   finished = true
 }
 if not finished {
-  say "Keep going, ${name}"
+  say "Keep going, ${name}", instant
 }
 // A text that a function can show before its first value showed null in Groovy; it shows nothing now.
 // NOTE SX_NULL_START_EMPTY line 10: Groovy showed mood as null until its first value; it starts as the empty text here, so a text shown before then says nothing.
 let mood = ""
 function report {
-  say "Mood: ${mood}"
+  say "Mood: ${mood}", instant
 }
 report()
 mood = "calm"
@@ -40,27 +40,27 @@ if askBoolean "Inside?" {
   room = "hall"
 }
 if room == null {
-  say "Nowhere"
+  say "Nowhere", instant
 } else {
-  say "In the ${room}"
+  say "In the ${room}", instant
 }
-say "Using the ${chosen}"
+say "Using the ${chosen}", instant
 // So does one that the code compares with a value that may be empty, or that a parameter takes as its default, and one
 // that a String cast copies, which keeps null as Groovy's did.
 let nick: string? = null
 let copied: string? = sexscriptLegacyCastText(nick)
 nick = "Kim"
 if copied == nick {
-  say "Same nick"
+  say "Same nick", instant
 }
 let answer: string? = null
 if answer == "" {
-  say "No answer"
+  say "No answer", instant
 }
 answer = askText("Answer?").replace("\n", " ")
 let hint: string? = null
 function remind(text = hint) {
-  say "Hint: ${text}"
+  say "Hint: ${text}", instant
 }
 hint = "Look up"
 remind()
@@ -71,7 +71,7 @@ if askBoolean "A gag?" {
   gag = "ball"
   let worn = gag
   if gag != null {
-    say "Wearing the ${worn}"
+    say "Wearing the ${worn}", instant
   }
 }
 exit

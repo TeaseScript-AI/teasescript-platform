@@ -6,5 +6,5 @@ keywords: "school"
 ---
 // Legacy setInfos(): API version 9, status "v2.3", color 0x000000, language "EN"
 
-say "Class begins"
+say "Class begins", instant
 goto "Banjo/schoolpack.tease"

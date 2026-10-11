@@ -9,5 +9,5 @@ if askBoolean "Bonus?" {
 if askBoolean "Again?" {
   goto "tease.tease"
 }
-say "The end"
+say "The end", instant
 exit

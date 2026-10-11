@@ -24,9 +24,8 @@ type Token = { char: string } | { key: string; value: IrExpression };
  *   or a placeholder in place of the count (`20 jerks` and `${i} jerks`) or the same text, whose other values neither
  *   those statements nor the loop change, becomes a
  *   `let counter = say before, instant` and a `counter.text = text` in the loop.
- * The waits between the steps stay as they are: they are the animation's or the count's timing, and withReadingTimes,
- * which runs after this, only touches waits right after a `say`. The system speaker's texts stay, and so does a module's
- * code outside its functions, whose variables are global (`module`).
+ * The waits between the steps stay as they are: they are the animation's or the count's timing. The system speaker's
+ * texts stay, and so does a module's code outside its functions, whose variables are global (`module`).
  */
 export function withMessageHandles(
   statements: IrStatement[],
@@ -171,7 +170,6 @@ function handle(say: Say, name: string): IrStatement {
     value: {
       kind: "message",
       value: say.value,
-      instant: true,
       ...(say.speaker === undefined ? {} : { speaker: say.speaker }),
     },
     span: say.span,

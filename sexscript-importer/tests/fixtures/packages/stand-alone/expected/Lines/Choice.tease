@@ -1,2 +1,2 @@
-say "Write your lines."
+say "Write your lines.", instant
 exit

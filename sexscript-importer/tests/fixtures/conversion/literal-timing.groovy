@@ -1,5 +1,5 @@
-// A longer wait stays, time for a task, and its text appears at once where no reading time can still run, as after a
-// button; a wait that timed the reading goes, also in milliseconds.
+// Literal timing (owner decision 2026-10-11): every shown text is said at once, as legacy show() displayed it, and
+// every legacy wait stays with its exact duration, also in milliseconds, around buttons, asks, media, and loops.
 showButton("Start")
 show("Do ten push-ups now.")
 wait(30)
@@ -8,13 +8,12 @@ wait(2)
 show("Breathe.")
 sleep(1500)
 
-// Also before a button, where the player decides when to go on.
+// Before a button.
 show("Ready?")
 wait(1)
 showButton("Yes")
 
-// A text that would appear at once keeps its reading time where the reading time of a text whose wait went may still
-// run, also across other statements and branches, so that the text before it is read first; a button ends it.
+// Across other statements and branches.
 show("Good.")
 wait(1)
 int reps = 20
@@ -32,8 +31,7 @@ showButton("Done")
 show("Stay there.")
 wait(30)
 
-// A count without letters keeps its beat, and so does a wait of a second at most after a text that a loop builds anew
-// each pass, the loop's tick; their texts are said at once.
+// A count without letters, and a loop's tick after a text that the loop builds anew each pass.
 show("3")
 wait(1)
 show("2")
@@ -42,13 +40,13 @@ for (int left = 3; left > 0; left--) {
     show("Starting in " + left)
     wait(1)
 }
-// A kept wait after a split text keeps what the earlier paragraphs' reading time leaves.
+// A split text: each paragraph is said at once, and the wait after it stays whole.
 show("First paragraph has a few words.\n\nSecond paragraph.\n\nLast one.")
 wait(20)
 show("One.\n\nTwo.\n\nThree.\n\nFour.\n\nFive.")
 wait(5)
 
-// A computed wait, and a run of waits, stay as they are; a sum takes parentheses before its unit.
+// A computed wait, and a run of waits; a sum takes parentheses before its unit.
 int n = getInteger("How long?", 3)
 show("Waiting " + n + " seconds.")
 wait(n)
@@ -59,8 +57,7 @@ wait(1)
 wait(2)
 show("Done.")
 
-// A beat keeps its timing whatever its wait, a number is a count too, and an animation keeps its timing; a text whose
-// replaced reading time a beat would cut keeps its legacy wait.
+// Beats, numbers, and an animation, whose steps change one message.
 show("Get ready.")
 wait(1)
 show("10")
@@ -75,13 +72,12 @@ show("Wait..")
 wait(1)
 show("Wait...")
 wait(1)
-// Every paragraph of a split tick keeps the beat, so the text shows whole at once, as legacy showed it.
+// A split tick.
 for (int left = 3; left > 0; left--) {
     show("Starting soon.\n\nStarting in " + left)
     wait(1)
 }
-// DisciplineClinic Punish spank(): a sound that starts between a stroke's text and its wait took no time in legacy, so
-// the wait stays as the stroke's beat and the text appears at once, with its sound.
+// DisciplineClinic Punish spank(): a sound that starts between a stroke's text and its wait keeps its place.
 def message = "Right cheek"
 def counting = false
 def tempTime = 0.5
@@ -91,16 +87,15 @@ for (int tempSpankCount = 1; tempSpankCount <= 3; tempSpankCount++) {
 	playBackgroundSound("DisciplinePack/hand"+(1+getRandom(3))+".wav")
 	wait(tempTime)
 }
-// TSV060: a kept wait after a split text that the last paragraph's reading time would outlast.
-// DisciplineClinic Punish: the waits set the timing, so the text shows whole at once, then the waits.
+// DisciplineClinic Punish: a long split text before a run of waits.
 show("You've created a bunch of paperwork for me to document this.\n\nSo you can expect me to be extra strict this time")
 wait(4)
 wait(3)
-// Domme3 maintenance: the rest of the wait after the earlier paragraphs is reading time, which goes before a button.
+// Domme3 maintenance: a split text before a button.
 show("You did well. \n\nI'm proud of you! \n\nGet dressed.")
 wait(7)
 showButton("Thanks, Miss.")
-// Domme3 punishment: before a call that may say a text at once, the text shows whole and the wait stays whole.
+// Domme3 punishment: a split text before a call that may say a text.
 def counted = { message ->
 	show(message + "\n\n0")
 	wait(3)
@@ -108,8 +103,7 @@ def counted = { message ->
 show("These last fifteen ... \n\nwill be slower ... \n\nand harder!")
 wait(7)
 counted("Alternating cheeks.")
-// BreatheAcademy waitWithCountDownSound: a step of the count between a text and its wait takes no time, and a computed
-// wait after a text that a loop builds anew each pass is its tick, so the countdown keeps its speed.
+// BreatheAcademy waitWithCountDownSound: a countdown with a step between its text and its computed wait.
 def countDown = { text, time, speed ->
 	def left = time / speed
 	(1..(time / speed)).each {
@@ -119,7 +113,7 @@ def countDown = { text, time, speed ->
 	}
 }
 countDown("Hold your breath", 3, 0.5)
-// BreatheAcademy showDynamically: a text typed out a character at a time keeps the pace of its computed wait.
+// BreatheAcademy showDynamically: a text typed out a character at a time.
 def textSpeed = 2
 def typed = ""
 for (c in "Ready") {
@@ -127,20 +121,19 @@ for (c in "Ready") {
 	show(typed)
 	wait(1 / textSpeed)
 }
-// A step of a count between a text and a short literal wait takes no time either: the reading time replaces the wait.
+// A step of a count between a text and a short literal wait.
 def breaths = 0
 show("Breathe in slowly.")
 breaths++
 wait(2)
-// A clock reading between a text and its wait measures the wait, which stays where it was.
+// A clock reading between a text and its wait.
 show("Keep holding until the wait is over.")
 def started = getTime()
 wait(2)
 def elapsed = getTime() - started
 if (elapsed < 2) show("Too soon")
 else show("Held")
-// A text that only switch cases set is said where it is not empty, and pairs with its wait as any text: a loop's tick
-// stays its beat, and a wait that its reading time replaces stays for the path where nothing is said.
+// A text that only switch cases set is said where it is not empty, and its wait stays on every path.
 def tick = ""
 for (def n = 0; n < 2; n++) {
 	switch (n) {
@@ -158,7 +151,7 @@ switch (getRandom(3)) {
 show(reply)
 wait(2)
 show("Done")
-// A sound between such a text and its wait starts before the wait on that path too.
+// A sound between such a text and its wait.
 def cue = ""
 switch (getRandom(2)) {
 	case 0: cue = "Listen."; break

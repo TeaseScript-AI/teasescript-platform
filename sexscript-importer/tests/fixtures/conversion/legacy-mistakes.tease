@@ -5,18 +5,18 @@ function setImageImplement {
   showImage "implement.jpg"
 }
 function startFast {
-  say "Fast start"
+  say "Fast start", instant
 }
 if randomInteger(0..2) == 0 {
   let startFastValue = randomInteger(0..2)
   if startFastValue == 1 {
-    say "Local value"
+    say "Local value", instant
   }
 }
 // NOTE SX_CLOSURE_NOT_CALLED line 7: Dropped the bare reference to closure setImageImplement: without () Groovy did not call it, so it had no effect. Add setImageImplement() manually if a call was intended.
 // NOTE SX_CLOSURE_NOT_CALLED line 8: Groovy treated closure setImageImplement itself as true here because it was not called; kept as true. Use setImageImplement() if a call was intended.
 if true {
-  say "Always shown"
+  say "Always shown", instant
 }
 startFast()
 // TODO SX_UNDEFINED_FUNCTION line 10: mistressInfo() is not defined in this script, its package helpers, or the SexScript API; SexScript failed here at runtime.
@@ -47,7 +47,7 @@ if limit > 5 {
 // NOTE SX_NULL_ONLY_VARIABLE line 26: challengeType is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
 let kind = null
 if kind == null {
-  say "No kind yet"
+  say "No kind yet", instant
 }
 // NOTE SX_NULL_ONLY_VARIABLE line 29: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.
 // A switch on such a variable ran its default, as no text case matched null.
@@ -55,15 +55,15 @@ if kind == null {
 // NOTE SX_NULL_ONLY_VARIABLE line 32: This switch is on a variable that only ever held null, which no case matched; the conversion keeps only its default.
 if true {
   let voiceless = "No voice"
-  say voiceless
+  say voiceless, instant
 }
 // A name that a loop binds too is another variable there, so the variable keeps its declaration.
 if askBoolean "Unset?" {
   // NOTE SX_NULL_START_NUMBER line 41: Groovy showed seat as null until its first value; it starts at 0 here, so a text shown before then says 0.
   let seat = 0
-  say "Unset ${seat}"
+  say "Unset ${seat}", instant
 }
 for seat in [1, 2] {
-  say "Seat ${seat}"
+  say "Seat ${seat}", instant
 }
 exit

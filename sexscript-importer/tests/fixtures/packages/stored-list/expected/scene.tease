@@ -6,6 +6,6 @@ for i in 0..5 {
     toys += "${toy} "
   }
 }
-say "Lay out ${toys}"
+say "Lay out ${toys}", instant
 save toys as "scene.laid"
 exit

@@ -1,2 +1,2 @@
-say "Change the sound"
+say "Change the sound", instant
 exit

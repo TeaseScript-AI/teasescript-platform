@@ -8,7 +8,7 @@ wait 1 s
 line.text += " ."
 wait 1 s
 // A text that repeats the animation's last step says only what it adds.
-say "Now begin."
+say "Now begin.", instant
 // A text with a value computed anew, such as a random draw, is no step of an animation.
 say "Pick ${randomInteger(0..100)}.", instant
 wait 1 s
@@ -46,71 +46,71 @@ while i > 17 {
 }
 // A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
 // own, as does a text that is no text.
-say "Get ready!"
+say "Get ready!", instant
 for s in 1..=2 {
-  say "Shock ${s} of 2"
+  say "Shock ${s} of 2", instant
   wait 5 s
 }
 let questions = ["Ready?", "Sure?"]
-say "Question 1"
+say "Question 1", instant
 for q in 1..=2 {
-  say "Question ${q}: ${questions[q - 1]}"
+  say "Question ${q}: ${questions[q - 1]}", instant
   wait 5 s
 }
 function countdown {
-  say "Get set"
+  say "Get set", instant
 }
-say "Round 0"
+say "Round 0", instant
 countdown()
 for r in 1..=2 {
-  say "Round ${r}"
+  say "Round ${r}", instant
   wait 5 s
 }
 let n = 0
-say n
+say n, instant
 for k in 1..=2 {
   n += 1
-  say n
+  say n, instant
   wait 5 s
 }
 // Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
 // change, nor an animation whose wait runs script code.
 let story = "First"
-say "Story: ${story}"
+say "Story: ${story}", instant
 for p in 1..=2 {
   story += " next"
-  say "Story: ${story}"
+  say "Story: ${story}", instant
   wait 5 s
 }
 let title = "One"
-say "Chapter ${title}: 0"
+say "Chapter ${title}: 0", instant
 for c in 1..=2 {
   title = "Two"
-  say "Chapter ${title}: ${c}"
+  say "Chapter ${title}: ${c}", instant
   wait 5 s
 }
 let words = ["First", "Second", "Third"]
-say "Word ${words[0]} count 0"
+say "Word ${words[0]} count 0", instant
 for w in 1..=2 {
   let dropped = words.removeAt(0)
-  say "Word ${words[0]} count ${w}"
+  say "Word ${words[0]} count ${w}", instant
   wait 5 s
 }
 let chapter = "First"
 function advance {
   chapter = "Second"
 }
-say "Chapter ${chapter}: 0"
+say "Chapter ${chapter}: 0", instant
 for a in 1..=2 {
   advance()
-  say "Chapter ${chapter}: ${a}"
+  say "Chapter ${chapter}: ${a}", instant
   wait 5 s
 }
 let part = "First"
-say "Part ${part}: 0"
+say "Part ${part}: 0", instant
 part = "Second"
 for p in 1..=2 {
-  say "Part ${part}: ${p}"
+  say "Part ${part}: ${p}", instant
   wait 5 s
 }
 let step = 0
@@ -118,26 +118,26 @@ function ready {
   part = "Step ${step}"
   return step < 3
 }
-say "Part ${part}: ${step}"
+say "Part ${part}: ${step}", instant
 while ready() {
   step += 1
-  say "Part ${part}: ${step}"
+  say "Part ${part}: ${step}", instant
   wait 5 s
 }
 function pause {
   part = "Third"
   return 1
 }
-say "${part}."
+say "${part}.", instant
 wait pause() s
-say "${part}.."
+say "${part}..", instant
 function floorValue {
   part = "Fourth"
   return 1
 }
 say "${part}.", instant
 wait floorValue() s
-say "${part}.."
+say "${part}..", instant
 // A counter through a range whose direction shows only at runtime is a counter too: the loop goes through the range's
 // positions and takes each number from them.
 let reps = 3

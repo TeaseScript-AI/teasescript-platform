@@ -19,7 +19,7 @@ let wanted = askText("Which toys?", prefill: "[${toys.join(", ")}]").replace("\n
 let total: number = 0
 total += level / 2
 // NOTE SX_INPUT_PREFILL line 13: getInteger() pre-filled its field with this value; a TeaseScript default must be a whole number, so a helper asks without the default when it is not.
-say "How many did you do?"
+say "How many did you do?", instant
 let counted = sexscriptLegacyAskInteger(total)
-say "${name}: level ${newLevel}, ${weight} kg, code ${code}, toys ${wanted}, ${counted} done"
+say "${name}: level ${newLevel}, ${weight} kg, code ${code}, toys ${wanted}, ${counted} done", instant
 exit

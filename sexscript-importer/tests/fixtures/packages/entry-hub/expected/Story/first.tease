@@ -3,5 +3,5 @@ title: "First"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
-say "Chapter one"
+say "Chapter one", instant
 goto "Story/main.tease"

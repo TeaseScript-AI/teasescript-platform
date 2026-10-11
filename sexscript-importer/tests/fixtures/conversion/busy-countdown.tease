@@ -3,7 +3,7 @@ let startTime = getAbsoluteDateTime().toSeconds()
 let waitedTime = getAbsoluteDateTime().toSeconds() - startTime
 // NOTE SX_BUSY_COUNTDOWN line 4: The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.
 timer 5 s
-say "Time is up"
+say "Time is up", instant
 // A limit given at run time may be already reached, such as a negative typed time: the loop did not run then.
 function waitFor(limit) {
   let started = getAbsoluteDateTime().toSeconds()
@@ -20,13 +20,13 @@ let before = 0
 before = getAbsoluteDateTime().toSeconds()
 let after = getAbsoluteDateTime().toSeconds()
 if after - before >= 0 {
-  say "Measured"
+  say "Measured", instant
 }
 // A loop that only counts adds the count at once where its range is not empty.
 function addPoints(i) {
   let p = 0
   p += abs(floor(i) - 1) + 1
-  say "Points ${p}"
+  say "Points ${p}", instant
 }
 addPoints(1000000)
 // A loop that polls the clock with nothing that waits, as ZapEdgeStrip's dice roll, waits a tenth of a second in each
@@ -50,7 +50,7 @@ while now < rollUntil {
   }
   now = getAbsoluteDateTime().toSeconds()
 }
-say "You rolled ${rolled}"
+say "You rolled ${rolled}", instant
 // So does one whose condition reads the clock itself, as Nim's closing window.
 let windowEnd = getAbsoluteDateTime().toSeconds() + 3
 // NOTE SX_CLOCK_LOOP line 47: The legacy loop polled the clock until the time was up, redrawing its text as fast as it could, at any number of passes; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second, which also sets how many passes it makes, and the texts the loop says are one message that changes in place.
@@ -70,7 +70,7 @@ while getAbsoluteDateTime().toSeconds() < windowEnd {
 // A loop whose body waits already is left as it is.
 let paced = getAbsoluteDateTime().toSeconds() + 2
 while getAbsoluteDateTime().toSeconds() < paced {
-  say "Tick"
+  say "Tick", instant
   wait 1 s
 }
 // A pass that may continue, or whose wait may not run, waits at its start where the clock did not advance before.
@@ -84,21 +84,21 @@ while getAbsoluteDateTime().toSeconds() < pollEnd {
   }
   passClock3 = getAbsoluteDateTime()
   polls += 1
-  say polls
+  say polls, instant
   if polls < 0 {
     wait 1 s
   }
   if polls % 2 == 0 {
     continue
   }
-  say "Odd ${polls}"
+  say "Odd ${polls}", instant
 }
 // The clock read through a function, and a wait in a function the loop calls, count too; that wait stays.
 function clockNow {
   return getAbsoluteDateTime().toSeconds()
 }
 function beat {
-  say "Beat"
+  say "Beat", instant
   wait 1 s
 }
 let beatEnd = clockNow() + 2
@@ -145,7 +145,7 @@ while getAbsoluteDateTime().toSeconds() < strokeEnd {
     wait 0.1 s
   }
   passClock6 = getAbsoluteDateTime()
-  say "Stroke"
+  say "Stroke", instant
   if rest > 0 {
     wait rest s
   }
@@ -212,7 +212,7 @@ while getAbsoluteDateTime().toSeconds() < guardEnd {
   }
   passClock10 = getAbsoluteDateTime()
   if resting and pace() {
-    say "Rested"
+    say "Rested", instant
   }
 }
 let askEnd = getAbsoluteDateTime().toSeconds() + 1
@@ -251,13 +251,13 @@ while remaining > 0 {
 }
 // A wait in a function the condition calls stays, as does the clock copied through a local.
 function sampleSlowly {
-  say "Sampling slowly"
+  say "Sampling slowly", instant
   wait 0.2 s
   return getAbsoluteDateTime().toSeconds()
 }
 let slowEnd = getAbsoluteDateTime().toSeconds() + 1
 while sampleSlowly() < slowEnd {
-  say "Slow"
+  say "Slow", instant
 }
 function copiedNow {
   let first = getAbsoluteDateTime().toSeconds()
@@ -288,7 +288,7 @@ function copiedEarly {
 }
 let early = 0
 while copiedEarly() > 0 and early < 3 {
-  say "Early"
+  say "Early", instant
   early += 1
 }
 // A value only computed from the clock, such as the element a day picks, holds none, so this search only counts.
@@ -302,7 +302,7 @@ while picked == null {
   }
   seed += 1
 }
-say picked
+say picked, instant
 // Arithmetic on a clock value still holds it.
 function adjustedNow {
   let t = getAbsoluteDateTime().toSeconds()

@@ -14,7 +14,7 @@ while rest.contains("<") {
   rest = rest.substring(open + close + 1)
 }
 withoutTags += "${rest}"
-say withoutTags.trim()
+say withoutTags.trim(), instant
 // NOTE SX_REGEX_WORKAROUND line 5: Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop over the parts between spaces stands in for split(/\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part.
 let words = []
 for part in "a  b\tc".replace("\t", " ").replace("\n", " ").replace("\r", " ").split(" ") {
@@ -22,13 +22,13 @@ for part in "a  b\tc".replace("\t", " ").replace("\n", " ").replace("\r", " ").s
     words.add(part)
   }
 }
-say "Words ${words.length}"
+say "Words ${words.length}", instant
 // NOTE SX_LOCALE_WORKAROUND line 7: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
 let conditional = not ["de", "en"].contains("en")
 if conditional {
   conditional = askBoolean "Check fonts?"
 }
 if conditional {
-  say "Fonts"
+  say "Fonts", instant
 }
 exit

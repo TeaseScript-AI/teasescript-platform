@@ -111,7 +111,7 @@ test(
       converted(await convertUnit(options));
       const main = path.join(options.outputRoot, "Walk/start.tease");
       const generated = await readFile(main, "utf8");
-      assert.match(generated, /say "Hello"\nsay "Bye"\nexit/u);
+      assert.match(generated, /say "Hello", instant\nwait 1 s\nsay "Bye", instant\nexit/u);
 
       const outputPatch = {
         id: "farewell",
@@ -121,8 +121,8 @@ test(
         baseHash: sha256(generated),
         edits: [
           {
-            find: 'say "Bye"\nexit',
-            replace: 'showImage tagged "hall"\nsay "Goodbye"\nexit',
+            find: 'say "Bye", instant\nexit',
+            replace: 'showImage tagged "hall"\nsay "Goodbye", instant\nexit',
             count: 1,
           },
         ],
@@ -169,7 +169,7 @@ test(
         compiles: true,
         failingFiles: [],
         errorsByMessage: {},
-        run: { status: "halted", failure: null, steps: 0 },
+        run: { status: "halted", failure: null, steps: 1 },
       });
     } finally {
       await rm(work, { recursive: true, force: true });
@@ -298,7 +298,7 @@ test(
       const main = path.join(options.outputRoot, "Walk/start.tease");
       assert.match(
         await readFile(main, "utf8"),
-        /say "Kneel\."\nsay """[^]*say "Wait\."\nsay "Now stand\."/u,
+        /say "Kneel\.", instant\nsay """[^]*""", instant\nsay "Wait\.", instant\nsay "Now stand\.", instant/u,
       );
       const reason = "The blank lines lay out a grid of numbers.";
       await writeFile(

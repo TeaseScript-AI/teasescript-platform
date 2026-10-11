@@ -57,12 +57,12 @@ let gender = "boy"
 if load("intro.female", default: false) == true {
   gender = "girl"
 }
-say "Hello, ${load("intro.name", default: "")}, my good ${gender}"
+say "Hello, ${load("intro.name", default: "")}, my good ${gender}", instant
 if load("intro.likemale", default: false) == true {
-  say "You like men too"
+  say "You like men too", instant
 }
 if load("toys.dildo", default: false) != true {
-  say "A dildo or dildo alternative is needed"
+  say "A dildo or dildo alternative is needed", instant
 }
 // A save of an owned item corrects the answer, so the item is still asked first.
 let conditional = load("clothes.panties", default: false) == true

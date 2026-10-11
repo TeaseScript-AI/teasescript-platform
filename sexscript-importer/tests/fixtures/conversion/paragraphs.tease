@@ -8,16 +8,17 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
-// The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each with
-// the Player's reading time.
+// The legacy display showed one text, so a blank line separated what becomes one message per paragraph, each said at
+// once, and the wait after the text stays whole.
 let name = "Ann"
-say "Do you deserve a break?"
-say "Well, ${name}, let's check."
-say "You are late."
-say "Kneel."
+say "Do you deserve a break?", instant
+say "Well, ${name}, let's check.", instant
+wait 3 s
+say "You are late.", instant
+say "Kneel.", instant
 // An ask's question keeps its last paragraph; the others are said before the ask.
-say "These are the rules."
-say "Count every stroke."
+say "These are the rules.", instant
+say "Count every stroke.", instant
 let strokes = askInteger "How many strokes?", prefill: 5
 // Blank lines that lay out columns, a ruled line, or a block of values stay in one message.
 say """
@@ -25,39 +26,39 @@ say """
 
   Strokes:   ${strokes}
   Rounds:    3
-"""
+""", instant
 say """
   LEVEL 1
 
   ----------
 
   Fight!
-"""
+""", instant
 say """
   ROUND OVER
 
   Score: ${strokes}.
 
   Rounds left = 2
-"""
+""", instant
 // A list of links is no block of values, and a single paragraph loses the blank lines around it.
-say "Links:"
+say "Links:", instant
 say """
   http://example.com/a
   http://example.com/b
-"""
-say "Hello."
+""", instant
+say "Hello.", instant
 // What the statement runs before its ask stays before the ask's question.
 function warmUp {
-  say "Stretch first."
+  say "Stretch first.", instant
   return 1
 }
-say "Next round."
-say "How many more?"
+say "Next round.", instant
+say "How many more?", instant
 let more = warmUp() + askInteger()
 // The photo an ask asks for keeps its last paragraph as its message.
 // NOTE SX_FILE_PHOTO line 22: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
-say "Smile."
+say "Smile.", instant
 let photo = askImage("Take a photo of yourself.")
 // A blank line in a value built at runtime stays.
 let note = """
@@ -65,7 +66,7 @@ let note = """
 
   second
 """
-say note
+say note, instant
 // A form's question keeps its first paragraph, the intro, and says the others after the form's fields as its outro.
 let pics = load("game.pics", default: false) == true
 let rounds = sexscriptLegacyLoadInteger("game.rounds")
@@ -88,7 +89,7 @@ pics = settings.pics
 save pics as "game.pics"
 rounds = settings.rounds
 save rounds as "game.rounds"
-say "Pictures ${pics}, rounds ${rounds}"
+say "Pictures ${pics}, rounds ${rounds}", instant
 // A form whose later paragraphs are computed with an effect keeps its question whole: the outro would be computed after
 // the fields.
 function mood {
@@ -121,7 +122,7 @@ let dialogs = [
   ["Tell me, how do you feel?"]
 ]
 for line in dialogs.random {
-  say line
+  say line, instant
 }
 // DisciplineClinic Punish: a picked text that the script reads again, here as a question, stays one message.
 dialogArray = ["""
@@ -130,7 +131,7 @@ dialogArray = ["""
   Take your position.
 """, "Bend over."]
 dialog = dialogArray.random
-say dialog
-say dialog
+say dialog, instant
+say dialog, instant
 let response = choose 0: "I understand.", 1: "Please, no."
 exit

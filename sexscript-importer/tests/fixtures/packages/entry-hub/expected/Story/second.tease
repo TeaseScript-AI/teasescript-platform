@@ -3,5 +3,5 @@ title: "Second"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
-say "Chapter two, the end"
+say "Chapter two, the end", instant
 exit

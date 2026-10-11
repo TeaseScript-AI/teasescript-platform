@@ -32,5 +32,5 @@ setupLaterModule()
 greet()
 let cycle = "pauseCycle"
 sexscriptLegacyCall(cycle, [120])
-say "Rounds: ${rounds}"
+say "Rounds: ${rounds}", instant
 exit

@@ -16,19 +16,19 @@ let configureCount = 0
 function askCallback1(it = null) {
   configureTxt = "Rounds ${configureCount}"
   configureCount += 1
-  say configureTxt
+  say configureTxt, instant
 }
 function configure(start) {
   configureTxt = ""
   configureCount = toInteger(start)
   askCallback1()
   askCallback1()
-  say "${configureTxt} ${configureCount}"
+  say "${configureTxt} ${configureCount}", instant
 }
 configure(2)
 function shoutCallback2(labelValue, suffix) {
   // NOTE SX_PLUS_OPERAND_TYPE line 23: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
-  say labelValue + suffix
+  say labelValue + suffix, instant
 }
 function optionsCallback2(labelValue2) {
   let suffix = "!"
@@ -42,7 +42,7 @@ function menu {
 }
 menu()
 function tellCallback4(it, seen) {
-  say "Seen ${seen}"
+  say "Seen ${seen}", instant
 }
 // A closure that only reads a local declared anew on each pass of a loop gets it as a parameter, as each pass's closure
 // saw its own.
@@ -62,7 +62,7 @@ function create(start) {
   // | def bump = { -> count++ }
   let bump = null
   saved = bump
-  say "Count ${count}"
+  say "Count ${count}", instant
 }
 create(1)
 // A closure value that only reads the locals it captures, and that its function only calls, gets them as parameters,
@@ -74,7 +74,7 @@ function labelCallback5(prefix, items, pick, depth) {
 function showMenu(items, depth) {
   let pick = 0
   while pick < items.length {
-    say labelCallback5("Item", items, pick, depth)
+    say labelCallback5("Item", items, pick, depth), instant
     if depth > 0 {
       sexscriptLegacyCall(nested, [["inner"], depth - 1])
     }
@@ -92,9 +92,9 @@ function chooseValue {
   let setValue = null
   // NOTE SX_NULL_ONLY_VARIABLE line 68: none is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
   if pick == null {
-    say "Unset"
+    say "Unset", instant
   } else {
-    say "Set"
+    say "Set", instant
   }
   sexscriptLegacyCall(setValue, [])
 }
@@ -116,12 +116,12 @@ function challenge(who) {
       challengeStep = 0
       mistakeCallback6()
       mistakeCallback6()
-      say "Mistakes ${challengeMistakes} ${challengeStep}"
+      say "Mistakes ${challengeMistakes} ${challengeStep}", instant
     }
     case "b" {
       challengeMistakes = 5
       challengeMistakes += 1
-      say "Other ${challengeMistakes}"
+      say "Other ${challengeMistakes}", instant
     }
   }
 }
@@ -136,7 +136,7 @@ function tune {
   // | def raise = { -> note = note.unknownMethod() }
   let raise = null
   sexscriptLegacyCall(raise, [])
-  say "Tuned"
+  say "Tuned", instant
 }
 tune()
 exit

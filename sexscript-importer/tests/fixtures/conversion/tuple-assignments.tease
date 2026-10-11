@@ -40,11 +40,11 @@ days = sexscriptLegacyItemAt(values, 1)
 taskName = sexscriptLegacyItemAt(values, 2)
 taskText = sexscriptLegacyItemAt(values, 3)
 if serverState == "r" {
-  say "Released after ${days} days"
+  say "Released after ${days} days", instant
 }
-say "Task ${taskName}, text ${taskText}"
+say "Task ${taskName}, text ${taskText}", instant
 let values2 = sexscriptLegacyTokenize("Sam/away", "/")
 let subName = sexscriptLegacyItemAt(values2, 0)
 let drop = sexscriptLegacyItemAt(values2, 1)
-say "${subName} ${drop}"
+say "${subName} ${drop}", instant
 exit

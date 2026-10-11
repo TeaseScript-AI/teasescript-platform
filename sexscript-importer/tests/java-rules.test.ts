@@ -39,12 +39,12 @@ async function convert(lines: string[], files: Record<string, string> = {}): Pro
 }
 
 /**
- * Compiles the converted script and runs it to the end, returning the values it said: each `say` becomes a call of a
- * recording host function, which shows text as itself and other values as JSON.
+ * Compiles the converted script and runs it to the end, returning the values it said: each `say text, instant` becomes a
+ * call of a recording host function, which shows text as itself and other values as JSON.
  */
 function run(source: string): string[] {
   if (!("compiler" in project)) return [];
-  const recording = source.replaceAll(/^( *)say (.+)$/gmu, "$1record($2)");
+  const recording = source.replaceAll(/^( *)say (.+), instant$/gmu, "$1record($2)");
   const files = [{ path: "main.tease", source: recording }];
   const compiled = project.compiler(files, ["record"]);
   assert.deepEqual(
@@ -488,7 +488,7 @@ test("keeps written text files in storage and shows viewed files as prose", { sk
   assert.match(source, /^save "first" as "file:logs\/session\.txt"$/mu);
   assert.match(
     source,
-    /^say as system prose "\$\{load\("file:readme\.txt", default: "Read me"\)\}"$/mu,
+    /^say as system prose "\$\{load\("file:readme\.txt", default: "Read me"\)\}", instant$/mu,
   );
   assert.doesNotMatch(source, /TODO/u);
   const files = [{ path: "main.tease", source }];

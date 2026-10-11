@@ -13,5 +13,5 @@ keywords: "femaledom", "chores"
 let name = "Night shift"
 let build = 3
 // NOTE SX_METADATA_DYNAMIC line 6: setInfos() computed its status when the script ran; a file header holds only written values, so it stays a comment after the header.
-say "Ready."
+say "Ready.", instant
 exit

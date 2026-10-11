@@ -6,5 +6,5 @@ keywords: "lines"
 ---
 // Legacy setInfos(): API version 9, status "v2", color 0x000000, language "EN"
 
-say "Hello ${load("intro.name", default: "")}"
+say "Hello ${load("intro.name", default: "")}", instant
 goto "Lines/Choice.tease"

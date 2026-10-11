@@ -7,13 +7,13 @@ function keepOutfit(photo) {
   save photo as "sexscript.image.${dir}images/outfit/last.jpg"
   // NOTE SX_PHOTO_SIZE line 6: Legacy code read the byte size of a file, which photo code compared with a threshold to detect a broken webcam picture; a package cannot read file sizes, and a photo the player took counts as valid, so the size reads as 1000000 bytes.
   if 1000000 < 15000 {
-    say "Your camera gave a broken picture."
+    say "Your camera gave a broken picture.", instant
   }
 }
 // NOTE SX_CAMERA_FALLBACK line 8: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let proof: string? = takePhoto()
 if proof == null {
-  say "No photo, no outfit check."
+  say "No photo, no outfit check.", instant
 } else {
   showImage proof
   keepOutfit(proof)
@@ -25,7 +25,7 @@ let face: string? = takePhoto()
 if face == null {
   exit
 }
-say "Your photo: ${face.lowercase()}"
+say "Your photo: ${face.lowercase()}", instant
 // A photo taken in a loop ends the session where a use of it after the loop finds none: a later pass may take one.
 let shot: string? = ""
 for it in 0..2 {
@@ -36,11 +36,11 @@ for it in 0..2 {
 if shot == null {
   exit
 }
-say "Last photo: ${shot.lowercase()}"
+say "Last photo: ${shot.lowercase()}", instant
 // What the script does between a photo and its use still happens, also setting the variable to a text, which needs no
 // test.
 let image: string? = takePhoto()
-say "Continue"
+say "Continue", instant
 image = "fallback"
-say image.lowercase()
+say image.lowercase(), instant
 exit

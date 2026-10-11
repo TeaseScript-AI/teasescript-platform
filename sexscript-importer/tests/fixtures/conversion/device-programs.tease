@@ -65,7 +65,7 @@ sexscriptLegacyShowDevice("Estim", "STOPPED")
 sexscriptLegacyShowDevice("Lock", "UNLOCKED")
 // NOTE SX_DEVICE_STATE line 13: openCdTrays() opened the CD trays of the player's computer, which a package cannot do; a permanent button shows the open tray, and clicking it closes the tray.
 sexscriptLegacyOpenTray()
-say "Put the key in the tray"
+say "Put the key in the tray", instant
 let switchbox_on = 0
 let switchbox_off = 0
 switchbox_onText = "usbcontrol.exe ${sexscriptLegacyLoadInteger("training.switchbox")} on"

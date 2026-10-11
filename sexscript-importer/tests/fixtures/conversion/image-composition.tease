@@ -7,7 +7,7 @@ function showTiles(picture, spacing) {
   showImage picture
 }
 showTiles("puzzle/cat.jpg", 2)
-say "Solve the puzzle"
+say "Solve the puzzle", instant
 // A zoom-in that draws the image it was given into growing frames shows the image itself.
 function zoomIn(picture) {
   for step in 1..=3 {

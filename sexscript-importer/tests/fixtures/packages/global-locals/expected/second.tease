@@ -7,5 +7,5 @@ function remember {
   save lastTimeValue as "demo.lastTime"
 }
 remember()
-say "Elapsed ${elapsed()}"
+say "Elapsed ${elapsed()}", instant
 exit

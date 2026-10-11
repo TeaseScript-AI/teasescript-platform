@@ -19,5 +19,5 @@ let piles = [pick([1], [2]), [3]]
 piles[0].add(5)
 let handIndex = 1
 piles[handIndex].add(7)
-say "Drew ${drawn}, next ${deck[0]}, piles end with ${piles[0][1]} and ${piles[handIndex][1]}"
+say "Drew ${drawn}, next ${deck[0]}, piles end with ${piles[0][1]} and ${piles[handIndex][1]}", instant
 exit

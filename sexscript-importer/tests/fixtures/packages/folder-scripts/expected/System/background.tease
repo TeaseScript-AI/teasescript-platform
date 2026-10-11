@@ -1,2 +1,2 @@
-say "Change the background"
+say "Change the background", instant
 exit

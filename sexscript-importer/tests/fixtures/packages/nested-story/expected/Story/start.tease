@@ -6,5 +6,5 @@ if load("Story.start.launch.firsttime", default: sexscriptLegacyValue(null)) == 
 }
 save getAbsoluteDateTime().toSeconds() as "Story.start.launch.lasttime"
 save load("Story.start.launch.nb", default: 0) + 1 as "Story.start.launch.nb"
-say "The story begins."
+say "The story begins.", instant
 goto "Story/middle.tease"

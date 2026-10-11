@@ -15,11 +15,11 @@ function enterWorld(room) {
   }
 }
 function worldTown(loadroom) {
-  say "Town: ${loadroom}"
+  say "Town: ${loadroom}", instant
   return worldEnd("defeated")
 }
 function worldEnd(reason) {
-  say "The end: ${reason}"
+  say "The end: ${reason}", instant
 }
 enterWorld("gates")
 // A variable set up after the script ran its own code keeps the dispatcher: that code could have called it while it
@@ -27,7 +27,7 @@ enterWorld("gates")
 let worldCave = null
 enterWorld("end")
 function scriptCallback3 {
-  say "Cave"
+  say "Cave", instant
 }
 worldCave = "scriptCallback3"
 sexscriptLegacyCall(worldCave, [])

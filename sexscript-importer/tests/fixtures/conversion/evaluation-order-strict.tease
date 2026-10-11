@@ -8,9 +8,9 @@ let conditional = "no"
 if change() == true {
   conditional = "yes"
 }
-say "${earlier}${conditional}"
+say "${earlier}${conditional}", instant
 function yesText {
-  say "Before"
+  say "Before", instant
   return "Yes"
 }
 let option = yesText()
@@ -19,7 +19,7 @@ function getRandom(maxValue) {
   return maxValue - 1
 }
 let xs = [1, 2, 3]
-say "Pick ${xs[getRandom(xs.length)]}"
+say "Pick ${xs[getRandom(xs.length)]}", instant
 let count = 0
 let ready = false
 // NOTE SX_NULL_ONLY_VARIABLE line 11: question is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
@@ -27,8 +27,8 @@ let answer = askText().replace("\n", " ")
 let ignoredAnswer1 = askBoolean "Ready?"
 let match = 1
 if count == match {
-  say "matched"
+  say "matched", instant
 } else if [1, 2].contains(count) {
-  say "small"
+  say "small", instant
 }
 exit

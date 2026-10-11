@@ -5,17 +5,17 @@ function image {
   showImage "garden.jpg"
 }
 function greet {
-  say "Welcome to ${mistress}'s house."
+  say "Welcome to ${mistress}'s house.", instant
 }
 // The same text calls each script's own picture, so it stays in each script.
 function enter {
   image()
-  say "Come in."
+  say "Come in.", instant
 }
 // This script keeps its level as text, so the helper that shows it stays in each script.
 let level = "high"
 function report {
-  say "Level ${level}"
+  say "Level ${level}", instant
 }
 enter()
 report()

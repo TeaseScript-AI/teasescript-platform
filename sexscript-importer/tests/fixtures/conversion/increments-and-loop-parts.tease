@@ -2,11 +2,11 @@
 let count = 3
 let turn = 0
 while count > 0 {
-  say "Count ${count}"
+  say "Count ${count}", instant
   count -= 1
 }
 while turn < 2 {
-  say "Turn ${turn}"
+  say "Turn ${turn}", instant
   turn += 1
 }
 // As a statement, a prefix increment changes the variable as a postfix one does.
@@ -25,14 +25,14 @@ function slot(value) {
 }
 let index = slot(7)
 tally[index] += 1
-say "Tally ${tally[3]} ${tally[0]}, score ${stats.score}"
+say "Tally ${tally[3]} ${tally[0]}, score ${stats.score}", instant
 // A later loop in a nested block may declare the counter of an earlier loop again.
 for i in 0..2 {
-  say "Warm up ${i}"
+  say "Warm up ${i}", instant
 }
 if askBoolean "Again?" {
   for i in 0..3 {
-    say "Again ${i}"
+    say "Again ${i}", instant
   }
 }
 // A prefix increment inside an expression changes the variable before the statement; for (;;) loops until a break.
@@ -45,28 +45,28 @@ while true {
     break
   }
 }
-say "Capped ${capped}, lives ${lives}"
+say "Capped ${capped}, lives ${lives}", instant
 // A for-in loop whose body is a single statement without braces.
 let cards = [2, 3, 4]
 let score = 0
 for card in cards {
   score += card
 }
-say "Score: ${score}"
+say "Score: ${score}", instant
 // A range up to a value that may hold a fraction iterates up to the whole number below it, as Groovy did.
 let swats = 17
 let perCheek = swats / 2
 let swatTo = floor(perCheek)
 for swatOffset in 0..=floor(abs(swatTo - 1)) {
   let swat = 1 + swatOffset * sign(swatTo - 1)
-  say "Swat ${swat}"
+  say "Swat ${swat}", instant
 }
 // An increment in an argument of a function that reads the counter keeps the old value first and counts before the
 // call, as Groovy did (Domme2's rules); one that the statement assigns over counts first (ShockReflex's power level).
 let rules = ["Kneel", "Wait"]
 let ruleNumber = 0
 function showRule(text) {
-  say "Rule ${ruleNumber}: ${text}"
+  say "Rule ${ruleNumber}: ${text}", instant
 }
 for it in rules {
   let ruleNumberBefore = ruleNumber
@@ -76,7 +76,7 @@ for it in rules {
 let powerLevel = 4
 powerLevel += 1
 powerLevel = toInteger(min(powerLevel, 5))
-say "Power ${powerLevel}"
+say "Power ${powerLevel}", instant
 // A conditional start or step of a C-style for is computed first, as in a statement (MatchDares' shuffled deck).
 let deckStart = askInteger "Shuffle?", prefill: 1
 let card = 3
@@ -84,7 +84,7 @@ if deckStart == 1 {
   card = 2
 }
 while card <= 5 {
-  say "Card ${card}"
+  say "Card ${card}", instant
   if deckStart == 1 {
     card += 1
   } else {
@@ -114,7 +114,7 @@ function findFirst(listValue, from) {
   }
   return -1
 }
-say "First ${findFirst([1, 3, 5], 0)}"
+say "First ${findFirst([1, 3, 5], 0)}", instant
 // A counter whose loop sets it with a conditional, or that a closure's default reads, stays declared where it was.
 let roundValue = 0
 if randomInteger(0..1) == 0 {
@@ -123,7 +123,7 @@ if randomInteger(0..1) == 0 {
   roundValue = 2
 }
 while roundValue < 3 {
-  say "Round ${roundValue}"
+  say "Round ${roundValue}", instant
   roundValue += 1
 }
 let lap = 0
@@ -132,8 +132,8 @@ function lastLap(seen = lap) {
 }
 lap = 0
 while lap < 2 {
-  say "Lap ${lap}"
+  say "Lap ${lap}", instant
   lap += 1
 }
-say "Last lap ${lastLap()}"
+say "Last lap ${lastLap()}", instant
 exit

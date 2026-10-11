@@ -31,7 +31,7 @@ takePics = settings.takePics
 save takePics as "game.takePics"
 tries = settings.tries
 save tries as "game.tries"
-say "Pictures ${takePics}, tries ${tries}"
+say "Pictures ${takePics}, tries ${tries}", instant
 // A menu that switches settings until the player leaves becomes one form of toggles; a reset to fixed values is a
 // choice before the form.
 let showPics = true
@@ -49,5 +49,5 @@ let settings2 = askForm "Visibility", fields: {
 showPics = settings2.showPics
 showDays = settings2.showDays
 menu = 0
-say "Visible ${showPics} ${showDays}"
+say "Visible ${showPics} ${showDays}", instant
 exit

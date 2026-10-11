@@ -15,7 +15,7 @@ test("a transfer keeps its last text where the next script first shows an updata
     {
       kind: "let",
       name: "line",
-      value: { kind: "message", value: { kind: "literal", value: "Loading." }, instant: true },
+      value: { kind: "message", value: { kind: "literal", value: "Loading." } },
       span,
     },
     { kind: "say", value: { kind: "literal", value: "Ready" }, span },

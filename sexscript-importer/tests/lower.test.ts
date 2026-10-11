@@ -59,15 +59,14 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  // A script's first text keeps its reading time, since one may still run from the script before it.
   assert.deepEqual(
     program.diagnostics.map((diagnostic) => diagnostic.code),
-    ["SX_WAIT_KEPT_PACED"],
+    [],
   );
   assert.equal(
     emitTease(program),
     [
-      'say "Hello"',
+      'say "Hello", instant',
       "wait 2 s",
       "timer 3 s",
       'showImage "scene/one.jpg"',
@@ -114,7 +113,9 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["switch value {", "  case 0..=3 {", '    say "small"', "  }", "}", "exit", ""].join("\n"),
+    ["switch value {", "  case 0..=3 {", '    say "small", instant', "  }", "}", "exit", ""].join(
+      "\n",
+    ),
   );
 });
 
@@ -151,9 +152,9 @@ test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's fi
     emitTease(program),
     [
       "if value == 2 {",
-      '  say "two"',
+      '  say "two", instant',
       "} else if value >= 0 and value <= 3 {",
-      '  say "low"',
+      '  say "low", instant',
       "}",
       "exit",
       "",
@@ -396,7 +397,14 @@ test("synthesizes optional it only when an implicit Groovy closure is called wit
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["function helper(it = null) {", '  say "ok"', "}", 'helper("ignored")', "exit", ""].join("\n"),
+    [
+      "function helper(it = null) {",
+      '  say "ok", instant',
+      "}",
+      'helper("ignored")',
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 
@@ -577,7 +585,7 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
   assert.equal(
     emitTease(program),
     [
-      'say "Choose one"',
+      'say "Choose one", instant',
       'let selected = choose 0: "First",',
       '  1: "Second",',
       '  2: "Third"',
@@ -638,7 +646,10 @@ test("lowers a simple C-style for loop through a range", () => {
 
   const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
-  assert.equal(emitTease(program), ["for i in 0..3 {", "  say i", "}", "exit", ""].join("\n"));
+  assert.equal(
+    emitTease(program),
+    ["for i in 0..3 {", "  say i, instant", "}", "exit", ""].join("\n"),
+  );
 });
 
 test("runs the update step of a C-style for loop that counts down before continue", () => {
@@ -688,7 +699,7 @@ test("runs the update step of a C-style for loop that counts down before continu
       "    i -= 1",
       "    continue",
       "  }",
-      "  say i",
+      "  say i, instant",
       "  i -= 1",
       "}",
       "exit",
@@ -761,10 +772,10 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
     [
       'let items = ["a", "b"]',
       "for it in 1..=3 {",
-      "  say it",
+      "  say it, instant",
       "}",
       "for it in items {",
-      "  say it",
+      "  say it, instant",
       "}",
       "exit",
       "",
@@ -818,7 +829,7 @@ test("turns return inside Groovy each() into continue", () => {
       "  if it == 2 {",
       "    continue",
       "  }",
-      "  say it",
+      "  say it, instant",
       "}",
       "exit",
       "",
@@ -1023,18 +1034,18 @@ test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", 
     [
       "switch value {",
       "  case 0 {",
-      '    say "zero"',
-      '    say "one"',
+      '    say "zero", instant',
+      '    say "one", instant',
       "  }",
       "  case 1 {",
-      '    say "one"',
+      '    say "one", instant',
       "  }",
       "  case 2 {",
-      '    say "two"',
-      '    say "default"',
+      '    say "two", instant',
+      '    say "default", instant',
       "  }",
       "  default {",
-      '    say "default"',
+      '    say "default", instant',
       "  }",
       "}",
       "exit",

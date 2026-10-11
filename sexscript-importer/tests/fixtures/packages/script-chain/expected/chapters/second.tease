@@ -1,4 +1,4 @@
-say "Chapter two."
+say "Chapter two.", instant
 showButton "go on"
 // The next script comes from storage.
 let after = load "chapter.after", default: ""

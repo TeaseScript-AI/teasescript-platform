@@ -148,21 +148,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `n = before() + getInteger(null)`.
 - Paragraphs (owner decision 2026-10-07): the legacy display showed one text, so authors separated what a chat shows
   as separate messages with a blank line. A text whose literal parts hold a blank line becomes one `say` per paragraph,
-  in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. The
-  pieces have the Player's reading time: a text that was `instant` because a legacy `wait` follows loses it. The wait
-  started when the whole text appeared, so a kept wait after the last piece keeps only what the reading time of the
-  earlier pieces leaves, in whole seconds, and goes when nothing is left (owner decision 2026-10-07;
-  `readingWaits.shortened` and `dropped`). Where the last piece's reading time would outlast the wait after it, the
-  compiler warns that the wait adds no time (`TSV060`, #714), which holds before a text or media, which wait for that
-  reading time; before a wait or a timer, which run alongside it, a button or an ask, which end it, or a text said at
-  once, the wait adds its time. So, by the rules above, where the legacy wait set the timing the text shows whole at
-  once, each piece said at once, and the waits follow: where another wait or a timer follows its wait (`SX_WAIT_TIMED`,
-  `timed`), before a wait restored for a beat (`SX_PARAGRAPH_WAIT_BEAT`, `paragraphsBeforeBeat`), and where the rest of
-  a long kept wait is shorter than the last piece's reading time before a statement that this reading time does not
-  cover (`SX_PARAGRAPH_WAIT_WHOLE`, `paragraphsWhole`); before a text, media, a button, or an ask, where a reading wait
-  goes, that rest is reading time and goes (`SX_PARAGRAPH_WAIT_READ`, `paragraphWaitsRead`). A text that was not split
-  keeps its timing as below; where it waits for a reading time before it, the warning stays, and its waits still add
-  their time. An ask's question (also `askImage`'s message) is the last paragraph that ends with a
+  in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. Each
+  piece is said at once, as the whole text was, and the legacy wait after it stays whole (Timing, below). An ask's
+  question (also `askImage`'s message) is the last paragraph that ends with a
   question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
   question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
   Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
@@ -750,11 +738,11 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   write, method call, or call of script code in its body, its condition, or those statements that may reach them),
   becomes `let counter = say …, instant` before the loop and `counter.text = …`
   in it, as Domme3's spank counts (`SX_MESSAGE_COUNTER`, `messageHandles.counters`). The waits between the steps stay as they
-  are, since the pacing rule below only touches waits right after a `say`; other loops keep one message per pass, a
+  are; other loops keep one message per pass, a
   module's code outside its functions keeps its texts, and a later text that repeats a handle's current text says only
   what it adds.
 - Clock loops: a legacy loop that polled the clock until a time passed (`getTime()`, `System.currentTimeMillis()`)
-  ran on real time, but a TeaseScript clock advances only at waits, and a text's reading time passes none. A loop that
+  ran on real time, but a TeaseScript clock advances only at waits, and a text passes none. A loop that
   only redraws a countdown becomes a visible timer over the same time (`SX_BUSY_COUNTDOWN`). Another loop whose
   condition reads the clock (directly, through a variable the body sets from it, or through a function that returns
   it, also through locals) and whose passes do not all surely make the clock advance (a wait of a time known to be
@@ -765,39 +753,13 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   sets how many passes the loop makes (`SX_CLOCK_LOOP`), as in ZapEdgeStrip's dice rolls,
   Nim's closing window, BreatheAcademy's countdown, and the loops of guessit, selfbt, smackedforcash, and
   trick_or_treat_poker. Where nothing in the loop may wait at all, it only redrew its texts, which become one message
-  that changes in place, as the legacy display redrew one text. A wait in a loop that polls the clock, or in a function
-  its condition or body calls, stays, also after a text whose reading time would replace it elsewhere (`SX_WAIT_CLOCK`).
-- Pacing: legacy `show()` displayed its text at once and authors timed its reading with the `wait()` after it, while
-  the Player gives every `say` a skippable reading time (1500 ms plus 300 ms a word or 30 ms a character, whichever is
-  more). A literal wait right after a text that is at most 1.5 times that reading time goes, also before a button or an
-  ask; the time is measured on the whole legacy text's visible words, without its interpolated values (owner decision
-  2026-10-07; `SX_WAIT_READING`, counted as `readingWaits.replaced`). A longer wait is time for an action or a task and
-  stays, and its text becomes `say …, instant` (converter owner, 2026-10-05; `readingWaits.kept`). Since `instant`
-  also ends the reading time of the text before it, a text keeps `instant` only where its own block shows, on the
-  straight path before it, that no reading time that replaced a wait can still run: after a text said at once or
-  without such a reading time, an ask, button, or choice that surely opens, media, or literal waits as long as a fixed
-  text's reading time, with only statements without effects in between. Elsewhere (the start of a function, a loop's
-  body, or a script, after a call or where computing the text calls something, or after a text with values whose
-  length is unknown) the text keeps its reading time and waits for the one before it (`SX_WAIT_KEPT_PACED`,
-  `keptPaced`). A fixed text's own reading time is shorter than the literal kept wait after it, so only a pending
-  reading time delays it; a text with values, or one before a computed wait, may also make the pause longer by its
-  own reading time. Computed waits, a wait that another wait follows, waits after
-  the importer's system texts, and beats keep their `instant` text as before. Beats (owner decision 2026-10-07), the
-  wait whatever its length: the wait after a text without letters, a count or a pause such as `3`, `. . .`, or a
-  number (`SX_WAIT_BEAT`, `beats`), and a loop's tick, a wait of a second at most after a text the loop's body builds
-  anew each pass, as in a countdown or a clock (`SX_WAIT_TICK`, `ticks`); animations and counters keep theirs as
-  updatable messages (above), whose first message keeps `instant` as a beat does. A beat split into paragraphs keeps
-  `instant` on every paragraph, so the text shows whole at once. A sound that starts between a text and its wait, a
-  background sound, took no time in legacy, so the wait is the text's (owner decision 2026-10-08): where it stays, the
-  text is a beat said at once with its sound, also as the last text of every branch of an `if` before the sound
-  (DisciplineClinic's strokes; `SX_WAIT_SOUND_BEAT`, `soundBeats`), and where the reading time replaces it, the sound
-  starts before its text so that the two come together, where the text is fixed or only interpolates variables
-  (`SX_SOUND_WITH_TEXT`, `soundsWithText`; a value read through a variable, as `list[i]`, may rely on a test before
-  it that the sound, which waits, lets lapse). A background sound, now plain `playAudio async`, and `stopAudio` wait for
-  the reading time before them, as media do. A beat keeps its `instant`, so a text whose
-  replaced reading time may still run when a beat is said keeps its legacy wait and `instant` instead, a beat itself
-  in turn unless it was split (`SX_WAIT_FOR_BEAT`, `keptForBeats`); a reading time of unknown origin, after a call or
-  from a loop's earlier pass, gives way to the beat.
+  that changes in place, as the legacy display redrew one text.
+- Timing (owner decision 2026-10-11, literal timing, as SexScript had it): legacy `show()` displayed its text at once,
+  so every text is `say …, instant`, also the texts the importer splits, folds, or adds, and every legacy `wait(n)` is
+  `wait n s` with exactly the legacy duration. No reading time, estimate, or pacing rule applies; the importer's own
+  waits, a clock loop's ticks, are literal waits too. A text that another text or the script's end follows with no
+  wait or input between gets no time of its own, as in SexScript, where the next text replaced it at once. Texts said
+  with a duration (`say t, n s`) are not used: a later text said at once, or a button, would cut that duration short.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

@@ -69,21 +69,11 @@ export interface IrFunctionParameter {
 
 export type IrStatement =
   /**
-   * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
-   * `prose` shows it as prose rather than a speech bubble (V30 §17). `readingTime` marks a text whose reading time
-   * replaced the legacy wait after it (withReadingTimes), and holds that wait, which a later `instant` text must not
-   * cut short; `beat` marks
-   * an `instant` text that keeps it: a beat, a count or a loop's tick, or a text that keeps its legacy wait before one.
+   * Every text is said at once (`say text, instant`), as legacy `show()` displayed it, and only the legacy waits time it
+   * (owner decision 2026-10-11: literal timing). `speaker` says it `as` that speaker, and `prose` shows it as prose
+   * rather than a speech bubble (V30 §17).
    */
-  | (IrBase & {
-      kind: "say";
-      value: IrExpression;
-      instant?: true;
-      speaker?: string;
-      prose?: true;
-      readingTime?: Extract<IrStatement, { kind: "wait" }>;
-      beat?: true;
-    })
+  | (IrBase & { kind: "say"; value: IrExpression; speaker?: string; prose?: true })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";
@@ -91,19 +81,10 @@ export type IrStatement =
       properties: Array<{ name: string; value: IrExpression }>;
     })
   /**
-   * `visible` shows a countdown (`timer`). `afterText` marks a literal wait right after a text that is longer than 1.5
-   * times the text's reading time and stays (withReadingTimes), which withParagraphs shortens when it splits the text.
-   * `unit` is that of the number `duration`, or null where `duration` is a duration value (withElapsedDurations).
-   * `clock` marks a wait in a loop that polls the clock, where it is the time the loop waits for (withClockLoopTicks).
+   * `visible` shows a countdown (`timer`). `unit` is that of the number `duration`, or null where `duration` is a
+   * duration value (withElapsedDurations).
    */
-  | (IrBase & {
-      kind: "wait";
-      duration: IrExpression;
-      visible: boolean;
-      unit: "s" | "ms" | null;
-      afterText?: true;
-      clock?: true;
-    })
+  | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" | null })
   /**
    * `timeout` is a number of seconds, or a duration where it is a duration literal or `durationTimeout` marks it
    * (withElapsedDurations).
@@ -377,10 +358,10 @@ export type IrExpression =
       calendar?: true;
     }
   /**
-   * A `say` used as a value: it shows its text as a `say` statement does and gives the message's handle, whose `text`
-   * changes the message in place (V30 "Updatable messages").
+   * A `say` used as a value: it shows its text at once as a `say` statement does and gives the message's handle, whose
+   * `text` changes the message in place (V30 "Updatable messages").
    */
-  | { kind: "message"; value: IrExpression; instant?: true; speaker?: string }
+  | { kind: "message"; value: IrExpression; speaker?: string }
   /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
   | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }

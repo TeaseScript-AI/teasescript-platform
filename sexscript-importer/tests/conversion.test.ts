@@ -707,7 +707,7 @@ test(
       writeFileSync(sourcePath, '// header\rwait(2)\rshow("done") // trailing\r');
       assert.equal(
         emitTease(await convert(sourcePath)),
-        '// header\nwait 2 s\nsay "done" // trailing\nexit\n',
+        '// header\nwait 2 s\nsay "done", instant // trailing\nexit\n',
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1679,88 +1679,6 @@ async function convert(
   return program;
 }
 
-// With the Player's default pacing, a text said at once (`instant`) ends the reading time of the text before it, so a
-// text whose legacy wait the reading time replaced is read in full on every path: after other statements, across a
-// call, after an ask that a condition may skip, on a loop's next pass after `continue`, where computing a text, a wait,
-// a value after an ask, or what media show says it, and before a beat, which keeps its timing (docs/RUNTIME.md "Pacing
-// gate").
-test(
-  "a reading time that replaced a legacy wait runs in full before the next text",
-  { skip: parserUnavailable },
-  async () => {
-    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
-    assert.ok(typeof runtime === "object" && runtime !== null);
-    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probes use.
-    const { compileSource, createFreshRuntimeSnapshot, run, observeTime, completeAction } =
-      runtime as PacedRuntime;
-    const sources = {
-      statement: 'show("Good.")\nwait(1)\nint n = 20\nshow("Hold.")\nwait(20)',
-      call: 'def hold = { show("Hold."); wait(20) }\nshow("Good.")\nwait(1)\nhold()',
-      values:
-        'def t = "a b c d e f g h i j"\nshow(t)\nwait(1)\nint x = 1\nwait(2)\nshow("Hold.")\nwait(20)',
-      skippedAsk:
-        'show("Good.")\nwait(1)\nif (false && getFile(null) != null) { show("No.") }\nshow("Hold.")\nwait(20)',
-      continued:
-        'for (int i = 0; i < 2; i++) {\n show("Hold " + i)\n wait(20)\n show("Good.")\n wait(1)\n if (i == 0) continue\n wait(10)\n}',
-      computedText:
-        'def content = { show("Good."); wait(1); return "Hold." }\nshowButton("Start")\nshow(content())\nwait(20)',
-      computedWait:
-        'def delay = { show("Good."); wait(1); return 1 }\nshowButton("Start")\nshow("Hold.")\nwait(delay())\nshow("Next.")\nwait(20)',
-      beat: 'show("Good.")\nwait(1)\nfor (int i = 3; i > 0; i--) {\n show("Starting in " + i)\n wait(1)\n}',
-      longBeat: 'show("Good.")\nwait(1)\nshow("3")\nwait(3)',
-      number: 'show("Good.")\nwait(1)\nshow(3)\nwait(1)',
-      animation: 'show("Good.")\nwait(1)\nshow("Wait.")\nwait(1)\nshow("Wait..")\nwait(1)',
-      splitBeat: 'show("Good.")\nwait(1)\nshow("!\\n\\n?")\nwait(1)',
-      splitTick:
-        'for (int i = 3; i > 0; i--) {\n show("First part.\\n\\nSecond part.\\n\\nStarting in " + i)\n wait(1)\n}',
-      media:
-        'def image = { show("Good."); wait(1); return "test.jpg" }\nshowButton("Start")\nsetImage(image())\nshow("Hold.")\nwait(20)',
-      askThenText:
-        'def content = { show("Good."); wait(1); return true }\nshowButton("Start")\ndef same = getBoolean("Ready?") == content()\nshow("Hold.")\nwait(20)',
-    };
-    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-reading-"));
-    try {
-      for (const [name, source] of Object.entries(sources)) {
-        const file = path.join(directory, `${name}.groovy`);
-        writeFileSync(file, `${source}\n`);
-        const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
-        const { plan } = compileSource(tease);
-        assert.ok(plan !== undefined, name);
-        const cut: string[] = [];
-        const note = (events: readonly PacedEvent[]): void => {
-          for (const event of events)
-            if (event.settlement?.settlementKind === "supersededByInstantOutput") cut.push(name);
-        };
-        let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
-        note(step.events);
-        for (let turn = 0; turn < 40 && step.snapshot.status === "waiting"; turn += 1) {
-          const action = step.snapshot.foregroundAction;
-          // A button is pressed and a choice takes its first option at once; time runs to the next deadline.
-          const answered =
-            action?.kind === "interaction"
-              ? completeAction(plan, step.snapshot, {
-                  actionId: action.actionId,
-                  actionKind: "interaction",
-                  interactionKind: action.interactionKind,
-                  payload:
-                    action.interactionKind === "button"
-                      ? { kind: "activate" }
-                      : { kind: "selectedOption", optionIndex: 0 },
-                })
-              : observeTime(plan, step.snapshot, action?.deadlineMs ?? NaN);
-          note(answered.events);
-          step = run(plan, answered.snapshot);
-          note(step.events);
-        }
-        assert.equal(step.snapshot.status, "halted", name);
-        assert.deepEqual(cut, [], tease);
-      }
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  },
-);
-
 // Legacy loadInteger() and loadFloat() parsed the stored text, loadInteger() dropping the fraction toward zero, and left
 // the stored text as it was; a value the script used for a missing key stays as it is. Half of a whole number keeps
 // its fraction through a later subtraction (RCA 2026-10-07 #1, #2, #4).
@@ -1839,10 +1757,10 @@ test(
   },
 );
 
-// BreatheAcademy's breath-hold countdown and typed-out text: legacy showed one text per tick and waited the tick, so a
-// player who never skips sees them take the time the author wrote, not a reading time per message.
+// Literal timing (owner decision 2026-10-11): every text is said at once and only the legacy waits take time, so a
+// player who never skips sees BreatheAcademy's breath-hold countdown and typed-out text take the time the author wrote.
 test(
-  "countdowns and texts typed out a character at a time keep their legacy pace",
+  "shown texts appear at once and legacy waits take the time the author wrote",
   { skip: parserUnavailable },
   async () => {
     const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
@@ -1901,7 +1819,7 @@ test(
       );
       note(step.events, step.snapshot);
       for (let turn = 0; turn < 200 && step.snapshot.status === "waiting"; turn += 1) {
-        // A player who never skips: time goes on to the earliest deadline, a reading time's or a wait's.
+        // A player who never skips: time goes on to the earliest deadline, a wait's.
         const deadlines = [
           step.snapshot.foregroundAction,
           ...(step.snapshot.backgroundActions ?? []),

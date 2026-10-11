@@ -112,12 +112,7 @@ export function withParagraphPicks(
         value.kind === "variable" && value.name === site.list
           ? { kind: "variable", name }
           : mapChildren(value, renamed);
-      const { instant: _instant, beat, ...paced } = site.say;
-      const said: Say = {
-        ...paced,
-        value: { kind: "variable", name: line },
-        ...(beat === true ? { instant: true, beat } : {}),
-      };
+      const said: Say = { ...site.say, value: { kind: "variable", name: line } };
       const span = result[index]!.span;
       result[index] = declared.has(name)
         ? { kind: "assign", target: { kind: "variable", name }, operator: "=", value: lists, span }
