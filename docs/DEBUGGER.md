@@ -42,8 +42,7 @@ which appears when the host persists script storage.
   ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
   accelerated time, not an active-debug fork, and change no script semantics.
 - **Countdowns** show the deadline of the current foreground wait from canonical state: an authored `wait` (a blocking
-  `timer` stays a timer), a presented `showButton` with a timeout, or chat pacing while no other foreground action owns
-  progress or input. An action suspended behind a running timer, media, or permanent-button block does not count; that
+  `timer` stays a timer), a presented `showButton` with a timeout, or a message's reading time. An action suspended behind a running timer, media, or permanent-button block does not count; that
   block's own foreground work does. Seconds round up against the Player's display estimate of scene time. An elapsed
   deadline whose action has not settled reads **Wait elapsed · waiting for script**; the line ends when its action
   settles or loses the foreground, and does not show before Start or Continue or after the session ends.

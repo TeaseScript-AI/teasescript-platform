@@ -533,9 +533,9 @@ inspection, all four interaction completions and rejections, pacing skip, explic
 
 The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
-background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
-settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
-equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
+reading times that hold every later statement, including instant output, interactions, media, timers, and `wait`,
+typed/time settlement, blocks and button clicks that wait for a reading time, deterministic event ordering,
+checkpoint/JSON restore equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
 exhaustion and terminal transition atomicity. The dependency-free browser smoke script covers primary pointer/touch and
 eligible Space input, interactive-input priority, rejection feedback, canonical transcript rendering, checkpoint
 control reconstruction, and desktop/button versus narrow/dropdown presentation.
@@ -559,7 +559,7 @@ through public validation/restore paths.
 Media coverage starts with real `.tease` source and exercises accepted and rejected forms, load/failure transitions,
 blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
-media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
+media and timers, cue blocks with self-handles, Stage replacement, playback projections, JSON
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each

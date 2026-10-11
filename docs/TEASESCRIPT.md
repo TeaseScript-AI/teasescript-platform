@@ -119,7 +119,7 @@ expression, and `as speaker` comes before the parentheses
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
-speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
+speaker says it in the chat, as by `say` but with no reading time of its own, once, and the field opens with it. `hint:` is help text shown in the field
 only; in a text or number field it shows only while the field is empty, so a prefill usually hides it
 ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
 optional `prefill:` answer starts in the field; the player still submits it, and a cleared field does not fall back to
@@ -200,14 +200,20 @@ say "Immediate", instant
 Pacing meanings:
 
 - omitted: smart autoplay from captured account settings;
-- positive exact duration: exact pacing gate, including fractional seconds such as `1.5 s`;
-- `0 s` or `instant`: settle any earlier background gate, emit immediately, and create no new gate;
+- positive exact duration: exact reading time, including fractional seconds such as `1.5 s`;
+- `0 s` or `instant`: no reading time;
 - a number without a unit: compile error that names the fix, such as `5 s` ([ADR 0026](decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
 - negative, non-finite, calendar, unsupported-magnitude, or deadline-overflow value: structured error.
 
 With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySkippable` setting and otherwise the platform default `true`.
 
-`wait` remains separate. It does not become a `say` option and does not consume the pacing gate.
+A paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision
+on #829, 2026-10-11). Nothing runs on during a reading time: no other message, question, button, form, media or
+camera change, message or permanent-button change, `wait`, timer, or code the player cannot see. A question appears
+together with its controls, and a timeout counts from when it is visible. Permanent buttons already shown stay usable;
+their blocks, like due timer blocks, run when the reading time ends. For exact timing, write `instant`:
+`say "Hold the position.", instant` followed by `wait 30 s` takes exactly 30 seconds, and without `instant` the reading
+time comes first. `wait` remains separate and does not become a `say` option.
 
 Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
 pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
