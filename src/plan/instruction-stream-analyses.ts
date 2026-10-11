@@ -2014,6 +2014,8 @@ function validateFunctionPrologue(
           "jump",
           "showPermanentButton",
           "startTimer",
+          // The barrier before `removePermanentButton(...)`.
+          "pacingBarrier",
         ])
       ) {
         errors.push(

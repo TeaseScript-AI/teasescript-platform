@@ -487,6 +487,47 @@ test("removing a permanent button waits for the reading time wherever the call s
   );
 });
 
+test("a parameter default that removes a permanent button waits for the reading time, and one that does not run holds nothing", () => {
+  const source = (call: string, removal = "removePermanentButton(target)") =>
+    [
+      'let button = showPermanentButton "Hint" {',
+      '    say "Hint", instant',
+      "}",
+      `function removeHint(target, removed = ${removal}) {`,
+      "    return removed",
+      "}",
+      'say "A", 5 s',
+      call,
+      'showButton "Go"',
+      "exit",
+    ].join("\n");
+  const omitted = plan(source("removeHint(button)"));
+  const held = run(omitted, createFreshRuntimeSnapshot(omitted));
+  assert.equal(heldGate(held.snapshot).deadlineMs, 5_000);
+  assert.ok(held.snapshot.backgroundActions.some((action) => action.kind === "permanentButton"));
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(omitted, held.snapshot)),
+  );
+  assert.deepEqual(restored.snapshot, held.snapshot);
+  const resume = (start: { readonly plan: typeof omitted; readonly snapshot: RuntimeSnapshot }) =>
+    run(start.plan, observeTime(start.plan, start.snapshot, 5_000).snapshot);
+  const released = resume({ plan: omitted, snapshot: held.snapshot });
+  assert.deepEqual(resume(restored), released);
+  assert.equal(
+    released.snapshot.backgroundActions.some((action) => action.kind === "permanentButton"),
+    false,
+  );
+  assert.equal(released.snapshot.foregroundAction?.kind, "interaction");
+
+  for (const [call, removal] of [
+    ["removeHint(button, null)", undefined],
+    ["removeHint(button)", "false and removePermanentButton(target) == null"],
+  ] as const) {
+    const kept = timeline(source(call, removal));
+    assert.deepEqual(kept, ["0 show Hint", "0 say A", "5000 button", "5000 exit"], call);
+  }
+});
+
 test("a goto that removes a shown permanent button waits for the reading time, and one that removes nothing goes on", () => {
   assert.deepEqual(
     timeline(
