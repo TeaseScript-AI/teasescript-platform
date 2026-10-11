@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 2 error diagnostics.
+// MIGRATION INCOMPLETE: 3 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
@@ -83,11 +83,27 @@ function showMenu(items, depth) {
 }
 nested = "showMenu"
 showMenu(["a", "b"], 1)
+// A text without a value that the function compares with null stays a local, and its setter a TODO: the script
+// variable would start as the empty text.
+function chooseValue {
+  let pick = null
+  // TODO SX_CAPTURING_CLOSURE line 67: This closure value captures local pick of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | def set = { -> pick = "x" }
+  let setValue = null
+  if pick == null {
+    say "Unset"
+  } else {
+    say "Set"
+  }
+  sexscriptLegacyCall(setValue, [])
+}
+chooseValue()
+chooseValue()
 // A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
 let tuneNote = "low"
 function tune {
   tuneNote = "low"
-  // TODO SX_CAPTURING_CLOSURE line 66: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // TODO SX_CAPTURING_CLOSURE line 76: This closure value captures local note of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
   // | def raise = { -> note = note.unknownMethod() }
   let raise = null
   sexscriptLegacyCall(raise, [])

@@ -515,10 +515,33 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
   const type = typeof left?.originType === "string" ? left.originType : "java.lang.Object";
   if (value?.kind === "closure") return false;
   if (type === "boolean") return false;
-  if (value === null || isEmpty(value)) return ZERO_TYPES.has(type) || TEXT_TYPES.has(type);
+  // A text without a value starts as the empty text, as the conversion starts such a local (liftLocal), except where the
+  // function tells null apart, which a local the conversion keeps as null shows.
+  if (value === null || isEmpty(value))
+    return ZERO_TYPES.has(type) || (TEXT_TYPES.has(type) && !nullTested(block, name));
   // A text set to a computed value may be null where it is read after a call, as above.
   if (TEXT_TYPES.has(type)) return literal(value);
   return literal(value) || typed(type);
+}
+
+/** Whether the block compares a variable with null, `x == null` or `x != null`, or reads it null-safely, `x?.size()`. */
+function nullTested(block: AstNode, name: string): boolean {
+  let tested = false;
+  walkAst(block, (node) => {
+    if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
+      const [left, right] = [asNode(node.left), asNode(node.right)];
+      const isNull = (side: AstNode | null): boolean =>
+        side?.kind === "constant" && side.value === null;
+      if (
+        (variableName(left) === name && isNull(right)) ||
+        (variableName(right) === name && isNull(left))
+      )
+        tested = true;
+    }
+    if ((node.kind === "property" || node.kind === "methodCall") && node.safe === true)
+      if (variableName(node.object) === name) tested = true;
+  });
+  return tested;
 }
 
 /**

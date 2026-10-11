@@ -1986,6 +1986,8 @@ test("the captured-locals fixture says what Groovy's closures gave", async () =>
     "Item inner at 0",
     "Item b at 1",
     "Item inner at 0",
+    "Unset",
+    "Unset",
     "Tuned",
   ]);
 });

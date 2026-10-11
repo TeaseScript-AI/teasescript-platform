@@ -60,6 +60,16 @@ def showMenu = { List items, int depth ->
 }
 nested = showMenu
 showMenu(["a", "b"], 1)
+// A text without a value that the function compares with null stays a local, and its setter a TODO: the script
+// variable would start as the empty text.
+def choose = { ->
+	String pick
+	def set = { -> pick = "x" }
+	show(pick == null ? "Unset" : "Set")
+	set()
+}
+choose()
+choose()
 // A closure whose converted body has an error stays as it was, unconverted, so that the script keeps compiling.
 def tune = { ->
 	String note = "low"
