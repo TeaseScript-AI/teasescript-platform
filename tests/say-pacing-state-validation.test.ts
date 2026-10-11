@@ -584,7 +584,11 @@ test("prepared say text is live instead of its already-consumed source expressio
 
   let boundary = createFreshRuntimeSnapshot(compiled);
   while (boundary.status !== "halted") {
-    boundary = executeInstruction(compiled, boundary).snapshot;
+    // The exit waits for the message's pacing.
+    boundary =
+      boundary.foregroundAction?.kind === "chatPacingGate"
+        ? observeTime(compiled, boundary, boundary.foregroundAction.deadlineMs).snapshot
+        : executeInstruction(compiled, boundary).snapshot;
     assert.equal(validateRuntimeSnapshot(boundary, compiled).valid, true);
   }
 
