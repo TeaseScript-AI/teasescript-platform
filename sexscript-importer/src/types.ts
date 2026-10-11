@@ -1015,11 +1015,17 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
   return elements;
 }
 
-/** `text.readLines()`, `text.split(separator)`, and `text.tokenize(...)`, which give lists of text. */
+/**
+ * `text.readLines()`, `text.split(separator)`, and `text.tokenize(...)`, which give lists of text, also copied as they
+ * are by `collect()` or `toList()` (HitOrZap's `strRange.split('-').collect()`).
+ */
 function textListCall(node: AstNode): boolean {
   const method = constantString(node.method);
   const args = asNode(node.arguments);
   const items = Array.isArray(args?.items) ? args.items.filter(isAstNode) : [];
+  const object = asNode(node.object);
+  if ((method === "collect" || method === "toList") && items.length === 0)
+    return object?.kind === "methodCall" && textListCall(object);
   if (method === "readLines") return items.length === 0;
   // A collection's split(closure) gives two lists instead.
   if (method === "split") return items.length === 1 && items[0]!.kind !== "closure";
