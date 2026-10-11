@@ -18261,7 +18261,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
         node.span,
       );
-      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      if (call.arguments.length > 0 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
+        return null;
       return { kind: "call", name: "askImage", positional: [], named: {} };
     }
     case "getDataFolder":

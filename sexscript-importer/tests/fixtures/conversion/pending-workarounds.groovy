@@ -17,4 +17,6 @@ show("You knelt ${seconds} seconds")
 useUrl("https://example.com/rules")
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
 def photo = getFile("Pick a photo of yourself")
+// Without a title, there is nothing to say before the request.
+def another = getFile()
 if (photo == null) show("No photo, then")
