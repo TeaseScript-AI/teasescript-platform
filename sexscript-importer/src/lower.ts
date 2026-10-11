@@ -5121,15 +5121,19 @@ function hasOwnEffect(node: AstNode, context: LowerContext): boolean {
 
 const PURE_OBJECT_METHODS = new Set([
   "contains",
+  "containsKey",
   "equals",
   "isEmpty",
+  "keySet",
   "length",
   "size",
   "split",
+  "toList",
   "toLowerCase",
   "toString",
   "toUpperCase",
   "trim",
+  "values",
 ]);
 
 /** Java Math methods without randomness; `Math.random()` is not one. */
