@@ -57,8 +57,9 @@ which appears when the host persists script storage.
   - The **Stage image** shows its authored path and state: Hidden, Unresolved path (the host has no file for it), Loading,
     Displayed, Load failed (the browser cannot load or decode it), or Covered by camera or video; in the development
     preview, Replaced by a preview fixture. Only the Stage's reports for the image element and source it shows now
-    count. A captured or chosen image has no path. **Set by** names the statement that set the image, or says that
-    earlier history is unavailable.
+    count. A captured or chosen image has no path. **Set by** names the statement that set the image; when the value
+    trace has no record of it, the line says why, as for a message: the image was set before the current recording
+    began, or its record was dropped.
   - **Audio and video** list every active instance with its authored path, Loading, Playing, or Paused, its reported
     playhead, and the statement that started it.
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
