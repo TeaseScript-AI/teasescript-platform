@@ -2073,7 +2073,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const timeStepsTried = new Set<string>();
   /** The presses after thinking first tried, by place, button, and time (see the expansion of a state). */
   const thinksTried = new Set<string>();
-  /** The places of the camera requests a step went again for with a photo (see the expansion of a state). */
+  /** The places of the first camera requests of steps that went again with a photo (see `photoAgain`). */
   const photoTried = new Set<number>();
   /** The first state of each session start, by the start's index; and the state of one that ended in its first step. */
   const firstNodeOf = new Map<number, number>([[0, 0]]);
@@ -2819,6 +2819,27 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * {@link ExploreOptions.followChains}): each state with nothing to do but wait goes on waiting at once, until something
    * else can happen, a state seen before comes, or the share is spent. The states passed are expanded on the way.
    */
+  /**
+   * A step that answered a camera request with no camera goes again with a photo (`again` takes that input), the first
+   * time its first request's place is met, as a picture taken at every question would double every state after it; a
+   * later one leaves its state open for the trap check.
+   */
+  const photoAgain = (
+    node: Node,
+    input: ExplorerInput,
+    next: Step,
+    again: (input: ExplorerInput) => void,
+  ): void => {
+    if (input.photo === true || next.captures.length === 0) return;
+    const place = next.captures[0]!;
+    if (photoTried.has(place)) {
+      drawsLeft.add(node.id);
+      return;
+    }
+    photoTried.add(place);
+    again({ ...input, photo: true });
+  };
+
   const followWaits = (first: Node, firstStep: Step): void => {
     let current = first;
     let last = firstStep;
@@ -2832,6 +2853,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const next = step(current, runtime, offered[0]!);
       forcedWork += session.operations - work;
       if (next === null) return;
+      const from = current;
+      photoAgain(from, offered[0]!, next, (again) => {
+        const photo = runtimeOf(from);
+        const taken = photo === null ? null : step(from, photo, again);
+        if (taken !== null) transition(from, again, taken, from.start, null);
+      });
       current.status = "expanded";
       const known = nodes.length;
       const reached = transition(current, offered[0]!, next, current.start, null);
@@ -2847,7 +2874,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const work = session.operations;
     const runtime = runtimeOf(node);
     const next = runtime === null ? null : step(node, runtime, job.input);
-    if (next !== null) transition(node, job.input, next, node.start, null);
+    if (next !== null) {
+      transition(node, job.input, next, node.start, null);
+      photoAgain(node, job.input, next, (again) =>
+        chosenSteps.push({ node: job.node, input: again }),
+      );
+    }
     chosenWork += session.operations - work;
   };
 
@@ -4474,14 +4506,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (leading) directedWork += session.operations - work;
       if (node.chosen) chosenWork += session.operations - work;
       if (next === null) continue;
-      // A step that answered a camera request with no camera goes again with a photo, the first time at the request's
-      // place (as a picture taken at every question would double every state after it); a later one leaves it open.
-      if (input.photo !== true && next.captures.length > 0) {
-        if (next.captures.some((place) => !photoTried.has(place))) {
-          for (const place of next.captures) photoTried.add(place);
-          inputs.push({ ...input, photo: true });
-        } else drawsLeft.add(node.id);
-      }
+      photoAgain(node, input, next, (again) => inputs.push(again));
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       measured(after);
@@ -4973,9 +4998,15 @@ function inputKey(input: ExplorerInput): string {
 function aligned(input: ExplorerInput, options: readonly ExplorerInput[]): ExplorerInput | null {
   // An input that fits as it is stays the same input.
   if (fitsPending(input, options)) return input;
-  // One that takes its place keeps the random outcomes it chose.
+  // One that takes its place keeps the random outcomes it chose, and its photo.
   const found = alignedKind(input, options);
-  return found === null || input.random === undefined ? found : { ...found, random: input.random };
+  return found === null
+    ? null
+    : {
+        ...found,
+        ...(input.random === undefined ? {} : { random: input.random }),
+        ...(input.photo === true ? { photo: true as const } : {}),
+      };
 }
 
 function alignedKind(

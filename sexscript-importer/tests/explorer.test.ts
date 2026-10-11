@@ -2301,6 +2301,46 @@ test(
     const replayed = replay(engine, plan, 1, [{ kind: "button", label: "Ready", photo: true }]);
     assert.equal(replayed.error, null);
     assert.ok(replayed.steps.some((step) => step.texts.includes("Nice photo.")));
+    // A second request that a photo at the first one leaves for a later step; a request after a run of waits a step
+    // follows at once; and one only a chosen random outcome reaches: each gets its photo too.
+    const full = (code: string, extra: Partial<Parameters<typeof explore>[2]> = {}) => {
+      const compiled = engine.compileProject([{ path: "main.tease", source: code }], {
+        builtins: [],
+      }).plan;
+      assert.ok(isRecord(compiled));
+      return explore(engine, compiled, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 20_000,
+        maxStates: 1000,
+        sources: new Map([["main.tease", code]]),
+        diagnostics: [],
+        ...extra,
+      }).coverage.percent;
+    };
+    assert.equal(
+      full(
+        'showButton "Ready"\nlet a = takePhoto()\nif a != null {\n  showButton "Next"\n}\n' +
+          'let b = takePhoto()\nif b != null {\n  say "B photo."\n}\nexit\n',
+      ),
+      100,
+    );
+    assert.equal(
+      full(
+        'showButton "Ready"\nfor i in 1..=150 {\n  wait 1 s\n}\nlet file = takePhoto()\n' +
+          'if file != null {\n  say "Photo."\n}\nexit\n',
+        { followChains: true },
+      ),
+      100,
+    );
+    assert.equal(
+      full(
+        'showButton "Ready"\nif randomInteger(0..4) == 3 {\n  let file = takePhoto()\n' +
+          '  if file != null {\n    say "Photo."\n  }\n}\nexit\n',
+        { randomChoices: true, cells: true },
+      ),
+      100,
+    );
   },
 );
 
