@@ -15991,8 +15991,8 @@ function growingListWrite(
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
   // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
   // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows by appending where the writes count up with a
-  // counter, and is padded up to a write at another position, which may lie past its end (Escape's `nimp`, which the
-  // script sets to 1 where no implement was chosen).
+  // counter, and also at another position, which may lie at its end (Escape's `nimp`, which the script sets to 1 where
+  // no implement was chosen); only a position beyond the end differs, as for a list of elements of unknown type.
   // A Java array has a fixed length, which a write past its end failed on, so a variable that may hold one does not grow.
   const array = (node: AstNode): boolean =>
     node.kind === "array" ||
@@ -16072,10 +16072,12 @@ function growingListWrite(
   // the literal list the variable starts as.
   const appends = sequentialWrites.has(targetNode) || (pastLiteral && position === literalLength);
   // Padding is null where the code compares the list's elements with null, else the empty value of the elements'
-  // type; a list of elements of unknown type keeps growing by appending.
+  // type; a list of elements of unknown type keeps growing by appending. So does a list set to lists of unknown length,
+  // whose elements' type a padding value could change (theEdger's codes): a write past its end appends.
+  const refilledOnly = refilled && !startsEmpty && !pastLiteral && !loopPast;
   const nullPadding = name !== null && context.nullElementLists.has(key ?? name);
   const neutral = nullPadding || name === null ? null : listPadding(name, valueNode, context);
-  if (!appends && (nullPadding || neutral !== null)) {
+  if (!appends && !refilledOnly && (nullPadding || neutral !== null)) {
     const padding: IrExpression = { kind: "literal", value: nullPadding ? null : neutral };
     addDiagnostic(
       context,

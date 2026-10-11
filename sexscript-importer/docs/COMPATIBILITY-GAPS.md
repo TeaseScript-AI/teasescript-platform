@@ -309,9 +309,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   or literal positions in order, also after `add` calls that show the position inside the list or at its end, as
   OwlSays' `index2.add(index2[0])` before `index2[0] = nphr`) the conversion appends, or writes in place; so does a
   list that starts empty and is set to lists of unknown length later, but never to a Java array, whose length is
-  fixed, where a counter counts up with its writes (OwlSays' `imp[nimp]` before `imp = shuffle(imp, nimp)`), and is
-  padded for its other writes, which may lie past its end (Escape's `nimp`, set to 1 where no implement was chosen);
-  elsewhere, such as a
+  fixed, where a counter counts up with its writes (OwlSays' `imp[nimp]` before `imp = shuffle(imp, nimp)`), and
+  appends at its end for its other writes too (Escape's `nimp`, set to 1 where no implement was chosen), which differs
+  only beyond the end; elsewhere, such as a
   list filled from its end or from position 1, it first pads the list up to the position: with null where the code
   compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
   truth treats like null (`SX_LIST_PADDING`; accepted 2026-10-06, following the zero-start decision). A list of elements of unknown type still appends at the end, which
