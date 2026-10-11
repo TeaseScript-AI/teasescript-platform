@@ -26,7 +26,7 @@ Development and integration use GitHub-native branches and pull requests.
 Verified patch publication remains a separate route for publishing a concrete
 tested patch result.
 
-## Issue sizing and execution recommendation
+## Issue sizing
 
 An issue should normally describe one coherent, reviewable task that one agent can execute from reproduction or design through implementation, tests, documentation impact, and pull request.
 
@@ -38,29 +38,13 @@ The agent creating or substantially refining an issue should include:
 - acceptance criteria;
 - when proposing future-facing infrastructure, the concrete scheduled
   consumer, accepted boundary that must be correct when first introduced, or
-  difficult-to-reverse boundary problem that justifies implementing it now;
-- an execution recommendation:
-  - `Single agent` — the default;
-  - `Coordinated multi-agent` — only with a short concrete rationale.
+  difficult-to-reverse boundary problem that justifies implementing it now.
 
-Before recommending multiple agents, first consider whether the work can be split into independent issues. Prefer
-separate single-agent issues when each can be implemented, tested, reviewed, and merged safely on its own. A proposed
+Prefer separate issues when each can be implemented, tested, reviewed, and merged safely on its own. A proposed
 implementation phase must also be dependency-closed for behavior it introduces: if ordinary successful execution
 immediately reaches a required transition, state, serialization rule, or validation path, that reachable behavior
 belongs in the same landable phase unless the earlier work remains behavior-neutral. Do not invent temporary semantics
 merely to preserve an artificial milestone boundary.
-
-Multiple agents are justified when, for example:
-
-- one accepted goal contains genuinely separate workstreams that can progress independently;
-- the workstreams share a contract or integration gate and must land together;
-- sequencing or overlapping behavior requires an explicit merge order;
-- different capabilities or roles can safely pipeline non-conflicting work and materially reduce idle time;
-- the task is too broad for one agent but splitting it into independently mergeable issues would create contradictory intermediate states or duplicated work.
-
-Do not recommend multiple agents only because an issue is large, touches several files, or benefits from review. One agent may still execute a complex but coherent issue.
-
-The issue author's recommendation is advisory. The owner or designated coordinator confirms the execution model before implementation begins.
 
 ## Requirement authority and review proportionality
 
