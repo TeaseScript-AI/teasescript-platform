@@ -172,7 +172,8 @@ test("workspace automation stores revisions and returns compile and run results"
   const run = await call("POST", "/api/workspace/run");
   assert.equal(run.status, 200);
   const runBody = view(run);
-  assert.equal(runBody.result?.status, "halted");
+  // The run waits for the message's reading time.
+  assert.equal(runBody.result?.status, "waiting");
   assert.equal(runBody.result?.events[0]?.text, "automation");
   const result = await call("GET", "/api/workspace/result");
   assert.equal(result.status, 200);

@@ -27,10 +27,11 @@ test("workspace helper exposes production say pacing and returns JSON-safe data"
   const compiled = compileWorkspaceSource('say "Hello"\nexit');
   assert.ok(compiled.plan);
   const result = executeWorkspaceSource('say "Hello"\nexit');
-  assert.equal(result.status, "halted");
+  // The message's reading time holds the script before its exit.
+  assert.equal(result.status, "waiting");
   assert.deepEqual(
     result.events.map((event) => event.kind),
-    ["say", "actionRequested", "exit"],
+    ["say", "actionRequested"],
   );
   const [say, requested] = result.events;
   assert.equal(say?.kind === "say" ? say.text : null, "Hello");
@@ -79,7 +80,7 @@ test("validated workspace execution does not mutate the caller snapshot", () => 
   const before = JSON.stringify(compiled.snapshot);
   const result = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
 
-  assert.equal(result.status, "halted");
+  assert.equal(result.status, "waiting");
   assert.equal(JSON.stringify(compiled.snapshot), before);
 });
 
@@ -197,7 +198,7 @@ test("a control rendered for an earlier interaction cannot answer a later one", 
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
-  // The long wait keeps the session running while the message's pacing gate is in the background.
+  // The message's reading time holds the session; the long wait after it starts only when it ends.
   const compiled = compileWorkspaceSource('say "paced"\nwait 2000 s\nexit');
   assert.ok(compiled.plan && compiled.snapshot);
   const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
@@ -220,7 +221,9 @@ test("workspace pacing and checkpoint controls are explicit and restore without 
   assert.ok(gate.deadlineMs <= 1_000_000);
   const observed = observeWorkspaceTime(compiled.plan, runningSnapshot, 1_000_000);
   assert.equal(observed.outcome.kind, "observed");
-  assert.equal(observed.snapshot.currentSessionTimeMs, 1_000_000);
+  // The script continues when the reading time ends, so scene time waits there for it.
+  assert.equal(observed.snapshot.currentSessionTimeMs, gate.deadlineMs);
+  assert.equal(observed.snapshot.observedSessionTimeMs, 1_000_000);
   assert.deepEqual(settledActionIds(observed.events), [gate.actionId]);
   assert.equal(observed.presentation.pacingGate, null);
   assert.equal(JSON.stringify(runningSnapshot), before);
