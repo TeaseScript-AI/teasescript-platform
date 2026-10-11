@@ -335,8 +335,9 @@ nearest `showButton` inside an object literal or call arguments. The timeout is 
 appears; the button captures its start and timeout in scene time, and checkpoint save/restore re-evaluates nothing.
 
 Reaching the timeout is normal completion, not cancellation: the button disappears without a player transcript
-message, and the result equals the timeout. A timer interrupt that suspends the button keeps it inert; when the
-timeout passes meanwhile, the button times out as soon as the interrupt returns.
+message, and the result equals the timeout. A timer, media, or button block that suspends the button keeps it inert,
+and its timeout stands still: after a normal return the button has the time it had left, and its elapsed result leaves
+out the time the block ran (owner decision on #829, 2026-10-11).
 
 ### `say`
 
@@ -579,10 +580,11 @@ When the calculated duration is `0`, the message creates no pacing action, actio
 
 Owner decision on #829 (2026-10-11), replacing the background gate, its promotion for a prepared later `say`, its
 consumption by an interaction, its supersession by `instant` output, and its overlap with `wait`: a paced `say` lasts
-its reading time, and the next statement runs after it, unless the player skips it. Nothing runs on during a reading
-time: no other message, interaction, media, camera, message or permanent-button change, `wait`, timer, or code the
-player cannot see. Work started earlier keeps running; permanent buttons already shown stay usable, and their blocks
-and due timer and cue blocks run when the reading time ends. Exact timing is written with `instant`: `say "Hold.",
+its reading time, and the next statement runs after it, unless the player skips it. Nothing after the `say` runs during
+its reading time: no other message, interaction, media, camera, message or permanent-button change, `wait`, timer, or
+code the player cannot see. Work started earlier keeps running, and permanent buttons already shown stay usable. A
+timer, cue, or permanent-button block interrupts a reading time as it interrupts a `wait`, and the reading time stands
+still until the block returns (decision 4 on #829, 2026-10-11). Exact timing is written with `instant`: `say "Hold.",
 instant` followed by `wait 30 s` takes exactly 30 seconds. Rejected: a `wait` that replaces the reading time, and
 invisible work that runs on during it.
 
