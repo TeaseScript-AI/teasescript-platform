@@ -462,6 +462,13 @@ test("code that a test rules out is checked with the tested variable holding no 
       [],
       condition,
     );
+  // So is the right operand of `and` or `or` that the left operand rules out (#831).
+  for (const value of ["v != null and v.length > 0", "v == null or v.length > 0"])
+    assert.deepEqual(
+      sayTexts(`let v: string[]? = ["a"]\nv = null\nlet t = ${value}\nsay "\${t}"\nexit`),
+      [value.startsWith("v !=") ? "false" : "true"],
+      value,
+    );
   // Other mismatches in such code, and mismatches where the outcome is reached, are still reported.
   assert.deepEqual(
     errors('let x: integer? = null\nlet o = 0\nif x != null {\n    o = "text"\n}\nexit'),

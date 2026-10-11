@@ -151,6 +151,7 @@ import {
   type PossibleValue,
   type ScalarValue,
   TypeJoin,
+  decidedValue,
   members,
   type PropertyTable,
   misfitProperty,
@@ -3126,24 +3127,36 @@ class TypeChecker {
 
   /**
    * One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. A
-   * return value of unknown type makes the result unknown, but the known values must still agree.
+   * return value of unknown type makes the result unknown, but the known values must still agree, also beside a value
+   * the compiler cannot know inside a return or a place such a value reached. Every return must also fit the result, so
+   * a value that fails either join is an error.
    */
   #inferredResult(context: FunctionContext): StaticType {
     const join = new TypeJoin();
+    const known = new TypeJoin(true);
+    // A return that holds only null decides no type, so a value of another type is compared with the first that does,
+    // and where known values disagree, with the first that holds no value the compiler cannot know, if there is one.
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
+    let firstKnown: typeof first;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
-      first ??= returned;
-      if (!join.add(returned.type))
+      const fits = join.add(returned.type);
+      const agrees = known.add(returned.type);
+      if (!fits || !agrees) {
+        const earlier = agrees ? first! : (firstKnown ?? first!);
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first.type)} on line ${first.span.start.line + 1}.${returnUnionFix(context.fn.declaration, first.type, returned.type)}`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(earlier.type)} on line ${earlier.span.start.line + 1}.${returnUnionFix(context.fn.declaration, agrees ? join.type : known.type, returned.type)}`,
           returned.span,
         );
+      } else if (decidedValue(returned.type).kind !== "never") {
+        first ??= returned;
+        if (firstKnown === undefined && !mayBeUnknown(returned.type)) firstKnown = returned;
+      }
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
-    if (first === undefined) return NULL_TYPE;
+    if (context.returns.length === 0) return NULL_TYPE;
     return context.returnsNull ? optional(join.type) : join.type;
   }
 
@@ -4359,9 +4372,14 @@ class TypeChecker {
           const rule = `'${node.operator}' needs true or false (boolean) values`;
           const left = yield* compileChild(this.#branchTask(node.left, scope));
           this.#requireBoolean(left.type, node.left, rule);
-          // The right operand runs only when the left one did not decide the result.
+          // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
+          // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
-          this.#flow.apply(runsRight);
+          this.#flow.apply(
+            runsRight ??
+              (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
+              null,
+          );
           const right = yield* compileChild(this.#branchTask(node.right, scope));
           this.#requireBoolean(right.type, node.right, rule);
           const reached = runsRight !== null;
@@ -8970,13 +8988,16 @@ function sourceText(expression: Expression): string | null {
   return null;
 }
 
-/** How to let a function return values of two types: declare a union result type. */
+/**
+ * How to let a function return values of two types: declare a union result type of `earlier`, what the returns before
+ * gave, and `other`.
+ */
 function returnUnionFix(
   declaration: FunctionDeclaration,
-  first: StaticType,
+  earlier: StaticType,
   other: StaticType,
 ): string {
-  const both = union([first, other]);
+  const both = union([earlier, other]);
   if (!isAnnotatable(both))
     return " A function returns one type. Use a separate function for values of another type.";
   const parameters = declaration.parameters.length === 0 ? "" : "(...)";

@@ -685,6 +685,10 @@ function* settleTask(
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     target.order = nextDecision();
+    // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
+    // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
+    if (target.heldUnknown !== undefined && decidedValue(value).kind === "never")
+      yield* compileChild(heldUnknownTask(value, target.heldUnknown));
     return;
   }
   if (target.kind === "union") {
@@ -1268,6 +1272,17 @@ export class TypeJoin {
   readonly #owned = new Set<PropertyTable>();
   #type: StaticType = NEVER_TYPE;
 
+  /**
+   * With `known`, the join compares only what the compiler knows: a value it cannot know, and a place such a value
+   * reached, agree with any other value at every depth instead of making the type unknown, so the known values must
+   * still agree with each other (V30 §17).
+   */
+  readonly #known: boolean;
+
+  constructor(known = false) {
+    this.#known = known;
+  }
+
   get type(): StaticType {
     return this.#type;
   }
@@ -1275,7 +1290,7 @@ export class TypeJoin {
   /** Joins a value into the type, or returns false and keeps the type when the value mixes types with it. */
   add(type: StaticType): boolean {
     const changes: JoinChange[] = [];
-    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes));
+    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes, this.#known));
     if (joined !== undefined) {
       this.#type = joined;
       return true;
@@ -1293,18 +1308,21 @@ function* joinTask(
   rightType: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   const left = canonical(leftType);
   const right = canonical(rightType);
-  if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
+  if (left.kind === "unknown" || right.kind === "unknown")
+    return known ? (left.kind === "unknown" ? right : left) : UNKNOWN_TYPE;
   const leftValue = decidedValue(left);
   const rightValue = decidedValue(right);
   // A slot that a value the compiler cannot know reached may hold any value, so with a known value it joins as unknown.
   const reachedUnknown = (type: StaticType): boolean =>
     members(type).some((member) => member.kind === "open" && member.heldUnknown !== undefined);
   if (
-    (reachedUnknown(left) && rightValue.kind !== "never") ||
-    (reachedUnknown(right) && leftValue.kind !== "never")
+    !known &&
+    ((reachedUnknown(left) && rightValue.kind !== "never") ||
+      (reachedUnknown(right) && leftValue.kind !== "never"))
   )
     return UNKNOWN_TYPE;
   const nullable = holdsNull(left) || holdsNull(right);
@@ -1325,7 +1343,7 @@ function* joinTask(
       ? rightValue
       : rightValue.kind === "never"
         ? leftValue
-        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes));
+        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes, known));
   if (value === undefined) return undefined;
   return nullable ? optional(value) : value;
 }
@@ -1335,6 +1353,7 @@ function* joinValuesTask(
   right: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
@@ -1345,7 +1364,9 @@ function* joinValuesTask(
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
       const joined =
-        kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned, changes));
+        kept === undefined
+          ? type
+          : yield* compileChild(joinTask(kept, type, owned, changes, known));
       if (joined === undefined) return undefined;
       changes.push({ properties, name, replaced: kept });
       properties.set(name, joined);
@@ -1353,7 +1374,9 @@ function* joinValuesTask(
     return { kind: "object", properties };
   }
   if (isCollection(left) && right.kind === left.kind) {
-    const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
+    const element = yield* compileChild(
+      joinTask(left.element, right.element, owned, changes, known),
+    );
     return element === undefined ? undefined : { kind: left.kind, element };
   }
   if (sameFamily(left, right)) return mergeScalars(left, right);
@@ -1368,10 +1391,15 @@ function* joinValuesTask(
   return undefined;
 }
 
-/** The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. */
-function decidedValue(type: StaticType): StaticType {
-  const value = nonNullType(type);
-  return value.kind === "open" ? NEVER_TYPE : value;
+/**
+ * The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. A place
+ * may hold one of several undecided slots, such as a variable given a different null-only variable on each branch.
+ */
+export function decidedValue(type: StaticType): StaticType {
+  return memberSubset(
+    type,
+    members(type).filter((member) => member.kind !== "null" && member.kind !== "open"),
+  );
 }
 
 /** Whether values of a type may be null, including a place that took null before any other value. */
