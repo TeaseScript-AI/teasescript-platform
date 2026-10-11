@@ -331,7 +331,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `args`, ShockQuiz's `getDisplayText`); where it sets them, they become script variables named after the function and
   the local, where no two calls of the function can share them (the shock units' settings, which set their `txt`).
   Other captures stay a TODO: a closure that escapes, by a value the script keeps or passes on, or one whose function
-  may run again while it runs.
+  may run again while it runs; a text parameter, a text set to a computed value, and a text without a value that its
+  function compares with null, which a script variable cannot hold as null.
 - A list position that may be negative, which Groovy counted from the end, or past the end, where Groovy read null,
   including a literal position past a shorter literal list the variable is set to again later (Farkel's
   `contestants = [winner1]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
