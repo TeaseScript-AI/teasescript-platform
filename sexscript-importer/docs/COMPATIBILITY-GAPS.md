@@ -266,7 +266,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   nothing, read natively, `load k, default: d`, as parsing a stored whole number gives the number itself; where it
   saves fractions, `toInteger(load(k, default: 0.0))` (loadFloat `load k, default: 0.0`) with a number default. A key
   that a computed save may name (by its shape, or a variable that only ever holds texts), or that a text or flag read
-  reads too, keeps the helper, and so does a read without a default, whose null the helper keeps of an open type.
+  reads too, keeps the helper, and so does a read without a default, whose null the helper keeps of an open type. A
+  list written out with numbers that gets such a read, and whose elements the code compares with null, takes optional
+  elements (`let ids: integer?[] = [0, 0, 0]`), as stripordie's player IDs, whose null marks a free slot.
 - Groovy's null-aware ordering (`sexscriptLegacyCompare`) and truth (`sexscriptLegacyTruth`) stay helpers only where
   typing cannot rule out null or tell the type: two sides proven numbers or texts compare plainly (`visits < 2`), and
   a value of a known scalar type or a list tests plainly (`count != 0`, `items.length > 0`). A number variable that
