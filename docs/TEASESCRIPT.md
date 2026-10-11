@@ -210,8 +210,8 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 Owner decisions (2026-10-11): everything the player sees or hears waits for the reading time of the message before it:
 a later `say`, a question with its buttons or fields, which appear together, Stage, sound, video, and camera changes, a
-change of a message's text, showing or removing a permanent button, and `exit`. Work the player cannot see runs on until
-such output, and a question's timeout counts from when it appears. `wait` remains separate and does not become a `say`
+change of a message's text, showing or removing a permanent button, a new countdown, and `exit`. Work the player cannot
+see runs on until such output, and a question's timeout or a countdown counts from when it appears. `wait` remains separate and does not become a `say`
 option; a `wait` or blocking `timer` that starts during a reading time replaces it, so only the wait counts. Shown
 permanent buttons stay usable, and a skippable reading time can still be skipped. [Held-back
 output](RUNTIME.md#held-back-output) gives the details, including blocks.

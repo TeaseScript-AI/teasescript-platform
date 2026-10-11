@@ -642,10 +642,10 @@ Skip settles only the pacing gate. It does not skip arbitrary instructions, canc
 Owner decision (2026-10-11), replacing the earlier consumption of a background gate by `showButton`, `askText`,
 `askNumber`, or `choose`: everything the player sees or hears waits for an active pacing gate, as a later `say` does. A
 question appears with its controls once the gate settles, and its timeout counts from then; media, a message's text,
-permanent-button changes, and `exit` wait the same way on the story path. The gate moves to the foreground without
-prepared output, with its action ID and deadline unchanged, and the waiting instruction runs again after settlement.
-Work the player cannot see continues until such output. [`RUNTIME.md`](../RUNTIME.md#held-back-output) defines the
-exact instructions and the rules inside timer, media, and button blocks.
+permanent-button changes, a countdown, and `exit` wait the same way. The gate moves to the foreground without prepared
+output, with its action ID and deadline unchanged, and the waiting instruction runs again after settlement. Work the
+player cannot see continues until such output. [`RUNTIME.md`](../RUNTIME.md#held-back-output) defines the exact
+instructions and the media exception inside timer, media, and button blocks.
 
 ### Interaction with `wait`
 
