@@ -139,7 +139,8 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 
 - `show()` replaced the single text area; `say` appends to a transcript. `show(null)` only cleared the text, so it is
   dropped. Input functions showed their text like `show()`; a `null` text kept the current text. An input's text is
-  said as prose at once before its field opens, as a `show()` text is, and the ask has no question of its own: an
+  said as prose at once before its field opens, as a `show()` text is, also `getBooleans`' message and the title
+  `getFile()` gave its chooser (unless the text just before said it), and the ask has no question of its own: an
   ask's question would be a bubble with the Player's pacing (owner decisions 2026-10-11, prose and literal timing,
   superseding the questions folded into asks of #634 and #636).
 - Paragraphs (owner decision 2026-10-11, superseding the paragraph split of 2026-10-07): one legacy `show()` is one

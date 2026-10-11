@@ -18159,13 +18159,18 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_BOOLEANS_ARITY",
           "getBooleans() must have exactly three arguments.",
         );
+      {
+        // The message is said as prose at once before the toggles, as every legacy text (owner decisions 2026-10-11).
+        const computed = { nodes: call.arguments.slice(1), values: args.slice(1) };
+        if (!pushPrompt(context, node, call.arguments[0]!, args[0]!, null, computed)) return null;
+        args.splice(1, 2, ...computed.values);
+      }
       // The legacy dialog's Cancel gave null; the form offers it where the script tests the answers for null.
       return {
         kind: "call",
         name: "askBooleans",
         positional: [],
         named: {
-          message: args[0]!,
           texts: args[1]!,
           prefill: args[2]!,
           ...(context.cancelBooleans === true
@@ -18247,7 +18252,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         return { kind: "call", name: "chooseFile", positional: [], named: {} };
       }
       // The corpus asks for files to get a photo of the player (owner decision 2026-10-05): askImage() asks for an
-      // image with the same message, which the player answers with a file or the camera (#608).
+      // image, which the player answers with a file or the camera (#608); the chooser's title is said as prose at once
+      // before it, as every text (owner decisions 2026-10-11), where a text before it did not say it already.
       addDiagnostic(
         context,
         "SX_FILE_PHOTO",
@@ -18255,7 +18261,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
         node.span,
       );
-      return { kind: "call", name: "askImage", positional: args, named: {} };
+      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      return { kind: "call", name: "askImage", positional: [], named: {} };
     }
     case "getDataFolder":
       if (args.length !== 0)

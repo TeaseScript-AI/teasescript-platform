@@ -1306,7 +1306,7 @@ test("maps legacy getBooleans to native askBooleans", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    'let selected = askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]\nexit\n',
+    'say prose "Choose", instant\nlet selected = askBooleans(texts: ["A", "B"], prefill: [true, false])\nexit\n',
   );
 });
 

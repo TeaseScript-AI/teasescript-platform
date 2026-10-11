@@ -63,7 +63,8 @@ if photo != null {
   showImage photo
 }
 // With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
-let kit = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
+say prose "Which toys do you have?", instant
+let kit = askBooleans(texts: ["Paddle", "Crop"], prefill: [true, false])
 if kit[1] == true {
   say prose "Bring the crop", instant
 }

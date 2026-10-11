@@ -32,7 +32,7 @@ say prose "Waiting for you, ${count} days", instant
 // A photo request whose title repeats the text before it says the title once, as its question.
 say prose "Show me how you kneel.", instant
 // NOTE SX_FILE_PHOTO line 31: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
-showImage askImage("Show me how you kneel.")
+showImage askImage()
 // An empty text only cleared the legacy display, so it is not said, also through a variable that stays empty.
 let pickedColor = choose 0: "Red", 1: "Blue"
 say prose "Color ${pickedColor}", instant

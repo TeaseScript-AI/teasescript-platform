@@ -3,21 +3,24 @@ speaker system {
 }
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
 // getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
-let toys = askBooleans "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
+say prose "Which toys do you have?", instant
+let toys = askBooleans(texts: ["Paddle", "Crop"], prefill: [true, false])
 let clothes = [false]
 let owned = [{ label: "Collar" }]
 let collectResult = []
 for it in owned {
   collectResult.add(it.label)
 }
-let answers: boolean[]? = askBooleans "What do you own?", texts: collectResult, prefill: clothes, cancel: "Cancel"
+say prose "What do you own?", instant
+let answers: boolean[]? = askBooleans(texts: collectResult, prefill: clothes, cancel: "Cancel")
 if answers != null {
   clothes = answers
   save clothes[0] as "clothes.collar"
 } else {
   say prose "Nothing changed", instant
 }
-let gags: boolean[]? = askBooleans "Which gags do you have?", texts: ["Ball gag"], prefill: [false], cancel: "Cancel"
+say prose "Which gags do you have?", instant
+let gags: boolean[]? = askBooleans(texts: ["Ball gag"], prefill: [false], cancel: "Cancel")
 if gags == null or gags[0] == false {
   say prose "No gag today", instant
 }
@@ -38,7 +41,8 @@ say as system "Open this link: https://example.com/rules", instant
 showButton "Continue"
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
 // NOTE SX_FILE_PHOTO line 19: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
-let photo = askImage("Pick a photo of yourself")
+say prose "Pick a photo of yourself", instant
+let photo = askImage()
 if photo == null {
   say prose "No photo, then", instant
 }
