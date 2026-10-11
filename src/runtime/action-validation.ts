@@ -813,8 +813,7 @@ export function validateInteractionResultHandoffState(
   }
 
   const settlement = snapshot.lastSettlement;
-  // A foreground interaction consumes the background pacing gate, so only a newer action can settle after it. A
-  // capture leaves that gate running, so the older gate may settle before the capture result is consumed.
+  // An interaction's settlement, or a newer one, stays retained until its result is consumed.
   if (
     handoff.actionKind === "interaction" &&
     (!isPlainRecord(settlement) ||
