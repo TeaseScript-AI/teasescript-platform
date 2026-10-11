@@ -510,16 +510,6 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
   // Groovy lets a function declare a name again only in a block apart from the first, such as another `case`; each
   // declaration then sets the one script variable where it stands (liftLocal), so they must agree on its type.
   if (declarations.length === 0) return false;
-  // Every use of the name must be one of these locals: a use outside their blocks, or before a declaration in its
-  // block, is a script variable of the same name that renaming would change.
-  if (
-    !withinDeclarations(
-      block,
-      name,
-      declarations.map(({ node }) => node),
-    )
-  )
-    return false;
   const types = new Set(declarations.map(({ node }) => originType(node)));
   if (types.size !== 1) return false;
   return declarations.every(({ node, nested }) => {
@@ -541,18 +531,16 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
 }
 
 /**
- * Whether every variable of the name in the function's body stands in a block that declares it, after that
- * declaration, so that it is one of these locals.
+ * The function body with the name renamed where it is one of its locals: after one of its declarations, inside that
+ * declaration's block, as a variable or an implicit call. A use outside, or before a declaration in its block, is a
+ * script variable of the same name and stays. A body that declares no such local (a lifted parameter) renames every
+ * use.
  */
-function withinDeclarations(
-  block: AstNode,
-  name: string,
-  declarations: readonly AstNode[],
-): boolean {
-  // The block that holds each declaration, with where the declaration starts.
+function renameLocal(block: AstNode, name: string, lifted: string): AstNode {
+  // The block that holds each declaration of the name, with where the declaration starts.
   const scopes = new Map<AstNode, Array<{ line: number; column: number }>>();
   const place = (node: AstNode, ancestors: readonly AstNode[]): void => {
-    if (declarations.includes(node)) {
+    if (node.kind === "declaration" && variableName(node.left) === name) {
       const holder = [...ancestors].reverse().find((ancestor) => ancestor.kind === "block");
       const span = node.span;
       if (holder !== undefined && span !== null && span !== undefined)
@@ -564,21 +552,23 @@ function withinDeclarations(
     for (const child of children(node)) place(child, [...ancestors, node]);
   };
   place(block, []);
-  if (scopes.size === 0) return false;
+  if (scopes.size === 0) return rename(block, name, lifted);
   const after = (span: AstNode["span"], start: { line: number; column: number }): boolean =>
     span !== null &&
     span !== undefined &&
     (span.line > start.line || (span.line === start.line && span.column >= start.column));
-  let inside = true;
-  const check = (node: AstNode, ancestors: readonly AstNode[]): void => {
-    if (node.kind === "variable" && variableName(node) === name)
-      inside &&= ancestors.some((ancestor) =>
-        (scopes.get(ancestor) ?? []).some((start) => after(node.span, start)),
-      );
-    for (const child of children(node)) check(child, [...ancestors, node]);
+  const scoped = (node: AstNode, ancestors: readonly AstNode[]): AstNode => {
+    const local = ancestors.some((ancestor) =>
+      (scopes.get(ancestor) ?? []).some((start) => after(node.span, start)),
+    );
+    if (node.kind === "variable" && node.name === name)
+      return local ? { ...node, name: lifted } : node;
+    const changed = mapChildren(node, (child) => scoped(child, [...ancestors, node]));
+    if (local && calledName(changed) === name)
+      return { ...changed, method: { ...asNode(changed.method)!, value: lifted } };
+    return changed;
   };
-  check(block, []);
-  return inside;
+  return scoped(block, []);
 }
 
 /** The Groovy type a declaration gives its variable, `java.lang.Object` for `def`. */
@@ -699,7 +689,7 @@ function liftLocal(
       ? [assignment(startingValue(type, node.span), node.span)]
       : [];
   };
-  const withValue = mapBlocks(rename(block, name, lifted), set);
+  const withValue = mapBlocks(renameLocal(block, name, lifted), set);
   const copied = { kind: "variable", span: block.span, name, type: "java.lang.Object" };
   const result =
     parameter === null
