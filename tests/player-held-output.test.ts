@@ -130,3 +130,24 @@ test("the Player reveals a hidden countdown only once the reading time before th
     [["visible", 5]],
   );
 });
+
+test("the Player keeps a permanent button that an expression removes until the reading time before it ends", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'let hint = showPermanentButton "Hint" {',
+      '    say "A hint.", instant',
+      "}",
+      'say "Read this first.", 5 s',
+      "let removed = removePermanentButton(hint)",
+      'showButton "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    playerRuntimePermanentButtons(session.state).map(({ label }) => label),
+    ["Hint"],
+  );
+  session = observePlayerRuntimeTime(session, 5_000).session;
+  assert.deepEqual(playerRuntimePermanentButtons(session.state), []);
+  assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
+});

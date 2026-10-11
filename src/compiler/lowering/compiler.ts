@@ -526,14 +526,6 @@ export class InstructionCompiler {
         ) {
           this.#barrierCall = call;
         }
-        // Removing a permanent button waits for the previous message's pacing, before its argument is evaluated.
-        if (
-          call.kind === "callExpression" &&
-          method.kind === "identifier" &&
-          method.name === "removePermanentButton"
-        ) {
-          this.#emitPacingBarrier(null, statement.span, true);
-        }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
@@ -1386,6 +1378,9 @@ export class InstructionCompiler {
       const result = this.#consumeInteractionResult(transientTemporary, expression.span);
       if (tags !== null) this.#emitTemporaryCleanup(tags.temporaryIds, expression.span);
       return result;
+    }
+    if (expression.kind === "callExpression" && isRemovePermanentButtonCall(expression)) {
+      return yield* compileChild(this.#lowerRemovePermanentButtonTask(expression));
     }
     if (
       expression.kind === "callExpression" &&
@@ -2483,6 +2478,49 @@ export class InstructionCompiler {
     };
   }
 
+  /**
+   * `removePermanentButton(...)`, wherever it is called: removing a shown button is output, so its arguments are
+   * evaluated once, in order, then a barrier waits for the previous message's pacing, also in a block, and then the
+   * call removes the button with the evaluated arguments.
+   */
+  *#lowerRemovePermanentButtonTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    const values = expression.arguments.map((argument) => argument.value);
+    const lowered = yield* compileChild(this.#lowerOrderedExpressionsTask(values));
+    const prepared = lowered.map((item, index) =>
+      item.plan.kind === "temporary"
+        ? item
+        : this.#materializeExpression(item, values[index]!.span),
+    );
+    this.#emitPacingBarrier(null, expression.span, true);
+    const call: ExpressionPlan = {
+      kind: "call",
+      callee: {
+        kind: "identifier",
+        name: "removePermanentButton",
+        span: copySpan(expression.callee.span),
+      },
+      arguments: expression.arguments.map((argument, index) =>
+        argument.kind === "positionalArgument"
+          ? { kind: "positional", value: prepared[index]!.plan, span: copySpan(argument.span) }
+          : {
+              kind: "named",
+              name: argument.name.name,
+              value: prepared[index]!.plan,
+              span: copySpan(argument.span),
+            },
+      ),
+      ...withTypeCheck(this.typeChecks.get(expression)),
+      span: copySpan(expression.span),
+    };
+    const removed = this.#materializeExpression({ plan: call, temporaryIds: [] }, expression.span);
+    return {
+      plan: removed.plan,
+      temporaryIds: [...prepared.flatMap((item) => item.temporaryIds), ...removed.temporaryIds],
+    };
+  }
+
   *#lowerUserFunctionCallTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): CompileTask<LoweredExpression> {
@@ -2749,6 +2787,7 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
+        isRemovePermanentButtonCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -3005,6 +3044,15 @@ function unitOf(expression: UnitExpression): UnitPlan {
 
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
+}
+
+/** `removePermanentButton(...)`, a protected built-in whose call is output that waits for pacing. */
+function isRemovePermanentButtonCall(expression: Expression): boolean {
+  return (
+    expression.kind === "callExpression" &&
+    expression.callee.kind === "identifier" &&
+    expression.callee.name === "removePermanentButton"
+  );
 }
 
 const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);

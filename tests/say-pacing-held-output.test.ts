@@ -453,6 +453,40 @@ test("a change of a timer's display waits for the reading time, also in a block,
   assert.deepEqual(display(changed.snapshot), ["mystery 30000"]);
 });
 
+test("removing a permanent button waits for the reading time wherever the call stands, also in a block", () => {
+  const hint = ['let hint = showPermanentButton "Hint" {', '    say "Hint", instant', "}"];
+  for (const removal of [
+    ["removePermanentButton(hint)"],
+    ["let removed = removePermanentButton(hint)"],
+    [
+      "function removeHint(target) {",
+      "    return removePermanentButton(target)",
+      "}",
+      "removeHint(hint)",
+    ],
+  ]) {
+    assert.deepEqual(
+      timeline([...hint, 'say "A", 5 s', ...removal, 'showButton "Go"', "exit"].join("\n")),
+      ["0 show Hint", "0 say A", "5000 remove button", "5000 button", "5000 exit"],
+      removal.join(" "),
+    );
+  }
+  assert.deepEqual(
+    timeline(
+      [
+        ...hint,
+        "timer async 1 s {",
+        '    say "Reading", 5 s',
+        "    let removed = removePermanentButton(hint)",
+        "}",
+        "wait 10 s",
+        "exit",
+      ].join("\n"),
+    ),
+    ["0 show Hint", "1000 say Reading", "6000 remove button", "10000 exit"],
+  );
+});
+
 test("a goto that removes a shown permanent button waits for the reading time, and one that removes nothing goes on", () => {
   assert.deepEqual(
     timeline(
