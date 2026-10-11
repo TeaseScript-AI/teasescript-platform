@@ -407,4 +407,11 @@ function reweigh {
 }
 // NOTE SX_INT_RANGE line 236: Java's intValue() dropped the bits of a whole number beyond the int range and capped a decimal number at it; toInteger() keeps the whole number.
 say toInteger(reweigh()) + 1
+// A script function of a generated helper's name keeps the result it returns.
+function sexscriptLegacyFormat {
+  return 3
+}
+let formatted: integer? = sexscriptLegacyFormat()
+formatted = null
+say "Formatted ${formatted}"
 exit

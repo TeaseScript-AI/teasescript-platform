@@ -234,3 +234,8 @@ if (false) {
 }
 def reweigh = { weight = 3; return weight }
 show(reweigh().intValue() + 1)
+// A script function of a generated helper's name keeps the result it returns.
+def sexscriptLegacyFormat = { -> return 3 }
+def formatted = sexscriptLegacyFormat()
+formatted = null
+show("Formatted " + formatted)

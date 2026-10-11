@@ -2553,7 +2553,8 @@ export function expressionType(
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
       return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
     case "call": {
-      const helper = HELPER_RESULTS.get(value.name);
+      // A generated helper's result, not that of a script function of the same name (`local`).
+      const helper = value.local === true ? undefined : HELPER_RESULTS.get(value.name);
       if (helper !== undefined) return helper;
       // A function of the package returns what its `return` values share.
       const local = result(value.name);
