@@ -1,6 +1,7 @@
 import {
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,
+  captureNamedZoneRules,
   captureTemporalContext,
   compileProject,
   completeAction,
@@ -323,13 +324,32 @@ export interface PlayerRuntimeSessionOptions {
 }
 
 /**
- * Captures the player's time zone and date and time presentation for a new session: the account settings when the host
- * has them, else the browser's. A setting this browser cannot use falls back to the browser's own, and then to UTC and
- * locale-neutral text.
+ * Captures the player's time zone and date and time presentation for a session's Start or Continue: the account
+ * settings when the host has them, else the browser's. A setting this browser cannot use falls back to the browser's
+ * own, and then to UTC and locale-neutral text. The context also holds the rules of each zone the script names
+ * (`plan.timeZones`) that this browser knows; the script fails when it converts through one this browser does not know.
  */
 export function playerTemporalContext(
   account: { readonly timeZone?: string; readonly locale?: string } = {},
+  namedZones: readonly string[] = [],
 ): TemporalContext {
+  const known = namedZones.flatMap((name) => {
+    try {
+      return [captureNamedZoneRules(name)];
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      return [];
+    }
+  });
+  return known.length === 0
+    ? playerZoneContext(account)
+    : { ...playerZoneContext(account), namedZones: known };
+}
+
+function playerZoneContext(account: {
+  readonly timeZone?: string;
+  readonly locale?: string;
+}): TemporalContext {
   const browser = Intl.DateTimeFormat().resolvedOptions();
   const locale = globalThis.navigator?.language ?? browser.locale;
   for (const [timeZone, language] of [

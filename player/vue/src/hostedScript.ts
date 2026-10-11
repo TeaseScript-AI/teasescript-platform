@@ -64,7 +64,7 @@ export function prepareHostedScript(
             ...recording,
             ...player.scriptStorageOptions(),
             // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
-            ...player.temporalCapture(),
+            ...player.temporalCapture(plan.timeZones),
           }),
         new Map(
           typeof project === "string"

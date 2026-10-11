@@ -111,7 +111,7 @@ an error with a diagnostic that names a route that works:
   `getDate() + 1 calendar day`;
 - `datetime ± D`, `datetime ± C` with a nonzero exact offset, and `datetime - datetime`: convert to `absoluteDateTime` for
   elapsed time, or use calendar units or `toDate(...)` for local dates;
-- `absoluteDateTime ± C`: convert to a `datetime` first;
+- `absoluteDateTime ± C`: `add(...)`, which counts in a time zone (§9), or convert to a `datetime` first;
 - any arithmetic on `time`.
 
 ```tease
@@ -124,7 +124,8 @@ let week = getAbsoluteDateTime() + 1 week                      // 168 hours from
 
 Comparison is unchanged: local values order by their fields, absolute values by moment, `==` across kinds is false, and
 ordering across kinds is an error. Known invalid combinations are compile errors and others are runtime errors.
-`toAbsoluteDateTime()` and `toDateTime()` keep converting through the player's current zone. `wait`, timers, and the
+`toAbsoluteDateTime()` and `toDateTime()` keep converting through the player's current zone, unless `zone:` names
+another (§9). `wait`, timers, and the
 other consumers of an exact duration take a `duration` and reject a `calendarDuration`.
 
 ### 6. Display
@@ -187,13 +188,61 @@ Each consumer takes an exact duration D:
 | a media repeat budget | D > 0 |
 | an assignment to a timer's `remaining` | any D, and zero or less ends the round at once |
 
+### 9. Anchored conversion and explicit time zones
+
+**Status:** Pending owner acceptance. The owner approved building it on 2026-10-10 (#512) and decides on the finished
+change.
+
+These methods convert or move a value in a time zone. Without `zone:` they use the player's zone in force when they run.
+
+| Method | Result |
+| --- | --- |
+| `datetime.toAbsoluteDateTime(zone:, disambiguation:)` | The moment of the local date and time in the zone |
+| `absoluteDateTime.toDateTime(zone:)` | The local date and time of the moment in the zone |
+| `absoluteDateTime.add(D)` | The same as `+ D` |
+| `absoluteDateTime.add(C, zone:, disambiguation:, overflow:)` | The moment moved by C in the zone |
+| `C.toDuration(from:, zone:, disambiguation:, overflow:)` | The exact time from `from:` to `from:` moved by C |
+| `date.add(C, overflow:)`, `datetime.add(C, overflow:)` | The same as `+ C`, with `overflow:` |
+
+`zone:` takes a zone name written as text: an IANA name such as `"Europe/Amsterdam"`, or `"UTC"`. An unknown or computed
+name is a compile error. The plan lists every zone a script names, and the Player records their rules together with the
+player's zone at Start and at every Continue, so execution reads no host zone data and a restored session computes the
+same moments. A named zone stays fixed when the player's zone changes. `"UTC"` needs no rules.
+
+`add(C)` and `toDuration(from:)` share one calculation. A `datetime` start is first resolved to its moment. Without
+calendar months and days, the exact offset is added to that moment. Otherwise its local date in the zone moves by the
+months, then the days, the result is resolved once, and the exact offset is added, rounded to whole milliseconds.
+`toDuration(from:)` requires `from:`, a `datetime` or an `absoluteDateTime`; a `date` or `time` is an error.
+
+`disambiguation:` decides a local time that the zone skips or repeats, for a `datetime` start and for the result alike:
+
+| Value | Skipped time | Repeated time |
+| --- | --- | --- |
+| `"compatible"` (default) | Moves forward by the gap | The earlier moment |
+| `"earlier"` | Moves back by the gap | The earlier moment |
+| `"later"` | Moves forward by the gap | The later moment |
+| `"reject"` | Error | Error |
+
+`overflow:` decides a day the target month lacks: `"constrain"`, the default, takes the month's last day, and `"reject"`
+is an error. The defaults are the behaviour of `toAbsoluteDateTime()` and of `+` without options. Option texts known at
+compile time are checked then, others at runtime, and `add` with a `duration` takes no options.
+
+```tease
+let unlock = getAbsoluteDateTime().add(1 calendar month)
+let start = toDateTime("2026-02-04T12:00").toAbsoluteDateTime(zone: "Europe/Amsterdam")
+let length = (1 calendar month + 1 day).toDuration(from: start, zone: "Europe/Amsterdam")   // 696 hours
+let second = toDateTime("2026-10-25T02:30").toAbsoluteDateTime(zone: "Europe/Amsterdam", disambiguation: "later")
+let strict = toDate("2027-01-31").add(1 calendar month, overflow: "reject")              // an error
+```
+
+For a start that the spring change skips, the two routes differ: from `toDateTime("2026-03-29T02:30")` in Amsterdam,
+`start.toAbsoluteDateTime().add(1 calendar day)` resolves 02:30 to 03:30 first and gives 03:30 the next day, while
+`(start + 1 calendar day).toAbsoluteDateTime()` keeps 02:30, which exists the next day.
+
 ## Not decided
 
 These parts of the #512 time proposal remain open:
 
-- anchored conversion and explicit time zones, with options for month ends and daylight-saving gaps and overlaps (`zone:`,
-  `disambiguation:`, `overflow:`, applying a `calendarDuration` to an `absoluteDateTime`, and measuring one from an
-  anchor);
 - `askDuration` and `askCalendarDuration`;
 - scheduling and `schedule(...)` ([V30 §36](../specifications/accepted-syntaxes-v30.md#36-scheduling));
 - `waitUntil`;
@@ -224,3 +273,8 @@ These parts of the #512 time proposal remain open:
   without a unit, such as an answer to "How many minutes?", silently counts seconds.
 - Converting old `save` values when they are read: keeps progress across the change, but adds a conversion path to
   every reader of saved data before any release has saved data to keep.
+- Any text as `zone:`, also a computed one (§9): the Player would have to fetch a zone's rules while the script runs,
+  through a new pause in the engine, for a rare case. A name written as text can grow into this without breaking a
+  script.
+- Only an `absoluteDateTime` start for `toDuration(from:)` (§9): one step longer from a local value, and the zone is
+  then written twice, once for the start and once for the length.

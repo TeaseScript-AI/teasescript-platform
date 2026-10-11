@@ -21,6 +21,7 @@ import {
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
 import { createSourceSpan } from "../source.js";
+import { namedTimeZones } from "../time-zones.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import type { RuntimeCheckSite } from "../type-checker.js";
 import {
@@ -59,7 +60,7 @@ export function compileStableProgram(
  * one block of the instruction stream: its root statements, then its functions and handlers. The root region of
  * `main.tease` starts with the start values of the globals and speakers of every file, in session-start order.
  * `typeChecks` are the runtime checks the type check recorded for values the compiler cannot know, and `images` is the
- * validated image catalog, in path order.
+ * validated image catalog, in path order. The plan lists the zones the files name with `zone:`.
  */
 export function compileStableProject(
   projectFiles: readonly StableProjectFile[],
@@ -171,5 +172,6 @@ export function compileStableProject(
     functions,
     instructions,
     storageTypes: storageTypes.map((entry) => ({ key: entry.key, type: entry.type })),
+    timeZones: namedTimeZones(projectFiles.map((file) => file.program)),
   });
 }

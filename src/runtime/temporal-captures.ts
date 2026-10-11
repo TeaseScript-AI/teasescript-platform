@@ -1,4 +1,5 @@
 import {
+  contextZonesProblem,
   frozenTemporalContext,
   isValidEpochMilliseconds,
   roundToMillisecond,
@@ -76,13 +77,15 @@ export function frozenTemporalCaptures(
 /**
  * Why `value` is not a valid capture list, or `null`: at least one capture, in recording order (boundaries and event
  * sequences not decreasing, and one of them increasing; boundaries not past `observedSessionTimeMs` and sequences not
- * past `nextEventSequence`), the first one in force at `currentSessionTimeMs`, and valid clocks and contexts.
+ * past `nextEventSequence`), the first one in force at `currentSessionTimeMs`, and valid clocks and contexts. With the
+ * plan's `timeZones`, a context holds only the rules of zones the plan names.
  */
 export function temporalCapturesProblem(
   value: unknown,
   currentSessionTimeMs: number,
   observedSessionTimeMs: number,
   nextEventSequence: number,
+  timeZones?: readonly string[],
 ): string | null {
   if (!Array.isArray(value) || value.length === 0)
     return "Temporal captures must be a list of at least one entry.";
@@ -125,6 +128,10 @@ export function temporalCapturesProblem(
     if (!validContexts.has(context)) {
       const problem = temporalContextProblem(context);
       if (problem !== null) return problem;
+      // EVIDENCE: validation: temporalContextProblem accepted the context.
+      const valid = context as TemporalContext;
+      const unnamed = timeZones === undefined ? null : contextZonesProblem(valid, timeZones);
+      if (unnamed !== null) return unnamed;
       validContexts.add(context);
     }
     previous = boundaryMs;

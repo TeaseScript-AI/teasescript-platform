@@ -109,6 +109,16 @@ export function isoWeek(date: DateFields): {
 }
 
 /**
+ * Why the month `months` after the date's month lacks the date's day, such as `"February 2027 has 28 days"` for
+ * January 31 plus one month, or `null` when it has the day.
+ */
+export function monthOverflow(date: DateFields, months: number): string | null {
+  const monthIndex = date.year * 12 + (date.month - 1) + months;
+  const year = Math.floor(monthIndex / 12);
+  return dateProblem({ year, month: monthIndex - year * 12 + 1, day: date.day });
+}
+
+/**
  * A date moved by whole months and then whole days (V30 §35): a day the target month lacks becomes its last day, so
  * January 31 plus one month is February 28 or 29. `undefined` outside the years 0000 to 9999.
  */
@@ -327,41 +337,53 @@ export function localFields(
 }
 
 /**
- * The moment of a local date and time in the zone. A local time that a forward transition skips is moved forward by
- * the skipped length; a local time that a backward transition repeats takes the earlier moment.
+ * How a local date and time that a zone skips or repeats becomes a moment (V30 §35). `compatible` moves a skipped time
+ * forward by the skipped length and takes the earlier moment of a repeated time; `earlier` moves a skipped time
+ * backward and takes the earlier moment; `later` moves a skipped time forward and takes the later moment.
  */
-export function zonedTimestamp(rules: ZoneRules, local: DateTimeFields): TemporalResult<number> {
+export type Disambiguation = "compatible" | "earlier" | "later";
+
+/**
+ * The moment of a local date and time in the zone. By default a local time that a forward transition skips is moved
+ * forward by the skipped length, and a local time that a backward transition repeats takes the earlier moment.
+ */
+export function zonedTimestamp(
+  rules: ZoneRules,
+  local: DateTimeFields,
+  disambiguation: Disambiguation = "compatible",
+): TemporalResult<number> {
   let wall = fieldsAsUtc(local);
-  // Each pass finds the earliest moment showing the wall time, or moves the wall time past one skipped range, so the
-  // passes end within the number of transitions.
+  // Each pass finds the moments showing the wall time, or moves the wall time past one skipped range, so the passes end
+  // within the number of transitions.
   for (let pass = 0; pass <= rules.transitions.length; pass += 1) {
-    const segments = segmentsAround(rules, wall);
-    for (let index = 0; index < segments.length; index += 1) {
-      const moment = wall - segments[index]!.offset;
-      if (moment >= segments[index]!.start && moment < (segments[index + 1]?.start ?? Infinity))
-        return withinZoneRules(moment)
-          ? { ok: true, value: moment }
-          : { ok: false, reason: OUTSIDE_ZONE_RULES };
+    const { moments, skipped } = momentsShowing(rules, wall);
+    if (moments.length > 0) {
+      const moment = disambiguation === "later" ? moments.at(-1)! : moments[0]!;
+      return withinZoneRules(moment)
+        ? { ok: true, value: moment }
+        : { ok: false, reason: OUTSIDE_ZONE_RULES };
     }
-    // Segment `gap` ends at local time `next.start + offset`, and the next one starts later, at `next.start + next.offset`.
-    const gap = segments.findIndex((segment, index) => {
-      const next = segments[index + 1];
-      return (
-        next !== undefined && wall >= next.start + segment.offset && wall < next.start + next.offset
-      );
-    });
-    if (gap < 0) break;
-    wall += segments[gap + 1]!.offset - segments[gap]!.offset;
+    if (skipped === 0) break;
+    wall += disambiguation === "earlier" ? -skipped : skipped;
   }
   return { ok: false, reason: OUTSIDE_ZONE_RULES };
+}
+
+/** Whether the zone skips the local date and time, shows it twice, or neither (`null`). */
+export function localTimeTransition(
+  rules: ZoneRules,
+  local: DateTimeFields,
+): "skipped" | "repeated" | null {
+  const { moments, skipped } = momentsShowing(rules, fieldsAsUtc(local));
+  if (moments.length > 1) return "repeated";
+  return moments.length === 0 && skipped > 0 ? "skipped" : null;
 }
 
 /** Why `value` is not valid zone rules, or `null`. */
 export function zoneRulesProblem(value: unknown): string | null {
   if (!isRecord(value) || !hasExactKeys(value, ["name", "initialOffsetSeconds", "transitions"]))
     return "Zone rules must be { name, initialOffsetSeconds, transitions }.";
-  if (typeof value.name !== "string" || !/^[A-Za-z0-9_+\-/]{1,64}$/u.test(value.name))
-    return "A zone name must be an IANA name such as Europe/Amsterdam.";
+  if (!isZoneName(value.name)) return "A zone name must be an IANA name such as Europe/Amsterdam.";
   if (!isOffsetSeconds(value.initialOffsetSeconds))
     return "A zone offset must be whole seconds below one day.";
   const transitions = value.transitions;
@@ -385,6 +407,11 @@ export function zoneRulesProblem(value: unknown): string | null {
   return null;
 }
 
+/** Whether `value` has the form of an IANA zone name, such as `Europe/Amsterdam`, `UTC`, or `Etc/GMT+5`. */
+export function isZoneName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_+\-/]{1,64}$/u.test(value);
+}
+
 function withinZoneRules(epochMilliseconds: number): boolean {
   return (
     epochMilliseconds >= ZONE_RULES_START_MILLISECONDS &&
@@ -401,6 +428,32 @@ function offsetSecondsAt(rules: ZoneRules, epochMilliseconds: number): number {
     else high = middle;
   }
   return low === 0 ? rules.initialOffsetSeconds : rules.transitions[low - 1]![1]!;
+}
+
+/**
+ * The moments that show wall time `wall` in the zone, earliest first, and, when none does, the length of the range a
+ * forward transition skips around it, or 0.
+ */
+function momentsShowing(
+  rules: ZoneRules,
+  wall: number,
+): { readonly moments: readonly number[]; readonly skipped: number } {
+  const segments = segmentsAround(rules, wall);
+  const moments: number[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const moment = wall - segments[index]!.offset;
+    if (moment >= segments[index]!.start && moment < (segments[index + 1]?.start ?? Infinity))
+      moments.push(moment);
+  }
+  if (moments.length > 0) return { moments, skipped: 0 };
+  // Segment `gap` ends at local time `next.start + offset`, and the next one starts later, at `next.start + next.offset`.
+  const gap = segments.findIndex((segment, index) => {
+    const next = segments[index + 1];
+    return (
+      next !== undefined && wall >= next.start + segment.offset && wall < next.start + next.offset
+    );
+  });
+  return { moments, skipped: gap < 0 ? 0 : segments[gap + 1]!.offset - segments[gap]!.offset };
 }
 
 /** The offsets in force around `wall`, as consecutive segments of moments, with offsets in milliseconds. */
@@ -600,17 +653,62 @@ function isPresentationText(
 // ---------------------------------------------------------------------------------------------------------------------
 // Session context
 
-/** What the host captured about the player for a session: the zone rules and the numeric presentation. */
+/**
+ * What the host captured for a session: the player's zone rules and numeric presentation, and the rules of each zone
+ * the script names with `zone:` (V30 §35), under the name as the script writes it. `namedZones` may be left out when
+ * there are none.
+ */
 export interface TemporalContext {
   readonly zone: ZoneRules;
   readonly presentation: PresentationSettings;
+  readonly namedZones?: readonly ZoneRules[];
 }
 
 /** Why `value` is not a valid temporal context, or `null`. */
 export function temporalContextProblem(value: unknown): string | null {
-  if (!isRecord(value) || !hasExactKeys(value, ["zone", "presentation"]))
-    return "A temporal context must be { zone, presentation }.";
-  return zoneRulesProblem(value.zone) ?? presentationSettingsProblem(value.presentation);
+  if (
+    !isRecord(value) ||
+    !(
+      hasExactKeys(value, ["zone", "presentation"]) ||
+      hasExactKeys(value, ["zone", "presentation", "namedZones"])
+    )
+  )
+    return "A temporal context must be { zone, presentation, namedZones? }.";
+  const problem = zoneRulesProblem(value.zone) ?? presentationSettingsProblem(value.presentation);
+  if (problem !== null || !Object.hasOwn(value, "namedZones")) return problem;
+  const zones = value.namedZones;
+  if (!Array.isArray(zones)) return "Named zones must be a list of zone rules.";
+  const names = new Set<unknown>();
+  for (const zone of zones) {
+    const zoneProblem = zoneRulesProblem(zone);
+    if (zoneProblem !== null) return zoneProblem;
+    // EVIDENCE: validation: zoneRulesProblem accepted the entry.
+    const name = (zone as ZoneRules).name;
+    if (names.has(name)) return `The named zone ${name} appears twice.`;
+    names.add(name);
+  }
+  return null;
+}
+
+/**
+ * Why a valid context does not fit a plan, or `null`: it holds the rules only of zones that the plan names, which bounds
+ * what each capture keeps.
+ */
+export function contextZonesProblem(
+  context: TemporalContext,
+  timeZones: readonly string[],
+): string | null {
+  const unnamed = context.namedZones?.find((zone) => !timeZones.includes(zone.name));
+  return unnamed === undefined ? null : `The script names no time zone ${unnamed.name}.`;
+}
+
+/**
+ * The rules of zone `name` in the context: the built-in rules of `UTC`, else the named zone the host captured, or
+ * `undefined` when it captured none of that name.
+ */
+export function namedZoneRules(context: TemporalContext, name: string): ZoneRules | undefined {
+  if (name === "UTC") return UTC_ZONE_RULES;
+  return context.namedZones?.find((zone) => zone.name === name);
 }
 
 /** Contexts that `frozenTemporalContext` made: deeply frozen, so snapshots can share them. */
@@ -627,21 +725,30 @@ export function isFrozenTemporalContext(value: unknown): boolean {
  */
 export function frozenTemporalContext(context: TemporalContext): TemporalContext {
   if (frozenContexts.has(context)) return context;
+  const namedZones = context.namedZones ?? [];
   const frozen: TemporalContext = Object.freeze({
-    zone: Object.freeze({
-      name: context.zone.name,
-      initialOffsetSeconds: context.zone.initialOffsetSeconds,
-      transitions: Object.freeze(
-        context.zone.transitions.map((transition) => Object.freeze([...transition])),
-      ),
-    }),
+    zone: frozenZoneRules(context.zone),
     presentation: Object.freeze({
       ...context.presentation,
       dayPeriods: Object.freeze([...context.presentation.dayPeriods] as const),
     }),
+    // A context without named zones has no `namedZones`, so the snapshot keeps one form.
+    ...(namedZones.length === 0
+      ? {}
+      : { namedZones: Object.freeze(namedZones.map(frozenZoneRules)) }),
   });
   frozenContexts.add(frozen);
   return frozen;
+}
+
+function frozenZoneRules(rules: ZoneRules): ZoneRules {
+  return Object.freeze({
+    name: rules.name,
+    initialOffsetSeconds: rules.initialOffsetSeconds,
+    transitions: Object.freeze(
+      rules.transitions.map((transition) => Object.freeze([...transition])),
+    ),
+  });
 }
 
 /** UTC with locale-neutral presentation, for hosts that capture nothing, such as tests and command-line tools. */

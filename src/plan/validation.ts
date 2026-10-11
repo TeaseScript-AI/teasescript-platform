@@ -19,6 +19,7 @@ import {
   packagePathProblem,
 } from "../project-paths.js";
 import { isCanonicalTagList, normalizeTagName } from "../tags.js";
+import { isZoneName } from "../temporal.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -80,6 +81,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
   validatePlanImages(value.images, errors);
   validateStorageTypes(value.storageTypes, errors);
+  validateTimeZones(value.timeZones, errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -268,7 +270,31 @@ const PLAN_FIELDS = [
   "functions",
   "instructions",
   "storageTypes",
+  "timeZones",
 ];
+
+/**
+ * The zones the script names with `zone:`, whose rules the host records (V30 §35): unique zone names other than `UTC`,
+ * in UTF-16 code-unit order.
+ */
+function validateTimeZones(value: unknown, errors: PlanValidationError[]): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan time zones must be an array.", "$.timeZones"));
+    return;
+  }
+  let previous: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const name: unknown = value[index];
+    const path = `$.timeZones[${index}]`;
+    if (!isZoneName(name) || name === "UTC")
+      errors.push(
+        planError("TSC002", "A plan time zone is an IANA zone name other than UTC.", path),
+      );
+    else if (previous !== null && !(previous < name))
+      errors.push(planError("TSC002", "Plan time zones are unique and in name order.", path));
+    else previous = name;
+  }
+}
 
 /** The types of storage keys: unique keys in UTF-16 code-unit order, each with a valid type (ADR 0021 §6). */
 function validateStorageTypes(value: unknown, errors: PlanValidationError[]): void {

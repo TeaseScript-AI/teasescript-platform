@@ -452,7 +452,8 @@ moment after an answer, can be lost. A saved-data import of the script discards 
 scenario, keeps none. The debug room has a start page of its own, with its restarts
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
-the account setting when the host supplies one, else the browser's. They are session data
+the account setting when the host supplies one, else the browser's. With them they record the rules of the time zones
+the script names. They are session data
 ([Date and time context](../RUNTIME.md#date-and-time-context)).
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It

@@ -350,7 +350,7 @@ export {
   type TemporalContext,
   type ZoneRules,
 } from "./temporal.js";
-export { captureTemporalContext } from "./temporal-capture.js";
+export { captureNamedZoneRules, captureTemporalContext } from "./temporal-capture.js";
 export {
   combineSourceSpans,
   createSourcePosition,
