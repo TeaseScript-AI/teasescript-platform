@@ -5328,16 +5328,43 @@ async function formsScenario(cdp, origin) {
     "The form written with cancel: shows no cancel button",
   );
   const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
+  const access = `${fields}.find((button) => button.textContent.includes("Access"))`;
   const fill = `getComputedStyle(${intensity}).backgroundImage`;
+  const width = (button) => `${button}.getBoundingClientRect().width`;
   const low = await value(cdp, fill);
+  const widths = [await value(cdp, width(intensity)), await value(cdp, width(access))];
   await evaluate(cdp, `${intensity}.click()`);
+  await evaluate(cdp, `${access}.click()`);
   await waitFor(
     cdp,
-    `${intensity}.textContent.includes("Medium")`,
+    `${intensity}.innerText.includes("Intensity: Medium") && ${access}.innerText.includes("Access: On")`,
     8_000,
-    "The cycle did not step",
+    "The cycle or the toggle with options did not step",
   );
   assertEqual((await value(cdp, fill)) !== low, true, "The cycle did not take its option's colour");
+  // Both keep the width of their longest text, and show and announce only the current one.
+  assertEqual(
+    JSON.stringify([await value(cdp, width(intensity)), await value(cdp, width(access))]),
+    JSON.stringify(widths),
+    "A press changed the width of a cycle or a toggle with options",
+  );
+  assertEqual(
+    [
+      await value(cdp, `${intensity}.innerText.replace(/\\s+/g, " ").trim()`),
+      await value(cdp, `${access}.innerText.replace(/\\s+/g, " ").trim()`),
+    ].join("|"),
+    "Intensity: Medium ↻|Access: On",
+    "A cycle or a toggle with options shows more than its current text",
+  );
+  await buttonNameCheck(cdp, "Intensity: Medium");
+  await buttonNameCheck(cdp, "Access: On");
+  await evaluate(cdp, `${access}.click()`);
+  await waitFor(
+    cdp,
+    `${access}.innerText.includes("Access: Off")`,
+    8_000,
+    "The toggle did not turn off",
+  );
   await evaluate(
     cdp,
     `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
