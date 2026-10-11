@@ -42,13 +42,13 @@ if likes("rope") {
   conditional = 40
 }
 if earlier >= earlier2 * conditional {
-  say "Tie up", instant
+  say prose "Tie up", instant
 }
 let missed = 3
 if missed > 1 {
-  say "Wrong again!", instant
+  say prose "Wrong again!", instant
 } else {
-  say "Wrong!", instant
+  say prose "Wrong!", instant
 }
 let conditional2 = 3
 if likes("tape") {
@@ -61,11 +61,11 @@ if conditional3 {
   conditional3 = askBoolean "Continue?"
 }
 if conditional3 {
-  say "Continuing", instant
+  say prose "Continuing", instant
 }
 // Groovy's & on booleans evaluates both sides, so a right side with effects runs first.
 function asked {
-  say "Asked", instant
+  say prose "Asked", instant
   return true
 }
 let earlier3 = likes("tape")
@@ -74,7 +74,7 @@ let both = earlier3 and conditional4
 // A stored flag of unknown type and a comparison are both tested as conditions.
 let helpmode = load "help", default: false
 if helpmode == true or missed < 0 {
-  say "Help", instant
+  say prose "Help", instant
 }
 // A list method with a closure becomes a loop before the statement.
 let toys = ["rope", "tape", "gag"]
@@ -84,7 +84,7 @@ for t in toys {
     findAllResult.add(t)
   }
 }
-say "Liked: ${findAllResult.join(", ")}", instant
+say prose "Liked: ${findAllResult.join(", ")}", instant
 let anyResult = false
 for t in toys {
   if t == "gag" {
@@ -93,7 +93,7 @@ for t in toys {
   }
 }
 if anyResult and total > 2 {
-  say "Gagged", instant
+  say prose "Gagged", instant
 }
 // isEmpty() on text, a list, or a dict tests the length.
 function empty(items) {
@@ -101,7 +101,7 @@ function empty(items) {
   return items.length == 0
 }
 if not empty(toys) {
-  say "Total ${total}, both ${both}", instant
+  say prose "Total ${total}, both ${both}", instant
 }
 // A menu built inside a larger expression asks first; a return in times() continues with the next round.
 let opts = []
@@ -118,18 +118,18 @@ for it in 0..rounds {
   if it == 1 {
     continue
   }
-  say "Round ${it}", instant
+  say prose "Round ${it}", instant
 }
 let order = [3, 1, 2]
 order.sort()
-say "Picked ${picked}, first ${order[0]}", instant
+say prose "Picked ${picked}, first ${order[0]}", instant
 // A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
 function weeks(punishment) {
   return toInteger(punishment / 20)
 }
 let squared = pow(3, 2)
 let named = "Ann" != ""
-say "Weeks ${weeks(45)}, ${squared}, ${named}", instant
+say prose "Weeks ${weeks(45)}, ${squared}, ${named}", instant
 // An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
 function describe(given) {
   let elvisValue = given
@@ -138,7 +138,7 @@ function describe(given) {
     mood = elvisValue
   }
   // NOTE SX_LENGTH_RECEIVER line 41: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
-  say "Mood ${mood.length}", instant
+  say prose "Mood ${mood.length}", instant
 }
 describe(null)
 // A collected value with a ternary inside its text computes the ternary first, in the loop.
@@ -153,7 +153,7 @@ for it in amounts {
   labels.add(value)
 }
 // NOTE SX_LIST_JOIN line 47: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say labels.join(", "), instant
+say prose labels.join(", "), instant
 // An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
 function pick {
   let savedPick: string? = load "x.pick", default: null
@@ -165,5 +165,5 @@ word = ""
 if elvisValue2 != null and elvisValue2 != "" {
   word = elvisValue2
 }
-say "Word ${word.length}", instant
+say prose "Word ${word.length}", instant
 exit

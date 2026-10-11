@@ -165,14 +165,14 @@ for item in [1, 2, 3] {
   total += item
 }
 for it in 0..3 {
-  say "Round ${it}", instant
+  say prose "Round ${it}", instant
 }
 repeat 2 {
-  say "Again", instant
+  say prose "Again", instant
 }
 for i in 0..items.length {
   let item = items[i]
-  say "${i}: ${item}", instant
+  say prose "${i}: ${item}", instant
 }
 items = sexscriptLegacyShuffled(items)
 items.removeAt(0)
@@ -183,11 +183,11 @@ let pairs = [
 ]
 pairs.remove([1, 2])
 let numbers = [5, 6]
-say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}", instant
-say "Best: ${sexscriptLegacyListMax([3, 7, 5])}", instant
+say prose "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}", instant
+say prose "Best: ${sexscriptLegacyListMax([3, 7, 5])}", instant
 let bigger = max(total, 4)
 if items.length == 0 {
-  say "Nothing left", instant
+  say prose "Nothing left", instant
 }
 // A loop that reads its own target keeps the old value until the result is complete.
 let again = true
@@ -201,16 +201,16 @@ for it in [1, 2] {
 again = anyResult
 let rounds = 2
 for it in 0..rounds {
-  say "Round", instant
+  say prose "Round", instant
 }
-say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}", instant
+say prose "Second ${[1, 2, 3][[1, 2, 3].length - 2]}", instant
 // A position compared with null reads null past the end, as Groovy did.
 let hand = ["Ace", "King"]
 // NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(hand, 2) != null {
-  say "Third card", instant
+  say prose "Third card", instant
 } else {
-  say "Two cards", instant
+  say prose "Two cards", instant
 }
 // A list that only ever starts empty grows at its end, also by a computed position.
 let shoe = []
@@ -223,12 +223,12 @@ for d in 0..2 {
     shoe[d * 2 + c] = c
   }
 }
-say "Shoe ${shoe.length}", instant
+say prose "Shoe ${shoe.length}", instant
 // A division of values not proven numbers sets a number.
 let odds: number = 0
 let parts = [3, 4]
 odds = parts[0] / parts[1]
-say "Odds ${odds}", instant
+say prose "Odds ${odds}", instant
 // Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
 function joinDecks(first, second, offset) {
   let joined = []
@@ -253,7 +253,7 @@ function joinDecks(first, second, offset) {
 }
 let labels = ["< Previous", "Next >"]
 labels.add("Exit")
-say "Decks ${joinDecks([1, 2], [3, 4], 2).length} ${labels.length}", instant
+say prose "Decks ${joinDecks([1, 2], [3, 4], 2).length} ${labels.length}", instant
 // A list filled from its end, or past its end, gets padding up to the position, as Groovy padded it with null: 0 where
 // nothing compares its elements with null, and null where something does.
 let slots = []
@@ -274,7 +274,7 @@ while seats.length <= 1 {
 seats[1] = "Ann"
 // NOTE SX_INDEX_PAST_END line 54: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(seats, 0) == null {
-  say "Seat 0 is free", instant
+  say prose "Seat 0 is free", instant
 }
 // A write that reads the same position first needs no padding: the position exists already.
 k = 0
@@ -282,20 +282,20 @@ while k < 3 {
   slots[k] = slots[k] + 1
   k += 1
 }
-say "Slots ${slots.length} ${seats.length}", instant
+say prose "Slots ${slots.length} ${seats.length}", instant
 // collect() without a closure collects each element as it is.
 let positions = []
 for item in 0..=2 {
   positions.add(item)
 }
-say "Positions ${positions.length}", instant
+say prose "Positions ${positions.length}", instant
 let rows = []
 let collectResult = []
 for item in "a,b".split(",") {
   collectResult.add(item)
 }
 rows.add(collectResult)
-say "Rows ${rows.length}", instant
+say prose "Rows ${rows.length}", instant
 // A list of positions sets each of them to the one value (campdrain), and reads the list of their elements
 // (Concentration).
 let stages = ["warm", "warm", "warm", "warm"]
@@ -311,16 +311,16 @@ function firstPaces(all) {
   return [all[0], all[1]]
 }
 // NOTE SX_LENGTH_RECEIVER line 71: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
-say "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces(paces).length}", instant
+say prose "Stages [${stages.join(", ")}] [${paces.join(", ")}] ${firstPaces(paces).length}", instant
 // A queue starts as an empty list, whose size reads as the list's (LLM_Mistress).
 let replies = []
 if replies.length == 0 {
-  say "No replies yet", instant
+  say prose "No replies yet", instant
 }
 // An any() whose result goes unused is a loop: a true result, returned or last, stops it, as in campdrain's drains.
 let drainSpeed = 0
 for stroke in 1..=2 {
-  say "Stroke ${stroke}", instant
+  say prose "Stroke ${stroke}", instant
   if load("training.edge", default: false) == true {
     if askBoolean "Over the edge?" {
       break
@@ -330,7 +330,7 @@ for stroke in 1..=2 {
     break
   }
 }
-say "Speed ${drainSpeed}", instant
+say prose "Speed ${drainSpeed}", instant
 // A write into a list inside a list changes the outer list itself, also where its position may be -1, as Battleship's
 // board of shots.
 let shots = [
@@ -347,7 +347,7 @@ if column < 0 {
   column = 0
 }
 shots[column][0] = 1
-say "Shot ${shots[0][0]}", instant
+say prose "Shot ${shots[0][0]}", instant
 // A loop that fills a literal list by position up to a count that can be more than its length grows the list, as
 // Farkel's cheating roll of seven dice into six values.
 let rolled = [0, 0, 0]
@@ -363,7 +363,7 @@ for i in 0..throwCount {
     rolled.add(randomInteger(0..6) + 1)
   }
 }
-say "Rolled ${rolled.length}", instant
+say prose "Rolled ${rolled.length}", instant
 // A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
 // after a bracket of one.
 let finalists = ["Anna", "Bea"]
@@ -371,7 +371,7 @@ if askBoolean "Bye?" {
   finalists = ["Anna"]
 }
 // NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
-say "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}", instant
+say prose "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}", instant
 // A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
 // OwlSays' owned implements.
 let owned = []
@@ -388,7 +388,7 @@ for toy in ["paddle", "cane"] {
   }
 }
 owned = sexscriptLegacyReversed(owned)
-say "Owned ${owned.length}", instant
+say prose "Owned ${owned.length}", instant
 // A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
 // check.
 let marks = []
@@ -401,7 +401,7 @@ for entry in ["a|re", "b|ok"] {
   marks.add(entry)
 }
 // NOTE SX_LIST_JOIN line 129: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Marks ${marks.join(",")}", instant
+say prose "Marks ${marks.join(",")}", instant
 // A list of lists shows as Groovy showed it (PainWaveGen's shock list); one that may be null, which the conversion may
 // start empty, or that holds maps, which it may make objects, stays a TODO.
 let shocks: (number | integer[] | string)[][] = []
@@ -411,10 +411,10 @@ let collectResult2 = []
 for it in shocks {
   collectResult2.add("${sexscriptLegacyListText(it)}")
 }
-say "Remove:", instant
+say prose "Remove:", instant
 let chosen = choose sexscriptLegacyMenuOptions(collectResult2 + ["Back"], 0)
 // NOTE SX_COLLECTION_TEXT_NESTED line 135: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
-say "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}", instant
+say prose "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}", instant
 let spare = []
 if askBoolean "Spare?" {
   spare = [1, 2]
@@ -429,7 +429,7 @@ if askBoolean "Spare?" {
 let collectResult3 = []
 let kept = 0
 if kept < shocks.length {
-  say "Kept", instant
+  say prose "Kept", instant
 }
 // A position that add() calls before it show inside the list, or at its end, is written in place or appended.
 let picks = []
@@ -442,7 +442,7 @@ if askBoolean "Pick?" {
     picks[1] = "c"
   }
 }
-say "Picks ${picks.length}", instant
+say prose "Picks ${picks.length}", instant
 // A collect() closure that returns early inside a try with a finally block stays a TODO: a continue would skip it.
 let finallyCount = 0
 // TODO SX_UNSUPPORTED_LIST_METHOD line 153: Groovy list method collect() is not safely mapped yet.
@@ -455,7 +455,7 @@ let finallyCount = 0
 // | 	return item + 1
 // | }
 let finallyKept = []
-say "Kept ${finallyKept.length} ${finallyCount}", instant
+say prose "Kept ${finallyKept.length} ${finallyCount}", instant
 // A list that starts empty and may later hold a Java array, whose length is fixed, does not grow.
 let fixedSlots = []
 let fixedFilled = 0
@@ -465,13 +465,13 @@ if askBoolean "Fixed?" {
 }
 fixedSlots[fixedFilled] = 5
 fixedFilled += 1
-say "Slots ${fixedSlots.length}", instant
+say prose "Slots ${fixedSlots.length}", instant
 // A value of unknown type that another variable is assigned from shares its list too, so a change through it is noted.
 let entryParts = sexscriptLegacySplit(load("game.entries", default: ""), ",")
 let entryCopy = entryParts
 // NOTE SX_SHARED_LIST_WRITE line 172: Groovy shared the list in entryParts with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
 entryParts[0] = "x"
-say "Copy ${entryCopy.length}", instant
+say prose "Copy ${entryCopy.length}", instant
 // The sum of texts joins them, so an answer compares with the digits a game showed (ToyExpanded's number memory game).
 let digits = []
 for it in 0..3 {
@@ -479,18 +479,18 @@ for it in 0..3 {
 }
 let sumResult = sexscriptLegacyTextSum(digits)
 if "012" == sumResult {
-  say "All digits", instant
+  say prose "All digits", instant
 }
 // The sum is text, so a text variable takes it without a variable of its own for a number.
 let answer = ""
 answer = sexscriptLegacyTextSum(digits)
-say "Answer ${answer}", instant
+say prose "Answer ${answer}", instant
 // The sum of a list without elements is null, which Groovy ordered below every number (ShockJack's shock times).
 let shockTimes = []
 while sexscriptLegacyCompare(sexscriptLegacyListSum(shockTimes), 5) < 0 {
   shockTimes.add(2)
 }
-say "Shocks ${shockTimes.length}", instant
+say prose "Shocks ${shockTimes.length}", instant
 // Arithmetic with the sum of no element failed in Groovy, whose sum() was null, so the session ends there (ShockJack).
 let shockTimeList = [3]
 let lastTime = 2
@@ -504,5 +504,5 @@ if shockTimeList.length == 0 {
   exit
 }
 shockTimeList[shockTimeList.length - 1] = shockTimeList.last - (sumResult2 - lastTime)
-say "Times ${shockTimeList[0]}", instant
+say prose "Times ${shockTimeList[0]}", instant
 exit

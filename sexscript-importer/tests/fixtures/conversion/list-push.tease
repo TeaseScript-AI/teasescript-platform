@@ -2,9 +2,9 @@
 let rules = ["Kneel"]
 rules = ["Listen"] + rules
 rules.add("Obey")
-say "First rule: ${rules[0]}, last: ${rules[2]}", instant
+say prose "First rule: ${rules[0]}, last: ${rules[2]}", instant
 // addAll() appends another list's elements in place.
 let extras = ["Kneel"]
 extras.addAll(["Wait", "Listen"])
-say "${extras.length} rules", instant
+say prose "${extras.length} rules", instant
 exit

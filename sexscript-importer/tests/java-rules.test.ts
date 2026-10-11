@@ -39,12 +39,12 @@ async function convert(lines: string[], files: Record<string, string> = {}): Pro
 }
 
 /**
- * Compiles the converted script and runs it to the end, returning the values it said: each `say text, instant` becomes a
+ * Compiles the converted script and runs it to the end, returning the values it said: each `say prose text, instant` becomes a
  * call of a recording host function, which shows text as itself and other values as JSON.
  */
 function run(source: string): string[] {
   if (!("compiler" in project)) return [];
-  const recording = source.replaceAll(/^( *)say (.+), instant$/gmu, "$1record($2)");
+  const recording = source.replaceAll(/^( *)say (?:prose )?(.+), instant$/gmu, "$1record($2)");
   const files = [{ path: "main.tease", source: recording }];
   const compiled = project.compiler(files, ["record"]);
   assert.deepEqual(

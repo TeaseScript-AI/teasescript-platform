@@ -4,18 +4,18 @@ function image {
   showImage "room.jpg"
 }
 function taunt {
-  say phrases.random, instant
+  say prose phrases.random, instant
 }
 function greet {
-  say "Welcome to ${mistress}'s house.", instant
+  say prose "Welcome to ${mistress}'s house.", instant
 }
 function enter {
   image()
-  say "Come in.", instant
+  say prose "Come in.", instant
 }
 let level = 1
 function report {
-  say "Level ${level}", instant
+  say prose "Level ${level}", instant
 }
 enter()
 report()

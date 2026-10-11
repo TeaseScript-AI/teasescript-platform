@@ -24,21 +24,21 @@ let visits = askInteger """
 
   Currently set to: every ${current} days
 """, prefill: 3
-say "Before we start.", instant
+say prose "Before we start.", instant
 let mood = askInteger """
   **Choose your mood:**
 
   1 = generally good
   2 = so-so
 """, prefill: 1
-say "I trust you didn't fail or missed something!", instant
+say prose "I trust you didn't fail or missed something!", instant
 let done = askText("Did you do everything as I told you?", prefill: "yes").replace("\n", " ")
 // Where no paragraph asks, the last one is the question; a word that only starts like an instruction is none.
-say "Let's be sure:", instant
+say prose "Let's be sure:", instant
 let locked = askText("Is this an image of you locked up", prefill: "yes").replace("\n", " ")
 let suffix = "tings"
-say "Set${suffix} can be changed.", instant
-say "Seté is a name.", instant
+say prose "Set${suffix} can be changed.", instant
+say prose "Seté is a name.", instant
 let changed = askText("A remark.", prefill: "no").replace("\n", " ")
-say "${multiplier} ${visits} ${mood} ${done} ${locked} ${changed}", instant
+say prose "${multiplier} ${visits} ${mood} ${done} ${locked} ${changed}", instant
 exit

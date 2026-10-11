@@ -1,9 +1,9 @@
 showWait("Kneel")
 rounds(3, "Stroke")
-say "Twice ${twice(2)}", instant
-say "Turns ${turns(2)}", instant
+say prose "Twice ${twice(2)}", instant
+say prose "Turns ${turns(2)}", instant
 if percentChance(40) {
-  say "Lucky", instant
+  say prose "Lucky", instant
 }
 start()
 check("good")

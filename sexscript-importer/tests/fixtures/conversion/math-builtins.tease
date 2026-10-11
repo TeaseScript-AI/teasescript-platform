@@ -9,8 +9,8 @@ let nearest = round(pow(1.5, 3))
 let below = floor(pow(2, 0.5))
 let distance = abs(side - 10)
 let cube = pow(side, 3)
-say "${area} ${diagonal} ${whole} ${nearest} ${below} ${distance} ${cube}", instant
+say prose "${area} ${diagonal} ${whole} ${nearest} ${below} ${distance} ${cube}", instant
 // A whole power stays an integer until a fraction is stored.
 area = area / 3
-say "${area}", instant
+say prose "${area}", instant
 exit

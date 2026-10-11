@@ -11,10 +11,10 @@ function deal_hand {
   }
   return hand
 }
-say "Cards ${deal_hand().length}", instant
+say prose "Cards ${deal_hand().length}", instant
 // BanjoGameHub rockpaperscissors: a ladder of tests of one choice is a switch.
 let opponent = ""
-say "Select your opponent:", instant
+say prose "Select your opponent:", instant
 let pick_opponent = choose 0: "Anna",
   1: "Bella",
   2: "Cleo",
@@ -33,10 +33,10 @@ switch pick_opponent {
     opponent = "Dora"
   }
 }
-say "Against ${opponent}", instant
+say prose "Against ${opponent}", instant
 // teachertrouble: a bound known before the script runs draws natively.
 let swats = randomInteger(0..20 - 10 + 1) + 10
-say "Swats ${swats}", instant
+say prose "Swats ${swats}", instant
 // dontjuge: a bound drawn anew on every pass keeps the loop a while.
 let swat = 0
 while swat < 20 + randomInteger(0..50) {
@@ -54,7 +54,7 @@ function drawTable(cards) {
   }
   return total
 }
-say "Total ${drawTable([[1, 2], [3]])}", instant
+say prose "Total ${drawTable([[1, 2], [3]])}", instant
 // teachertrouble: a script that never stops its background sounds plays each one plainly, without keeping a handle.
 let spankSound = "hand"
 let spankSoundLimit = 3

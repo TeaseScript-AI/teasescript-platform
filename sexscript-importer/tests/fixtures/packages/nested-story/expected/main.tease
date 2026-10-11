@@ -13,7 +13,7 @@ global function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
-say "Which script do you want to start?", instant
+say prose "Which script do you want to start?", instant
 let picked = choose addon: "addon", start: "start"
 switch picked {
   case "addon" {

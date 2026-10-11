@@ -24,10 +24,10 @@ function pick(n = bump()) {
 }
 loadModules()
 xs += [bump()]
-say "xs [${xs.join(", ")}]", instant
+say prose "xs [${xs.join(", ")}]", instant
 let choices = { outer: "bump" }
 ys += [toInteger(dispatch(choices.outer))]
-say "ys [${ys.join(", ")}]", instant
+say prose "ys [${ys.join(", ")}]", instant
 zs += [pick()]
-say "zs [${zs.join(", ")}]", instant
+say prose "zs [${zs.join(", ")}]", instant
 exit

@@ -1,2 +1,2 @@
-say "Implements", instant
+say prose "Implements", instant
 exit

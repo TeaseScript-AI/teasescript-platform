@@ -1,21 +1,21 @@
 let name = askText("What is your name?").replace("\n", " ")
 let weight = askNumber "Your weight?", prefill: 0
-say "Hello ${name}, you said ${weight}.", instant
-say "Choose a task", instant
+say prose "Hello ${name}, you said ${weight}.", instant
+say prose "Choose a task", instant
 let task = choose 0: "Kneel",
   1: "Wait",
   2: "Count"
 while true {
-  say "Ready?", instant
+  say prose "Ready?", instant
   if (choose 0: "No", 1: "Yes") != 0 {
     break
   }
-  say "Then wait.", instant
+  say prose "Then wait.", instant
   timer 10 s
 }
 wait 500 ms
 if name != "" {
-  say "Good, ${name}", instant
+  say prose "Good, ${name}", instant
 }
 // The question of an endless loop's condition is asked again in every round.
 let roundValue = 0
@@ -38,7 +38,7 @@ let kneel = askBoolean question
 // A question read from storage may be null, which kept the current text, so it is still tested.
 let stored = load "question", default: ""
 if stored != "" {
-  say stored, instant
+  say prose stored, instant
 }
 let answer = askText().replace("\n", " ")
 // A question that may be null elsewhere needs no test right after it was set to text.
@@ -46,7 +46,7 @@ stored = "Ready now?"
 let ready = askBoolean stored
 // A character of a text is its one-character substring, also counted from the end.
 let code = askText("Square?", prefill: "B4").replace("\n", " ")
-say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}", instant
+say prose "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}", instant
 // Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
 function honorific {
   return "Miss"
@@ -54,24 +54,24 @@ function honorific {
 let question2 = "Ready, ${honorific()}?"
 let option = "Yes, ${honorific()}"
 if askBoolean question2, yesText: option {
-  say "Good.", instant
+  say prose "Good.", instant
 }
 // A range goes through its values with their positions.
 let position = 0
 for value in 5..=6 {
-  say "${position}: ${value}", instant
+  say prose "${position}: ${value}", instant
   position += 1
 }
 // FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
 // legacy button did, also where it is an askBoolean's noText.
 if askBoolean "Who controls the key?", yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
-  say "Fine.", instant
+  say prose "Fine.", instant
 }
 // show() returned null, so a menu whose message is show(text) showed the text and then its options.
 let menuText = "Main menu"
-say menuText, instant
+say prose menuText, instant
 let menuChoice = choose 0: "Start", 1: "End"
-say "Chose ${menuChoice}", instant
+say prose "Chose ${menuChoice}", instant
 // A gauge wait of a negative number of seconds did not wait at all, so seconds not certain to be at least 0 count
 // from 0; a literal, a random number, and their sums are certain.
 let penalty = [-60, 0]
@@ -82,5 +82,5 @@ timer (randomInteger(0..3) + 1) s
 let gaugeStep = 1
 gaugeStep += 1
 timer (gaugeStep * 2) s
-say "Gauges done", instant
+say prose "Gauges done", instant
 exit

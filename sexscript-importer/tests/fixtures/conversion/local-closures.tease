@@ -17,7 +17,7 @@ function sexscriptLegacyCall(action, args) {
   }
 }
 function announceCallback1(t) {
-  say "Count ${t}", instant
+  say prose "Count ${t}", instant
 }
 // A closure kept in a local of a function becomes a function, which its calls call directly while nothing assigns
 // the local again; one that captures another closure of the function cannot convert
@@ -35,14 +35,14 @@ function scriptCallback2 {
 }
 // A closure called where it is written calls its function directly.
 let limits = scriptCallback2()
-say "Up to ${limits.high}", instant
+say prose "Up to ${limits.high}", instant
 // A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
 // functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
 // outside the block, where it meant something else.
 let punish = null
-say "Estim connected?", instant
+say prose "Estim connected?", instant
 function shock(message, shocks) {
-  say message, instant
+  say prose message, instant
   // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
   let itTo = floor(shocks)
   for itOffset in 0..=floor(abs(itTo - 1)) {
@@ -71,7 +71,7 @@ wait 1 s
 function again(againValue, times) {
   while true {
     if times > 0 {
-      say "Again ${times}", instant
+      say prose "Again ${times}", instant
       times -= 1
       continue
     }
@@ -82,7 +82,7 @@ again("again", 2)
 // A function that took the legacy script object as `main` called its methods as SexScript's; a call passes null in its
 // place, and a whole default that a call passes a fraction takes fractions (jeuxdemain_femme's animations).
 function pulse(main, speed: number = 1) {
-  say "Pulse ${speed}", instant
+  say prose "Pulse ${speed}", instant
 }
 pulse(null, 0.5)
 pulse(null)
@@ -93,15 +93,15 @@ function apply(action) {
   echo(0.5)
 }
 function pick(n = 1) {
-  say ["zero", "one"][n], instant
+  say prose ["zero", "one"][n], instant
 }
 function echo(n) {
-  say n, instant
+  say prose n, instant
 }
 pick()
 apply("echo")
 function card(main, n = 1) {
-  say ["zero", "one"][n], instant
+  say prose ["zero", "one"][n], instant
 }
 card(null)
 // TODO SX_OBJECT_THIS line 57: The legacy script object (this) cannot become a TeaseScript value.

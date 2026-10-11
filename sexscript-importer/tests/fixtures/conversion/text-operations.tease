@@ -109,46 +109,46 @@ function sexscriptLegacySplit(text, separator) {
 // Text handling with text operations.
 let line = "  write this line  "
 let typed = line.trim()
-say "Characters: ${typed.length}", instant
-say "${typed.uppercase()} / ${typed.lowercase()}", instant
-say "ok".uppercaseFirst(), instant
+say prose "Characters: ${typed.length}", instant
+say prose "${typed.uppercase()} / ${typed.lowercase()}", instant
+say prose "ok".uppercaseFirst(), instant
 if typed.startsWith("write") and not typed.endsWith("!") {
-  say typed.replace("line", "sentence"), instant
+  say prose typed.replace("line", "sentence"), instant
 }
-say typed.replace(" ", "_"), instant
+say prose typed.replace(" ", "_"), instant
 let parts = "red,green,blue".split(",")
-say "${parts[1]} ${typed.substring(0, 5)}", instant
+say prose "${parts[1]} ${typed.substring(0, 5)}", instant
 // A separator with its regular-expression metacharacters escaped splits at the plain text.
 let opponent = "Alexis|26".split("|")
-say opponent[0], instant
+say prose opponent[0], instant
 if "Yes".lowercase() == "YES".lowercase() {
-  say "same", instant
+  say prose "same", instant
 }
-say "x".replace("x", "$&"), instant
+say prose "x".replace("x", "$&"), instant
 if typed.contains("this") {
-  say "At ${typed.indexOf("this")}", instant
+  say prose "At ${typed.indexOf("this")}", instant
 }
 // Groovy showed a whole list as [a, b].
 let items = ["kneel", "wait"]
-say "Items: [${items.join(", ")}], joined: ${items.join(", ")} or ${items.join("")}", instant
+say prose "Items: [${items.join(", ")}], joined: ${items.join(", ")} or ${items.join("")}", instant
 let mixed: (number | boolean)[] = [1, 2.5, true]
-say "Mixed: [${mixed.join(", ")}]", instant
-say "[${items.join(", ")}]", instant
+say prose "Mixed: [${mixed.join(", ")}]", instant
+say prose "[${items.join(", ")}]", instant
 // Java counted an emoji as two characters.
 // NOTE SX_TEXT_CODE_POINTS line 26: Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript length counts code points, which changes the result here.
-say "Smile count: ${"😀!".length}", instant
+say prose "Smile count: ${"😀!".length}", instant
 // Groovy += on text appended the value's text.
 let trail = ""
 for step in [1, 2] {
   trail = "${trail}${step}"
 }
 trail += "!"
-say trail, instant
+say prose trail, instant
 // tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
 let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")
 // NOTE SX_FORMAT line 36: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
 let stamp = "07:05, ${sexscriptLegacyFixed(12.345, 1, 10)}%"
-say "${fields.length} fields at ${stamp}", instant
+say prose "${fields.length} fields at ${stamp}", instant
 // Java split() dropped the empty part after a last separator, as in Baccarat's picture lists; a part read at a fixed
 // position is the same either way.
 let pictures = load "game.pictures", default: ""
@@ -156,7 +156,7 @@ if pictures == "" or pictures == "" {
   pictures = "a.jpg|b.jpg|"
 }
 let pictureList = sexscriptLegacySplit(pictures, "|")
-say "${pictureList.length} pictures, first ${pictures.split("|")[0]}", instant
+say prose "${pictureList.length} pictures, first ${pictures.split("|")[0]}", instant
 // The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
 for word in sexscriptLegacyTokenize("Kneel, now.", " ") {
   // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
@@ -165,7 +165,7 @@ for word in sexscriptLegacyTokenize("Kneel, now.", " ") {
   if sexscriptLegacyTextAt(word, word.length - 1) == "," or sexscriptLegacyTextAt(word, word.length - 1) == "." {
     word = word.substring(0, word.length - 1)
   }
-  say "Word ${word}", instant
+  say prose "Word ${word}", instant
 }
 // A pattern known only at runtime, such as a text a function gets, is written by a helper as Java wrote it
 // (PainStacks' countdown).
@@ -173,12 +173,12 @@ function countdownText(pattern, seconds) {
   // NOTE SX_FORMAT_RUNTIME line 50: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
   return sexscriptLegacyFormat(pattern, ["${toInteger(seconds / 60)}", "${seconds % 60}"])
 }
-say countdownText("Wait %d:%02d", 75), instant
+say prose countdownText("Wait %d:%02d", 75), instant
 let shockPattern = "Shock time %.1f seconds, %d%% done"
 // NOTE SX_FORMAT_RUNTIME line 53: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
-say sexscriptLegacyFormat(shockPattern, ["${2.25}", "${50}"]), instant
+say prose sexscriptLegacyFormat(shockPattern, ["${2.25}", "${50}"]), instant
 // Java's 0 flag fills after a minus sign.
 let paddedPattern = "Score %05d"
 // NOTE SX_FORMAT_RUNTIME line 56: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
-say sexscriptLegacyFormat(paddedPattern, ["${-7}"]), instant
+say prose sexscriptLegacyFormat(paddedPattern, ["${-7}"]), instant
 exit

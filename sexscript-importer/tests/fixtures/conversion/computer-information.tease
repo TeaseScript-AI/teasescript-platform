@@ -16,12 +16,12 @@ function sexscriptLegacyDeviceId {
 }
 // Information the player's computer provided is asked once from the player, as the system speaker, and saved.
 // NOTE SX_OS_INFO line 2: System.getProperty("user.name") read the player's account name from the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "intro.name".
-say "Hello ${sexscriptLegacyAskOnce("intro.name", "What is your name?")}", instant
+say prose "Hello ${sexscriptLegacyAskOnce("intro.name", "What is your name?")}", instant
 // NOTE SX_OS_INFO line 3: System.getProperty("user.home") read the player's home folder from the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "system.homeFolder".
-say "Your files are in ${sexscriptLegacyAskOnce("system.homeFolder", "Which folder is your home folder?")}", instant
+say prose "Your files are in ${sexscriptLegacyAskOnce("system.homeFolder", "Which folder is your home folder?")}", instant
 // NOTE SX_OS_INFO line 4: The legacy script read the full path of the player's folder on the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "system.playerFolder".
 let folder = sexscriptLegacyAskOnce("system.playerFolder", "Which folder holds your SexScripts player?")
-say "The player runs from ${folder}", instant
+say prose "The player runs from ${folder}", instant
 // A network hardware address used as an ID becomes a random ID, made once.
 // NOTE SX_OS_INFO line 7: The legacy script read the network hardware addresses of the computer as an ID, which a browser does not provide; a random ID, made once and saved, stands in for them.
 let addresses = [sexscriptLegacyDeviceId()]

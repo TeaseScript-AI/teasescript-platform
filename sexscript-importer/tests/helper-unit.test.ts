@@ -109,7 +109,7 @@ test("lowers an auxiliary Groovy helper class to ordinary TeaseScript functions"
     emitTease(program),
     [
       "function helper(count) {",
-      '  say "Working", instant',
+      '  say prose "Working", instant',
       "  wait 15000 ms",
       "  return count",
       "}",

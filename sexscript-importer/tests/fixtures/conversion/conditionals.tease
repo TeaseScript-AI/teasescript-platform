@@ -29,21 +29,21 @@ if rounds > 8 {
   bonus = randomInteger(0..3)
 }
 if rounds == 0 {
-  say "None", instant
+  say prose "None", instant
 } else if rounds == 1 {
-  say "One round", instant
+  say prose "One round", instant
 } else {
-  say "Many rounds", instant
+  say prose "Many rounds", instant
 }
 let labelValue = ""
 if labelValue == "" {
   labelValue = "pet"
 }
-say "Mood ${mood}, bonus ${bonus}, ${labelValue}", instant
+say prose "Mood ${mood}, bonus ${bonus}, ${labelValue}", instant
 // A value of unproven type, such as a parameter, is true as Groovy found it: not null, false, zero, or empty.
 function finish(message) {
   if sexscriptLegacyTruth(message) {
-    say message, instant
+    say prose message, instant
   }
 }
 finish("Done")
@@ -51,24 +51,24 @@ finish("")
 // A closure case is a condition on the switched value, which Groovy evaluated once.
 let switchValue1 = randomInteger(0..4)
 if switchValue1 < 2 {
-  say "Stop!", instant
+  say prose "Stop!", instant
 } else if switchValue1 == 2 {
-  say "Again", instant
+  say prose "Again", instant
 } else {
-  say "Go on", instant
+  say prose "Go on", instant
 }
 // instanceof tests a value's type, which a Groovy map passes as a dict or an object.
-say "A number?", instant
+say prose "A number?", instant
 // NOTE SX_UNION_TYPE line 24: Groovy let 'given' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if given is string { ... }
 let given: string | integer = "five"
 if askBoolean {
   given = 5
 }
 if given is number {
-  say "A number", instant
+  say prose "A number", instant
 }
 if given is string {
-  say "A text", instant
+  say prose "A text", instant
 }
 // Several conditional fragments in one text are computed first, so the text is written once.
 let leashed = askBoolean "Leashed?"
@@ -81,7 +81,7 @@ let conditional2 = ", mouth open"
 if gagged {
   conditional2 = ""
 }
-say "Crawl to me${conditional}${conditional2}.", instant
+say prose "Crawl to me${conditional}${conditional2}.", instant
 // An update of one variable by a conditional value is written per branch.
 let dare = "Crawl. "
 if leashed {
@@ -91,10 +91,10 @@ if leashed {
 } else {
   dare += "Free, speaking."
 }
-say dare, instant
+say prose dare, instant
 // A conditional used as a statement runs one call per branch.
 if leashed {
-  say "Leashed.", instant
+  say prose "Leashed.", instant
 } else {
   showImage "free.jpg"
 }

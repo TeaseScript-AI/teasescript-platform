@@ -16,7 +16,7 @@ function getRandom(low, high) {
   // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   return low + sexscriptLegacyRandom(high - low)
 }
-say "Roll ${getRandom(3, 6)}", instant
+say prose "Roll ${getRandom(3, 6)}", instant
 // The same holds for a call with the closure's own number of arguments.
 function waitWithGauge(seconds) {
   if seconds > 0 {
@@ -28,7 +28,7 @@ waitWithGauge(2)
 function waitValue(waitValue2, n) {
   while true {
     if n > 0 {
-      say "Wait ${n}", instant
+      say prose "Wait ${n}", instant
       n -= 1
       continue
     }
@@ -39,15 +39,15 @@ waitValue("waitValue", 2)
 // A closure of one parameter called without an argument gets null.
 function greet(who) {
   if who == null {
-    say "Hello", instant
+    say prose "Hello", instant
   } else {
-    say "Hello ${who}", instant
+    say prose "Hello ${who}", instant
   }
 }
 greet(null)
 // A local closure named sleep is called instead of Groovy sleep(milliseconds).
 function sleep {
-  say "You fall asleep.", instant
+  say prose "You fall asleep.", instant
 }
 sleep()
 // A flag that later holds a number is false at 0, as Groovy truth was.
@@ -66,7 +66,7 @@ function countUp {
 // NOTE SX_BINDING_VARIABLE: Groovy kept counter, which functions assign without a declaration, in the script's binding that every function shares; it is declared here, before the script first uses it, with an empty value.
 let counter = 0
 countUp()
-say "Counted ${counter}", instant
+say prose "Counted ${counter}", instant
 // Another closure's parameter of the same name, or an implicit `it`, declares it only inside that closure.
 let mood: string? = "calm"
 function setMood {
@@ -74,11 +74,11 @@ function setMood {
   mood = level
 }
 function describe(levelValue) {
-  say "Level ${levelValue}", instant
+  say prose "Level ${levelValue}", instant
 }
 function again(it = null) {
   it = "x"
-  say it, instant
+  say prose it, instant
 }
 // NOTE SX_BINDING_VARIABLE: Groovy kept level, which functions assign without a declaration, in the script's binding that every function shares; it is declared here, before the script first uses it, with an empty value.
 let level = null
@@ -89,7 +89,7 @@ again()
 // or, where a branch assigns it first, it starts empty before the branch.
 let total = 2
 total += 1
-say "Again?", instant
+say prose "Again?", instant
 // NOTE SX_BINDING_VARIABLE: Groovy kept bonus, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.
 let bonus = 0
 if askBoolean {
@@ -97,10 +97,10 @@ if askBoolean {
 } else {
   bonus = 2
 }
-say "Total ${total}, bonus ${bonus}", instant
+say prose "Total ${total}, bonus ${bonus}", instant
 // A declaration is local to its block, so another block's assignment of the same name writes the binding.
 let slots = [0, 0]
-say "First slot?", instant
+say prose "First slot?", instant
 // NOTE SX_BINDING_VARIABLE: Groovy kept slot, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.
 let slot = 0
 if askBoolean {
@@ -110,5 +110,5 @@ if askBoolean {
   slot = 1
   slots[slot] = 2
 }
-say "Slots [${slots.join(", ")}]", instant
+say prose "Slots [${slots.join(", ")}]", instant
 exit

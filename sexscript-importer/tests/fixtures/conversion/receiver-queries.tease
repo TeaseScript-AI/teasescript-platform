@@ -38,12 +38,12 @@ function colon(line) {
   return line.indexOf(":")
 }
 let tags = ["red", "blue"]
-say "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}", instant
-say "Tags: ${describe(tags)}", instant
-say "Zeros: ${zeros([0, 3, 0])}, lowest: ${lowest([4, 2, 9])}", instant
-say "Colon at ${colon("key: value")}", instant
+say prose "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}", instant
+say prose "Tags: ${describe(tags)}", instant
+say prose "Zeros: ${zeros([0, 3, 0])}, lowest: ${lowest([4, 2, 9])}", instant
+say prose "Colon at ${colon("key: value")}", instant
 let answer = load "answer", default: ""
 if answer != "" and answer.contains("yes") {
-  say "Agreed", instant
+  say prose "Agreed", instant
 }
 exit

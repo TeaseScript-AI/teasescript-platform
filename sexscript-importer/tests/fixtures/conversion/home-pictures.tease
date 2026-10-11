@@ -8,5 +8,5 @@ let dir = "~/Downloads"
 // NOTE SX_HOME_PICTURES line 4: eachFileRecurse() looked through the files of a folder of the player's computer, such as the pictures in the home, Downloads, or Documents folder, which a package cannot see; the player is asked for a photo instead.
 say as system "The original looked through the pictures on your computer. Take a photo to show here instead.", instant
 showImage takePhoto()
-say "Interesting pictures you have", instant
+say prose "Interesting pictures you have", instant
 exit

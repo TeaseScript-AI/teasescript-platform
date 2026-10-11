@@ -1,2 +1,2 @@
-say "The end.", instant
+say prose "The end.", instant
 exit

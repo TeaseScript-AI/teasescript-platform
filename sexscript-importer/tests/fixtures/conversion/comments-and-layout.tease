@@ -1,5 +1,5 @@
 // Intro scene
-say "Welcome", instant // greeting
+say prose "Welcome", instant // greeting
 wait 2 s
 
 /* Ask how the session
@@ -7,9 +7,9 @@ wait 2 s
 let roundValue = randomInteger(0..3)
 if roundValue == 0 {
   // easy path
-  say "Easy", instant
+  say prose "Easy", instant
 } else {
-  say "Hard", instant
+  say prose "Hard", instant
   // nothing else yet
 }
 exit

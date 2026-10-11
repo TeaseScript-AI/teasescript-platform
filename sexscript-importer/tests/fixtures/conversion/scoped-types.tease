@@ -1,6 +1,6 @@
 // A closure's local is a variable apart from a parameter of the same name in another closure.
 function describe(items) {
-  say "First: ${items[0]}", instant
+  say prose "First: ${items[0]}", instant
 }
 function deal {
   let items = ["ace", "king", "queen"]
@@ -17,16 +17,16 @@ let title = first("Miss", "Mister")
 function initials(name) {
   return name.split("M").length - 1
 }
-say "Hand: ${hand[0]}, ${title} has ${initials(title)} M", instant
+say prose "Hand: ${hand[0]}, ${title} has ${initials(title)} M", instant
 // Loop variables and iteration closure parameters take the elements of a proven list.
 let outfits = ["red bikini", "blue bikini top"]
 for outfit in outfits {
   if outfit.split("bikini").length - 1 > 0 {
-    say "Beach: ${outfit}", instant
+    say prose "Beach: ${outfit}", instant
   }
 }
 for item in outfits {
-  say "Words: ${item.split(" ").length - 1 + 1}", instant
+  say prose "Words: ${item.split(" ").length - 1 + 1}", instant
 }
 describe(hand)
 exit

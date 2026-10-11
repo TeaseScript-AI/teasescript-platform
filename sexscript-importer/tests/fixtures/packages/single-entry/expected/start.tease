@@ -1,5 +1,5 @@
 // The one script in the package root is its entry.
-say "Hall or garden?", instant
+say prose "Hall or garden?", instant
 let visits = load "visits", default: 0
 save visits + 1 as "visits"
 if visits < 2 {

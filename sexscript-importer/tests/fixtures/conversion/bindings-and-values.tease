@@ -10,30 +10,30 @@ function sexscriptLegacyItemAt(listValue, position) {
 function randomIntegerValue(rangeValue) {
   return 99
 }
-say "Roll: ${randomInteger(0..3)}, ${randomIntegerValue(1)}", instant
+say prose "Roll: ${randomInteger(0..3)}, ${randomIntegerValue(1)}", instant
 function getString {
   return false
 }
 if getString() {
-  say "wrong", instant
+  say prose "wrong", instant
 } else {
-  say "right", instant
+  say prose "right", instant
 }
 let empty = {}
 if empty != {} {
-  say "Has entries", instant
+  say prose "Has entries", instant
 }
 let items = ["a", "b"]
 let more = items + ["c"]
 let check = (1 < 2) == true
 let setValue = "tools" // protected in TeaseScript
-say "Set: ${setValue}", instant
+say prose "Set: ${setValue}", instant
 function pick(a, b) {
   return b
 }
-say "Pick", instant
-say "Picked ${pick((choose 0: "A", 1: "B"), 3)}", instant
-say "hello", instant
+say prose "Pick", instant
+say prose "Picked ${pick((choose 0: "A", 1: "B"), 3)}", instant
+say prose "hello", instant
 exit // final return
 // A declaration of several variables takes each from its position in the values, null past the end.
 function tilePosition(index) {
@@ -42,5 +42,5 @@ function tilePosition(index) {
 let values = tilePosition(5)
 let column = sexscriptLegacyItemAt(values, 0)
 let row = sexscriptLegacyItemAt(values, 1)
-say "Column ${column}, row ${row}", instant
+say prose "Column ${column}, row ${row}", instant
 exit

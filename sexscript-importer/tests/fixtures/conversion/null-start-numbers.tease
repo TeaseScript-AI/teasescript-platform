@@ -17,15 +17,15 @@ function award {
   bonus = 2
 }
 if score == 0 {
-  say "No score yet", instant
+  say prose "No score yet", instant
 }
 award()
-say "Total ${score + bonus}", instant
+say prose "Total ${score + bonus}", instant
 // A number that a function can show before its first value showed null in Groovy; it shows 0 now.
 // NOTE SX_NULL_START_NUMBER line 13: Groovy showed strokes as null until its first value; it starts at 0 here, so a text shown before then says 0.
 let strokes = 0
 function report {
-  say "Strokes so far: ${strokes}", instant
+  say prose "Strokes so far: ${strokes}", instant
 }
 report()
 strokes = 5
@@ -38,7 +38,7 @@ function pick {
 if level == null {
   pick()
 }
-say "Level ${level}", instant
+say prose "Level ${level}", instant
 // So do numbers that functions add to, since Groovy failed on a null sum.
 let points = 0
 function addPoints {
@@ -46,14 +46,14 @@ function addPoints {
   points += 300
 }
 addPoints()
-say "Points ${points}", instant
+say prose "Points ${points}", instant
 // A Date reads its milliseconds as a number, so a variable it sets starts at 0.
 let started = 0
 function mark {
   started = getAbsoluteDateTime().toMilliseconds()
 }
 mark()
-say "Took ${getAbsoluteDateTime().toMilliseconds() - started}", instant
+say prose "Took ${getAbsoluteDateTime().toMilliseconds() - started}", instant
 // A function's own counter starts at 0 too, also where another function names a text the same.
 function fill(n) {
   let i = 0
@@ -68,11 +68,11 @@ function fill(n) {
     }
     i += 1
   }
-  say "Marks ${marks.length}", instant
+  say prose "Marks ${marks.length}", instant
 }
 function spell {
   for i in ["a", "b"] {
-    say i, instant
+    say prose i, instant
   }
 }
 fill(3)
@@ -98,5 +98,5 @@ function configure {
   spanks = loadSet("game.spanks", 4)
 }
 configure()
-say "Spanks ${spanks * 2}", instant
+say prose "Spanks ${spanks * 2}", instant
 exit

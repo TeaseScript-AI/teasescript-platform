@@ -1,9 +1,9 @@
 let mood = randomInteger(0..3)
 if mood == 0 {
-  say "Happy", instant
+  say prose "Happy", instant
 } else if mood == 1 {
-  say "Strict", instant
+  say prose "Strict", instant
 } else {
-  say "Bored", instant
+  say prose "Bored", instant
 }
 exit

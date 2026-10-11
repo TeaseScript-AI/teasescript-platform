@@ -127,7 +127,7 @@ function sexscriptLegacyTimes(value, count) {
   return sexscriptLegacyValue(value * count)
 }
 let scores = [3, 5, 8]
-say "Last ${scores.last}, second last ${scores[scores.length - 2]}", instant
+say prose "Last ${scores.last}, second last ${scores[scores.length - 2]}", instant
 function twice(x) {
   return x * 2
 }
@@ -138,17 +138,17 @@ function labelValue(n) {
     return "low"
   }
 }
-say "Twice ${twice(scores[0])}, ${labelValue(scores[1])}", instant
+say prose "Twice ${twice(scores[0])}, ${labelValue(scores[1])}", instant
 // A final assignment returns the assigned value.
 let counter = 0
 function bump {
   counter += 1
   return counter
 }
-say "Count ${bump()}", instant
+say prose "Count ${bump()}", instant
 // No caller uses this result, so the last expression stays a statement.
 function greet {
-  say "Hi", instant
+  say prose "Hi", instant
   bump()
 }
 greet()
@@ -158,17 +158,17 @@ let lastPick = -1
 let pick = randomInteger(0..3)
 // NOTE SX_NEGATIVE_INDEX line 17: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
 if kinds[pick] != sexscriptLegacyItemAt(kinds, lastPick) {
-  say "Another kind", instant
+  say prose "Another kind", instant
 }
 lastPick = pick
 // A menu choice minus one reads the last element when the player picks the first button, as Groovy counted it.
 let ratings = ["soft", "hard", "none"]
-say "Which limit?", instant
+say prose "Which limit?", instant
 let limit = choose 0: "Back",
   1: "Soft",
   2: "Hard"
 // NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
-say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}", instant
+say prose "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}", instant
 // A range index takes a part of a list, also counted from the end, backwards, or without its end (`..<`), and a write to
 // a range replaces it.
 let deck = ["a", "b", "c", "d", "e"]
@@ -180,7 +180,7 @@ deck = sexscriptLegacySpliced(deck, 1, 1, ["y"], true)
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 // NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Top ${topValue.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}", instant
+say prose "Top ${topValue.join(",")}, back ${backwards.join(",")}, between ${between.join(",")}, deck ${deck.join(",")}", instant
 // A part of a list that a function returns is a list too, which `*` repeats.
 function deal {
   return ["a", "b", "c"]
@@ -188,30 +188,30 @@ function deal {
 let hand = deal()
 let pairs = sexscriptLegacyRepeatList(sexscriptLegacySlice(hand, 0, 1), 2)
 // NOTE SX_LIST_JOIN line 36: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Pairs ${pairs.join(",")}", instant
+say prose "Pairs ${pairs.join(",")}", instant
 // A part whose type only the running script knows, such as an element of a parameter, is repeated or multiplied there.
 function top(piles) {
   return piles[0]
 }
 let twiceValue = sexscriptLegacyTimes(top([["x", "y"]]), 2)
 // NOTE SX_LIST_JOIN line 40: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
-say "Twice ${twiceValue.join(",")}", instant
+say prose "Twice ${twiceValue.join(",")}", instant
 // A character of a text that only the converted types prove text reads through a helper: type inference reads the
 // `shot` of both blocks as one variable, of unknown type.
 if askBoolean "Replay?" {
   // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
   let shot = load "game.shot", default: sexscriptLegacyValue(null)
-  say "Saved ${shot}", instant
+  say prose "Saved ${shot}", instant
 }
 if askBoolean "Shoot?" {
   let shot = ""
   shot = askText("Your shot (A1 to G7):").replace("\n", " ")
-  say "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}", instant
+  say prose "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}", instant
 }
 // A list repeated by a count that may be missing is repeated as a number.
 let rounds = load "game.rounds", default: 2
 let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))
-say "Marks ${marks.length}", instant
+say prose "Marks ${marks.length}", instant
 // A -1 copied through another variable counts from the end too (PainStacks' unfair column).
 let stacks = [
   [1],
@@ -222,5 +222,5 @@ let unfairColumn = -1
 let column = 0
 column = unfairColumn
 // NOTE SX_NEGATIVE_INDEX line 62: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
-say "Last ${sexscriptLegacyItemAt(stacks, column)[0]}", instant
+say prose "Last ${sexscriptLegacyItemAt(stacks, column)[0]}", instant
 exit

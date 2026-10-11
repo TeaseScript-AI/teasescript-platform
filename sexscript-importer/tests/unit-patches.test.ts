@@ -111,7 +111,10 @@ test(
       converted(await convertUnit(options));
       const main = path.join(options.outputRoot, "Walk/start.tease");
       const generated = await readFile(main, "utf8");
-      assert.match(generated, /say "Hello", instant\nwait 1 s\nsay "Bye", instant\nexit/u);
+      assert.match(
+        generated,
+        /say prose "Hello", instant\nwait 1 s\nsay prose "Bye", instant\nexit/u,
+      );
 
       const outputPatch = {
         id: "farewell",
@@ -121,8 +124,8 @@ test(
         baseHash: sha256(generated),
         edits: [
           {
-            find: 'say "Bye", instant\nexit',
-            replace: 'showImage tagged "hall"\nsay "Goodbye", instant\nexit',
+            find: 'say prose "Bye", instant\nexit',
+            replace: 'showImage tagged "hall"\nsay prose "Goodbye", instant\nexit',
             count: 1,
           },
         ],
@@ -130,7 +133,10 @@ test(
       await writePatches(work, [SOURCE_PATCH, outputPatch]);
       const { record } = converted(await convertUnit(options));
       const final = await readFile(main, "utf8");
-      assert.equal(final, generated.replace('say "Bye"', 'showImage tagged "hall"\nsay "Goodbye"'));
+      assert.equal(
+        final,
+        generated.replace('say prose "Bye"', 'showImage tagged "hall"\nsay prose "Goodbye"'),
+      );
       // The corpus keeps its own script; the staged copy that was patched is gone.
       assert.equal(
         await readFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), "utf8"),
@@ -212,7 +218,7 @@ test(
           reason: "The ending says goodbye.",
           file: "start.tease",
           baseHash: sha256("an older start.tease"),
-          edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 1 }],
+          edits: [{ find: 'say prose "Bye"', replace: 'say prose "Goodbye"', count: 1 }],
         },
       ]);
       const staleOutput = await convertUnit(options);
@@ -264,7 +270,7 @@ test(
           reason: "The ending says goodbye.",
           file: "start.tease",
           baseHash: sha256(await readFile(path.join(published, "start.tease"), "utf8")),
-          edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 2 }],
+          edits: [{ find: 'say prose "Bye"', replace: 'say prose "Goodbye"', count: 2 }],
         },
       ]);
       const counted = await convertUnit(options);
@@ -298,7 +304,7 @@ test(
       const main = path.join(options.outputRoot, "Walk/start.tease");
       assert.match(
         await readFile(main, "utf8"),
-        /say "Kneel\.", instant\nsay """[^]*""", instant\nsay "Wait\.", instant\nsay "Now stand\.", instant/u,
+        /say prose "Kneel\.", instant\nsay prose """[^]*""", instant\nsay prose "Wait\.", instant\nsay prose "Now stand\.", instant/u,
       );
       const reason = "The blank lines lay out a grid of numbers.";
       await writeFile(

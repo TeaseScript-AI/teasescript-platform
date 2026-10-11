@@ -51,19 +51,19 @@ let n = randomInteger(0..3)
 let days = sexscriptLegacyLoadInteger("x.days")
 switch n {
   case 0 {
-    say "Zero", instant
+    say prose "Zero", instant
     if sexscriptLegacyCompare(days, 5) < 0 {
-      say "Too early", instant
+      say prose "Too early", instant
     } else {
-      say "Changing", instant
+      say prose "Changing", instant
     }
   }
   case 1 {
-    say "One", instant
-    say "or two", instant
+    say prose "One", instant
+    say prose "or two", instant
   }
   case 2 {
-    say "One or two", instant
+    say prose "One or two", instant
   }
 }
 // A switch case that ends with break returns its last value from the function.
@@ -77,51 +77,51 @@ function labelValue(kind) {
     }
   }
 }
-say labelValue(1), instant
+say prose labelValue(1), instant
 // A case expression with effects needs the switch value kept; a list variable case tests membership.
 let subject = 1
 subject = randomInteger(0..3)
 let options = [1, 2]
 let switchValue1 = subject
 if switchValue1 == randomInteger(0..3) {
-  say "drawn", instant
+  say prose "drawn", instant
 } else if options.contains(switchValue1) {
-  say "listed", instant
+  say prose "listed", instant
 } else {
-  say "other", instant
+  say prose "other", instant
 }
 // A range bound known only at runtime may make the range run in either direction.
 let top = 3
 if (subject >= top and subject <= 1) or (subject <= top and subject >= 1) {
-  say "in range", instant
+  say prose "in range", instant
 }
 // A list case matches any of its elements, as a case with several values.
 switch n {
   case 0, 1 {
-    say "low", instant
+    say prose "low", instant
   }
   case 2..=3 {
-    say "high", instant
+    say prose "high", instant
   }
 }
 // A descending range matched in Groovy too, which a range case cannot express.
 if n <= 3 and n >= 1 {
-  say "one to three", instant
+  say prose "one to three", instant
 } else if n == 0 {
-  say "zero", instant
+  say prose "zero", instant
 }
 // A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
 switch randomInteger(0..2) {
   case 0 {
     if load("toys.paddle", default: false) == true {
-      say "Fetch the paddle", instant
+      say prose "Fetch the paddle", instant
     } else if load("toys.crop", default: false) == true {
-      say "Fetch the crop", instant
+      say prose "Fetch the crop", instant
     }
   }
   default {
     if load("toys.crop", default: false) == true {
-      say "Fetch the crop", instant
+      say prose "Fetch the crop", instant
     }
   }
 }
@@ -141,27 +141,27 @@ function implement(choice) {
   }
   return "none"
 }
-say "Fetch the ${implement(randomInteger(0..2))}", instant
+say prose "Fetch the ${implement(randomInteger(0..2))}", instant
 // A switch on a number that may be null ran its default for null, which a case of its own runs too.
 let picked = null
 if randomInteger(0..2) == 0 {
   picked = randomInteger(0..3)
 }
 if picked == null {
-  say "Nothing picked", instant
+  say prose "Nothing picked", instant
 }
 if picked == null {
-  say "Other", instant
+  say prose "Other", instant
 } else {
   switch picked {
     case 0 {
-      say "Zero ${picked + 1}", instant
+      say prose "Zero ${picked + 1}", instant
     }
     case 1 {
-      say "One ${picked + 1}", instant
+      say prose "One ${picked + 1}", instant
     }
     default {
-      say "Other", instant
+      say prose "Other", instant
     }
   }
 }

@@ -1,2 +1,2 @@
-say "The rooms", instant
+say prose "The rooms", instant
 exit

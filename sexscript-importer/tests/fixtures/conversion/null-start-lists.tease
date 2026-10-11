@@ -10,10 +10,10 @@ function last(size) {
   return size - 1
 }
 if prompts == null or not prompts.length > 0 {
-  say "No prompts yet", instant
+  say prose "No prompts yet", instant
 }
 fill()
 let index = last(prompts.length)
-say prompts[index], instant
+say prose prompts[index], instant
 save extras.length as "extras"
 exit

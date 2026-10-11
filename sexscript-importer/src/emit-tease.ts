@@ -84,7 +84,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
   switch (statement.kind) {
     case "say":
       lines.push(
-        `${pad}say ${statement.speaker === undefined ? "" : `as ${statement.speaker} `}${statement.prose === true ? "prose " : ""}${emitExpression(statement.value)}, instant`,
+        `${pad}${sayText(statement.speaker, statement.prose === true, emitExpression(statement.value))}`,
       );
       return;
     case "speaker":
@@ -408,7 +408,9 @@ export function emitExpression(expression: IrExpression): string {
       return `(${emitButton(expression.label, expression.timeout)})`;
     case "message":
       // Inside an expression a `say` value takes the bounded form (V30 "Updatable messages").
-      return `say${expression.speaker === undefined ? "" : ` as ${expression.speaker}`}(${emitExpression(expression.value)}, instant)`;
+      return expression.speaker === undefined
+        ? `say prose() (${emitExpression(expression.value)}, instant)`
+        : `say as ${expression.speaker}(${emitExpression(expression.value)}, instant)`;
     case "range": {
       const operator = expression.inclusive ? "..=" : "..";
       return `${operand(expression.from, RANGE + 1)}${operator}${operand(expression.to, RANGE + 1)}`;
@@ -707,12 +709,25 @@ function inSeconds(value: IrExpression): IrExpression {
   };
 }
 
+/**
+ * A `say` that shows its text at once (literal timing, owner decision 2026-10-11), as prose where it has no speaker, the
+ * text of the legacy display, which showed plain text (owner decision 2026-10-11), or where the importer shows its own
+ * text as prose. A value that starts with a parenthesis would read as the mode's options, so it takes the bounded form.
+ */
+function sayText(speaker: string | undefined, prose: boolean, value: string): string {
+  const as = speaker === undefined ? "" : `as ${speaker} `;
+  if (!prose && speaker !== undefined) return `say ${as}${value}, instant`;
+  return value.startsWith("(")
+    ? `say ${as}prose() (${value}, instant)`
+    : `say ${as}prose ${value}, instant`;
+}
+
 /** A complete statement value, where a compact choice, button, read, or ask needs no parentheses. */
 function emitValue(expression: IrExpression): string {
   if (expression.kind === "button") return emitButton(expression.label, expression.timeout);
   // A whole statement value takes the compact form, its pacing up to the end of the statement.
   if (expression.kind === "message")
-    return `say ${expression.speaker === undefined ? "" : `as ${expression.speaker} `}${emitExpression(expression.value)}, instant`;
+    return sayText(expression.speaker, false, emitExpression(expression.value));
   if (expression.kind === "load")
     return `load ${operand(expression.key, POSTFIX)}, default: ${loadDefault(expression)}`;
   if (expression.kind === "input") return compactInput(expression);

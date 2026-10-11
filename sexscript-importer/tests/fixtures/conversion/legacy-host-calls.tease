@@ -66,7 +66,7 @@ let switchOn = "SwitchBox.exe 7 ein"
 sexscriptLegacyShowSwitch(switchOn)
 // NOTE SX_SWITCH_BUTTON line 16: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
 sexscriptLegacyShowSwitch("SwitchBox.exe 7 aus")
-say "Best score ${best}", instant
+say prose "Best score ${best}", instant
 // Deleting the file of a photo the script took clears the reference.
 // NOTE SX_CAMERA_FALLBACK line 19: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let selfie: string? = takePhoto()
@@ -83,7 +83,7 @@ playVideo async "clips/scene.mp4"
 // A prefill that may be blank opens the input without a default then, as the legacy empty field did.
 let draft = ""
 let answer = askText("Your name?", prefill: draft).replace("\n", " ")
-say "Hello ${answer}", instant
+say prose "Hello ${answer}", instant
 // A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
 function checkPhoto(snapfile) {
   if snapfile != null {
@@ -97,18 +97,18 @@ function checkPhoto(snapfile) {
 }
 // NOTE SX_CAMERA_FALLBACK line 38: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 if checkPhoto(takePhoto()) {
-  say "Nice photo", instant
+  say prose "Nice photo", instant
 }
 // The system language, which TeaseScript cannot query yet, reads as English.
 // NOTE SX_LOCALE_WORKAROUND line 40: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
 if "en" == "de" {
-  say "Hallo", instant
+  say prose "Hallo", instant
 } else {
-  say "Hello", instant
+  say prose "Hello", instant
 }
 // Java SimpleDateFormat of the current moment shows the local time.
 // NOTE SX_DATE_FORMAT line 42: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
-say "You report at ${getTime().formatTime()}.", instant
+say prose "You report at ${getTime().formatTime()}.", instant
 // A photo copied to a package image path is shown wherever the script shows that path.
 // NOTE SX_FILE_PHOTO line 44: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let proof = askImage("Upload the picture?")

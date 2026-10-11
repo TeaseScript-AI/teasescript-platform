@@ -515,8 +515,8 @@ test(
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
       const source = emitTease(program!);
       assert.match(source, /^let picture = "images\/Room\/bed\.jpg"$/mu);
-      assert.match(source, /^if true \{\n {2}say "Bed"/mu);
-      assert.match(source, /^if not false \{\n {2}say "No zapper"/mu);
+      assert.match(source, /^if true \{\n {2}say prose "Bed"/mu);
+      assert.match(source, /^if not false \{\n {2}say prose "No zapper"/mu);
       assert.match(
         source,
         /\["images\/room\/chair2\.jpg"\]\.contains\(sexscriptLegacyPackagePath\("images\/Room\/chair\$\{n\}\.jpg"\)\)/u,
@@ -555,7 +555,7 @@ test(
       });
       assert.equal(
         report.smokeRuns[0]?.failure?.line,
-        written.findIndex((line) => line.startsWith("say toInteger(count)")) + 1,
+        written.findIndex((line) => line.startsWith("say prose toInteger(count)")) + 1,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -707,7 +707,7 @@ test(
       writeFileSync(sourcePath, '// header\rwait(2)\rshow("done") // trailing\r');
       assert.equal(
         emitTease(await convert(sourcePath)),
-        '// header\nwait 2 s\nsay "done", instant // trailing\nexit\n',
+        '// header\nwait 2 s\nsay prose "done", instant // trailing\nexit\n',
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1471,7 +1471,7 @@ test(
       assert.match(current, new RegExp(`load${name}Module\\(\\)`, "u"));
       assert.match(older, new RegExp(`load${name}Module\\(\\)`, "u"));
     }
-    assert.match(current, /say "Play \$\{rounds\}"/u);
+    assert.match(current, /say prose "Play \$\{rounds\}"/u);
     assert.doesNotMatch(current, /Old play/u);
     assert.match(older, /"Old play"/u);
     assert.doesNotMatch(older, /"Play /u);

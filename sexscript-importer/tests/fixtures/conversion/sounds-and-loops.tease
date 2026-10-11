@@ -8,7 +8,7 @@ while answer < 5 {
 // The sound starts again before every round of the endless loop.
 while true {
   playAudio async "tick.wav"
-  say "Tick", instant
+  say prose "Tick", instant
   if answer > 3 {
     break
   }
@@ -28,9 +28,9 @@ showButton "Continue when you heard enough"
 stopAudio
 // show() returns nothing, so Groovy discarded the appended text.
 // NOTE SX_DISCARDED_CONCATENATION line 23: Groovy appended text to the result of show(), which returns nothing, and discarded it; the appended text was never shown and is dropped here.
-say "Quiet now.", instant
+say prose "Quiet now.", instant
 function finish {
-  say "Bye", instant
+  say prose "Bye", instant
   // NOTE SX_SYSTEM_EXIT line 26: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
   exit
 }

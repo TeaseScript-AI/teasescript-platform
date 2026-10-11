@@ -59,22 +59,22 @@ function fill {
   answers = ["Yes", "No"]
 }
 if answers == null {
-  say "Nothing loaded yet", instant
+  say prose "Nothing loaded yet", instant
 }
 fill()
 if answers != null {
-  say answers[0], instant
+  say prose answers[0], instant
 }
 // loadFirstTrue gives null when no key holds true, so the variable it sets may hold null.
 let implement: string? = "hand"
 implement = sexscriptLegacyLoadFirstTrue(["toys.paddle", "toys.crop"])
-say "You get the ${implement}", instant
+say prose "You get the ${implement}", instant
 // One list of keys, passed as a Java array, is the list of keys itself.
 let paddles = ["toys.paddle", "toys.hairbrush"]
 // NOTE SX_JAVA_ARRAY_CONVERSION line 13: A Java String[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
 let noKeys = sexscriptLegacyArray(0, null)
 let spanker: string? = sexscriptLegacyLoadFirstTrue(paddles)
-say "Spanker ${spanker}", instant
+say prose "Spanker ${spanker}", instant
 // A number that a restore may leave null orders below every value, which the comparison writes out, so it narrows.
 let square: integer? = -1
 // NOTE SX_NULL_ONLY_VARIABLE line 18: saved is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
@@ -88,23 +88,23 @@ let base: integer? = square
 if base == null or base < 0 {
   base = 0
 }
-say "Base ${base + 1}", instant
+say prose "Base ${base + 1}", instant
 // A number set to null keeps the helper comparison, since after the null the compiler knows it holds null.
 let level = null
 if level == null {
-  say "No level", instant
+  say prose "No level", instant
 }
 level = 1
 level = null
 if sexscriptLegacyCompare(level, 0) < 0 {
-  say "Below", instant
+  say prose "Below", instant
 } else {
-  say "Not below", instant
+  say prose "Not below", instant
 }
 let copiedLevel: integer? = level
 if sexscriptLegacyCompare(copiedLevel, 0) < 0 {
-  say "Copy below", instant
+  say prose "Copy below", instant
 } else {
-  say "Copy not below", instant
+  say prose "Copy not below", instant
 }
 exit

@@ -312,7 +312,7 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
   // A single script keeps its name beside a generated main.tease that goes to it, compiled with pending-capability
   // placeholders (none are needed here) and as generated.
   const project = [
-    { path: "clean.tease", source: 'say "hello", instant\nexit\n' },
+    { path: "clean.tease", source: 'say prose "hello", instant\nexit\n' },
     { path: "main.tease", source: 'goto "clean.tease"\n' },
   ];
   assert.deepEqual(compiledProjects, [project, project]);

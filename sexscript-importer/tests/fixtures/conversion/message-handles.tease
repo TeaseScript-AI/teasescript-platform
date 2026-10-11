@@ -1,27 +1,27 @@
 // An animation, texts that each add only punctuation with only waits between them, is one message whose text each
 // step changes in place; the waits between the steps stay as they are, also short ones.
 showButton "Start"
-let line = say "Wait.", instant
+let line = say prose "Wait.", instant
 wait 1 s
 line.text += " ."
 wait 1 s
 line.text += " ."
 wait 1 s
 // A text that repeats the animation's last step says only what it adds.
-say "Now begin.", instant
+say prose "Now begin.", instant
 // A text with a value computed anew, such as a random draw, is no step of an animation.
-say "Pick ${randomInteger(0..100)}.", instant
+say prose "Pick ${randomInteger(0..100)}.", instant
 wait 1 s
-say "Pick ${randomInteger(0..100)}..", instant
+say prose "Pick ${randomInteger(0..100)}..", instant
 wait 1 s
-let line2 = say "Thinking .", instant
+let line2 = say prose "Thinking .", instant
 wait 0.5 s
 line2.text = "Thinking  .."
 wait 0.5 s
 // A loop that shows the line said before it again with a new count changes that line in place.
 let message = "Count them."
 let x = 0
-let counter = say """
+let counter = say prose """
   ${message}
 
   ${x}
@@ -37,7 +37,7 @@ for it in 1..=3 {
   playAudio "swat.wav"
   wait 1000 ms
 }
-let counter2 = say "20 jerks", instant
+let counter2 = say prose "20 jerks", instant
 let i = 19
 while i > 17 {
   counter2.text = "${i} jerks"
@@ -46,71 +46,71 @@ while i > 17 {
 }
 // A loop whose text is no new count of the line before it, or that follows a call, says each text as a message of its
 // own, as does a text that is no text.
-say "Get ready!", instant
+say prose "Get ready!", instant
 for s in 1..=2 {
-  say "Shock ${s} of 2", instant
+  say prose "Shock ${s} of 2", instant
   wait 5 s
 }
 let questions = ["Ready?", "Sure?"]
-say "Question 1", instant
+say prose "Question 1", instant
 for q in 1..=2 {
-  say "Question ${q}: ${questions[q - 1]}", instant
+  say prose "Question ${q}: ${questions[q - 1]}", instant
   wait 5 s
 }
 function countdown {
-  say "Get set", instant
+  say prose "Get set", instant
 }
-say "Round 0", instant
+say prose "Round 0", instant
 countdown()
 for r in 1..=2 {
-  say "Round ${r}", instant
+  say prose "Round ${r}", instant
   wait 5 s
 }
 let n = 0
-say n, instant
+say prose n, instant
 for k in 1..=2 {
   n += 1
-  say n, instant
+  say prose n, instant
   wait 5 s
 }
 // Nor does a loop whose text grows by text, or whose other values the loop, its condition, or the statements before it
 // change, nor an animation whose wait runs script code.
 let story = "First"
-say "Story: ${story}", instant
+say prose "Story: ${story}", instant
 for p in 1..=2 {
   story += " next"
-  say "Story: ${story}", instant
+  say prose "Story: ${story}", instant
   wait 5 s
 }
 let title = "One"
-say "Chapter ${title}: 0", instant
+say prose "Chapter ${title}: 0", instant
 for c in 1..=2 {
   title = "Two"
-  say "Chapter ${title}: ${c}", instant
+  say prose "Chapter ${title}: ${c}", instant
   wait 5 s
 }
 let words = ["First", "Second", "Third"]
-say "Word ${words[0]} count 0", instant
+say prose "Word ${words[0]} count 0", instant
 for w in 1..=2 {
   let dropped = words.removeAt(0)
-  say "Word ${words[0]} count ${w}", instant
+  say prose "Word ${words[0]} count ${w}", instant
   wait 5 s
 }
 let chapter = "First"
 function advance {
   chapter = "Second"
 }
-say "Chapter ${chapter}: 0", instant
+say prose "Chapter ${chapter}: 0", instant
 for a in 1..=2 {
   advance()
-  say "Chapter ${chapter}: ${a}", instant
+  say prose "Chapter ${chapter}: ${a}", instant
   wait 5 s
 }
 let part = "First"
-say "Part ${part}: 0", instant
+say prose "Part ${part}: 0", instant
 part = "Second"
 for p in 1..=2 {
-  say "Part ${part}: ${p}", instant
+  say prose "Part ${part}: ${p}", instant
   wait 5 s
 }
 let step = 0
@@ -118,30 +118,30 @@ function ready {
   part = "Step ${step}"
   return step < 3
 }
-say "Part ${part}: ${step}", instant
+say prose "Part ${part}: ${step}", instant
 while ready() {
   step += 1
-  say "Part ${part}: ${step}", instant
+  say prose "Part ${part}: ${step}", instant
   wait 5 s
 }
 function pause {
   part = "Third"
   return 1
 }
-say "${part}.", instant
+say prose "${part}.", instant
 wait pause() s
-say "${part}..", instant
+say prose "${part}..", instant
 function floorValue {
   part = "Fourth"
   return 1
 }
-say "${part}.", instant
+say prose "${part}.", instant
 wait floorValue() s
-say "${part}..", instant
+say prose "${part}..", instant
 // A counter through a range whose direction shows only at runtime is a counter too: the loop goes through the range's
 // positions and takes each number from them.
 let reps = 3
-let counter3 = say "0 reps", instant
+let counter3 = say prose "0 reps", instant
 let rTo = reps
 for rOffset in 0..=floor(abs(rTo - 1)) {
   let r = 1 + rOffset * sign(rTo - 1)

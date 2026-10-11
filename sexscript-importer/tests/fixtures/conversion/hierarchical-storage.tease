@@ -136,14 +136,14 @@ while load("club.toys.${index}", default: "") != "" {
   laid += "${load("club.toys.${index}", default: "")} "
   index += 1
 }
-say "Lay out ${laid}", instant
+say prose "Lay out ${laid}", instant
 // An element saved on its own is part of its key's map for load() (ToyExpanded's availability).
 sexscriptLegacySave("club.visits.monday", 2)
 sexscriptLegacySave("club.visits.friday", 3)
 // NOTE SX_LOAD_OPEN_NULL line 15: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let visits = sexscriptLegacyLoad("club.visits", sexscriptLegacyValue(null))
 // NOTE SX_LENGTH_RECEIVER line 16: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
-say "Visits ${visits.length} ${sexscriptLegacyLoadInteger("club.visits.friday")}", instant
+say prose "Visits ${visits.length} ${sexscriptLegacyLoadInteger("club.visits.friday")}", instant
 // Elements whose names are numbers make a list, with null where a number is missing.
 sexscriptLegacySave("club.days.3", 5)
 sexscriptLegacySave("club.days.1", 2)
@@ -151,20 +151,20 @@ sexscriptLegacySave("club.days.1", 2)
 let days = sexscriptLegacyLoad("club.days", sexscriptLegacyValue(null))
 // NOTE SX_LENGTH_RECEIVER line 21: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_INDEX_PAST_END line 21: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-say "Days ${days.length} ${days[1]} ${sexscriptLegacyItemAt(days, 2) == null}", instant
+say prose "Days ${days.length} ${days[1]} ${sexscriptLegacyItemAt(days, 2) == null}", instant
 // A key that holds a value first and gets elements later keeps its value for load(), as legacy did.
 sexscriptLegacySave("club.level", 3)
 sexscriptLegacySave("club.level.kink", 5)
-say "Level ${sexscriptLegacyLoad("club.level", 0)} ${sexscriptLegacyLoadInteger("club.level.kink")}", instant
+say prose "Level ${sexscriptLegacyLoad("club.level", 0)} ${sexscriptLegacyLoadInteger("club.level.kink")}", instant
 // A shorter list replaces every element of a longer one, and a null element stays a null element.
 sexscriptLegacySave("club.toys", ["gag", null])
 // NOTE SX_LENGTH_RECEIVER line 28: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 let savedToys = sexscriptLegacyLoad("club.toys")
-say "Again ${sexscriptLegacyLoad("club.toys", []).length} ${sexscriptLegacyItemAt(savedToys, 1) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
+say prose "Again ${sexscriptLegacyLoad("club.toys", []).length} ${sexscriptLegacyItemAt(savedToys, 1) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
 // save(key, null) removes the key with all its elements.
 sexscriptLegacySave("club", null)
 let savedKink: integer? = load "club.level.kink", default: null
 // NOTE SX_LOAD_OPEN_NULL line 31: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
-say "Reset ${sexscriptLegacyLoad("club.toys") == null} ${savedKink == null} ${sexscriptLegacyLoad("club", sexscriptLegacyValue(null)) == null}", instant
+say prose "Reset ${sexscriptLegacyLoad("club.toys") == null} ${savedKink == null} ${sexscriptLegacyLoad("club", sexscriptLegacyValue(null)) == null}", instant
 exit

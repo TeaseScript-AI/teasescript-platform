@@ -14,7 +14,7 @@ for i in 0..3 {
   rows[0].addAll([i, i])
   rows[1].add(i)
 }
-say "Counts ${counts.length}, items ${record.items.length}, rows ${rows[0].length} and ${rows[1].length}", instant
+say prose "Counts ${counts.length}, items ${record.items.length}, rows ${rows[0].length} and ${rows[1].length}", instant
 
 // A value whose call may change the list it is appended to is computed after the list is read, as Groovy did.
 let log = []
@@ -23,5 +23,5 @@ function remember(text) {
   return text
 }
 log += [remember("first")]
-say "Log ${log.length}", instant
+say prose "Log ${log.length}", instant
 exit

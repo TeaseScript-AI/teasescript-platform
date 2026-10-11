@@ -760,6 +760,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   waits, a clock loop's ticks, are literal waits too. A text that another text or the script's end follows with no
   wait or input between gets no time of its own, as in SexScript, where the next text replaced it at once. Texts said
   with a duration (`say t, n s`) are not used: a later text said at once, or a button, would cut that duration short.
+- Prose (owner decision 2026-10-11): the legacy display showed plain text, not chat bubbles, so every converted text
+  is `say prose …, instant`, also an updatable message (`let line = say prose "…", instant`, or `say prose() (…,
+  instant)` as a value), whose in-place updates keep its presentation. The system speaker's texts, which the importer
+  adds, stay bubbles, and a form's outro stays its prose block.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is

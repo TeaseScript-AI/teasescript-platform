@@ -1,2 +1,2 @@
-say "Write your lines.", instant
+say prose "Write your lines.", instant
 exit

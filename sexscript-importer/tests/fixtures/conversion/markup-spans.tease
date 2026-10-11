@@ -3,16 +3,16 @@
 // so the span settles around its line breaks and its paragraphs are messages of their own.
 let counting = false
 function spank(message, spot) {
-  say "[size=x-large]**${message}**[/size]", instant
-  say "[size=x-large]**.......**[/size]", instant
+  say prose "[size=x-large]**${message}**[/size]", instant
+  say prose "[size=x-large]**.......**[/size]", instant
   // A variable that every show wraps in its size and <b> again keeps neither of its own.
   if spot != "cheek" {
     message = "Center cheek, Alternate sides"
   }
   if counting {
-    say "[size=x-large]**${message}**[/size]", instant
+    say prose "[size=x-large]**${message}**[/size]", instant
   } else {
-    say """
+    say prose """
       [size=x-large]**${message}**[/size]
       [size=x-large]**.1.**[/size]
     """, instant
@@ -20,5 +20,5 @@ function spank(message, spot) {
 }
 spank("Right cheek", "cheek")
 // Milovana: the Flash editor wraps every paragraph in a FONT with its FACE and default size, which is no emphasis.
-say "[color=#000000]You think I have all day to wait for you?[/color]", instant
+say prose "[color=#000000]You think I have all day to wait for you?[/color]", instant
 exit
