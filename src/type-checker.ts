@@ -4359,9 +4359,14 @@ class TypeChecker {
           const rule = `'${node.operator}' needs true or false (boolean) values`;
           const left = yield* compileChild(this.#branchTask(node.left, scope));
           this.#requireBoolean(left.type, node.left, rule);
-          // The right operand runs only when the left one did not decide the result.
+          // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
+          // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
-          this.#flow.apply(runsRight);
+          this.#flow.apply(
+            runsRight ??
+              (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
+              null,
+          );
           const right = yield* compileChild(this.#branchTask(node.right, scope));
           this.#requireBoolean(right.type, node.right, rule);
           const reached = runsRight !== null;
