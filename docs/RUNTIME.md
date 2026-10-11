@@ -419,7 +419,7 @@ lastSettlement:
 ```
 
 A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, `chatPacingGate`,
-`mediaPlayback`, or `storageWrite` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer,
+`mediaPlayback`, `storageWrite`, or `capture` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer,
 media, and permanent button actions.
 
 The shared timer and media interrupt state may retain one inert suspended foreground delay, interaction, or media
