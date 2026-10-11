@@ -817,6 +817,19 @@ playAudio "door.mp3"
 from a list ([§16](#16-lists)). Used as a value, `say` gives a handle whose text can change in place, and also has a form
 in parentheses, `say("Strokes: 0", instant)` ([Updatable messages](#updatable-messages)).
 
+### Reading time
+**Status:** Accepted (Owner decisions on [#829](https://github.com/TeaseScript-AI/teasescript-platform/issues/829),
+2026-10-11)
+
+A `say` gives its message a reading time, its pacing
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#say)). What the player sees or hears next waits
+until that reading time has passed or the player skips it: a later `say`, also `instant` or `0 s`, which then has no
+reading time of its own; a question with its buttons or fields, which appear together, and whose timeout counts from
+then; Stage, sound, video, and camera changes; a change of a message's text; showing or removing a permanent button;
+and `exit`. Other code runs on until such output, and the code after it runs once it has appeared. A `wait` or blocking
+timer that starts during a reading time replaces it, so only the wait counts. In a timer, media, or button block only
+messages and questions wait. Permanent buttons already shown stay usable.
+
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
 ## 10. Function calls and arguments
@@ -2776,8 +2789,7 @@ indefinite repetition.
 On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`,
 `stopAudio`, and statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and
 camera placement writes, wait until the previous message's pacing has completed or been skipped, like a following
-`say`. `wait` and `timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical
-interrupt pacing and add no media wait.
+`say` ([Reading time](#reading-time)). Timer and cue blocks keep the canonical interrupt pacing and add no media wait.
 
 ### Camera view
 
@@ -3483,22 +3495,8 @@ Scene time is measured in milliseconds, including fractional milliseconds, up to
 longer than that can never end; the compiler rejects one it can see, such as `wait 1e15 s`, and any other is a runtime
 error.
 
-A `wait` runs alongside the pacing of the message before it, so the script goes on after the longer of the two
-([`RUNTIME.md`](../RUNTIME.md#instant-0-s-and-wait)). Warning `TSV060` (owner decision, 2026-10-08), on the `wait`,
-marks one that therefore adds no time unless the player skips the message: a `wait` of a known non-zero duration that is
-the next statement after a `say` without its own pacing (`instant` or a duration), in the same block, and is shorter
-than the message's reading time at the default reading speed. That reading time is the shortest the message can take:
-the default smart pacing of its visible text when the compiler knows all of the text, and otherwise the base delay
-alone, as a value the compiler cannot know may change which markup the text holds and so hide any of the rest. Comments
-and blank lines are no statements. Not checked are a `wait` after another statement or a label, after a `say` that ends
-a branch or loop body, after a message used as a value, and one whose duration is not known:
-
-```text
-for i in 1..=10 {
-    say ".${i}."
-    wait 0.5 s      // TSV060: the message takes at least 1.5 seconds to read
-}
-```
+A `wait` or blocking timer that starts while the message before it is still being read replaces that reading time
+([Reading time](#reading-time)).
 
 ## 28. Permanent buttons
 **Status:** Accepted (inactive while the handler runs: Owner decision on #610; `persist:` on the command: Owner
@@ -3708,7 +3706,6 @@ Static analysis should warn, but not necessarily fail compilation, when:
 
 - statements are unreachable;
 - an `exit` is declared but unreachable;
-- a `wait` adds no time because the message before it takes longer to read (`TSV060`, [§27](#27-timers));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
   or an unconditional top-level `goto` back to an earlier label of its file, whose loop is the statements between them.
   A `break`, `return`, `end`, `exit`, any other `goto`, a file `call`, or a call of an author, host, or library function
@@ -4315,9 +4312,10 @@ let strokes = [say("First", instant), say("Second", instant)]
 - **`text`.** Reading it gives the text as written, with its markup and after `${...}`, such as `"**Ready**"`. Assigning
   text, or appending with `+=`, replaces the message's text and parses it whole; the message keeps its speaker,
   presentation, and place in the conversation, and the conversation shows only its current text. The same text again
-  changes nothing, and `""` empties the message without removing it. A text write starts no pacing and waits for none;
-  use `wait` between changes. `text` takes only text: write `"Strokes: ${count}"` for a number. A handle has no other
-  property, no methods, and no operators besides `==` and `!=`.
+  changes nothing, and `""` empties the message without removing it. A text write starts no reading time and waits, like
+  other output, for one that runs ([Reading time](#reading-time)); use `wait` between changes. `text` takes only text:
+  write `"Strokes: ${count}"` for a number. A handle has no other property, no methods, and no operators besides `==`
+  and `!=`.
 - **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
   same message, and `==` compares messages, not texts. A message stays changeable while a handle to it remains, also
   an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller, or a block.
