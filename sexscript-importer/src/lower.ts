@@ -1264,10 +1264,17 @@ function constantMapFields(
     const key = bindingKey(node, keys);
     if (key !== null && literals.has(key)) rejected.add(key);
   });
-  const stays = (key: string, seen: ReadonlySet<string> = new Set()): boolean =>
-    !rejected.has(key) &&
-    !seen.has(key) &&
-    (sources.get(key) ?? []).every((source) => stays(source, new Set([...seen, key])));
+  // Whether a map and every map its sum reads stay as written, once for each map, as sums may share their sources.
+  const staying = new Map<string, boolean>();
+  const stays = (key: string): boolean => {
+    const known = staying.get(key);
+    if (known !== undefined) return known;
+    // A map that its own sum reaches again does not stay.
+    staying.set(key, false);
+    const result = !rejected.has(key) && (sources.get(key) ?? []).every((source) => stays(source));
+    staying.set(key, result);
+    return result;
+  };
   // A field's type: that of its constant, or of the field of another such map it reads.
   const fieldType = (value: AstNode, seen: ReadonlySet<AstNode>): number | null => {
     if (value.kind === "constant") return value.value === null ? null : inferType(value, types);
