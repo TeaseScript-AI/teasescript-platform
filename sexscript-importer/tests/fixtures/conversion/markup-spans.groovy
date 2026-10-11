@@ -1,5 +1,5 @@
 // DisciplineClinic Punish spank(): a local text that never changes, inside an HTML span, joins the span's own text,
-// so the span settles around its line breaks and its paragraphs are messages of their own.
+// so the span settles around its line breaks.
 def counting = false
 def spank = { message, spot ->
 	def dots = "\n\n....... "

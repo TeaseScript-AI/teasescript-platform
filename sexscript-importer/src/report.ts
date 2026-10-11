@@ -76,8 +76,6 @@ export interface FeasibilityOptions {
   runner?: TeaseProjectRunner;
   /** Accepted forms to emit instead of their workarounds; the shim makes them compile and run. */
   accepted?: ReadonlySet<AcceptedForm>;
-  /** Keeps texts with blank lines as one message each (LowerOptions.keepParagraphs). */
-  keepParagraphs?: boolean;
   /**
    * The package's images, which legacy image counts read at conversion time, and which the gate and the smoke runs give
    * the compiler with the folder tags their generated sidecars carry.
@@ -185,26 +183,6 @@ export interface FeasibilityReport {
    */
   forms: { sequences: number; menus: number };
   /**
-   * Texts with blank lines (withParagraphs): `says` and asks' questions split into one message per paragraph (the
-   * question the last paragraph, `questions`; the question with the remarks after it, `questionRemarks`; or the last
-   * paragraph where none asks, `questionFallbacks`), form questions whose later paragraphs became the outro, single
-   * paragraphs without the blank lines around them, and texts left whole as layout or by the unit's keepParagraphs;
-   * lists of texts said one picked text at a time and split the same way (withParagraphPicks, `picks`), or left whole
-   * where the list or the picked text has other uses (`picksKept`).
-   */
-  paragraphs: {
-    says: number;
-    questions: number;
-    questionRemarks: number;
-    questionFallbacks: number;
-    outros: number;
-    trimmed: number;
-    layout: number;
-    kept: number;
-    picks: number;
-    picksKept: number;
-  };
-  /**
    * Buttons whose waiting time stays a duration (withElapsedDurations): comparisons of a button's seconds with a number
    * (`compared`), and variables that hold such a duration (`variables`).
    */
@@ -282,7 +260,6 @@ export function analyzeFeasibility(
     paths,
   } = lowerPackage(files, {
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
-    ...(options.keepParagraphs === true ? { keepParagraphs: true } : {}),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
@@ -361,18 +338,6 @@ export function analyzeFeasibility(
     askQuestions: 0,
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
-    paragraphs: {
-      says: 0,
-      questions: 0,
-      questionRemarks: 0,
-      questionFallbacks: 0,
-      outros: 0,
-      trimmed: 0,
-      layout: 0,
-      kept: 0,
-      picks: 0,
-      picksKept: 0,
-    },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
     storageReads: {
@@ -504,16 +469,6 @@ export function analyzeFeasibility(
       else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
       else if (code === "SX_SETTINGS_FORM") report.forms.sequences += 1;
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;
-      else if (code === "SX_PARAGRAPHS") report.paragraphs.says += 1;
-      else if (code === "SX_PARAGRAPH_PICK") report.paragraphs.picks += 1;
-      else if (code === "SX_PARAGRAPH_PICK_KEPT") report.paragraphs.picksKept += 1;
-      else if (code === "SX_PARAGRAPH_QUESTION") report.paragraphs.questions += 1;
-      else if (code === "SX_PARAGRAPH_QUESTION_REMARKS") report.paragraphs.questionRemarks += 1;
-      else if (code === "SX_PARAGRAPH_QUESTION_FALLBACK") report.paragraphs.questionFallbacks += 1;
-      else if (code === "SX_FORM_OUTRO") report.paragraphs.outros += 1;
-      else if (code === "SX_PARAGRAPH_TRIMMED") report.paragraphs.trimmed += 1;
-      else if (code === "SX_PARAGRAPHS_LAYOUT") report.paragraphs.layout += 1;
-      else if (code === "SX_PARAGRAPHS_KEPT") report.paragraphs.kept += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;
       else if (code === "SX_BUTTON_DURATION_VARIABLE") report.buttonDurations.variables += 1;
       else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;

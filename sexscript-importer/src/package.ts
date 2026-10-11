@@ -104,8 +104,6 @@ export interface PackageOptions {
   }>;
   /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
-  /** Keeps texts with blank lines as one message each (LowerOptions.keepParagraphs). */
-  keepParagraphs?: boolean;
   /** The package's images, which legacy image counts read at conversion time. */
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
@@ -969,7 +967,6 @@ export function lowerPackage(
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
-      ...(options.keepParagraphs === true ? { keepParagraphs: true } : {}),
       ...(options.media === undefined ? {} : { media: options.media }),
       ...(options.files === undefined ? {} : { files: options.files }),
       ...(javaResources === undefined ? {} : { javaResources }),

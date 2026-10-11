@@ -4,7 +4,7 @@
  *
  * - `rule`: each SX_ diagnostic code in `.conversion.log` or the report's diagnostic counts, info lines (converter
  *   rules applied) and TODOs alike;
- * - `count`: each report counter of a converter rule above zero, such as `paragraphs.says` or `askQuestions`;
+ * - `count`: each report counter of a converter rule above zero, such as `askQuestions`;
  * - `uses`: each engine name (`showButton`, `askForm`, ...) and each token kind (`keywordWhile`, `rangeExclusive`, ...)
  *   of the generated `.tease` files, through the engine's lexer;
  * - `pending`, `compile`, `smoke`, `project`, `final`: pending capabilities, compiler diagnostic codes, smoke-run

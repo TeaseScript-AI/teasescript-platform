@@ -55,16 +55,26 @@ while left > 0 {
   wait 1 s
   left -= 1
 }
-// A split text: each paragraph is said at once, and the wait after it stays whole.
-say prose "First paragraph has a few words.", instant
-say prose "Second paragraph.", instant
-say prose "Last one.", instant
+// A text with paragraphs is one message, said at once, and the wait after it stays whole.
+say prose """
+  First paragraph has a few words.
+
+  Second paragraph.
+
+  Last one.
+""", instant
 wait 20 s
-say prose "One.", instant
-say prose "Two.", instant
-say prose "Three.", instant
-say prose "Four.", instant
-say prose "Five.", instant
+say prose """
+  One.
+
+  Two.
+
+  Three.
+
+  Four.
+
+  Five.
+""", instant
 wait 5 s
 
 // A computed wait, and a run of waits; a sum takes parentheses before its unit.
@@ -93,11 +103,14 @@ line.text += "."
 wait 1 s
 line.text += "."
 wait 1 s
-// A split tick.
+// A tick with paragraphs.
 left = 3
 while left > 0 {
-  say prose "Starting soon.", instant
-  say prose "Starting in ${left}", instant
+  say prose """
+    Starting soon.
+
+    Starting in ${left}
+  """, instant
   wait 1 s
   left -= 1
 }
@@ -117,26 +130,28 @@ for tempSpankCount in 1..=3 {
   playAudio async "DisciplinePack/hand${1 + randomInteger(0..3)}.wav"
   wait tempTime s
 }
-// DisciplineClinic Punish: a long split text before a run of waits.
-say prose "You've created a bunch of paperwork for me to document this.", instant
-say prose "So you can expect me to be extra strict this time", instant
+// DisciplineClinic Punish: a long text with paragraphs before a run of waits.
+say prose """
+  You've created a bunch of paperwork for me to document this.
+
+  So you can expect me to be extra strict this time
+""", instant
 wait 4 s
 wait 3 s
-// Domme3 maintenance: a split text before a button.
-say prose "You did well.", instant
-say prose "I'm proud of you!", instant
-say prose "Get dressed.", instant
+// Domme3 maintenance: a text with paragraphs before a button.
+say prose "You did well. \n\nI'm proud of you! \n\nGet dressed.", instant
 wait 7 s
 showButton "Thanks, Miss."
-// Domme3 punishment: a split text before a call that may say a text.
+// Domme3 punishment: a text with paragraphs before a call that may say a text.
 function counted(messageValue) {
-  say prose "${messageValue}", instant
-  say prose "0", instant
+  say prose """
+    ${messageValue}
+
+    0
+  """, instant
   wait 3 s
 }
-say prose "These last fifteen ...", instant
-say prose "will be slower ...", instant
-say prose "and harder!", instant
+say prose "These last fifteen ... \n\nwill be slower ... \n\nand harder!", instant
 wait 7 s
 counted("Alternating cheeks.")
 // BreatheAcademy waitWithCountDownSound: a countdown with a step between its text and its computed wait.
@@ -145,8 +160,11 @@ function countDown(text, timeValue, speed) {
   let itTo = floor(timeValue / speed)
   for itOffset in 0..=floor(abs(itTo - 1)) {
     let it = 1 + itOffset * sign(itTo - 1)
-    say prose "${text}", instant
-    say prose "${toInteger(leftValue * speed)} seconds", instant
+    say prose """
+      ${text}
+
+      ${toInteger(leftValue * speed)} seconds
+    """, instant
     leftValue -= 1
     wait speed s
   }

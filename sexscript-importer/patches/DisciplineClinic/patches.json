@@ -116,7 +116,7 @@
       "id": "stale-dialog-questions",
       "layer": "source",
       "category": "b",
-      "reason": "Three questions in Punish ask getSelectedValue(dialog, …) with a dialog that an earlier pick set for another text: the mercy question after the mumble question (\"Please Stop\" …), the reply after a mercy answer that show(dialog) has just shown (\"Yes, Miss\" …), and the repeat-offense reply (\"I understand.\" …), where dialog still holds a text shown long before or in another function. Legacy showed that older text again above the buttons; the author meant the buttons under the text just shown, which a null question gives. Unread, the leftover dialog no longer keeps the clinic's random dialog lists whole (the paragraph rule).",
+      "reason": "Three questions in Punish ask getSelectedValue(dialog, …) with a dialog that an earlier pick set for another text: the mercy question after the mumble question (\"Please Stop\" …), the reply after a mercy answer that show(dialog) has just shown (\"Yes, Miss\" …), and the repeat-offense reply (\"I understand.\" …), where dialog still holds a text shown long before or in another function. Legacy showed that older text again above the buttons; the author meant the buttons under the text just shown, which a null question gives.",
       "diff": "stale-dialog-questions.diff"
     },
     {

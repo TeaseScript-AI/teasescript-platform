@@ -293,34 +293,6 @@ test(
 );
 
 test(
-  "a unit whose manifest keeps paragraphs says a text with blank lines as one message",
-  { skip: unbuilt },
-  async () => {
-    const { work, options } = await fixture();
-    try {
-      const text = 'show("Kneel.\\n\\n  1  2  3\\n  4  5  6")\nshow("Wait.\\n\\nNow stand.")\n';
-      await writeFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), text);
-      converted(await convertUnit(options));
-      const main = path.join(options.outputRoot, "Walk/start.tease");
-      assert.match(
-        await readFile(main, "utf8"),
-        /say prose "Kneel\.", instant\nsay prose """[^]*""", instant\nsay prose "Wait\.", instant\nsay prose "Now stand\.", instant/u,
-      );
-      const reason = "The blank lines lay out a grid of numbers.";
-      await writeFile(
-        path.join(work, "patches/Walk/patches.json"),
-        JSON.stringify({ keepParagraphs: { reason }, patches: [] }),
-      );
-      const { record } = converted(await convertUnit(options));
-      assert.equal(record.keepParagraphs, reason);
-      assert.doesNotMatch(await readFile(main, "utf8"), /say "Wait\."/u);
-    } finally {
-      await rm(work, { recursive: true, force: true });
-    }
-  },
-);
-
-test(
   "a stand-alone script that a unit holds back stays out of the start choice",
   { skip: unbuilt },
   async () => {
@@ -372,11 +344,6 @@ test("patch manifests are checked before anything is applied", async () => {
     await rejected({ ...output, edits: [{ find: "say 1", replace: "say 2" }] }, /"count"/u);
     await rejected({ ...SOURCE_PATCH, diff: "../other/greeting.diff" }, /inside the unit's patch/u);
     await rejected({ ...SOURCE_PATCH, edits: [] }, /fields a source patch does not use/u);
-    await writeFile(
-      path.join(work, "patches/Walk/patches.json"),
-      JSON.stringify({ keepParagraphs: true, patches: [] }),
-    );
-    await assert.rejects(readUnitPatches(options.patchesRoot, "Walk"), /"keepParagraphs"/u);
     await writeFile(
       path.join(work, "patches/Walk/patches.json"),
       JSON.stringify({ heldStandAlone: { "reset.groovy": "" }, patches: [] }),

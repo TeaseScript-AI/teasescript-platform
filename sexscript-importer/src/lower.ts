@@ -54,8 +54,6 @@ import {
   withoutBlankText,
   withoutRepeatedText,
 } from "./repeated-text.ts";
-import { withParagraphPicks } from "./paragraph-picks.ts";
-import { withParagraphs } from "./paragraphs.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
 import { withMessageHandles } from "./message-handles.ts";
 import { withParsedLoads } from "./parsed-loads.ts";
@@ -140,8 +138,6 @@ export type HelperRegistry = ReadonlyMap<string, ReadonlyMap<string, HelperFunct
 
 export interface LowerOptions {
   helperRegistry?: HelperRegistry;
-  /** Keeps a text with blank lines as one message instead of one per paragraph (withParagraphs), for a whole unit. */
-  keepParagraphs?: boolean;
   /** Functions defined anywhere in the package, such as runtime-loaded mixin methods. */
   packageFunctions?: ReadonlySet<string>;
   /** Runtime-loaded mixin modules of the package. */
@@ -2344,8 +2340,8 @@ function lowerFileOnce(
   }
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped, animations and counters made messages that change in place, repeated texts
-  // shortened, texts folded into asks, and picked texts and paragraphs split. Every text is said at once and every
-  // legacy wait stays as written (literal timing, owner decision 2026-10-11).
+  // shortened, and texts folded into asks. Every text is said at once, a text with blank lines as one message, and
+  // every legacy wait stays as written (literal timing, owner decision 2026-10-11).
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
@@ -2358,10 +2354,7 @@ function lowerFileOnce(
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withoutRepeatedText(texts, diagnostics);
-  // A picked text splits into its paragraphs first, so that an ask after it keeps no question of several paragraphs.
-  texts = withParagraphPicks(texts, diagnostics, options.keepParagraphs === true, shared);
   texts = withAskQuestions(texts, diagnostics);
-  texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
   texts = withGroovyRanges(texts, (base) => freshName(base, context));
   const statements = [
     ...helperStatements(context.syntheticHelpers),

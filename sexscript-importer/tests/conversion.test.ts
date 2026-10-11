@@ -1832,9 +1832,9 @@ test(
         note(step.events, step.snapshot);
       }
       assert.equal(step.snapshot.status, "halted", tease);
-      // Six ticks of half a second, two of a second, and 35 characters half a second apart: 3 + 2 + 17.5 s, two texts
+      // Six ticks of half a second, two of a second, and 35 characters half a second apart: 3 + 2 + 17.5 s, one text
       // per tick and one per character; then the held text, whose wait the clock measured.
-      assert.equal(times.length, 12 + 4 + 35 + 1, tease);
+      assert.equal(times.length, 6 + 2 + 35 + 1, tease);
       assert.equal(times.at(-1)! - times[0]!, 22_500, tease);
       assert.equal(texts.at(-1), "Keep holding.", tease);
     } finally {

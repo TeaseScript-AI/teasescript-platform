@@ -40,7 +40,7 @@ for (int left = 3; left > 0; left--) {
     show("Starting in " + left)
     wait(1)
 }
-// A split text: each paragraph is said at once, and the wait after it stays whole.
+// A text with paragraphs is one message, said at once, and the wait after it stays whole.
 show("First paragraph has a few words.\n\nSecond paragraph.\n\nLast one.")
 wait(20)
 show("One.\n\nTwo.\n\nThree.\n\nFour.\n\nFive.")
@@ -72,7 +72,7 @@ show("Wait..")
 wait(1)
 show("Wait...")
 wait(1)
-// A split tick.
+// A tick with paragraphs.
 for (int left = 3; left > 0; left--) {
     show("Starting soon.\n\nStarting in " + left)
     wait(1)
@@ -87,15 +87,15 @@ for (int tempSpankCount = 1; tempSpankCount <= 3; tempSpankCount++) {
 	playBackgroundSound("DisciplinePack/hand"+(1+getRandom(3))+".wav")
 	wait(tempTime)
 }
-// DisciplineClinic Punish: a long split text before a run of waits.
+// DisciplineClinic Punish: a long text with paragraphs before a run of waits.
 show("You've created a bunch of paperwork for me to document this.\n\nSo you can expect me to be extra strict this time")
 wait(4)
 wait(3)
-// Domme3 maintenance: a split text before a button.
+// Domme3 maintenance: a text with paragraphs before a button.
 show("You did well. \n\nI'm proud of you! \n\nGet dressed.")
 wait(7)
 showButton("Thanks, Miss.")
-// Domme3 punishment: a split text before a call that may say a text.
+// Domme3 punishment: a text with paragraphs before a call that may say a text.
 def counted = { message ->
 	show(message + "\n\n0")
 	wait(3)

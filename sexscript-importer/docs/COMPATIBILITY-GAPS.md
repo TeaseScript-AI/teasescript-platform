@@ -146,35 +146,9 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
   repeats goes. A text is not folded into an ask across something with an effect that the statement runs first, as in
   `n = before() + getInteger(null)`.
-- Paragraphs (owner decision 2026-10-07): the legacy display showed one text, so authors separated what a chat shows
-  as separate messages with a blank line. A text whose literal parts hold a blank line becomes one `say` per paragraph,
-  in order, with the same speaker; a blank line inside an interpolated value or a text built at runtime stays. Each
-  piece is said at once, as the whole text was, and the legacy wait after it stays whole (Timing, below). An ask's
-  question (also `askImage`'s message) is the last paragraph that ends with a
-  question mark, ignoring closing brackets, quotes, and markup, or else the last that starts with an instruction or
-  question word (Enter, Type, Choose, Select, Pick, Write, Tell, Give, Name, How, What, Which, Please, Input, Insert,
-  Answer, Click, Press, Set); the paragraphs before it are said before the ask, and the remarks after it, such as
-  `(default is 2, current is 3)` or a legend, stay in the question. Where no paragraph qualifies, as in non-English
-  scripts without a question mark, the last paragraph is the question (owner decision 2026-10-07, option E;
-  `SX_PARAGRAPH_QUESTION`, `_REMARKS`, `_FALLBACK`, counted as `questions`, `questionRemarks`, `questionFallbacks`).
-  A form's question keeps its first paragraph and says the others after the fields as its `outro:`, where neither they
-  nor the fields have effects (the outro is computed after the fields).
-  `askBooleans` has no `outro:` and keeps its message whole. A single paragraph loses the blank lines around it. Texts
-  whose blank lines lay them out stay whole: two aligned lines, a ruled line, an empty box (`[  ]`), a table row, or a
-  block of value rows (`Score: 12`, `Time unit = ${unit}`; three, or two that make up half the text). A unit whose
-  layout this misses sets `"keepParagraphs"` in its patches.json (none yet). A list of alternative texts that the
-  script only picks one of to say, `dialog = dialogArray.random; say dialog` or `say text[randomInteger(0..3)]`,
-  becomes a list of each alternative's paragraphs said one message each, `let dialogs = [["…", "…"], ["…"]]` and
-  `for line in dialogs.random { say line }`, which draws the same alternative (owner decision 2026-10-08;
-  `SX_PARAGRAPH_PICK`, `picks`). It stays whole where the list or the picked text has another use: read again later,
-  also as a leftover after the function that picked it returns, or used before the pick other than for its length
-  (`SX_PARAGRAPH_PICK_KEPT`, `picksKept`). DisciplineClinic asked three questions with a `dialog` left from an earlier
-  pick, which showed that older text again; a unit patch asks them without a question, as their author meant, so its
-  lists split. 304 lists in 13 units are said this way, and 145 in 14 units stay whole.
-  Corpus: 10,635 says split in 172 units,
-  172 questions in 50 units (71 that ask, 49 with remarks after them, 52 by the fallback), 263 single paragraphs
-  trimmed in 26 units, 215 texts kept as layout in 50 units, 0 form
-  outros (no form question in the corpus has a literal blank line); report counter `paragraphs`.
+- Paragraphs (owner decision 2026-10-11, superseding the paragraph split of 2026-10-07): one legacy `show()` is one
+  `say`, and a blank line in its text stays inside that message, which prose shows as a paragraph break; an ask's
+  question and a form's question stay whole too.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Legacy `show()` rendered HTML, whose bold, italic, strikethrough, and font sizes become markup spans (markup.ts). A
@@ -186,7 +160,7 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `34px`, which legacy ignored, or one computed at runtime goes with its tag, and so does a value inside a dropped tag
   (catwoman's size, ShockQuiz's and fight_arena's colours), which used to take the place of the values after it. A span
   ends at a line break, so it closes before each one and opens again on the next line with text, and the blank line
-  between paragraphs gets no delimiters, so the paragraph rule still splits them (its layout check ignores size tags);
+  between paragraphs gets no delimiters;
   a bold, italic, or strikethrough span inside one of its own kind adds nothing, as in HTML (spinthebottle's second
   `<i>` where `</i>` was meant). Inside a span, a function's text variable that never changes joins the span's own text
   first (DisciplineClinic's `dots = "\n\n....... "`), and a variable that every show wraps in the same span again keeps

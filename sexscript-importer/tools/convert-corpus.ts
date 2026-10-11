@@ -77,8 +77,6 @@ export interface ConversionRecord {
   readonly inputs: Readonly<Record<string, string>>;
   /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
   readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
-  /** Why the unit keeps texts with blank lines as one message each, from its manifest; absent where they split. */
-  readonly keepParagraphs?: string;
   /** The unit's status from the merged corpus's `unit.json`, such as `unfinished-content-stub`; null for none. */
   readonly unitStatus: string | null;
   readonly exitCode: number;
@@ -318,7 +316,6 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     const { exitCode, stderr } = await run(process.execPath, [
       cliPath,
       "convert-package",
-      ...(patches?.keepParagraphs == null ? [] : ["--keep-paragraphs"]),
       ...heldArguments(patches),
       path.join(unitRoot, "scripts"),
       packageRoot,
@@ -336,12 +333,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     step = "media";
     const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
     step = "report";
-    const report = await unitReport(
-      unitRoot,
-      packageRoot,
-      patches?.keepParagraphs != null,
-      heldArguments(patches),
-    );
+    const report = await unitReport(unitRoot, packageRoot, heldArguments(patches));
     const record: ConversionRecord = {
       source: path.join(corpusRoot, id),
       converter: options.converter,
@@ -354,7 +346,6 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
               layer,
               sha256: patches.hashes.get(patchId)!,
             })),
-      ...(patches?.keepParagraphs == null ? {} : { keepParagraphs: patches.keepParagraphs }),
       unitStatus: await unitStatus(corpusRoot, id),
       exitCode,
       ...media,
@@ -418,12 +409,7 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "re
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
     step = "report";
-    const report = await unitReport(
-      unitRoot,
-      published,
-      patches?.keepParagraphs != null,
-      heldArguments(patches),
-    );
+    const report = await unitReport(unitRoot, published, heldArguments(patches));
     const temporary = path.join(published, ".report.json.tmp");
     await writeFile(temporary, `${JSON.stringify(report)}\n`);
     await rename(temporary, path.join(published, ".report.json"));
@@ -556,14 +542,12 @@ function heldArguments(patches: UnitPatches | null): string[] {
 async function unitReport(
   unitRoot: string,
   packageRoot: string,
-  keepParagraphs: boolean,
   held: readonly string[],
 ): Promise<Record<string, unknown>> {
   const { exitCode, stdout, stderr } = await run(process.execPath, [
     cliPath,
     "report",
     "--run",
-    ...(keepParagraphs ? ["--keep-paragraphs"] : []),
     ...held,
     "--package",
     packageRoot,

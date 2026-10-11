@@ -53,11 +53,6 @@ export interface UnitPatches {
   /** SHA-256 of each patch by id: its diff file, or its manifest entry. */
   readonly hashes: ReadonlyMap<string, string>;
   /**
-   * Why the unit keeps texts with blank lines as one message each, where its blank lines are layout, such as ASCII
-   * art or tables (`"keepParagraphs": { "reason": ... }` in the manifest); null where texts split into paragraphs.
-   */
-  readonly keepParagraphs: string | null;
-  /**
    * Stand-alone scripts the start does not offer until the owner decides, by their paths from the scripts folder, with
    * why (`"heldStandAlone": { path: reason }` in the manifest), such as a development leftover.
    */
@@ -93,19 +88,10 @@ export async function readUnitPatches(
   }
   if (
     !isRecord(manifest) ||
-    !onlyKeys(manifest, ["patches", "keepParagraphs", "heldStandAlone"]) ||
+    !onlyKeys(manifest, ["patches", "heldStandAlone"]) ||
     !Array.isArray(manifest.patches)
   )
     throw new PatchError(`${where} must be an object with a "patches" list`);
-  const keep = manifest.keepParagraphs;
-  if (
-    keep !== undefined &&
-    (!isRecord(keep) ||
-      !onlyKeys(keep, ["reason"]) ||
-      typeof keep.reason !== "string" ||
-      keep.reason.trim() === "")
-  )
-    throw new PatchError(`${where} has a "keepParagraphs" that is not { "reason": text }`);
   const held = manifest.heldStandAlone ?? {};
   if (
     !isRecord(held) ||
@@ -130,7 +116,6 @@ export async function readUnitPatches(
     folder,
     patches,
     hashes,
-    keepParagraphs: isRecord(keep) && typeof keep.reason === "string" ? keep.reason : null,
     heldStandAlone: new Map(
       Object.entries(held).flatMap(([file, reason]) =>
         typeof reason === "string" ? [[file, reason] as const] : [],

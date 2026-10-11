@@ -1,10 +1,13 @@
 // NOTE SX_HTML_LAYOUT: Legacy show() rendered HTML; the text keeps bold, italic, colour, size, and line breaks as message markup, and drops layout such as TEXTFORMAT, ALIGN, and FONT FACE with the size an editor writes beside it (1 text in this file).
 // DisciplineClinic Punish spank(): a local text that never changes, inside an HTML span, joins the span's own text,
-// so the span settles around its line breaks and its paragraphs are messages of their own.
+// so the span settles around its line breaks.
 let counting = false
 function spank(message, spot) {
-  say prose "[size=x-large]**${message}**[/size]", instant
-  say prose "[size=x-large]**.......**[/size]", instant
+  say prose """
+    [size=x-large]**${message}**[/size]
+
+    [size=x-large]**.......**[/size]
+  """, instant
   // A variable that every show wraps in its size and <b> again keeps neither of its own.
   if spot != "cheek" {
     message = "Center cheek, Alternate sides"

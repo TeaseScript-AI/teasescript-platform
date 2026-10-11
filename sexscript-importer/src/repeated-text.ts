@@ -532,7 +532,7 @@ export function withoutRepeatedChainText<
 }
 
 /** An ask that says a question before it opens: a single-field input or a form, or `askImage`. */
-export function isAsk(value: IrExpression): boolean {
+function isAsk(value: IrExpression): boolean {
   return value.kind === "input" || (value.kind === "call" && value.name === "askImage");
 }
 
@@ -631,7 +631,7 @@ export function effectBefore(statement: IrStatement, target: IrExpression): bool
   return reached && effect;
 }
 
-export const ASKING_STATEMENTS: ReadonlySet<string> = new Set([
+const ASKING_STATEMENTS: ReadonlySet<string> = new Set([
   "let",
   "assign",
   "expression",
