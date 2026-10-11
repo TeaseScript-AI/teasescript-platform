@@ -1,7 +1,15 @@
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
+  if action == "clearPiles" {
+    clearPiles()
+    return
+  }
   if action == "drop" {
     drop()
+    return
+  }
+  if action == "shuffleOut" {
+    shuffleOut()
     return
   }
 }
@@ -101,4 +109,26 @@ let held2 = cards[0]
 sexscriptLegacyCall(dropAll, [])
 held2[0] = 1
 say "Held ${held2[0]}"
+// So does one called through a closure in a map, or returned by another closure.
+let decks = [[0]]
+function shuffleOut {
+  decks.clear()
+}
+let handlers = { drop: "shuffleOut" }
+let kept = decks[0]
+sexscriptLegacyCall(handlers.drop, [])
+kept[0] = 1
+say "Kept ${kept[0]}"
+let piles = [[0]]
+function clearPiles {
+  piles.clear()
+}
+function forward {
+  return "clearPiles"
+}
+let callClear = forward()
+let top = piles[0]
+sexscriptLegacyCall(callClear, [])
+top[0] = 1
+say "Top ${top[0]}"
 exit

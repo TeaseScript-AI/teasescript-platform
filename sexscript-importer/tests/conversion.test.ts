@@ -1968,6 +1968,8 @@ test("the list-aliases fixture says what Groovy's shared lists gave", async () =
     "Counts 6 7,5,2",
     "Slots 5 1",
     "Held 1",
+    "Kept 1",
+    "Top 1",
   ]);
 });
 

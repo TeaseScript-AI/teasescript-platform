@@ -61,3 +61,19 @@ def held2 = cards[0]
 dropAll()
 held2[0] = 1
 show("Held " + held2[0])
+// So does one called through a closure in a map, or returned by another closure.
+def decks = [[0]]
+def shuffleOut = { decks.clear() }
+def handlers = [drop: { shuffleOut() }]
+def kept = decks[0]
+handlers.drop()
+kept[0] = 1
+show("Kept " + kept[0])
+def piles = [[0]]
+def clearPiles = { piles.clear() }
+def forward = { return clearPiles }
+def callClear = forward()
+def top = piles[0]
+callClear()
+top[0] = 1
+show("Top " + top[0])

@@ -154,32 +154,33 @@ function closureMoves(body: AstNode): Map<string, Set<string>> {
 function escapingMoves(body: AstNode, movers: Moves): Set<string> {
   const lists = new Set<string>();
   const named = new Set<AstNode>();
-  const reads = new Set<string>();
+  // The variable nodes that only name what a statement sets, or the closure a `.call()` calls.
+  const notRead = new Set<AstNode>();
   walkAst(body, (node) => {
-    const name =
-      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")
-        ? variableName(node.left)
-        : null;
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const name = assigns ? variableName(node.left) : null;
     const value = asNode(node.right);
     if (name !== null && value?.kind === "closure") named.add(value);
-    if (name !== null && value?.kind === "variable" && movers.has(variableName(value) ?? ""))
-      reads.add(variableName(value)!);
-    if (node.kind === "list")
-      nodeArray(node.items).forEach((item) => reads.add(variableName(item) ?? ""));
-    if (node.kind === "map")
-      nodeArray(node.entries).forEach((entry) =>
-        reads.add(variableName(asNode(entry.value)) ?? ""),
-      );
-    if (node.kind === "methodCall")
-      nodeArray(asNode(node.arguments)?.items).forEach((item) =>
-        reads.add(variableName(item) ?? ""),
-      );
+    const left = assigns ? asNode(node.left) : null;
+    if (left !== null) notRead.add(left);
+    if (node.kind === "methodCall" && constantString(node.method) === "call") {
+      const object = asNode(node.object);
+      if (object !== null) notRead.add(object);
+    }
   });
-  for (const name of reads) movers.get(name)?.forEach((list) => lists.add(list));
-  // An anonymous closure, such as a map's, moves its lists wherever it may be called.
+  // A closure the script reads as a value in any way, kept, passed, put in a map or a list, or returned, may be called
+  // through that value, where the calls are not seen.
+  walkAst(body, (node) => {
+    if (node.kind !== "variable" || notRead.has(node)) return;
+    movers.get(variableName(node) ?? "")?.forEach((list) => lists.add(list));
+  });
+  // An anonymous closure, such as a map's, moves its lists wherever it may be called, also through a closure it calls.
   walkAst(body, (node) => {
     if (node.kind !== "closure" || named.has(node)) return;
     walkAst(node, (child) => {
+      const callee = calledClosure(child);
+      if (callee !== null) movers.get(callee)?.forEach((list) => lists.add(list));
       const method = child.kind === "methodCall" ? constantString(child.method) : null;
       const appends =
         method !== null &&
