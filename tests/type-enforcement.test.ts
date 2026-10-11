@@ -1192,16 +1192,21 @@ test("a return of a variable that held only null decides no result type, also wh
   assert.equal(runValidSource(unknownA('"s"')).snapshot.failure?.code, "TSR058");
   assert.deepEqual(sayTexts(unknownA("[2]")), ["2"]);
   // A value of another type is compared with the return that decided the type, not with one that held only null.
-  assert.deepEqual(
-    mismatches(info("", 'if type == 1 {\n        return [1]\n    }\n    return "x"')),
+  const mixed = 'if type == 1 {\n        return [1]\n    }\n    return "x"';
+  assert.deepEqual(mismatches(info("", mixed)), [
     [
-      [
-        "TSV044",
-        "'info' returns text (string) here, but a list (integer[]) on line 14. To return both, declare the result type, as in 'function info(...): integer[] | string | null'.",
-        '"x"',
-      ],
+      "TSV044",
+      "'info' returns text (string) here, but a list (integer[]) on line 14. To return both, declare the result type, as in 'function info(...): integer[] | string | null'.",
+      '"x"',
     ],
-  );
+  ]);
+  // The returns the compiler knows still agree beside one that a value it cannot know reached, with one such
+  // variable or several.
+  const assigned = info('function assign(value) {\n    kindA = value\n}\nassign("s")', mixed);
+  assert.deepEqual(codes(assigned), [["TSV044", '"x"']]);
+  assert.deepEqual(codes(assigned.replace("typeout = kindB", "typeout = kindA")), [
+    ["TSV044", '"x"'],
+  ]);
 });
 
 test("annotated parameters and results are checked, and a default types a parameter like let", () => {
