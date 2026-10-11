@@ -306,6 +306,7 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), or by
   a loop counter whose bound may exceed the literal list's length (Farkel's seventh die), grew the Groovy list,
   padding it with null up to the position. Where the writes are proven to count up (a counter that grows with them,
+  also one set to 1 where it is 0, as Escape's `nimp` where no implement was chosen,
   or literal positions in order, also after `add` calls that show the position inside the list or at its end, as
   OwlSays' `index2.add(index2[0])` before `index2[0] = nphr`) the conversion appends, or writes in place; so does a
   list that starts empty and is set to lists of unknown length later, but never to a Java array, whose length is
@@ -314,7 +315,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   list filled from its end or from position 1, it first pads the list up to the position: with null where the code
   compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
   truth treats like null (`SX_LIST_PADDING`; accepted 2026-10-06, following the zero-start decision). A list of elements of unknown type still appends at the end, which
-  differs beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A computed position counts as a
+  differs beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A list set to its own `sort()` or `reverse()` keeps its length, so such a setting leaves how the list grows as it
+  was (Concentration's `sumOps`). A computed position counts as a
   number where its operands are numbers or of unknown type, since Groovy failed on a list position of another type.
 - What a function cannot convert does not block the script when nothing references the function: no call, action ID, or
   use as a value in the generated program, which counts module loaders, setups, and the action dispatcher, and no
@@ -335,9 +337,13 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   by a value the script keeps or passes on, or one whose function may run again while it runs; a text parameter, a
   text set to a computed value, and a text without a value that its function compares with null, which a script
   variable cannot hold as null.
-- A list position that may be negative, which Groovy counted from the end, or past the end, where Groovy read null,
+- A list position that may be negative, which Groovy counted from the end, also the remainder of such a number,
+  which keeps its sign (Stay's `imp[tries % nimp]` after `tries = -1`), or past the end, where Groovy read null,
   including a literal position past a shorter literal list the variable is set to again later (Farkel's
-  `contestants = [winner1]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
+  `contestants = [winner1]`), a position whose largest value from numbers and random draws reaches past the list
+  literals the variable is set to (justalittlefun's fourth roll, `texts4[val4 - 1]` after `val4 = 1 + getRandom(6)`
+  over five texts, of a list that nothing resizes), and a variable only ever set to numbers, in a list that only ever
+  starts empty (interrogation's `goals[goal]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
   names an element: a menu position, after a test that rules out the menu's written options, of a menu over
   `["Back"] + list` or over a list that a loop built with one option for each element of the read list, and a counter
   that started at 0 or more, only grew since, and is tested below the list's size, with nothing in between that may

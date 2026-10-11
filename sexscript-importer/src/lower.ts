@@ -281,6 +281,10 @@ interface LowerContext {
   assignedValues: ReadonlyMap<string, readonly AstNode[]>;
   /** The values each binding is updated to by `+=`, `-=`, `*=`, and `/=` (compoundValues). */
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
+  /** The bindings that `++` or `--` changes (steppedBindings). */
+  steppedBindings: ReadonlySet<string>;
+  /** The list bindings whose length may change: appends, removals, writes by position, `<<` (resizedLists). */
+  resizedLists: ReadonlySet<string>;
   /** Bindings declared with a value, and those something else may change too (declaredWrites). */
   declaredWrites: DeclaredWrites;
   /** List reads by a menu position that are certainly in range (menu-indexes.ts). */
@@ -1717,6 +1721,56 @@ function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
   );
 }
 
+/** The bindings that `++` or `--` changes, before or after the variable. */
+function steppedBindings(body: AstNode, keys: BindingKeys): Set<string> {
+  const stepped = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind !== "postfix" && node.kind !== "prefix") return;
+    const key = bindingKey(asNode(node.expression) ?? asNode(node.value), keys);
+    if (key !== null) stepped.add(key);
+  });
+  return stepped;
+}
+
+/** Methods that change a list's length or move its elements. */
+const RESIZING_METHODS = new Set([
+  "add",
+  "addAll",
+  "clear",
+  "leftShift",
+  "pop",
+  "push",
+  "putAt",
+  "remove",
+  "removeAll",
+  "removeAt",
+  "removeIf",
+  "retainAll",
+  "set",
+]);
+
+/**
+ * The list bindings whose length may change: the receiver of a method that changes it, the left side of `<<`, `+=`, or
+ * `-=`, or a list written by position, which Groovy grew past its end.
+ */
+function resizedLists(body: AstNode, keys: BindingKeys): Set<string> {
+  const resized = new Set<string>();
+  walkAst(body, (node) => {
+    let list: AstNode | null = null;
+    if (node.kind === "methodCall" && RESIZING_METHODS.has(constantString(node.method) ?? ""))
+      list = asNode(node.object);
+    const operator = node.kind === "binary" ? text(node.operator) : null;
+    if (operator === "<<" || operator === "+=" || operator === "-=") list = asNode(node.left);
+    if (operator === "=") {
+      const left = asNode(node.left);
+      if (left?.kind === "binary" && left.operator === "[") list = asNode(left.left);
+    }
+    const key = list === null ? null : bindingKey(list, keys);
+    if (key !== null) resized.add(key);
+  });
+  return resized;
+}
+
 /** The value each compound update gives its variable, as the binary expression it computes (`x += y` is `x + y`). */
 function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
   const values = new Map<string, AstNode[]>();
@@ -1962,6 +2016,8 @@ function lowerFileOnce(
     parameterBindings: new Set(),
     assignedValues: new Map(),
     compoundValues: new Map(),
+    steppedBindings: new Set(),
+    resizedLists: new Set(),
     declaredWrites: { initialized: new Set(), other: new Set() },
     menuIndexes: new Set(),
     nullElementLists: new Set(),
@@ -2090,6 +2146,8 @@ function lowerFileOnce(
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
+    context.steppedBindings = steppedBindings(body, context.bindings);
+    context.resizedLists = resizedLists(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
     context.nullOnly = nullOnlyVariables(body, context);
     context.menuIndexes = menuIndexes(body);
@@ -3260,6 +3318,8 @@ function lowerHelperMethod(
     ),
     assignedValues: assignedValues(body, new Map()),
     compoundValues: compoundValues(body, new Map()),
+    steppedBindings: steppedBindings(body, new Map()),
+    resizedLists: resizedLists(body, new Map()),
     declaredWrites: declaredWrites(body, new Map()),
     menuIndexes: menuIndexes(body),
     nullElementLists: new Set(),
@@ -10163,6 +10223,99 @@ function plainCharacters(
  * (DungeonTrials' `getSelectedValue(text, weapons + ["No weapon"])`, whose last option is past the end), or a variable
  * assigned one of these.
  */
+/** Whether a position's largest value reaches past the list literals that a list variable always holds. */
+function reachesPastLiteral(position: AstNode, list: AstNode, context: LowerContext): boolean {
+  const length = literalListLength(list, context);
+  const largest = length === null ? undefined : largestValue(position, context);
+  return length !== null && largest !== undefined && largest >= length;
+}
+
+/** The fewest elements of the list literals a variable is only ever set to, where nothing resizes it, or null. */
+function literalListLength(list: AstNode, context: LowerContext): number | null {
+  const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
+  if (key === null || context.resizedLists.has(key)) return null;
+  const values = context.assignedValues.get(key) ?? [];
+  if (values.length === 0 || !values.every((value) => value.kind === "list")) return null;
+  return Math.min(...values.map((value) => nodeArray(value.items).length));
+}
+
+/**
+ * The largest value a whole position can have, where it is made of numbers, `getRandom(n)` of a written number, sums
+ * and differences, or a variable only ever set to such values; undefined otherwise.
+ */
+function largestValue(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): number | undefined {
+  const bound = (value: AstNode, largest: boolean): number | undefined => {
+    const constant = constantValue(value);
+    if (typeof constant === "number") return Number.isInteger(constant) ? constant : undefined;
+    if (value.kind === "methodCall" && legacyApiCall(value, context)?.name === "getRandom") {
+      const count = constantValue(nodeArray(asNode(value.arguments)?.items)[0]);
+      return typeof count === "number" && Number.isInteger(count) && count > 0
+        ? largest
+          ? count - 1
+          : 0
+        : undefined;
+    }
+    if (value.kind === "binary" && (value.operator === "+" || value.operator === "-")) {
+      const left = asNode(value.left);
+      const right = asNode(value.right);
+      if (left === null || right === null) return undefined;
+      const a = bound(left, largest);
+      const b = bound(right, value.operator === "+" ? largest : !largest);
+      return a === undefined || b === undefined
+        ? undefined
+        : value.operator === "+"
+          ? a + b
+          : a - b;
+    }
+    if (value.kind !== "variable") return undefined;
+    const key = bindingKey(value, context.bindings);
+    if (key === null || seen.has(key) || (context.compoundValues.get(key) ?? []).length > 0)
+      return undefined;
+    if (context.steppedBindings.has(key)) return undefined;
+    const values = context.assignedValues.get(key) ?? [];
+    if (values.length === 0) return undefined;
+    seen.add(key);
+    const bounds = values.map((item) => bound(item, largest));
+    seen.delete(key);
+    const known = bounds.filter((item): item is number => item !== undefined);
+    if (known.length !== bounds.length) return undefined;
+    return largest ? Math.max(...known) : Math.min(...known);
+  };
+  return bound(node, true);
+}
+
+/**
+ * Whether a read of a list that only ever starts empty, filled by writes and appends where the script runs them, is at
+ * a variable only ever set to numbers, a setting of the script (interrogation's `goals[goal]` when a session left early
+ * is closed before a new one filled the goals). Groovy read null there while the list was shorter. A number written as
+ * the position, as after appends in the same block, stays a plain read.
+ */
+function fixedReadOfEmptyStart(list: AstNode, position: AstNode, context: LowerContext): boolean {
+  const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
+  if (key === null) return false;
+  const assigned = context.assignedValues.get(key) ?? [];
+  const empty = (node: AstNode): boolean =>
+    node.kind === "list" && nodeArray(node.items).length === 0;
+  if (assigned.length === 0 || !assigned.every(empty)) return false;
+  const whole = (node: AstNode | undefined): boolean => {
+    const value = node === undefined ? undefined : constantValue(node);
+    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  };
+  const positionKey = position.kind === "variable" ? bindingKey(position, context.bindings) : null;
+  if (positionKey === null) return false;
+  const values = context.assignedValues.get(positionKey) ?? [];
+  return (
+    values.length > 0 &&
+    values.every((value) => whole(value)) &&
+    (context.compoundValues.get(positionKey) ?? []).length === 0 &&
+    !context.steppedBindings.has(positionKey)
+  );
+}
+
 function mayIndexPastEnd(
   node: AstNode,
   context: LowerContext,
@@ -10213,6 +10366,11 @@ function mayIndexNegative(node: AstNode, context: LowerContext, seen = new Set<s
     const right = constantValue(asNode(node.right) ?? undefined);
     const left = asNode(node.left);
     return typeof right === "number" && right > 0 && left !== null && mayBeZero(left, context);
+  }
+  // A remainder has the sign of the number divided, `tries % n` after `tries = -1` (Stay's implements).
+  if (node.kind === "binary" && node.operator === "%") {
+    const left = asNode(node.left);
+    return left !== null && mayIndexNegative(left, context, seen);
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
@@ -12283,7 +12441,9 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     if (
       !context.writeTargets.has(node) &&
-      (mayIndexPastEnd(indexNode, context, targetNode) || nullComparedReads.has(node))
+      (mayIndexPastEnd(indexNode, context, targetNode) ||
+        nullComparedReads.has(node) ||
+        (targetNode !== null && fixedReadOfEmptyStart(targetNode, indexNode, context)))
     ) {
       addDiagnostic(
         context,
@@ -12300,6 +12460,22 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "SX_INDEX_PAST_END",
         "warning",
         "This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
+    // A position whose largest value, from numbers and random draws, reaches past the list literals the variable always
+    // holds: `texts[roll - 1]` after `roll = 1 + getRandom(6)` over five texts (justalittlefun's fourth roll).
+    if (
+      !context.writeTargets.has(node) &&
+      targetNode !== null &&
+      reachesPastLiteral(indexNode, targetNode, context)
+    ) {
+      addDiagnostic(
+        context,
+        "SX_INDEX_PAST_END",
+        "warning",
+        "This position can reach past the end of the list written out, where Groovy read null; a helper reads null there too.",
         node.span,
       );
       return useHelper(context, "itemAt", [target, index]);
@@ -15464,10 +15640,45 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
   });
   const isConstant = (node: AstNode | undefined, value: number): boolean =>
     constantValue(node) === value;
+  // A 1 set where the counter is 0, `if (n == 0) n = 1` (Escape's `nimp` where no implement was chosen), counts up by
+  // one as well.
+  const stepsFromZero = new Set<AstNode>();
+  walkAst(body, (node) => {
+    if (node.kind !== "if") return;
+    const condition = asNode(node.condition);
+    const tested =
+      condition?.kind === "binary" &&
+      text(condition.operator) === "==" &&
+      isConstant(asNode(condition.right) ?? undefined, 0)
+        ? bindingKey(asNode(condition.left), keys)
+        : null;
+    if (tested === null) return;
+    const then = asNode(node.then);
+    const statements =
+      then?.kind === "block" ? nodeArray(then.statements) : then === null ? [] : [then];
+    for (const statement of statements) {
+      const expression =
+        statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+      const value =
+        expression?.kind === "binary" && text(expression.operator) === "="
+          ? asNode(expression.right)
+          : null;
+      if (
+        value !== null &&
+        isConstant(value, 1) &&
+        bindingKey(asNode(expression!.left), keys) === tested
+      )
+        stepsFromZero.add(value);
+    }
+  });
   const counts = (key: string): boolean =>
     !decremented.has(key) &&
     (context.assignedValues.get(key) ?? []).every(
-      (value) => isConstant(value, 0) || isNullConstant(value) || isEmptyGroovyExpression(value),
+      (value) =>
+        isConstant(value, 0) ||
+        isNullConstant(value) ||
+        isEmptyGroovyExpression(value) ||
+        stepsFromZero.has(value),
     ) &&
     (context.compoundValues.get(key) ?? []).every(
       (value) => text(value.operator) === "+" && isConstant(asNode(value.right) ?? undefined, 1),
@@ -15770,7 +15981,13 @@ function growingListWrite(
   const initializer = name === null ? undefined : context.constantInitializers.get(name);
   // A list that only ever starts empty, also where the script empties it again, `cards = []`.
   const key = listNode === null ? null : bindingKey(listNode, context.bindings);
-  const assigned = key === null ? [] : (context.assignedValues.get(key) ?? []);
+  // `list = list.sort()` and `list = list.reverse()` keep the list's length, so they leave how it grows as it was.
+  const reorders = (node: AstNode): boolean =>
+    node.kind === "methodCall" &&
+    ["sort", "reverse"].includes(constantString(node.method) ?? "") &&
+    bindingKey(asNode(node.object), context.bindings) === key;
+  const assigned =
+    key === null ? [] : (context.assignedValues.get(key) ?? []).filter((node) => !reorders(node));
   const isEmptyList = (node: AstNode | undefined): boolean =>
     node?.kind === "list" && nodeArray(node.items).length === 0;
   const startsEmpty =
