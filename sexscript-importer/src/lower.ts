@@ -14688,15 +14688,8 @@ function lowerObjectMethodCallExpression(
         const elements = listElementType(targetNode, context);
         if ((elements & STRING) !== 0 && onlyOf(elements, STRING | NULL))
           return useHelper(context, "textSum", [target]);
-        // The helper adds numbers only.
-        if (!onlyOf(elements, NUMBER)) {
-          return unsupportedExpression(
-            context,
-            node,
-            "SX_LIST_SUM_TYPE",
-            "Groovy sum() adds numbers but joins text and other values; this list is not proven to hold only numbers. Add the elements explicitly.",
-          );
-        }
+        // The helper adds numbers only; elements of types the running script shows add as Groovy's plus did.
+        if (!onlyOf(elements, NUMBER)) return useHelper(context, "sum", [target]);
         return useHelper(context, "listSum", [target]);
       }
       case "unique":

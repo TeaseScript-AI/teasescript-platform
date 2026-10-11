@@ -219,6 +219,7 @@ export type HelperName =
   | "listMin"
   | "listSum"
   | "textSum"
+  | "sum"
   | "loadFirstTrue"
   | "max"
   | "menuOptions"
@@ -259,7 +260,8 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
     needed.has("loadInteger") ||
     needed.has("loadFloat") ||
     needed.has("slice") ||
-    needed.has("times")
+    needed.has("times") ||
+    needed.has("sum")
   )
     needed.add("value");
   for (const name of needed)
@@ -294,6 +296,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMin",
   "listSum",
   "textSum",
+  "sum",
   "max",
   "min",
   "fixed",
@@ -2367,6 +2370,48 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ret(bin("+", at(v("items"), lit(0)), template(at(v("items"), lit(1))))),
           ]),
           ret(call(v("items"), "join", lit(""))),
+        ],
+      ),
+  },
+  // Groovy sum() of values whose types only the running script shows: each later value added with plus, as numbers
+  // while both sides are numbers and as text from the first text on (`[1, "a", 2]` gives "1a2"); null for no element.
+  // The result keeps an open type through `value`, as it may be a number or text.
+  sum: {
+    name: "sexscriptLegacySum",
+    build: () =>
+      fn(
+        "sexscriptLegacySum",
+        ["items"],
+        [
+          ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
+          letS("total", lit(0)),
+          letS("text", lit("")),
+          letS("joined", lit(false)),
+          letS("first", lit(true)),
+          forS("item", v("items"), [
+            ifS(
+              bin(
+                "and",
+                { kind: "unary", operator: "not", value: v("joined") },
+                { kind: "typeTest", value: v("item"), type: "number" },
+              ),
+              [set(v("total"), v("item"), "+=")],
+              [
+                ifS({ kind: "unary", operator: "not", value: v("joined") }, [
+                  set(v("joined"), lit(true)),
+                  ifS({ kind: "unary", operator: "not", value: v("first") }, [
+                    set(v("text"), template(v("total"))),
+                  ]),
+                ]),
+                set(v("text"), template(v("item")), "+="),
+              ],
+            ),
+            set(v("first"), lit(false)),
+          ]),
+          ifS(v("joined"), [
+            ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("text")], named: {} }),
+          ]),
+          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("total")], named: {} }),
         ],
       ),
   },
