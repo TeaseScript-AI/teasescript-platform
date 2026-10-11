@@ -3128,24 +3128,31 @@ class TypeChecker {
   /**
    * One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. A
    * return value of unknown type makes the result unknown, but the known values must still agree, also beside a value
-   * the compiler cannot know inside a return or a place such a value reached.
+   * the compiler cannot know inside a return or a place such a value reached. Every return must also fit the result, so
+   * a value that fails either join is an error.
    */
   #inferredResult(context: FunctionContext): StaticType {
     const join = new TypeJoin();
     const known = new TypeJoin(true);
-    // A return that holds only null decides no type, so a value of another type is compared with the first that does.
+    // A return that holds only null decides no type, so a value of another type is compared with the first that does,
+    // and where known values disagree, with the first that holds no value the compiler cannot know, if there is one.
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
+    let firstKnown: typeof first;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
-      join.add(returned.type);
-      if (!known.add(returned.type))
+      const fits = join.add(returned.type);
+      const agrees = known.add(returned.type);
+      if (!fits || !agrees) {
+        const earlier = agrees ? first! : (firstKnown ?? first!);
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first!.type)} on line ${first!.span.start.line + 1}.${returnUnionFix(context.fn.declaration, known.type, returned.type)}`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(earlier.type)} on line ${earlier.span.start.line + 1}.${returnUnionFix(context.fn.declaration, agrees ? join.type : known.type, returned.type)}`,
           returned.span,
         );
-      else if (first === undefined && decidedValue(returned.type).kind !== "never")
-        first = returned;
+      } else if (decidedValue(returned.type).kind !== "never") {
+        first ??= returned;
+        if (firstKnown === undefined && !mayBeUnknown(returned.type)) firstKnown = returned;
+      }
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;

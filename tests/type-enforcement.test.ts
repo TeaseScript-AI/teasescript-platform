@@ -1203,17 +1203,33 @@ test("a return of a variable that held only null decides no result type, also wh
   // The returns the compiler knows still agree beside one that a value it cannot know reached (V30 §17), also inside
   // a list or an object, and with one such variable or several.
   const assign = 'function assign(value) {\n    kindA = value\n}\nassign("s")';
-  for (const wrap of ["%", "[%]", "{ t: % }"]) {
-    const wrapped = (value: string) => wrap.replace("%", value);
-    const source = info(
+  const wrapped = (wrap: string) => {
+    const value = (inner: string) => wrap.replace("%", inner);
+    return info(
       assign,
-      `if type == 1 {\n        return ${wrapped("1")}\n    }\n    return ${wrapped('"x"')}`,
-    ).replace("return typeout", `return ${wrapped("typeout")}`);
-    assert.deepEqual(codes(source), [["TSV044", wrapped('"x"')]], wrap);
-  }
+      `if type == 1 {\n        return ${value("1")}\n    }\n    return ${value('"x"')}`,
+    ).replace("return typeout", `return ${value("typeout")}`);
+  };
+  assert.deepEqual(codes(wrapped("%")), [["TSV044", '"x"']]);
+  assert.deepEqual(codes(wrapped("{ t: % }")), [["TSV044", '{ t: "x" }']]);
+  assert.deepEqual(mismatches(wrapped("[%]")), [
+    [
+      "TSV044",
+      "'info' returns a list (string[]) here, but a list (integer[]) on line 14. To return both, declare the result type, as in 'function info(...): integer?[] | string[]'.",
+      '["x"]',
+    ],
+  ]);
   assert.deepEqual(codes(info(assign, mixed).replace("typeout = kindB", "typeout = kindA")), [
     ["TSV044", '"x"'],
   ]);
+  // Every return must also fit the result, which keeps what the compiler cannot know: a union return that the known
+  // values allow is still an error beside a list of unknown elements, so the result never leaves out its text.
+  assert.deepEqual(
+    codes(
+      "function f(n: integer, p, q: integer[] | string) {\n    if n == 0 {\n        return [p]\n    }\n    if n == 1 {\n        return [1]\n    }\n    return q\n}\nexit",
+    ),
+    [["TSV044", "q"]],
+  );
 });
 
 test("annotated parameters and results are checked, and a default types a parameter like let", () => {
