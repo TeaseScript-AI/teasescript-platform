@@ -201,16 +201,23 @@ Pacing meanings:
 
 - omitted: smart autoplay from captured account settings;
 - positive exact duration: exact pacing gate, including fractional seconds such as `1.5 s`;
-- `0 s` or `instant`: settle any earlier background gate, emit immediately, and create no new gate;
+- `0 s` or `instant`: wait, like any later `say`, for the reading time before it, then appear at once and create no
+  gate of its own (owner decision, 2026-10-11);
 - a number without a unit: compile error that names the fix, such as `5 s` ([ADR 0026](decisions/0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
 - negative, non-finite, calendar, unsupported-magnitude, or deadline-overflow value: structured error.
 
 With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySkippable` setting and otherwise the platform default `true`.
 
-`wait` remains separate. It does not become a `say` option and does not consume the pacing gate.
+Owner decisions (2026-10-11): everything the player sees or hears waits for the reading time of the message before it:
+a later `say`, a question with its buttons or fields, which appear together, Stage, sound, video, and camera changes, a
+change of a message's text, showing or removing a permanent button, and `exit`. Work the player cannot see runs on until
+such output, and a question's timeout counts from when it appears. `wait` remains separate and does not become a `say`
+option; a `wait` or blocking `timer` that starts during a reading time replaces it, so only the wait counts. Shown
+permanent buttons stay usable, and a skippable reading time can still be skipped. [Held-back
+output](RUNTIME.md#held-back-output) gives the details, including blocks.
 
-Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
-pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
+Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or a
+reading time of its own ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
 it in parentheses, `say("text", pacing)`:
 
 ```tease

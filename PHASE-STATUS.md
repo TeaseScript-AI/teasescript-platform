@@ -38,8 +38,9 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   permanent buttons (`showPermanentButton`, `removePermanentButton`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
-  protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
-  output, typed skip settlement, and interaction/timer composition. A `say` used as a value gives a `messageHandle`
+  protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, which holds
+  back later visible output and which a `wait` replaces, prepared output, typed skip settlement, and interaction/timer
+  composition. A `say` used as a value gives a `messageHandle`
   whose `text` changes the message in place ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows,
   announces politely, and Debug explains and rewinds.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
