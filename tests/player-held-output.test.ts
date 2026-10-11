@@ -115,3 +115,18 @@ test("the Player shows a countdown only once the reading time before it ends, wi
     [["visible", "Left", 10]],
   );
 });
+
+test("the Player reveals a hidden countdown only once the reading time before the change ends", () => {
+  let session = createPlayerRuntimeSession(
+    'let t = timer async hidden 10 s "Left"\nsay "Watch the timer.", 5 s\nt.display = "visible"\nshowButton "Go"\nexit',
+  );
+  assert.deepEqual(playerRuntimeTimers(session.state, 0), []);
+  session = observePlayerRuntimeTime(session, 5_000).session;
+  assert.deepEqual(
+    playerRuntimeTimers(session.state, 5_000).map(({ kind, remainingSeconds }) => [
+      kind,
+      remainingSeconds,
+    ]),
+    [["visible", 5]],
+  );
+});

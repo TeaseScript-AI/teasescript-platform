@@ -463,11 +463,19 @@ export class InstructionCompiler {
       }
       case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
-        // The target object is already prepared once; the barrier waits when it holds a media handle, camera view, or
-        // message handle.
-        if (target.plan.kind === "property" && PACED_HANDLE_PROPERTIES.has(target.plan.name)) {
-          // A message's text waits in blocks too; media and camera keep a block's timing.
-          this.#emitPacingBarrier(target.plan.object, statement.span, target.plan.name === "text");
+        // The target object is already prepared once; the barrier waits when it holds a media handle, camera view,
+        // message handle, or, for a display, a timer handle.
+        if (
+          target.plan.kind === "property" &&
+          (PACED_HANDLE_PROPERTIES.has(target.plan.name) ||
+            PRESENTATION_PROPERTIES.has(target.plan.name))
+        ) {
+          // A message's text and a timer's display wait in blocks too; media and camera keep a block's timing.
+          this.#emitPacingBarrier(
+            target.plan.object,
+            statement.span,
+            PRESENTATION_PROPERTIES.has(target.plan.name),
+          );
         }
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
@@ -3000,17 +3008,18 @@ function copySpan(span: SourceSpan): PlanSourceLocation {
 }
 
 const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-/**
- * Handle properties whose write waits for the previous message's pacing: media playback, camera placement, and a
- * message's text.
- */
+/** Media playback and camera placement properties, whose write waits for the previous message's pacing. */
 const PACED_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
   "position",
   "remaining",
   "volume",
   "placement",
-  "text",
 ]);
+/**
+ * A message's text and a timer's display: presentation without timing of its own, whose write waits for the previous
+ * message's pacing also in a block. A timer's clock, such as its `remaining`, is timing control and acts at once.
+ */
+const PRESENTATION_PROPERTIES: ReadonlySet<string> = new Set(["text", "display"]);
 
 function assembleExpression(
   expression: Expression,

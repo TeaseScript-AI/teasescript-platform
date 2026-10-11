@@ -467,10 +467,11 @@ export interface StartTimerInstruction extends InstructionBase {
 }
 
 /**
- * Waits for the previous message's pacing before media and camera presentation, a message text write, or
- * `removePermanentButton`. With a `receiver`, it waits only when that side-effect-free expression evaluates to a media
- * handle, a camera view, or a message handle. Only a barrier that `holdsInBlocks` waits while a timer, media, or button
- * block runs; media and camera keep a block's timing.
+ * Waits for the previous message's pacing before media and camera presentation, a message text write, a timer display
+ * write, or `removePermanentButton`. With a `receiver`, it waits only when that side-effect-free expression evaluates to
+ * a media handle, a camera view, or a message handle. A barrier that `holdsInBlocks` guards presentation without timing
+ * of its own: it alone waits while a timer, media, or button block runs, and also for a timer handle, whose display it
+ * changes. Media and camera keep a block's timing.
  */
 export interface PacingBarrierInstruction extends InstructionBase {
   readonly kind: "pacingBarrier";

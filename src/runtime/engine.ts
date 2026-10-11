@@ -220,6 +220,7 @@ import {
   isCameraView,
   isMessageHandle,
   isSpeakerReference,
+  isTimerHandle,
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
@@ -3886,20 +3887,23 @@ function startMedia(
 }
 
 /**
- * Waits for pacing before output that its own instruction cannot hold: media, camera, a message's text, and
- * `removePermanentButton`. A barrier with a receiver waits only when that receiver is a media handle, camera view, or
- * message handle. Stage, sound, video, and camera output keeps the timing of a timer, media, or button block, and of
- * the functions it calls, so its barrier never waits while one runs (V30 §22); the others hold there too.
+ * Waits for pacing before output that its own instruction cannot hold: media, camera, a message's text, a timer's
+ * display, and `removePermanentButton`. A barrier with a receiver waits only when that receiver is a media handle,
+ * camera view, or message handle, or, for a barrier that `holdsInBlocks`, a timer handle. Stage, sound, video, and
+ * camera output keeps the timing of a timer, media, or button block, and of the functions it calls, so its barrier
+ * never waits while one runs (V30 §22); the others hold there too.
  */
 function executePacingBarrier(
   instruction: Extract<Instruction, { kind: "pacingBarrier" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
 ): void {
+  const presentation = instruction.holdsInBlocks === true;
   if (
-    (instruction.holdsInBlocks === true || !interruptRunning(snapshot)) &&
+    (presentation || !interruptRunning(snapshot)) &&
     snapshot.backgroundActions.some((action) => action.kind === "chatPacingGate") &&
-    (instruction.receiver === null || isPacedHandle(evaluator.evaluate(instruction.receiver)))
+    (instruction.receiver === null ||
+      isPacedHandle(evaluator.evaluate(instruction.receiver), presentation))
   ) {
     holdForPacing(snapshot);
     return;
@@ -3991,9 +3995,17 @@ function timerMayShow(instruction: Extract<Instruction, { kind: "startTimer" }>)
     : !(display.kind === "literal" && display.value === "hidden");
 }
 
-/** Handles whose changes wait for the previous message's pacing: media playback, camera views, and messages. */
-function isPacedHandle(value: SerializableRuntimeValue): boolean {
-  return isMediaHandle(value) || isCameraView(value) || isMessageHandle(value);
+/**
+ * Handles whose changes wait for the previous message's pacing: media playback, camera views, and messages, and timers
+ * for a change of their display only, as their clock is timing control.
+ */
+function isPacedHandle(value: SerializableRuntimeValue, presentation: boolean): boolean {
+  return (
+    isMediaHandle(value) ||
+    isCameraView(value) ||
+    isMessageHandle(value) ||
+    (presentation && isTimerHandle(value))
+  );
 }
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {

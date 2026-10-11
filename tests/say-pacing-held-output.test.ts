@@ -414,6 +414,45 @@ test("an operation on a running countdown is timing control and acts at once, so
   assert.equal(shown.snapshot.foregroundAction?.kind, "interaction");
 });
 
+test("a change of a timer's display waits for the reading time, also in a block, while its clock runs on", () => {
+  const display = (snapshot: RuntimeSnapshot) =>
+    snapshot.backgroundActions.flatMap((action) =>
+      action.kind === "timer" ? [`${action.timer.display} ${action.timer.deadlineMs}`] : [],
+    );
+  const story = plan(
+    [
+      "let t = timer async hidden 10 s",
+      'say "A", 5 s',
+      't.display = "visible"',
+      'showButton "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  const held = run(story, createFreshRuntimeSnapshot(story));
+  assert.deepEqual(display(held.snapshot), ["hidden 10000"]);
+  assert.equal(heldGate(held.snapshot).deadlineMs, 5_000);
+  const shown = run(story, observeTime(story, held.snapshot, 5_000).snapshot);
+  assert.deepEqual(display(shown.snapshot), ["visible 10000"]);
+
+  const block = plan(
+    [
+      "let t = timer async hidden 30 s",
+      "timer async 1 s {",
+      '    say "Reading", 5 s',
+      '    t.display = "mystery"',
+      "}",
+      "wait 10 s",
+      "exit",
+    ].join("\n"),
+  );
+  const started = run(block, createFreshRuntimeSnapshot(block));
+  const reading = run(block, observeTime(block, started.snapshot, 1_000).snapshot);
+  assert.deepEqual(display(reading.snapshot), ["hidden 30000"]);
+  assert.equal(heldGate(reading.snapshot).deadlineMs, 6_000);
+  const changed = run(block, observeTime(block, reading.snapshot, 6_000).snapshot);
+  assert.deepEqual(display(changed.snapshot), ["mystery 30000"]);
+});
+
 test("a goto that removes a shown permanent button waits for the reading time, and one that removes nothing goes on", () => {
   assert.deepEqual(
     timeline(
