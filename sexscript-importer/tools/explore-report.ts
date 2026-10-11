@@ -344,12 +344,15 @@ function stopShown(search: Fields): string {
       return " It tried everything it could think of.";
     case "plateau":
       return " It stopped when more play no longer reached anything new: nothing in the second half of its play.";
+    // Reports from before the plateau was named so.
+    case "stalled":
+      return " It stopped when more play no longer reached anything new.";
     case "maxStates":
-      return ` It was cut off at its limit of ${count(search.states).toLocaleString("en")} kept game states before it finished.`;
+      return ` It was cut off at its limit of ${count(search.states).toLocaleString("en")} kept game states.`;
     case "budget":
-      return " It was cut off at its time budget before it finished.";
+      return " It was cut off at its time budget.";
     default:
-      return " It was cut off at its step budget before it finished.";
+      return " It was cut off at its step budget.";
   }
 }
 

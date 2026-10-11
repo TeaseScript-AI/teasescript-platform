@@ -417,10 +417,10 @@ async function exploreUnits(
       groups.map(
         (group) =>
           new Promise<number>((resolve) =>
-            spawn(process.execPath, [SELF, ...flags, ...group], { stdio: "inherit" }).on(
-              "close",
-              (code) => resolve(code ?? 1),
-            ),
+            // The workers run with this process's Node flags, as its heap, which the default state cap is sized by.
+            spawn(process.execPath, [...process.execArgv, SELF, ...flags, ...group], {
+              stdio: "inherit",
+            }).on("close", (code) => resolve(code ?? 1)),
           ),
       ),
     );

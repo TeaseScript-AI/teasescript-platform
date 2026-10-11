@@ -626,11 +626,12 @@ export interface Closest {
 }
 
 /**
- * Whether a search that stopped so was cut off by a cap (time, work, or states) before it finished: a warning, as its
- * coverage is not all the search would reach. One that is exhausted, or on a plateau, finished.
+ * Whether a search that stopped so was cut off by a cap (time, work, or states): a warning to look into, as a cap, not
+ * the search, ended it. One that is exhausted, or on a plateau (`stalled` in reports from before it was named so),
+ * finished.
  */
 export function cutOff(stoppedBy: string): boolean {
-  return stoppedBy !== "exhausted" && stoppedBy !== "plateau";
+  return stoppedBy !== "exhausted" && stoppedBy !== "plateau" && stoppedBy !== "stalled";
 }
 
 /** How a run until stalled ended, and the progress it made. */
@@ -730,8 +731,8 @@ export interface ExploreResult {
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
     /**
      * Why the search stopped. It finished: `exhausted`, nothing left to try, or `plateau`, with `untilStalled`, no new
-     * code or condition way for the stall window, the second half of the run ({@link stallWindow}). It was cut off, a
-     * warning that it did not finish ({@link cutOff}): `budget`, the time budget; `operations`, the work budget;
+     * code or condition way for the stall window, the second half of the run ({@link stallWindow}). A cap cut it off, a
+     * warning to look into ({@link cutOff}): `budget`, the time budget; `operations`, the work budget;
      * `maxStates`, the state cap.
      */
     stoppedBy: "exhausted" | "plateau" | "budget" | "operations" | "maxStates";

@@ -1815,7 +1815,7 @@ test(
         }),
       ),
     );
-    assert.match(report, /cut off at its limit of 20,003 kept game states before it finished/u);
+    assert.match(report, /cut off at its limit of 20,003 kept game states\./u);
     // A missed way is only not proven unreachable: the report does not present it as reachable.
     assert.match(
       report,

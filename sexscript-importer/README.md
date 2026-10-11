@@ -340,8 +340,8 @@ every quarter window, and the window starts after a corpus replay. Its caps are 
 unless `--budget-seconds` is given) and a state cap (unless `--max-states` is given) of as many states as three
 quarters of the heap hold at about 3 KB each (1.1 million with Node's default heap of 4.5 GB; the snapshot store lies
 outside the heap). `search.stoppedBy` says whether the run finished, `exhausted` or `plateau`, or a cap cut it off,
-`budget`, `operations`, or `maxStates`: a cut-off is a warning that the run did not finish, which the summary line,
-the playtest report, and the catalog say. `search.audit` says how the run ended: `complete` (nothing left to try, and
+`budget`, `operations`, or `maxStates`: a cut-off is a warning to look into, which the summary line, the playtest
+report, and the catalog say (`stalled`, in reports from before, was a plateau). `search.audit` says how the run ended: `complete` (nothing left to try, and
 no line or missed way of unknown reach), `stalled` (a plateau, or nothing left to try with code of unknown reach),
 `spiral` (a plateau in which one place took at least half of the expansions since the last progress: the place and
 its prompt, a problem of the explorer), or `capped` (a cap came first); with the window at the end, the last progress,
