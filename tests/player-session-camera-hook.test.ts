@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   createPlayerRuntimeRestorePoint,
@@ -13,6 +12,7 @@ import {
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface CameraHost {
@@ -20,6 +20,7 @@ interface CameraHost {
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -33,23 +34,12 @@ let usePlayerSession: (options: {
 }) => CameraHost;
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    assert.equal(typeof module.usePlayerSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  assert.equal(typeof module.usePlayerSession, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
 });
 
 class FakeTrack extends EventTarget {
@@ -184,4 +174,18 @@ test("the script's camera view previews the session camera where it places it, a
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, "stage");
   assert.equal(host.viewfinder.value, tracks[2]);
+});
+
+test("a Start that throws after the camera opened releases the camera", async (context) => {
+  const { grant, tracks } = stubBrowser(context);
+  context.mock.method(console, "error", () => {});
+  grant();
+  const host = mount(context, { capabilities: { camera: true } });
+  host.prepare(() => {
+    throw new TypeError("The script could not start.");
+  });
+  await host.activate();
+  assert.equal(host.hostError.value, "TypeError");
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0]?.readyState, "ended");
 });

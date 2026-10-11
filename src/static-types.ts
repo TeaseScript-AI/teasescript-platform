@@ -134,13 +134,15 @@ export interface PartOrigin {
  * What a number derives from: origins that merge without copying, so a long sum stays cheap, and that keep every
  * origin they merged, so no dependency of a widening is lost.
  */
-class Origins implements Iterable<Origin> {
-  readonly #origin: Origin | undefined;
-  readonly #parts: readonly Origins[];
+export class Origins implements Iterable<Origin> {
+  /** The origin of a group of one. */
+  readonly origin: Origin | undefined;
+  /** The groups this one merged. */
+  readonly parts: readonly Origins[];
 
   private constructor(origin: Origin | undefined, parts: readonly Origins[]) {
-    this.#origin = origin;
-    this.#parts = parts;
+    this.origin = origin;
+    this.parts = parts;
   }
 
   static of(origin: Origin): Origins {
@@ -161,11 +163,11 @@ class Origins implements Iterable<Origin> {
       const group = pending.pop()!;
       if (seen.has(group)) continue;
       seen.add(group);
-      if (group.#origin !== undefined && !found.has(group.#origin)) {
-        found.add(group.#origin);
-        yield group.#origin;
+      if (group.origin !== undefined && !found.has(group.origin)) {
+        found.add(group.origin);
+        yield group.origin;
       }
-      for (const part of group.#parts) pending.push(part);
+      for (const part of group.parts) pending.push(part);
     }
   }
 }
@@ -683,6 +685,10 @@ function* settleTask(
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     target.order = nextDecision();
+    // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
+    // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
+    if (target.heldUnknown !== undefined && decidedValue(value).kind === "never")
+      yield* compileChild(heldUnknownTask(value, target.heldUnknown));
     return;
   }
   if (target.kind === "union") {
@@ -944,6 +950,26 @@ export function decidePath(
   return runCompileTask(decidePathTask(type, path, 0, value, at));
 }
 
+/**
+ * Whether `path` certainly leads to no part of a type, because a step names a property or element it does not have:
+ * then {@link decidePath} decides nothing there. It answers without walking a union, so `false` only means "maybe".
+ */
+export function lacksPath(type: StaticType, path: readonly string[]): boolean {
+  let part = type;
+  for (const name of path) {
+    const value = resolved(part);
+    if (value.kind === "union") return false;
+    if (name === "[]" && isCollection(value)) part = value.element;
+    else if (value.kind !== "object" || value.properties === null) return true;
+    else {
+      const kept = value.properties.get(name);
+      if (kept === undefined) return true;
+      part = kept;
+    }
+  }
+  return false;
+}
+
 function* decidePathTask(
   typeToDecide: StaticType,
   path: readonly string[],
@@ -1010,8 +1036,8 @@ function* numberPathsTask(
 /** The integers inside a value, through elements and properties, each with its path and what it derives from. */
 export function integerParts(
   type: StaticType,
-): { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] {
-  const parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] = [];
+): { readonly path: readonly string[]; readonly origins: Origins }[] {
+  const parts: { readonly path: readonly string[]; readonly origins: Origins }[] = [];
   runCompileTask(integerPartsTask(type, [], parts));
   return parts;
 }
@@ -1019,7 +1045,7 @@ export function integerParts(
 function* integerPartsTask(
   typeToSearch: StaticType,
   path: readonly string[],
-  parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[],
+  parts: { readonly path: readonly string[]; readonly origins: Origins }[],
 ): CompileTask<void> {
   const type = resolved(nonNullType(typeToSearch));
   if (isScalar(type, "integer")) {
@@ -1078,6 +1104,91 @@ function* ownPartOriginsTask(
         yield* compileChild(ownPartOriginsTask(value, origin, [...path, name])),
       );
   return type;
+}
+
+/**
+ * Like {@link ownPartOrigins}, but only for the parts at `path` inside a place's own type, such as a property that a store
+ * added or decided: the other parts already have their origins.
+ */
+export function ownPartOriginsAt(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+): void {
+  runCompileTask(ownPartOriginsAtTask(type, origin, path, 0));
+}
+
+function* ownPartOriginsAtTask(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+  step: number,
+): CompileTask<StaticType> {
+  if (step === path.length) return yield* compileChild(ownPartOriginsTask(type, origin, path));
+  if (type.kind === "open") {
+    if (type.resolved !== null)
+      type.resolved = yield* compileChild(ownPartOriginsAtTask(type.resolved, origin, path, step));
+    return type;
+  }
+  if (type.kind === "union") {
+    const parts: StaticType[] = [];
+    for (const member of type.members)
+      parts.push(yield* compileChild(ownPartOriginsAtTask(member, origin, path, step)));
+    return parts.every((part, index) => part === type.members[index]) ? type : union(parts);
+  }
+  const name = path[step]!;
+  if (name === "[]" && isCollection(type)) {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      ownPartOriginsAtTask(type.element, origin, path, step + 1),
+    );
+  } else if (type.kind === "object" && type.properties !== null) {
+    const kept = type.properties.get(name);
+    if (kept !== undefined)
+      type.properties.set(
+        name,
+        yield* compileChild(ownPartOriginsAtTask(kept, origin, path, step + 1)),
+      );
+  }
+  return type;
+}
+
+/**
+ * Whether the parts at `path` inside a place's own type include every part of `part` that a store can add to or
+ * decide, so that a store into `part` changed nothing outside the parts at `path`.
+ */
+export function holdsAt(type: StaticType, path: readonly string[], part: StaticType): boolean {
+  let reached = expanded(type);
+  for (const name of path) {
+    const next: StaticType[] = [];
+    for (const value of reached) {
+      const kept =
+        name === "[]" && isCollection(value)
+          ? value.element
+          : value.kind === "object" && value.properties !== null
+            ? value.properties.get(name)
+            : undefined;
+      if (kept !== undefined) for (const found of expanded(kept)) next.push(found);
+    }
+    reached = next;
+  }
+  const held = new Set(reached);
+  return expanded(part).every(
+    (value) =>
+      held.has(value) || (value.kind !== "open" && value.kind !== "object" && !isCollection(value)),
+  );
+}
+
+/** The decided types a type stands for: itself, what decided it, or the members of a union. */
+function expanded(type: StaticType): StaticType[] {
+  const found: StaticType[] = [];
+  const pending = [type];
+  while (pending.length > 0) {
+    const value = resolved(pending.pop()!);
+    if (value.kind === "union") for (const member of value.members) pending.push(member);
+    else found.push(value);
+  }
+  return found;
 }
 
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */
@@ -1161,6 +1272,17 @@ export class TypeJoin {
   readonly #owned = new Set<PropertyTable>();
   #type: StaticType = NEVER_TYPE;
 
+  /**
+   * With `known`, the join compares only what the compiler knows: a value it cannot know, and a place such a value
+   * reached, agree with any other value at every depth instead of making the type unknown, so the known values must
+   * still agree with each other (V30 §17).
+   */
+  readonly #known: boolean;
+
+  constructor(known = false) {
+    this.#known = known;
+  }
+
   get type(): StaticType {
     return this.#type;
   }
@@ -1168,7 +1290,7 @@ export class TypeJoin {
   /** Joins a value into the type, or returns false and keeps the type when the value mixes types with it. */
   add(type: StaticType): boolean {
     const changes: JoinChange[] = [];
-    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes));
+    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes, this.#known));
     if (joined !== undefined) {
       this.#type = joined;
       return true;
@@ -1186,18 +1308,21 @@ function* joinTask(
   rightType: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   const left = canonical(leftType);
   const right = canonical(rightType);
-  if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
+  if (left.kind === "unknown" || right.kind === "unknown")
+    return known ? (left.kind === "unknown" ? right : left) : UNKNOWN_TYPE;
   const leftValue = decidedValue(left);
   const rightValue = decidedValue(right);
   // A slot that a value the compiler cannot know reached may hold any value, so with a known value it joins as unknown.
   const reachedUnknown = (type: StaticType): boolean =>
     members(type).some((member) => member.kind === "open" && member.heldUnknown !== undefined);
   if (
-    (reachedUnknown(left) && rightValue.kind !== "never") ||
-    (reachedUnknown(right) && leftValue.kind !== "never")
+    !known &&
+    ((reachedUnknown(left) && rightValue.kind !== "never") ||
+      (reachedUnknown(right) && leftValue.kind !== "never"))
   )
     return UNKNOWN_TYPE;
   const nullable = holdsNull(left) || holdsNull(right);
@@ -1218,7 +1343,7 @@ function* joinTask(
       ? rightValue
       : rightValue.kind === "never"
         ? leftValue
-        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes));
+        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes, known));
   if (value === undefined) return undefined;
   return nullable ? optional(value) : value;
 }
@@ -1228,6 +1353,7 @@ function* joinValuesTask(
   right: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
@@ -1238,7 +1364,9 @@ function* joinValuesTask(
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
       const joined =
-        kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned, changes));
+        kept === undefined
+          ? type
+          : yield* compileChild(joinTask(kept, type, owned, changes, known));
       if (joined === undefined) return undefined;
       changes.push({ properties, name, replaced: kept });
       properties.set(name, joined);
@@ -1246,7 +1374,9 @@ function* joinValuesTask(
     return { kind: "object", properties };
   }
   if (isCollection(left) && right.kind === left.kind) {
-    const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
+    const element = yield* compileChild(
+      joinTask(left.element, right.element, owned, changes, known),
+    );
     return element === undefined ? undefined : { kind: left.kind, element };
   }
   if (sameFamily(left, right)) return mergeScalars(left, right);
@@ -1261,10 +1391,15 @@ function* joinValuesTask(
   return undefined;
 }
 
-/** The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. */
-function decidedValue(type: StaticType): StaticType {
-  const value = nonNullType(type);
-  return value.kind === "open" ? NEVER_TYPE : value;
+/**
+ * The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. A place
+ * may hold one of several undecided slots, such as a variable given a different null-only variable on each branch.
+ */
+export function decidedValue(type: StaticType): StaticType {
+  return memberSubset(
+    type,
+    members(type).filter((member) => member.kind !== "null" && member.kind !== "open"),
+  );
 }
 
 /** Whether values of a type may be null, including a place that took null before any other value. */

@@ -6,6 +6,7 @@ import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
+  answeredByPlayerInput,
   answerPlayerRuntimeImage,
   playerRuntimeForeground,
   playerRuntimeForm,
@@ -33,6 +34,7 @@ import type {
   PlayerSpeakerPresentation,
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
+import type { DebugAnswerInput } from "../../debug-export.js";
 import type { CapturedMediaAdmission } from "../../../src/index.js";
 
 /** How the host stores an image file the player chose for `askImage`, and vouches for it. */
@@ -56,7 +58,10 @@ const props = defineProps<{
   /** The revision through which the transcript shows directly, like history (`PlayerSessionHost.jumpedRevision`). */
   jumpedRevision?: number;
   transcriptKey: string;
-  /** Brings scene time up to date before input and returns the published session. */
+  /**
+   * Brings scene time up to date before input and returns the published session; `null` when the session takes no
+   * input, as once a Player error stopped it.
+   */
   observeTime?: () => PlayerRuntimeSession | null;
   /**
    * Readies the session before input is evaluated, such as by adopting a state Debug's rewind restored; input goes
@@ -178,10 +183,12 @@ const presentedAt = ref(0);
 function activatePreselected() {
   const target = preselected.value;
   if (target === undefined) return;
-  void complete((session) =>
-    target === null
-      ? activatePlayerRuntimeButton(session)
-      : selectPlayerRuntimeChoice(session, target),
+  void complete(
+    answer("preselectedKey", (session) =>
+      target === null
+        ? activatePlayerRuntimeButton(session)
+        : selectPlayerRuntimeChoice(session, target),
+    ),
   );
 }
 // An image request accepts a file through the paperclip or a drop only while it allows files.
@@ -359,12 +366,22 @@ watch(
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
     await nextTick();
+    // A control outside the interaction that this update removed, such as Start, leaves focus unowned as well.
+    const releasedFocus =
+      !ownedFocus &&
+      active instanceof HTMLElement &&
+      !active.isConnected &&
+      (document.activeElement === null || document.activeElement === document.body) &&
+      hoverAvailable.value;
     // Progression may restore composer focus, but must not steal it from Tools/dialogs.
-    if ((ownedFocus || returnToChoice || unownedFocus) && (foreground.value || pacing.value)) {
+    if (
+      (ownedFocus || returnToChoice || unownedFocus || releasedFocus) &&
+      (foreground.value || pacing.value)
+    ) {
       if (wasEditing) focusInput();
       // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
       else if (composerFocused && !root.value?.contains(document.activeElement)) focusInput();
-      else if (unownedFocus) {
+      else if (unownedFocus || releasedFocus) {
         // Default focus is not keyboard navigation, so it must not reveal a navigation outline.
         document.documentElement.dataset.playerKeyboardFocus = "false";
         focusInput();
@@ -376,6 +393,15 @@ watch(
   },
   { immediate: true },
 );
+
+// An answer the player gave, whose debug recording keeps how (DEBUGGER.md "Debug export").
+function answer(
+  input: DebugAnswerInput,
+  operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
+) {
+  return (session: PlayerRuntimeSession) =>
+    answeredByPlayerInput(session, input, () => operation(session));
+}
 
 async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
@@ -399,7 +425,7 @@ async function complete(
     // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
     const ready = props.prepareInput?.() ?? true;
     if (ready !== true && !(await ready)) return;
-    const session = props.observeTime?.() ?? props.session;
+    const session = props.observeTime ? props.observeTime() : props.session;
     if (!session) return;
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
     if (targetId(session) !== presented) {
@@ -556,7 +582,12 @@ async function submitImage(files: readonly File[], target: ImageRequestIdentity)
 }
 
 function submit(source: "input" | "button") {
-  void complete((session) => submitPlayerRuntimeComposer(session, draft.value), source === "input");
+  void complete(
+    answer(source === "input" ? "enter" : "send", (session) =>
+      submitPlayerRuntimeComposer(session, draft.value),
+    ),
+    source === "input",
+  );
 }
 </script>
 
@@ -586,8 +617,10 @@ function submit(source: "input" | "button") {
                     false,
                   )
               "
-              @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
-              @cancel="complete(cancelPlayerRuntimeForm)"
+              @submit="
+                complete(answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())))
+              "
+              @cancel="complete(answer('button', cancelPlayerRuntimeForm))"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
               @clear="complete(clearPlayerRuntimeFormField, false)"
             />
@@ -598,10 +631,12 @@ function submit(source: "input" | "button") {
               :disabled="submitting"
               @activate="
                 (optionId) =>
-                  complete((session) =>
-                    optionId === null
-                      ? activatePlayerRuntimeButton(session)
-                      : selectPlayerRuntimeChoice(session, optionId),
+                  complete(
+                    answer('button', (session) =>
+                      optionId === null
+                        ? activatePlayerRuntimeButton(session)
+                        : selectPlayerRuntimeChoice(session, optionId),
+                    ),
                   )
               "
             />
@@ -635,11 +670,9 @@ function submit(source: "input" | "button") {
           :placeholder="
             formEditor
               ? formEditor.hint
-              : imageRequest
-                ? imageRequest.hint || 'Add an image…'
-                : foreground && 'hint' in foreground
-                  ? foreground.hint
-                  : 'Type your response…'
+              : foreground && 'hint' in foreground
+                ? foreground.hint
+                : 'Type your response…'
           "
           :attach="attach"
           :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"

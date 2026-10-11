@@ -458,13 +458,17 @@ function recordedAnswers(recording: DebugRecording | null): unknown[] {
         actionId: request["actionId"],
         interactionKind: request["interactionKind"],
         payload: request["payload"],
+        input: operation.input,
         outcome: operation.outcome,
       },
     ];
   });
 }
 
-/** The photos a session used, with where: recorded image answers and captures, and saved values. */
+/**
+ * The photos a session used, with where: recorded image answers and captures, and saved values: those given, which the
+ * state shown has, and those of the recording's anchor and end, which its replay holds. A saved photo counts once.
+ */
 export function debugPhotoUses(
   recording: DebugRecording | null,
   savedValues: readonly { readonly value: Parameters<typeof capturedMediaReferences>[0] }[],
@@ -487,9 +491,16 @@ export function debugPhotoUses(
     if (payload["kind"] === "captured" && isRecord(media) && typeof media["reference"] === "string")
       add(media["reference"], { relation: "capture", operation: operation.seq, actionId });
   }
-  for (const entry of savedValues)
-    for (const reference of capturedMediaReferences(entry.value))
-      add(reference, { relation: "savedValue", operation: null, actionId: null });
+  const saved = new Set<string>();
+  for (const values of [
+    savedValues,
+    recording?.anchorSnapshot.scriptStorage ?? [],
+    recording?.endSnapshot.scriptStorage ?? [],
+  ])
+    for (const entry of values)
+      for (const reference of capturedMediaReferences(entry.value)) saved.add(reference);
+  for (const reference of saved)
+    add(reference, { relation: "savedValue", operation: null, actionId: null });
   return uses;
 }
 
@@ -503,9 +514,10 @@ const CREDENTIAL_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gu,
 ];
 // A path outside a URL: a rooted one of at least two parts such as /srv/notes.txt, a drive path such as C:\notes or
-// C:/notes, a network path such as \\server\share (also as \server\share, as message markup shows it), or a file URL.
+// C:/notes, a network path such as \\server\share (also as \server\share, as message markup shows it) or
+// //server/share, or a file URL.
 const PATH_PATTERNS = [
-  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:[\\/][^\s"')]+|\\{1,2}[^\s"'()\\]+\\[^\s"')]+)/gu,
+  /(?:^|[\s"'(=])(?:\/{1,2}[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:[\\/][^\s"')]+|\\{1,2}[^\s"'()\\]+\\[^\s"')]+)/gu,
   /\b[Ff][Ii][Ll][Ee]:\/\/[^\s"')]+/gu,
 ];
 // A URL other than a file URL, whose path is part of an address, not of this computer.

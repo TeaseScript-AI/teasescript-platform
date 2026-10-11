@@ -328,12 +328,23 @@ export function skipSilentRounds(
   timer.deadlineMs = anchoredDeadlineMs(anchorMs, last, roundMs);
 }
 
+/** The properties a timer handle has, which {@link timerProperty} reads and restore validation accepts. */
+export const TIMER_PROPERTIES: ReadonlySet<string> = new Set([
+  "remaining",
+  "elapsed",
+  "display",
+  "label",
+  "state",
+  "repeatDuration",
+]);
+
 /** Handle property reads; `undefined` means the property does not exist. */
 export function timerProperty(
   timer: TimerHandleRecord,
   name: string,
   nowMs: number,
 ): SerializableRuntimeValue | undefined {
+  if (!TIMER_PROPERTIES.has(name)) return undefined;
   switch (name) {
     case "remaining":
       return { kind: "duration", milliseconds: timerRemainingMs(timer, nowMs) };

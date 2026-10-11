@@ -143,6 +143,13 @@ export interface DebugReplay {
 export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
 
 /**
+ * How the player gave the answer a `completeAction` passed: Enter in the composer (`enter`), its Send button (`send`), a
+ * button of the request, clicked or activated by key (`button`), or the key that activates the preselected button from
+ * the composer (`preselectedKey`).
+ */
+export type DebugAnswerInput = (typeof ANSWER_INPUTS)[number];
+
+/**
  * One engine call the Player made, with the plain arguments it passed after the plan and snapshot: `run` takes its run
  * options; `observeTime` the time and media reports; `completeAction` the request; `reportMediaLoad` the media and
  * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit;
@@ -171,6 +178,8 @@ export interface DebugOperation {
   readonly randomChoices: readonly RandomChoiceReceipt[];
   /** The ID of the random draw the call stands paused at, or `null`. */
   readonly pausedAt: number | null;
+  /** For a `completeAction`, how the player gave its answer; `null` for other calls and other answers. */
+  readonly input: DebugAnswerInput | null;
 }
 
 export interface DebugAdmissionQuery {
@@ -210,8 +219,9 @@ export class DebugExportError extends Error {
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
 // 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call. 4: adds a call's chosen random
-// outcomes and paused draw, and the `resumeRandomDraw` call. 5: adds the `setDebugMode` call.
-export const DEBUG_EXPORT_VERSION = 5;
+// outcomes and paused draw, and the `resumeRandomDraw` call. 5: adds the `setDebugMode` call. 6: adds how the player
+// gave an answer.
+export const DEBUG_EXPORT_VERSION = 6;
 /** The most JSON a reader decompresses or parses; a diagnostic-tool limit, not a TeaseScript one. */
 export const DEBUG_EXPORT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -240,6 +250,7 @@ const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   setDebugMode: 1,
 };
 const STATUSES = ["ready", "running", "waiting", "halted", "failed"] as const;
+const ANSWER_INPUTS = ["enter", "send", "button", "preselectedKey"] as const;
 const SELECTION_FIELDS = [
   "savedValues",
   "answers",
@@ -576,6 +587,7 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     "thrown",
     "randomChoices",
     "pausedAt",
+    "input",
   ]);
   const seq = count(operation["seq"], `${path}.seq`);
   if (seq !== index + 1) fail(`${path}.seq`, `must be ${index + 1}`);
@@ -616,6 +628,9 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     operation["pausedAt"] === null ? null : count(operation["pausedAt"], `${path}.pausedAt`);
   if (thrown !== null && (randomChoices.length > 0 || pausedAt !== null))
     fail(path, "must not choose or pause at random draws when it threw");
+  const input = oneOf(operation["input"], `${path}.input`, [null, ...ANSWER_INPUTS] as const);
+  if (input !== null && kind !== "completeAction")
+    fail(`${path}.input`, "belongs only to completeAction");
   return {
     seq,
     kind,
@@ -627,6 +642,7 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
     thrown,
     randomChoices,
     pausedAt,
+    input,
   };
 }
 

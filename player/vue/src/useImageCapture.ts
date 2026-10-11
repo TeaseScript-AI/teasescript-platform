@@ -59,7 +59,10 @@ export interface ImageCaptureHost {
   readonly media: CapturedMediaStore;
   /** Whether a camera can be used here at all; without it no capture opens. */
   readonly offered: boolean;
-  /** Observes the current time, publishes the result, and returns the published session. */
+  /**
+   * Observes the current time, publishes the result, and returns the published session; `null` when the session takes
+   * no input, as once a Player error stopped it.
+   */
   observe(): PlayerRuntimeSession | null;
   publish(session: PlayerRuntimeSession): void;
   /** Waits one step of the countdown; a second by default. */
@@ -191,7 +194,7 @@ export function useImageCapture(host: ImageCaptureHost) {
   function use(): void {
     const target = capture.value;
     if (target?.phase !== "review" || target.reference === null) return;
-    const current = host.observe() ?? host.session.value;
+    const current = host.observe();
     if (current === null || !answers(current, target)) return set(null);
     const result = answerPlayerRuntimeImage(current, target.reference, host.media);
     if (result?.outcome.kind !== "completed") return;

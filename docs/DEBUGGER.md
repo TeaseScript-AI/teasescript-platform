@@ -90,8 +90,10 @@ which appears when the host persists script storage.
   this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
   Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
-    Advanced: the stored JSON form), checked before it is stored. A value changed meanwhile is reported, not
-    overwritten. The edit is stored in this browser first, showing Saving…; only once that succeeded does a running
+    Advanced: the stored JSON form), checked before it is stored. An Advanced value whose stored form would be longer
+    than a text can be opens with an empty field and says so; it can still be replaced or deleted. A value changed
+    meanwhile, as `==` compares it, is reported, not overwritten. The edit is stored in this browser first, showing
+    Saving…; only once that succeeded does a running
     session take it through `applyExternalStorageEdit`, so its next `load` reads it like any saved value, which ignores
     a value of another type than the load's (V30 §25), while values it already loaded stay; when storing fails, nothing
     changes. While the script's own save waits for the browser, Save is disabled ("The script is saving… try again in
@@ -163,13 +165,13 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   than a script limit, while the `×N` counts count all.
 - **Code** shows the draw's whole file, coloured by the compiler's own lexer with the theme's `syntax-*` roles: 7 lines
   by default, with the draw's line highlighted in the middle and the draw itself underlined. A file the lexer rejects
-  shows plain. **Show whole function**, **Show whole block** for a top-level statement of several lines, or **Show whole
-  file** fits that range together with the lines already shown, and **Show less** returns. Both blocks have **Copy
-  visible lines**, **Wrap long lines**, and **Expand** in their top-right corner, shown while the pointer is over the
-  block or one of them has keyboard focus, and always where the pointer cannot hover. A corner grip, also by arrow keys,
-  resizes a block by whole lines, keeping the draw's line in the middle. Expand shows the block large over the dimmed
-  page, at most 80% of the view's height, with the breadcrumb as its title; its X, Escape, or a click beside it closes
-  it.
+  shows plain. **Show whole function**, **Show whole block** for the smallest statement or block around the draw that
+  those lines do not show whole, or **Show whole file** fits that range together with the lines already shown, and
+  **Show less** returns. Both blocks have **Copy visible lines**, **Wrap long lines**, and **Expand** in their top-right
+  corner, shown while the pointer is over the block or one of them has keyboard focus, and always where the pointer
+  cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
+  middle. Expand shows the block large over the dimmed page, at most 80% of the view's height, with the breadcrumb as
+  its title; its X, Escape, or a click beside it closes it.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
   (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
@@ -187,7 +189,8 @@ validated state as checkpoint JSON, which includes the session's storage view, a
 rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
 photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
 in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
-IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has. Turning
+IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has; it also stops
+at a state too large to save (`TSK004`). Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
 Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
 its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
@@ -216,7 +219,8 @@ with it.
   with their text in the state Forward restores.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
-  begin anew at every restored state, so a replay never mixes branches.
+  begin anew at every restored state, so a replay never mixes branches. After a Player error, rewinding does not replace
+  what the debug export replays: the export keeps the recording up to the error until the next Start.
 
 ## Debug export
 
@@ -229,14 +233,15 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 5`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
 and `rewindCount`, or `null`), both of which `inspect` prints; the selection and omissions; the canonical checkpoint
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
-with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
+with the media store's recorded answers and how the player gave the answer (`input`: Enter in the composer, its Send
+button, a button of the request, or the key that activates the preselected button, else `null`), `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, `updateInteraction` with the form edit, and `setDebugMode` with whether Debug
 is on, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
@@ -265,7 +270,7 @@ where the browser can hash, the incident as the session's actual state shows it,
 marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
-reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions; session
+reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions with their `input`; session
 text adds the last 50 transcript messages, the Stage image's authored path, media sources, notice messages, and the
 Debug log while the Debug menu is on, and the events with their content: messages and their changes, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   advancePlayerRuntimeTime,
@@ -23,6 +22,7 @@ import {
   type RandomSite,
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Debug's random draws (DEBUGGER.md "Random draws") through the real Vue session host and engine: with Choose outcomes
 // on in the debug room, a session pauses at every draw and goes on with the outcome the picker gives; Next time and
@@ -95,44 +95,32 @@ let useDebugRandom: (player: RandomHost) => DebugRandom;
 let presentation: Presentation;
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const random: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDebugRandom.ts",
-    );
-    const shown: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/randomDrawPresentation.ts",
-    );
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof random.useDebugRandom, "function");
-    assert.equal(typeof shown.randomDrawCode, "function");
-    assert.equal(typeof shown.outcomeLines, "function");
-    assert.equal(typeof shown.randomDrawChoices, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const random: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDebugRandom.ts",
+  );
+  const shown: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/randomDrawPresentation.ts",
+  );
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof random.useDebugRandom, "function");
+  assert.equal(typeof shown.randomDrawCode, "function");
+  assert.equal(typeof shown.outcomeLines, "function");
+  assert.equal(typeof shown.randomDrawChoices, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: as above.
+  useDebugRandom = random.useDebugRandom as typeof useDebugRandom;
+  presentation = {
     // EVIDENCE: validation: as above.
-    useDebugRandom = random.useDebugRandom as typeof useDebugRandom;
-    presentation = {
-      // EVIDENCE: validation: as above.
-      randomDrawCode: shown.randomDrawCode as Presentation["randomDrawCode"],
-      // EVIDENCE: validation: as above.
-      outcomeLines: shown.outcomeLines as Presentation["outcomeLines"],
-      // EVIDENCE: validation: as above.
-      randomDrawChoices: shown.randomDrawChoices as Presentation["randomDrawChoices"],
-    };
-  } finally {
-    await server.close();
-  }
+    randomDrawCode: shown.randomDrawCode as Presentation["randomDrawCode"],
+    // EVIDENCE: validation: as above.
+    outcomeLines: shown.outcomeLines as Presentation["outcomeLines"],
+    // EVIDENCE: validation: as above.
+    randomDrawChoices: shown.randomDrawChoices as Presentation["randomDrawChoices"],
+  };
 });
 
 function savedData(): ScriptStorageProvider {
@@ -421,6 +409,38 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   assert.deepEqual(markedLines(presentation.randomDrawCode(source, second)!), [second.line]);
   assert.deepEqual(markedLines(code), [site.line]);
   assert.deepEqual(presentation.randomDrawCode(source, site), code);
+});
+
+test("Show whole block fits the smallest statement or block around the draw that the default lines do not show whole", () => {
+  const say = (count: number, indent = "  ") =>
+    Array.from({ length: count }, (_, index) => `${indent}say "Step ${index + 1}", instant`);
+  const enclosing = (lines: readonly string[]) => {
+    const source = [...lines, "exit"].join("\n");
+    return presentation.randomDrawCode(source, listRandomSites(compiled(source))[0]!)!.enclosing;
+  };
+  // A draw in an `if` block of lines 9–19, inside a `repeat` of lines 1–32.
+  const nested = (inside: number) => [
+    "repeat 3 {",
+    ...say(7),
+    "  if true {",
+    ...say(inside, "    "),
+    "    let hit = chance(50)",
+    ...say(inside, "    "),
+    "  }",
+    ...say(12),
+    "}",
+  ];
+  assert.deepEqual(enclosing(nested(4)), { kind: "block", from: 9, to: 19 });
+  // An `if` block of lines 9–13 shows whole in the default lines 8–14, so the `repeat` around it is next.
+  assert.deepEqual(enclosing(nested(1)), { kind: "block", from: 1, to: 26 });
+  // A block the default lines show whole, with none around it, leaves nothing to show.
+  assert.equal(enclosing(["if true {", "  let hit = chance(50)", "}"]), null);
+  // A draw in a statement of one line, outside any block, fits the whole file.
+  assert.deepEqual(enclosing([...say(10, ""), "let hit = chance(50)", ...say(10, "")]), {
+    kind: "file",
+    from: 1,
+    to: 22,
+  });
 });
 
 test("earlier outcomes read like code, and each kind of draw offers its outcomes as its support allows", () => {

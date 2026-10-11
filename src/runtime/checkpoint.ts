@@ -1,4 +1,5 @@
 import { createCapturedArray } from "../external-data-capture.js";
+import { MAX_TEXT_LENGTH } from "./text-length.js";
 import { type InstructionPlan } from "../plan/model.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
@@ -13,7 +14,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 96;
+export const CHECKPOINT_VERSION = 101;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -23,7 +24,7 @@ export interface RuntimeCheckpoint {
 }
 
 export interface CheckpointErrorInfo {
-  readonly code: "TSK001" | "TSK002" | "TSK003";
+  readonly code: "TSK001" | "TSK002" | "TSK003" | "TSK004";
   readonly message: string;
   readonly path: string;
 }
@@ -56,17 +57,43 @@ export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
 /**
  * JSON of plain runtime data that checkpoint validation produced, such as a checkpoint or one of its snapshots, without
  * validating it again. Native JSON writes it as the iterative writer does, unless a host hook could apply or the data is
- * deeper than the host stack allows.
+ * deeper than the host stack allows. JSON longer than a text can be (`MAX_TEXT_LENGTH`) fails with `TSK004` in every
+ * host, as V8 cannot build it.
  */
 export function serializeValidatedRuntimeJson(value: unknown): string {
+  return serializeValidatedRuntimeJsonWithin(value, MAX_TEXT_LENGTH);
+}
+
+/** `serializeValidatedRuntimeJson` with `limit` as the longest JSON it writes; tests give a small one. */
+export function serializeValidatedRuntimeJsonWithin(value: unknown, limit: number): string {
   if (!inheritsToJson()) {
+    let json: string | undefined;
     try {
-      return JSON.stringify(value);
+      json = JSON.stringify(value);
     } catch (error) {
+      if (isStringLengthExhaustion(error)) throw stateTooLarge();
       if (!isStackExhaustion(error)) throw error;
     }
+    if (json !== undefined) {
+      if (json.length > limit) throw stateTooLarge();
+      return json;
+    }
   }
-  return serializeJsonIterative(value);
+  return serializeJsonIterative(value, limit);
+}
+
+/** V8's failure to build a string longer than it holds. */
+function isStringLengthExhaustion(error: unknown): boolean {
+  return error instanceof RangeError && error.message === "Invalid string length";
+}
+
+/** `TSK004`: a state, or a text built from one such as an export, would be longer than a text can be. */
+export function stateTooLarge(): CheckpointError {
+  return checkpointError(
+    "TSK004",
+    `The state is too large to save: as text it would be longer than the limit of ${MAX_TEXT_LENGTH.toLocaleString("en-US")} characters.`,
+    "$",
+  );
 }
 
 /**
@@ -91,8 +118,15 @@ function isStackExhaustion(error: unknown): boolean {
   );
 }
 
-function serializeJsonIterative(value: unknown): string {
+function serializeJsonIterative(value: unknown, limit: number): string {
   const out: string[] = [];
+  // Counted as it grows, so JSON too long to join fails before the join.
+  let length = 0;
+  const write = (piece: string) => {
+    length += piece.length;
+    if (length > limit) throw stateTooLarge();
+    out.push(piece);
+  };
   const stack: Array<{ value: unknown; state: "value" } | { value: string; state: "close" }> = [
     { value, state: "value" },
   ];
@@ -100,18 +134,23 @@ function serializeJsonIterative(value: unknown): string {
     // EVIDENCE: stack is non-empty because the loop condition was checked immediately before pop.
     const frame = stack.pop()!;
     if (frame.state === "close") {
-      out.push(frame.value);
+      write(frame.value);
       continue;
     }
     const current = frame.value;
     if (current === null || typeof current !== "object") {
-      const encoded = JSON.stringify(current);
+      let encoded: string | undefined;
+      try {
+        encoded = JSON.stringify(current);
+      } catch (error) {
+        throw isStringLengthExhaustion(error) ? stateTooLarge() : error;
+      }
       if (encoded === undefined) throw new TypeError("Checkpoint contains a non-JSON-safe value.");
-      out.push(encoded);
+      write(encoded);
       continue;
     }
     if (Array.isArray(current)) {
-      out.push("[");
+      write("[");
       stack.push({ value: "]", state: "close" });
       for (let i = current.length - 1; i >= 0; i--) {
         if (i < current.length - 1) stack.push({ value: ",", state: "close" });
@@ -121,7 +160,7 @@ function serializeJsonIterative(value: unknown): string {
     }
     // EVIDENCE: validated checkpoint containers are plain JSON objects at this boundary.
     const keys = Object.keys(current as Record<string, unknown>);
-    out.push("{");
+    write("{");
     stack.push({ value: "}", state: "close" });
     for (let i = keys.length - 1; i >= 0; i--) {
       const key = keys[i]!;

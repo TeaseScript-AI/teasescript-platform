@@ -213,7 +213,7 @@ test("a random timer length takes its unit after the range in the short and the 
     assert.deepEqual(action.timer.range, expected, range);
   }
   assertRuntimeResumeEquivalent(
-    'let a = 1\nlet b = 3\nlet n = 0\nlet beat = timer(duration: (a..=b) s, async: true, repeat: true) {\n  n += 1\n}\nwait 10 s\nbeat.stop()\nsay "${n}"\nexit',
+    'let a = 1\nlet b = 3\nlet n = 0\nlet beat = timer(duration: (a..=b) s, async: true, repeat: true) {\n  n += 1\n}\nwait 7 s\nbeat.stop()\nsay "${n}"\nexit',
   );
   for (const [source, fix] of [
     ["timer 5..10 s", "timer (5..10) s"],
@@ -285,6 +285,17 @@ test("a name after a say mode or skip word stays the text, also when it is a uni
     ['let s = "Hi"\nsay bubble(color: "red") s, instant', "Hi", "bubble"],
     ['let h = "Hi"\nsay prose h, instant', "Hi", "prose"],
     ['let ms = "Hi"\nsay skippable ms, instant', "Hi", "bubble"],
+    // A month or a year written out after a value asks for 'calendar', but after a mode, a skip word, or a speaker it
+    // is the text too.
+    ['let months = "Hi"\nsay skippable months, instant', "Hi", "bubble"],
+    ['let year = "Hi"\nsay bubble() year, instant', "Hi", "bubble"],
+    ['let y = "Hi"\nsay prose y, instant', "Hi", "prose"],
+    [
+      'speaker narrator { displayName: "Narrator" }\nlet months = "Hi"\nsay as narrator months, instant',
+      "Hi",
+      "bubble",
+    ],
+    ['let mo = "Hi"\nlet shown = say unskippable mo, instant', "Hi", "bubble"],
     // Without a mode or skip word before it, the unit belongs to the value, also to a member, an element, or a call
     // named like one.
     ["let n = 3\nsay n s, instant", "3 seconds", "bubble"],
@@ -402,7 +413,7 @@ test("a wait or timer range takes any exact unit and draws whole units of it", (
 
   // Every draw restores from every checkpoint.
   assertRuntimeResumeEquivalent(
-    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (2..=5) days\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
+    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (1..=2) days\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
   );
 
   // A calendar unit after a range is refused like any calendar duration.

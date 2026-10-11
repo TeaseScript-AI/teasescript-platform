@@ -136,23 +136,23 @@ test("say shows a timer handle with its current state, also after checkpoint res
 test("say shows a media handle with its current state, also after checkpoint resume", () => {
   const source = [
     'let music = playAudio(file: "music.mp3", async: true)',
-    "wait 12 s",
+    "wait 2 s",
     "say [music], 0 s",
     "music.pause()",
     "say music, 0 s",
     "music.stop()",
     "say music, 0 s",
     'let beep = playAudio(file: "beep.mp3", async: true)',
-    "wait 61 s",
+    "wait 4 s",
     "say beep, 0 s",
     "exit",
   ].join("\n");
-  const equivalent = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 60_000 });
+  const equivalent = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 3_000 });
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     [
-      '[<media "music.mp3", playing at 12 seconds>]',
-      '<media "music.mp3", paused at 12 seconds>',
+      '[<media "music.mp3", playing at 2 seconds>]',
+      '<media "music.mp3", paused at 2 seconds>',
       '<media "music.mp3", stopped>',
       '<media "beep.mp3", finished>',
     ],

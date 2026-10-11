@@ -8,6 +8,7 @@ import {
 import { internalFault, RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import {
+  cloneCapturedSerializableValue,
   createCapturedSerializableList,
   createCapturedSerializableObject,
   dictProperty,
@@ -46,7 +47,12 @@ export interface PreparedReferenceDescriptor {
   readonly rootFrameId: number | null;
   readonly rootName: string | null;
   readonly path: PreparedReferenceStep[];
-  readonly capturedRoot: SerializableRuntimeValue;
+  /**
+   * A copy of the root: the value a detached reference's path starts from, and for an attached one, where the plan
+   * keeps it, its fallback (`preparedReferenceTemporaries` of the snapshot validation analysis). `undefined` for an
+   * attached reference that keeps none.
+   */
+  readonly capturedRoot: SerializableRuntimeValue | undefined;
   readonly detached: boolean;
 }
 
@@ -68,7 +74,10 @@ const INTERNAL_REFERENCE_SPAN = createSourceSpan(
   INTERNAL_REFERENCE_POSITION,
 );
 
-/** The stored form of a descriptor. It shares the descriptor's captured root, which storing it as a temporary copies. */
+/**
+ * The stored form of a descriptor, without `capturedRoot` when it keeps no copy. It shares the descriptor's captured
+ * root, which storing it as a temporary copies.
+ */
 export function serializePreparedReference(
   descriptor: PreparedReferenceDescriptor,
 ): SerializableRuntimeObject {
@@ -79,7 +88,9 @@ export function serializePreparedReference(
       { name: "rootFrameId", value: descriptor.rootFrameId },
       { name: "rootName", value: descriptor.rootName },
       { name: "path", value: serializePreparedReferencePath(descriptor.path) },
-      { name: "capturedRoot", value: descriptor.capturedRoot },
+      ...(descriptor.capturedRoot === undefined
+        ? []
+        : [{ name: "capturedRoot", value: descriptor.capturedRoot }]),
       { name: "detached", value: descriptor.detached },
     ],
   };
@@ -132,8 +143,8 @@ export function readPreparedReference(
     (rootFrameId === null) !== (rootName === null) ||
     pathValue === undefined ||
     !isList(pathValue) ||
-    capturedRoot === undefined ||
-    typeof detached !== "boolean"
+    typeof detached !== "boolean" ||
+    (capturedRoot === undefined && (rootFrameId === null || detached))
   ) {
     throw fault(
       "TSR053",
@@ -296,7 +307,8 @@ export function refreshPreparedReferenceFallbacks(
     } catch {
       continue;
     }
-    if (descriptor.detached) continue;
+    // A reference without a copy of its root resolves through its variable alone.
+    if (descriptor.detached || descriptor.capturedRoot === undefined) continue;
     const root = preparedReferenceRoot(snapshot, descriptor);
     if (!root.found) {
       freezePreparedReference(snapshot, serialized, descriptor);
@@ -383,16 +395,28 @@ function freezePreparedReference(
   serialized: SerializableRuntimeObject,
   descriptor: PreparedReferenceDescriptor,
 ): void {
-  const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
+  const resolution = resolveStoredPreparedReference(snapshot, descriptor);
   if (!resolution.found) {
+    // Every change that could break the path of an attached reference that keeps no copy of its root freezes it first.
+    if (descriptor.capturedRoot === undefined) {
+      throw fault(
+        "TSR053",
+        internalFault("A prepared reference no longer leads to the value it names."),
+        INTERNAL_REFERENCE_SPAN,
+      );
+    }
     setCapturedSerializableProperty(serialized, "detached", true);
     return;
   }
-  setCapturedSerializableProperty(serialized, "rootFrameId", null);
-  setCapturedSerializableProperty(serialized, "rootName", null);
-  setCapturedSerializableProperty(serialized, "path", createCapturedSerializableList([]));
-  setCapturedSerializableProperty(serialized, "capturedRoot", resolution.value);
-  setCapturedSerializableProperty(serialized, "detached", true);
+  const frozen = serializePreparedReference({
+    rootFrameId: null,
+    rootName: null,
+    path: descriptor.path.slice(resolution.rest),
+    capturedRoot: cloneCapturedSerializableValue(resolution.value),
+    detached: true,
+  });
+  serialized.properties.length = 0;
+  for (const property of frozen.properties) serialized.properties.push(property);
 }
 
 export function preparedReferenceSpeakerPath(
@@ -419,19 +443,34 @@ export function preparedReferenceSpeakerPath(
   return identity;
 }
 
-function resolvePreparedReferenceDescriptor(
+/**
+ * The last value on the path of `descriptor` that the session holds, and the position of the steps after it. A property
+ * of any value but an object, a speaker, or a collection, such as a timer's `state` or a date's `weekday`, is read at
+ * use, so a frozen reference keeps the value that has it and reads it from there.
+ */
+function resolveStoredPreparedReference(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
-): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
+): { readonly found: boolean; readonly value: SerializableRuntimeValue; readonly rest: number } {
   const root = preparedReferenceRoot(snapshot, descriptor);
-  if (!root.found) return root;
+  if (!root.found) return { ...root, rest: 0 };
   let current = root.value;
-  for (const step of descriptor.path) {
+  for (let index = 0; index < descriptor.path.length; index += 1) {
+    const step = descriptor.path[index]!;
+    if (
+      step.kind === "property" &&
+      !isObject(current) &&
+      !isSpeakerReference(current) &&
+      !isList(current) &&
+      !isSet(current) &&
+      !isDict(current)
+    )
+      return { found: true, value: current, rest: index };
     const next = resolvePreparedReferenceStep(snapshot, current, step);
-    if (!next.found) return next;
+    if (!next.found) return { ...next, rest: index };
     current = next.value;
   }
-  return { found: true, value: current };
+  return { found: true, value: current, rest: descriptor.path.length };
 }
 
 function preparedReferenceRoot(
@@ -446,7 +485,8 @@ function preparedReferenceRoot(
       ? { found: false, value: null }
       : { found: true, value: binding.value };
   }
-  return { found: true, value: descriptor.capturedRoot };
+  // EVIDENCE: readPreparedReference and the evaluator give every detached or rootless reference a captured root.
+  return { found: true, value: descriptor.capturedRoot! };
 }
 
 function resolvePreparedReferenceStep(

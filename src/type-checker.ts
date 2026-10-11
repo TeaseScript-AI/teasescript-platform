@@ -83,7 +83,9 @@ import {
   builtinShapeProblems,
   COLLECTION_CHANGES,
   COLLECTION_METHODS,
+  noteSharing,
   rootName,
+  type Sharing,
   collectionMethodProblems,
   expressionLabel,
   memberProblems,
@@ -149,6 +151,7 @@ import {
   type PossibleValue,
   type ScalarValue,
   TypeJoin,
+  decidedValue,
   members,
   type PropertyTable,
   misfitProperty,
@@ -178,6 +181,8 @@ import {
   widenedType,
   widenPath,
   decidePath,
+  lacksPath,
+  holdsAt,
   observe,
   placedSlots,
   nextDecision,
@@ -186,8 +191,10 @@ import {
   numberPaths,
   integerParts,
   ownPartOrigins,
+  ownPartOriginsAt,
   type Declaration,
   type Origin,
+  type Origins,
   type PartOrigin,
   type StaticType,
 } from "./static-types.js";
@@ -196,6 +203,7 @@ import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
+  sameReadStorageKeyTypes,
   sameType,
   storageKeyTypes,
   typeKey,
@@ -218,8 +226,11 @@ export interface TypeCheckOptions {
     readonly path: string;
     readonly tags: readonly PlanTag[] | null;
   }[];
-  /** The declarations of the variables that a timer, media, or button block shares and assigns, from name checking. */
-  readonly sharedWrites?: ReadonlySet<VariableSite>;
+  /**
+   * The declarations of the variables that a timer, media, or button block shares and assigns or changes in place, with
+   * how, from name checking.
+   */
+  readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
 }
 
 export interface TypeCheckResult {
@@ -305,7 +316,9 @@ export function checkTypes(
   const copies: Copies = new Map();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
-  // them, so they settle at once; the bound only guards against a load type that changes with variable types.
+  // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
+  // they changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that
+  // the next check would read changed, the next check would repeat this one exactly, so it is not run.
   let storage: ReadonlyMap<string, StorageKeyType> = new Map();
   let storageRounds = 0;
   for (;;) {
@@ -322,6 +335,8 @@ export function checkTypes(
     checker.check(programs);
     checker.recordDecisions();
     let storageChanged = false;
+    // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
+    let storageRead = false;
     if (storageRounds < MAX_STORAGE_ROUNDS) {
       // A key whose type the runtime cannot check has none.
       const found = new Map(
@@ -330,12 +345,25 @@ export function checkTypes(
         ),
       );
       if (!sameStorageKeyTypes(storage, found)) {
+        storageRead = !sameReadStorageKeyTypes(storage, found);
         storage = found;
         storageChanged = true;
         storageRounds += 1;
       }
     }
-    if (!checker.widenedMore && !checker.decidedMore && !storageChanged) {
+    // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
+    // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
+    let last =
+      !checker.widenedMore &&
+      !checker.decidedMore &&
+      (!storageChanged || (!storageRead && !checker.copiedMore));
+    let followed = false;
+    if (last && storageChanged) {
+      checker.widenFollowers();
+      followed = true;
+      last = !checker.widenedMore;
+    }
+    if (last) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
@@ -354,7 +382,7 @@ export function checkTypes(
         storageTypes: storageTypePlans(storage),
       });
     }
-    checker.widenFollowers();
+    if (!followed) checker.widenFollowers();
   }
 }
 
@@ -461,6 +489,79 @@ function decidingSlots(slots: readonly OpenType[]): {
   return { deciding, unknown };
 }
 
+/**
+ * A check kept for the end of the check: an operation whose operands held only null when it was checked, with what it
+ * reports if they still do, or a store of an operation of unknown result into a place that no value decided yet, which
+ * is checked against the type a later value decided.
+ */
+type DeferredCheck = {
+  readonly file: number;
+  /** Where among the diagnostics of its file the check reports. */
+  readonly at: number;
+} & (
+  | {
+      readonly kind: "nullOnly";
+      readonly slots: readonly OpenType[];
+      readonly diagnostics: readonly Diagnostic[];
+    }
+  | {
+      readonly kind: "lateStore";
+      readonly place: Place;
+      readonly expression: Expression;
+      readonly value: StaticType;
+    }
+);
+
+/**
+ * The undecided slot of a type that so far held only null, such as the type of `v` after `let v = null` once nothing
+ * narrows it any more, or `undefined` for any other type. A value that a later store gives may still decide the slot.
+ */
+function nullOnlySlot(type: StaticType): OpenType | undefined {
+  let slot: OpenType | undefined;
+  let sawNull = false;
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "null") sawNull = true;
+    else if (
+      value.kind === "open" &&
+      slot === undefined &&
+      value.resolved === null &&
+      value.heldUnknown === undefined
+    )
+      slot = value;
+    else return undefined;
+  }
+  return slot !== undefined && (sawNull || slot.sawNull) ? slot : undefined;
+}
+
+/**
+ * Whether an undecided slot held only null to the end of a check: no value decided it or a slot it was copied from, and
+ * none of them took a value the compiler cannot know. `known` keeps the answer for each slot walked, so a chain of copies
+ * that many slots share is walked once.
+ */
+function heldOnlyNull(slot: OpenType, known: Map<OpenType, boolean>): boolean {
+  const walked = new Set<OpenType>();
+  let only = true;
+  for (
+    let current: OpenType | undefined = slot;
+    current !== undefined;
+    current = current.copiedFrom
+  ) {
+    const seen = known.get(current);
+    if (seen !== undefined) {
+      only = seen;
+      break;
+    }
+    if (walked.has(current) || current.resolved !== null || current.heldUnknown !== undefined) {
+      only = false;
+      break;
+    }
+    walked.add(current);
+  }
+  for (const current of walked) known.set(current, only);
+  return only;
+}
+
 /** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
 function storedIn(slot: OpenType): Set<OpenType> {
   const chain = new Set<OpenType>();
@@ -484,6 +585,53 @@ function storedPlace(slot: OpenType): OpenType | undefined {
     : undefined;
 }
 
+/**
+ * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
+ * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
+ * deeper, or held a value the compiler cannot know, which a new slot would forget. Each slot is visited once.
+ */
+function replayableDecisions(): (decider: OpenType) => boolean {
+  /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
+  const verdicts = new Map<OpenType, boolean>();
+  return (decider) => {
+    const onPath = new Set<OpenType>();
+    const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
+    const enter = (slot: OpenType): void => {
+      onPath.add(slot);
+      frames.push({ slot, next: slotEdges(slot), clean: slot.heldUnknown === undefined });
+    };
+    if (!verdicts.has(decider)) enter(decider);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1]!;
+      const next = frame.next.pop();
+      if (next === undefined) {
+        frames.pop();
+        onPath.delete(frame.slot);
+        verdicts.set(frame.slot, frame.clean);
+        // What a slot reaches, the slots that reach it reach too.
+        if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
+      } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
+      else if (!verdicts.has(next)) enter(next);
+    }
+    return verdicts.get(decider)!;
+  };
+}
+
+/** The slots a slot's type depends on: the one it was copied from, and those directly in the type that decided it. */
+function slotEdges(slot: OpenType): OpenType[] {
+  const edges: OpenType[] = slot.copiedFrom === undefined ? [] : [slot.copiedFrom];
+  const pending: StaticType[] = slot.resolved === null ? [] : [slot.resolved];
+  while (pending.length > 0) {
+    const part = pending.pop()!;
+    if (part.kind === "open") edges.push(part);
+    else if (part.kind === "union") for (const member of part.members) pending.push(member);
+    else if (isCollection(part)) pending.push(part.element);
+    else if (part.kind === "object" && part.properties !== null)
+      for (const value of part.properties.values()) pending.push(value);
+  }
+  return edges;
+}
+
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
   if (declaration.kind === "identifier") return declaration.name;
@@ -499,14 +647,88 @@ interface PlacePath {
   readonly path: readonly string[];
 }
 
+/**
+ * Whether a path, written as a key of {@link Widened}, is one of `keys` or lies inside one of them: whether it or one of
+ * the paths that lead to it is in `keys`, where `""` is the whole variable.
+ */
+function withinKeys(path: string, keys: ReadonlySet<string>): boolean {
+  if (keys.has("") || keys.has(path)) return true;
+  for (let end = path.indexOf("."); end !== -1; end = path.indexOf(".", end + 1))
+    if (keys.has(path.slice(0, end))) return true;
+  return false;
+}
+
+/** A part of a variable that a store added to or decided, with its path there (see `TypeChecker.#rewiden`). */
+interface ChangedPart {
+  readonly path: readonly string[];
+  readonly part: StaticType;
+}
+
 function extendPath(owner: PlacePath | undefined, step: string): PlacePath | undefined {
   return owner === undefined ? undefined : { root: owner.root, path: [...owner.path, step] };
 }
 
-/** A place that stores a value of another place, so it widens with it (see `TypeChecker.#follow`). */
+/** A place that stores a value of other places, so it widens with them (see `TypeChecker.#follow`). */
 interface Follower {
   readonly place: PlacePath;
   readonly at: SourceSpan;
+  /** The places the stored value derives from. */
+  readonly origins: Origins;
+}
+
+/**
+ * Finds the followers whose value derives from a place, in checking order. A follower that an earlier call returned is
+ * not returned again, since its place has widened by then. Values copied from each other share groups of origins, and
+ * each group is visited once over all calls, not once per follower that holds it, so a long chain of copies costs no
+ * more than its length.
+ */
+function followerFinder(followers: readonly Follower[]): (place: PlacePath) => Follower[] {
+  // The followers that hold each group, the groups that merged it, and the groups of one origin by its place.
+  const holders = new Map<Origins, number[]>();
+  const mergedInto = new Map<Origins, Origins[]>();
+  const singles = new Map<Declaration, Map<string, Origins[]>>();
+  const seen = new Set<Origins>();
+  for (const [index, follower] of followers.entries()) {
+    const held = holders.get(follower.origins) ?? [];
+    held.push(index);
+    holders.set(follower.origins, held);
+    const work = [follower.origins];
+    while (work.length > 0) {
+      const group = work.pop()!;
+      if (seen.has(group)) continue;
+      seen.add(group);
+      if (group.origin !== undefined) {
+        const { root, path } = originPlace(group.origin);
+        const paths = singles.get(root) ?? new Map<string, Origins[]>();
+        const key = path.join(".");
+        const groups = paths.get(key) ?? [];
+        groups.push(group);
+        paths.set(key, groups);
+        singles.set(root, paths);
+      }
+      for (const part of group.parts) {
+        const into = mergedInto.get(part) ?? [];
+        into.push(group);
+        mergedInto.set(part, into);
+        work.push(part);
+      }
+    }
+  }
+  // A visited group is not visited again: the followers that hold it and every group that merged it were returned then.
+  const visited = new Set<Origins>();
+  return (place) => {
+    const found: number[] = [];
+    const work = [...(singles.get(place.root)?.get(place.path.join(".")) ?? [])];
+    while (work.length > 0) {
+      const group = work.pop()!;
+      if (visited.has(group)) continue;
+      visited.add(group);
+      for (const index of holders.get(group) ?? []) found.push(index);
+      for (const merged of mergedInto.get(group) ?? []) work.push(merged);
+    }
+    found.sort((left, right) => left - right);
+    return found.map((index) => followers[index]!);
+  };
 }
 
 /** The place an origin stands for: a variable, or an element or property inside one. */
@@ -522,8 +744,11 @@ interface Variable {
   readonly declaration?: Declaration | undefined;
   /** Whether a type is written for the variable: a `let` or parameter with a type annotation. */
   readonly annotated?: boolean;
-  /** Whether a function or a timer or media block may assign it, so a call or suspension cancels its narrowing. */
-  readonly shared: boolean;
+  /**
+   * Whether a function or a timer or media block may assign it or change its value in place, so a call or suspension
+   * cancels its narrowing, or for a change in place only the narrowing that the change can undo.
+   */
+  readonly shared: Sharing | false;
 }
 
 /**
@@ -658,7 +883,10 @@ interface Place {
   readonly elementOf?: string | null;
   /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
   readonly listed?: boolean;
-  /** For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`. */
+  /**
+   * For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`: the type as it
+   * is when a message reads it, which a later value may have decided. A copy made by spreading keeps the text of then.
+   */
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
   readonly verb: string;
@@ -727,6 +955,21 @@ class TypeChecker {
   /** Numbers and durations known at compile time, folded once per expression (see `#known`). */
   readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
 
+  /**
+   * Each arithmetic operation that gives a value of unknown type because an operand's type is unknown, with the types it
+   * can give, so a place with a written type can tell when none of them could fit it, as `/` never gives text. An
+   * operand that is such an operation itself stands for the types it can give, any other operand of unknown type for
+   * every type an operator takes.
+   */
+  readonly #unknownOperations = new Map<Expression, readonly StaticType[]>();
+
+  /**
+   * Operations on a variable, element, or property that so far held only null, which fail if it holds only null to the
+   * end, and stores into a place whose type a later value may decide: the check reports them once it has checked every
+   * store (see {@link #reportDeferred}).
+   */
+  readonly #deferred: DeferredCheck[] = [];
+
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
 
@@ -737,13 +980,13 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
-  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
+  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Map(), loops: new Map() };
 
-  /** The declarations of the variables that a block shares and assigns (see {@link VariableSite}). */
-  readonly #sharedWrites: ReadonlySet<VariableSite>;
+  /** The declarations of the variables that a block shares and assigns or changes in place (see {@link VariableSite}). */
+  readonly #sharedWrites: ReadonlyMap<VariableSite, Sharing>;
 
-  /** The globals that a function or a timer or media block of any file assigns. */
-  #sharedGlobals: ReadonlySet<string> = new Set();
+  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
+  #sharedGlobals: ReadonlyMap<string, Sharing> = new Map();
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -801,6 +1044,9 @@ class TypeChecker {
   /** Whether this check found a place decided after a read that earlier checks did not (see {@link Decided}). */
   decidedMore = false;
 
+  /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
+  copiedMore = false;
+
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
    * variable it was copied from, which a mismatch in the copy names.
@@ -813,22 +1059,33 @@ class TypeChecker {
     const observed = [...places.keys()].filter((slot) => slot.observed === true);
     const copied = [...places.keys()].filter((slot) => slot.copiedFrom !== undefined);
     const { deciding, unknown } = decidingSlots([...observed, ...copied]);
-    // A decision that still leaves a part undecided, such as a list that holds itself, is not taken over: it would only
-    // give the next check another part to decide.
+    const undecided = (decider: OpenType): boolean =>
+      containsType(decider.resolved!, (part) => part.kind === "open");
     const settled = (decider: OpenType | null | undefined): decider is OpenType =>
-      decider !== null &&
-      decider !== undefined &&
-      !containsType(decider.resolved!, (part) => part.kind === "open");
+      decider !== null && decider !== undefined && !undecided(decider);
+    // A decision that still leaves parts undecided, such as `{ images: null }`, is taken over with new slots for them,
+    // which the next check decides by its own stores. One that reaches a value that holds itself, such as `a.add(a)`,
+    // is not: each next check would find another part to decide.
+    const replayable = replayableDecisions();
     for (const slot of observed) {
       const decider = deciding.get(slot);
       // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
       // nothing, but earlier reads then know that the slot may hold such a value.
       const held = unknown.get(slot);
-      const decision: Decision | undefined = settled(decider)
-        ? { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! }
-        : held !== undefined && decider === null
-          ? { type: UNKNOWN_TYPE, at: held }
-          : undefined;
+      const type =
+        decider === null || decider === undefined
+          ? undefined
+          : !undecided(decider)
+            ? decider.resolved!
+            : replayable(decider)
+              ? detachedType(decider.resolved!)
+              : undefined;
+      const decision: Decision | undefined =
+        type !== undefined
+          ? { type, at: slot.resolvedAt ?? decider!.resolvedAt! }
+          : held !== undefined && decider === null
+            ? { type: UNKNOWN_TYPE, at: held }
+            : undefined;
       if (decision === undefined) continue;
       const place = places.get(slot)!;
       const paths = this.#decided.get(place.root) ?? new Map<string, Decision>();
@@ -852,8 +1109,12 @@ class TypeChecker {
       const decider = source === undefined ? undefined : deciding.get(source);
       if (source === undefined || !settled(decider) || storedIn(slot).has(decider)) continue;
       const copies = this.#copies.get(place.root) ?? new Map<string, string>();
-      copies.set(place.path.join("."), declaredName(places.get(source)!.root));
+      const key = place.path.join(".");
+      const name = declaredName(places.get(source)!.root);
+      if (copies.get(key) === name) continue;
+      copies.set(key, name);
       this.#copies.set(place.root, copies);
+      this.copiedMore = true;
     }
   }
 
@@ -861,8 +1122,8 @@ class TypeChecker {
 
   readonly #copies: Copies;
 
-  /** For each variable, the paths of {@link #decided} that its type does not have yet. */
-  readonly #pendingDecisions = new Map<Declaration, Set<string>>();
+  /** For each variable, the paths of {@link #decided} that its type does not have yet, with their steps. */
+  readonly #pendingDecisions = new Map<Declaration, Map<string, readonly string[]>>();
 
   /** Widens every place that follows a widened one (see {@link #followers}). */
   public widenFollowers(): void {
@@ -870,10 +1131,11 @@ class TypeChecker {
     for (const [root, paths] of this.#widened)
       for (const path of paths.keys())
         pending.push({ root, path: path === "" ? [] : path.split(".") });
+    if (pending.length === 0) return;
+    const followersOf = followerFinder(this.#followers);
     while (pending.length > 0) {
       const widened = pending.pop()!;
-      for (const { place, at } of this.#followers.get(widened.root)?.get(widened.path.join(".")) ??
-        []) {
+      for (const { place, at } of followersOf(widened)) {
         if (this.#widenedAt(place.root, place.path)) continue;
         this.#recordWidening(place, at);
         pending.push(place);
@@ -887,10 +1149,10 @@ class TypeChecker {
   readonly #unappliedWidening = new Set<Declaration>();
 
   /**
-   * For each integer place, by its variable and its path there, the integer places that store its value, with where:
-   * when it widens, they widen too, without one more check per step of a chain.
+   * The integer places that store a value of other integer places, in checking order, with where: when one of those
+   * widens, they widen too, without one more check per step of a chain.
    */
-  readonly #followers = new Map<Declaration, Map<string, Follower[]>>();
+  readonly #followers: Follower[] = [];
 
   /** The variable each declaration created most recently, whose type later widenings change. */
   readonly #declared = new Map<Declaration, Variable>();
@@ -929,7 +1191,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
-    this.#sharedWrites = options.sharedWrites ?? new Set();
+    this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -983,13 +1245,13 @@ class TypeChecker {
   public check(programs: readonly Program[]): void {
     const effects = programs.map(programEffects);
     const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
-    const sharedGlobals = new Set<string>();
+    const sharedGlobals = new Map<string, Sharing>();
     for (const fileEffects of effects)
-      for (const name of fileEffects.shared) sharedGlobals.add(name);
+      for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
     // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
     if (effects.some((fileEffects) => fileEffects.callsFiles))
       for (const fileEffects of effects)
-        for (const name of fileEffects.rootAssigned) sharedGlobals.add(name);
+        for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
     this.#sharedGlobals = sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
@@ -999,7 +1261,7 @@ class TypeChecker {
             statement,
             this.#declareFunction(statement, file, this.#project),
           );
-    this.#effects = { shared: new Set(), loops };
+    this.#effects = { shared: new Map(), loops };
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -1068,6 +1330,7 @@ class TypeChecker {
       }
       this.#handlers.length = 0;
     }
+    this.#reportDeferred();
   }
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
@@ -1713,9 +1976,9 @@ class TypeChecker {
       type,
       shared:
         statement.kind === "globalStatement"
-          ? this.#sharedGlobals.has(name)
+          ? (this.#sharedGlobals.get(name) ?? false)
           : scope === this.#root
-            ? this.#effects.shared.has(name)
+            ? (this.#effects.shared.get(name) ?? false)
             : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
@@ -1726,11 +1989,11 @@ class TypeChecker {
   }
 
   /**
-   * Whether a timer, media, or button block shares and assigns the variable of this declaration, so that a suspension
-   * may change it (rule 5.5, V30 §14).
+   * Whether a timer, media, or button block shares and assigns the variable of this declaration or changes it in place,
+   * so that a suspension may change it (rule 5.5, V30 §14).
    */
-  #sharedLocal(site: VariableSite): boolean {
-    return this.#sharedWrites.has(site);
+  #sharedLocal(site: VariableSite): Sharing | false {
+    return this.#sharedWrites.get(site) ?? false;
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -1746,18 +2009,21 @@ class TypeChecker {
 
   /**
    * A wait, interaction, call, or other point where a handler or function may run: forget what is known about variables
-   * that they may assign (rule 5.5).
+   * that they may assign, or that a change they may make in place may undo (rule 5.5).
    */
   #suspend(): void {
-    this.#flow.forget(sharedVariable);
+    this.#flow.forgetShared((variable, type) => undoneBy(variable, type, variable.shared));
   }
 
   /** At the start of a loop: forget what its body (or a call or suspension in it) may change on an earlier iteration. */
   #widen(body: Block): void {
-    const effects = this.#effects.loops.get(body) ?? { assigned: new Set(), suspends: true };
-    this.#flow.forget(
-      (variable) => effects.assigned.has(variable.name) || (effects.suspends && variable.shared),
-    );
+    const effects = this.#effects.loops.get(body) ?? { writes: new Map(), suspends: true };
+    this.#flow.forget((variable, type) => {
+      const written = effects.writes.get(variable.name) ?? false;
+      const shared = effects.suspends ? variable.shared : false;
+      const how = written === "assigns" || shared === "assigns" ? "assigns" : written || shared;
+      return undoneBy(variable, type, how);
+    });
   }
 
   /**
@@ -1881,14 +2147,15 @@ class TypeChecker {
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
           if (statement.operator === "=") {
-            value.properties.set(
-              name,
-              decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
+            const added = decidedSlot(
+              this.#newPlaceType(statement.value, assigned),
+              statement.value.span,
             );
+            value.properties.set(name, added);
             const owner = this.#pathOf(target.object, scope);
             if (owner !== undefined) {
               this.#follow(extendPath(owner, name), assigned, statement.value.span);
-              this.#rewiden(owner.root);
+              this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
             }
           }
           return;
@@ -1955,17 +2222,38 @@ class TypeChecker {
       read ?? (variable === undefined ? place.type : this.#currentType(variable)),
     );
     if (variable !== undefined) this.#flow.set(variable, undefined);
+    const reported = this.diagnostics.length;
+    const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
+    const cannotCombine = (held: StaticType, added: StaticType) =>
+      `${place.subject}, so ${describeValue(added)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(held), added, statement)}`;
     // Adding or subtracting null is never supported.
     const outcome =
       resolved(nonNullType(value)).kind === "never"
         ? { failed: [kept, value] }
-        : this.#memberOperation([kept, value], [target, statement.value], (a, b) =>
-            arithmeticType(operator, a, b),
-          );
+        : this.#memberOperation([kept, value], [target, statement.value], combine);
     const result = "type" in outcome ? outcome.type : undefined;
     if (result !== undefined && isScalar(value, "calendarDuration"))
       this.#checkLocalCalendarOffset(kept, statement.value, statement.value.span);
-    if (result !== undefined && !isKnown(result)) return;
+    if (result !== undefined && !isKnown(result)) {
+      this.#checkUnknownCompound(place, kept, statement);
+      // A place or a value that so far held only null is checked as null too, in case no store gives it another value.
+      const slots =
+        this.diagnostics.length === reported
+          ? [kept, value].flatMap((operand) => nullOnlySlot(operand) ?? [])
+          : [];
+      if (slots.length > 0) {
+        const held = nullOnlySlot(kept) === undefined ? kept : NULL_TYPE;
+        const added = nullOnlySlot(value) === undefined ? value : NULL_TYPE;
+        this.#deferNullOnly(slots, () => {
+          if (
+            resolved(nonNullType(added)).kind === "never" ||
+            "failed" in this.#memberOperation([held, added], [target, statement.value], combine)
+          )
+            this.#report(typeCode.typeMismatch, cannotCombine(held, added), statement.value.span);
+        });
+      }
+      return;
+    }
     if (result === undefined) {
       const [first, second] = [resolved(kept), resolved(value)];
       if (operator === "+" && first.kind === "list" && second.kind === "list") {
@@ -1991,11 +2279,7 @@ class TypeChecker {
         );
         return;
       }
-      this.#report(
-        typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
-        statement.value.span,
-      );
+      this.#report(typeCode.typeMismatch, cannotCombine(kept, value), statement.value.span);
       return;
     }
     if (this.#widens(place, result, statement.value)) return;
@@ -2010,10 +2294,50 @@ class TypeChecker {
       // A joined list decides an element type that no value decided yet, as a store does.
       if (isCollection(resolved(result))) {
         settle(place.type, result, statement.value.span);
-        if (place.widening !== undefined) this.#rewiden(place.widening.root);
+        if (place.widening !== undefined)
+          this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       }
       if (variable !== undefined) this.#assigned(variable, result);
     }
+  }
+
+  /**
+   * Reports `+=` or `-=` with an operation of unknown result when no type that operation can give, added to or
+   * subtracted from any type the place may hold, could fit the place's type, as text never comes from `/`.
+   */
+  #checkUnknownCompound(place: Place, kept: StaticType, statement: AssignmentStatement): void {
+    const operation = unwrap(statement.value);
+    const given = this.#unknownOperations.get(operation);
+    const held = members(resolved(nonNullType(kept)));
+    if (
+      given === undefined ||
+      given.length === 0 ||
+      (operation.kind !== "binaryExpression" && operation.kind !== "unaryExpression") ||
+      !held.every(isKnown)
+    )
+      return;
+    const operator = statement.operator === "+=" ? "+" : "-";
+    const fits = held.some((member) =>
+      given.some((type) => {
+        const result = arithmeticType(operator, member, type);
+        return result !== undefined && mayFit(place.type, result);
+      }),
+    );
+    if (fits) return;
+    const results = union([...given]);
+    const text = operationText(statement.value);
+    const target = expressionLabel(statement.target);
+    const fix =
+      operator === "+" && held.some((member) => isScalar(member, "string"))
+        ? text === null || target === null
+          ? ' Put the whole calculation inside "${" and "}" instead.'
+          : ` Put the result in the text instead, as in '${target} += "\${${text}}"'.`
+        : operandFix(nonNullType(kept), results, statement);
+    this.#report(
+      typeCode.typeMismatch,
+      `${place.subject}, so the result of '${operation.operator}', which is ${describeValue(results)}, cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${fix}`,
+      statement.value.span,
+    );
   }
 
   /**
@@ -2050,6 +2374,60 @@ class TypeChecker {
           this.#storeTask({ ...place, type: fitting }, expression, value, decides),
         );
         return;
+      }
+      // An element that an operation of unknown result gives, which the elements of no member could hold, cannot fit,
+      // also inside nested literals, against what the members' elements hold at that depth.
+      if (candidates.length > 1) {
+        const pending: {
+          readonly literal: Extract<
+            Expression,
+            { kind: "listLiteral" | "setLiteral" | "dictLiteral" }
+          >;
+          readonly holders: StaticType[];
+        }[] = [{ literal, holders: candidates.map((candidate) => candidate.element) }];
+        for (let next = 0; next < pending.length; next += 1) {
+          const { literal: current, holders } = pending[next]!;
+          const held = holders.flatMap((holder) =>
+            members(resolved(nonNullType(holder))).map(resolved),
+          );
+          // A holder of values the compiler cannot know, such as `list`, may hold anything below it. Null holds none.
+          if (held.some((member) => member.kind === "unknown" || member.kind === "open")) continue;
+          for (const element of literalElements(current)) {
+            const nested = unwrap(element);
+            if (
+              nested.kind === "listLiteral" ||
+              nested.kind === "setLiteral" ||
+              nested.kind === "dictLiteral"
+            ) {
+              const kind = literalCollectionKind(nested);
+              const inner = held
+                .filter((member): member is CollectionType => member.kind === kind)
+                .map((member) => member.element);
+              if (inner.length > 0) pending.push({ literal: nested, holders: inner });
+              continue;
+            }
+            // Each holder is tested on its own: a union of them would compare the deeper levels again at every depth.
+            if (
+              (nested.kind !== "binaryExpression" && nested.kind !== "unaryExpression") ||
+              isKnown(this.#typeOf(element))
+            )
+              continue;
+            const results = this.#unknownOperations.get(nested);
+            if (
+              results === undefined ||
+              results.length === 0 ||
+              results.some((result) => held.some((member) => mayFit(member, result)))
+            )
+              continue;
+            const text = operationText(element);
+            this.#report(
+              typeCode.typeMismatch,
+              `${place.subject}, so it cannot contain the result of '${nested.operator}', which is ${describeValue(union([...results]))}.${held.some((member) => isScalar(member, "string")) ? (text === null ? ' To show it as text, put the whole calculation inside "${" and "}".' : ` To show it as text, write "\${${text}}".`) : place.label === null ? " Change its type so its elements can hold that result." : ` Change the type of '${place.label}' so its elements can hold that result.`}`,
+              element.span,
+            );
+            return;
+          }
+        }
       }
     }
     if (
@@ -2097,9 +2475,23 @@ class TypeChecker {
       // New properties join the place only when the object fits it, so one mistake does not cause more.
       if (decides && fits) for (const [name, type] of added) properties.set(name, type);
       if (decides && fits && added.length > 0 && place.widening !== undefined)
-        this.#rewiden(place.widening.root);
+        this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       return;
     }
+    if (this.#reportUnfit(place, expression, value)) return;
+    // A value that decides the place later may leave no result of the operation that fits: the end of the check tells.
+    if (
+      members(place.type).some((member) => member.kind === "open") &&
+      this.#unknownOperations.has(unwrap(expression))
+    )
+      this.#deferred.push({
+        kind: "lateStore",
+        file: this.#file,
+        at: this.diagnostics.length,
+        place,
+        expression,
+        value,
+      });
     if (isAssignable(place.type, value)) {
       // A place without a written type, or whose type the value would decide, cannot keep a mixed `choose`.
       if (place.inferred !== undefined || members(place.type).some((member) => !isKnown(member)))
@@ -2124,7 +2516,7 @@ class TypeChecker {
         place.widening !== undefined &&
         (mayGainParts || this.#unappliedWidening.has(place.widening.root))
       )
-        this.#rewiden(place.widening.root);
+        this.#rewiden(place.widening.root, { path: place.widening.path, part: place.type });
       this.#follow(place.widening, value, expression.span);
       return;
     }
@@ -2227,9 +2619,11 @@ class TypeChecker {
     ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
     const decisions = this.#decided.get(declaration);
     if (decisions !== undefined) {
-      this.#pendingDecisions.set(declaration, new Set(decisions.keys()));
+      const pending = new Map<string, readonly string[]>();
+      for (const path of decisions.keys()) pending.set(path, path === "" ? [] : path.split("."));
+      this.#pendingDecisions.set(declaration, pending);
       // A decided part may bring elements or properties that earlier checks widened.
-      if (this.#decide(declaration, own)) {
+      if (this.#decide(declaration, own).length > 0) {
         for (const path of paths?.keys() ?? []) if (path !== "") widenPath(own, path.split("."));
         ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
       }
@@ -2240,31 +2634,46 @@ class TypeChecker {
   /**
    * Widens again what earlier checks widened inside a variable, and gives new parts their origins, for elements and
    * properties that a store added after the variable was created.
+   *
+   * A store names the part it changed, so only that part and what decisions change are visited: every other part got
+   * its origins and widenings when it was added, and visiting the whole variable on each store would make an object that
+   * grows one property at a time cost the square of its size. The whole variable is visited when no part is named, when
+   * a widening that this check recorded may concern any part, or when the store's path does not lead to the part it
+   * changed.
    */
-  #rewiden(root: Declaration): void {
+  #rewiden(root: Declaration, changed?: ChangedPart): void {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
+    const whole =
+      changed === undefined ||
+      this.#unappliedWidening.has(root) ||
+      !holdsAt(variable.type, changed.path, changed.part);
     this.#unappliedWidening.delete(root);
-    this.#decide(root, variable.type);
+    const decided = this.#decide(root, variable.type);
+    const parts = whole ? [[]] : [changed.path, ...decided];
+    const keys = new Set(parts.map((part) => part.join(".")));
     for (const path of this.#widened.get(root)?.keys() ?? [])
-      if (path !== "") widenPath(variable.type, path.split("."));
-    ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
+      if (path !== "" && withinKeys(path, keys)) widenPath(variable.type, path.split("."));
+    for (const part of parts)
+      ownPartOriginsAt(variable.type, (path) => this.#partOrigin(root, path), part);
   }
 
   /**
    * Decides in a variable's type what earlier checks found decided after a read (see {@link Decided}), for the parts
-   * it has: a property that a store adds later is decided when it is added.
+   * it has: a property that a store adds later is decided when it is added. Returns the paths it decided.
    */
-  #decide(root: Declaration, type: StaticType): boolean {
+  #decide(root: Declaration, type: StaticType): (readonly string[])[] {
     const pending = this.#pendingDecisions.get(root);
-    if (pending === undefined || pending.size === 0) return false;
+    if (pending === undefined || pending.size === 0) return [];
     const decisions = this.#decided.get(root)!;
-    let decided = false;
-    for (const path of pending) {
+    const decided: (readonly string[])[] = [];
+    for (const [path, steps] of pending) {
+      // Most pending paths name a property not added yet; finding that needs no walk through the type.
+      if (lacksPath(type, steps)) continue;
       const { type: value, at } = decisions.get(path)!;
-      if (decidePath(type, path === "" ? [] : path.split("."), value, at)) {
+      if (decidePath(type, steps, value, at)) {
         pending.delete(path);
-        decided = true;
+        decided.push(steps);
       }
     }
     return decided;
@@ -2311,20 +2720,14 @@ class TypeChecker {
    */
   #follow(target: PlacePath | undefined, value: StaticType, at: SourceSpan): void {
     if (target === undefined) return;
-    for (const part of integerParts(value)) {
-      const place: PlacePath = { root: target.root, path: [...target.path, ...part.path] };
-      const key = place.path.join(".");
-      for (const origin of part.origins) {
-        const source = originPlace(origin);
-        const sourceKey = source.path.join(".");
-        if (source.root === place.root && sourceKey === key) continue;
-        const paths = this.#followers.get(source.root) ?? new Map<string, Follower[]>();
-        const followers = paths.get(sourceKey) ?? [];
-        followers.push({ place, at });
-        paths.set(sourceKey, followers);
-        this.#followers.set(source.root, paths);
-      }
-    }
+    // The origins are not listed here: a copy's parts keep every origin of what they were copied from, so listing them
+    // for each store would grow with the square of a chain of copies.
+    for (const part of integerParts(value))
+      this.#followers.push({
+        place: { root: target.root, path: [...target.path, ...part.path] },
+        at,
+        origins: part.origins,
+      });
   }
 
   /** Why a value is a number when a non-whole number widened a variable it derives from, naming that assignment. */
@@ -2341,7 +2744,8 @@ class TypeChecker {
 
   /**
    * Whether every part of a value fits a type, looking into nested list, set, and dict literals, whose own types are
-   * not decided until a place gives them one. It reports nothing and changes no type.
+   * not decided until a place gives them one, and at what an operation of unknown result can give. It reports nothing
+   * and changes no type.
    */
   *#fitsTask(type: StaticType, expression: Expression): CompileTask<boolean> {
     const literal = unwrap(expression);
@@ -2349,8 +2753,10 @@ class TypeChecker {
       literal.kind !== "listLiteral" &&
       literal.kind !== "setLiteral" &&
       literal.kind !== "dictLiteral"
-    )
-      return isAssignable(type, this.#typeOf(expression));
+    ) {
+      const value = this.#typeOf(expression);
+      return isAssignable(type, value) && this.#unfitResults(expression, value, type) === undefined;
+    }
     const kind = literalCollectionKind(literal);
     for (const member of members(nonNullType(type))) {
       if (member.kind === "unknown" || member.kind === "open") return true;
@@ -2389,13 +2795,7 @@ class TypeChecker {
     const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
       isCollection(member)
-        ? [
-            {
-              ...elementPlace(member, label, nullable, this.#text, inferred, owner),
-              ...(verb === undefined ? {} : { verb }),
-              listed,
-            },
-          ]
+        ? [elementPlace(member, label, nullable, this.#text, inferred, owner, verb, listed)]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -2416,9 +2816,24 @@ class TypeChecker {
       this.#reportMayBe(collectionExpression, collections[1]!, [collections[0]!]);
       return;
     }
-    const passing = collections.filter((_, index) => isAssignable(places[index]!.type, value));
+    // A part of unknown type fits a member only if a result of an operation that gives it could.
+    const unknownParts = containsType(value, (part) => part.kind === "unknown");
+    const passing: StaticType[] = [];
+    for (const [index, member] of collections.entries())
+      if (
+        isAssignable(places[index]!.type, value) &&
+        (!unknownParts || (yield* compileChild(this.#fitsTask(places[index]!.type, expression))))
+      )
+        passing.push(member);
     if (passing.length === collections.length) {
       for (const place of places) yield* compileChild(this.#storeTask(place, expression, value));
+      return;
+    }
+    // Which member holds the collection is known only when the script runs, which checks such a value then.
+    if (passing.length > 0 && unknownParts) {
+      for (const [index, place] of places.entries())
+        if (passing.includes(collections[index]!))
+          yield* compileChild(this.#storeTask(place, expression, value));
       return;
     }
     if (passing.length > 0) {
@@ -2712,24 +3127,36 @@ class TypeChecker {
 
   /**
    * One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. A
-   * return value of unknown type makes the result unknown, but the known values must still agree.
+   * return value of unknown type makes the result unknown, but the known values must still agree, also beside a value
+   * the compiler cannot know inside a return or a place such a value reached. Every return must also fit the result, so
+   * a value that fails either join is an error.
    */
   #inferredResult(context: FunctionContext): StaticType {
     const join = new TypeJoin();
+    const known = new TypeJoin(true);
+    // A return that holds only null decides no type, so a value of another type is compared with the first that does,
+    // and where known values disagree, with the first that holds no value the compiler cannot know, if there is one.
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
+    let firstKnown: typeof first;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
-      first ??= returned;
-      if (!join.add(returned.type))
+      const fits = join.add(returned.type);
+      const agrees = known.add(returned.type);
+      if (!fits || !agrees) {
+        const earlier = agrees ? first! : (firstKnown ?? first!);
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first.type)} on line ${first.span.start.line + 1}.${returnUnionFix(context.fn.declaration, first.type, returned.type)}`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(earlier.type)} on line ${earlier.span.start.line + 1}.${returnUnionFix(context.fn.declaration, agrees ? join.type : known.type, returned.type)}`,
           returned.span,
         );
+      } else if (decidedValue(returned.type).kind !== "never") {
+        first ??= returned;
+        if (firstKnown === undefined && !mayBeUnknown(returned.type)) firstKnown = returned;
+      }
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
-    if (first === undefined) return NULL_TYPE;
+    if (context.returns.length === 0) return NULL_TYPE;
     return context.returnsNull ? optional(join.type) : join.type;
   }
 
@@ -2922,8 +3349,9 @@ class TypeChecker {
   }
 
   /**
-   * A range that `for` goes through or `randomInteger` draws from has whole-number bounds (V30 §6): a bound of type
-   * `number` is an error rather than a truncation. A bound the compiler cannot know is checked at runtime.
+   * A range that `for` goes through, `randomInteger` draws from, or a wait or timer counts in units has whole-number
+   * bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler cannot know is
+   * checked at runtime.
    */
   #checkWholeRangeBounds(expression: Expression, bound: string): void {
     const range = unwrap(expression);
@@ -3944,9 +4372,14 @@ class TypeChecker {
           const rule = `'${node.operator}' needs true or false (boolean) values`;
           const left = yield* compileChild(this.#branchTask(node.left, scope));
           this.#requireBoolean(left.type, node.left, rule);
-          // The right operand runs only when the left one did not decide the result.
+          // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
+          // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
-          this.#flow.apply(runsRight);
+          this.#flow.apply(
+            runsRight ??
+              (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
+              null,
+          );
           const right = yield* compileChild(this.#branchTask(node.right, scope));
           this.#requireBoolean(right.type, node.right, rule);
           const reached = runsRight !== null;
@@ -4354,6 +4787,34 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
     result: (...values: StaticType[]) => StaticType | undefined,
   ): StaticType {
+    const reported = this.diagnostics.length;
+    const type = this.#checkedOperation(operator, operands, expression, result);
+    // An operand that so far held only null, such as `v` after `let v = null` once a loop or a block may have stored
+    // in it, is checked as null too, in case no store gives it another value.
+    const slots = operands.flatMap((operand) => nullOnlySlot(operand) ?? []);
+    if (slots.length > 0 && this.diagnostics.length === reported) {
+      const possible = this.#unknownOperations.get(expression);
+      this.#deferNullOnly(slots, () => {
+        this.#checkedOperation(
+          operator,
+          operands.map((operand) => (nullOnlySlot(operand) === undefined ? operand : NULL_TYPE)),
+          expression,
+          result,
+        );
+      });
+      if (possible === undefined) this.#unknownOperations.delete(expression);
+      else this.#unknownOperations.set(expression, possible);
+    }
+    return type;
+  }
+
+  #checkedOperation(
+    operator: string,
+    operands: readonly StaticType[],
+    expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
+    result: (...values: StaticType[]) => StaticType | undefined,
+  ): StaticType {
+    const reported = this.diagnostics.length;
     const outcome = this.#memberOperation(
       operands,
       expression.kind === "binaryExpression"
@@ -4361,15 +4822,190 @@ class TypeChecker {
         : [expression.operand],
       result,
     );
-    if ("type" in outcome) return outcome.type;
+    let failed: readonly StaticType[];
+    if ("type" in outcome) {
+      if (
+        isKnown(outcome.type) ||
+        this.diagnostics.length !== reported ||
+        ["<", "<=", ">", ">="].includes(operator)
+      )
+        return outcome.type;
+      const possible = this.#possibleResults(operands, expression, result);
+      // Left unrecorded, an operation whose operand already failed passes that on without a message of its own, to the
+      // operations, stores, and compound assignments around it.
+      if (possible.failed) return outcome.type;
+      if (possible.results.length > 0) this.#unknownOperations.set(expression, possible.results);
+      // What an inner operation can give works with nothing the other operand may be, so this always fails.
+      if (possible.results.length > 0 || possible.narrowed === null) return outcome.type;
+      failed = possible.narrowed;
+    } else failed = outcome.failed;
     const command = this.#timeOperands.get(expression);
     this.#report(
       typeCode.invalidOperand,
-      (command === undefined ? null : groupedUnitMessage(command, expression, outcome.failed)) ??
-        operatorMessage(operator, expression, outcome.failed),
+      (command === undefined ? null : groupedUnitMessage(command, expression, failed)) ??
+        operatorMessage(operator, expression, failed),
       expression.span,
     );
     return UNKNOWN_TYPE;
+  }
+
+  /**
+   * For a value of unknown type from an operation, the types the operation could give when none of them fits a place of
+   * type `type`, as text never comes from `/`. An operand of unknown type stands for every type an operator takes.
+   */
+  #unfitResults(
+    expression: Expression,
+    value: StaticType,
+    type: StaticType,
+  ): { readonly operator: string; readonly results: StaticType } | undefined {
+    const operated = unwrap(expression);
+    if (isKnown(value) || !isKnown(type)) return undefined;
+    if (operated.kind !== "binaryExpression" && operated.kind !== "unaryExpression")
+      return undefined;
+    const results = this.#unknownOperations.get(operated);
+    if (
+      results === undefined ||
+      results.length === 0 ||
+      results.some((result) => mayFit(type, result))
+    )
+      return undefined;
+    return { operator: operated.operator, results: union(results) };
+  }
+
+  /**
+   * Reports a value from an operation that gives no type that fits the place (see {@link #unfitResults}), and returns
+   * whether it did.
+   */
+  #reportUnfit(place: Place, expression: Expression, value: StaticType): boolean {
+    const unfit = this.#unfitResults(expression, value, place.type);
+    if (unfit === undefined) return false;
+    const text = operationText(expression);
+    // Another place suggests the type the operator gives for numbers, which is what such a value usually holds.
+    const results = members(unfit.results);
+    const fix = members(resolved(nonNullType(place.type))).some((member) =>
+      isScalar(member, "string"),
+    )
+      ? text === null
+        ? ' To show it as text, put the whole calculation inside "${" and "}".'
+        : ` To show it as text, write "\${${text}}".`
+      : place.fix(results.find((result) => isNumeric(result)) ?? results[0]!, expression);
+    this.#report(
+      typeCode.typeMismatch,
+      `${place.subject}, so it cannot ${place.verb} the result of '${unfit.operator}', which is ${describeValue(unfit.results)}.${fix}`,
+      expression.span,
+    );
+    return true;
+  }
+
+  /**
+   * The types an operation of unknown result can give: every combination of its operands' members, where an operand of
+   * unknown type stands for what the operation that gives it can give, or else for every type an operator takes. With
+   * an operand that such an operation gives, also the operand types this used, for the message when none works.
+   */
+  #possibleResults(
+    operands: readonly StaticType[],
+    expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
+    result: (...values: StaticType[]) => StaticType | undefined,
+  ): {
+    readonly results: readonly StaticType[];
+    readonly narrowed: readonly StaticType[] | null;
+    readonly failed: boolean;
+  } {
+    const expressions =
+      expression.kind === "binaryExpression"
+        ? [expression.left, expression.right]
+        : [expression.operand];
+    let narrowed = false;
+    // An operand that is an operation the check did not record already reported why it fails.
+    let failed = false;
+    const [lefts, rights] = operands.map((operand, index) =>
+      members(resolved(nonNullTypeForUse(operand))).flatMap((member) => {
+        if (isKnown(member)) return [member];
+        const operation = unwrap(expressions[index]!);
+        const given = this.#unknownOperations.get(operation);
+        if (given === undefined) {
+          failed ||= operation.kind === "binaryExpression" || operation.kind === "unaryExpression";
+          return OPERAND_KINDS;
+        }
+        narrowed = true;
+        return given;
+      }),
+    );
+    const results: StaticType[] = [];
+    for (const left of lefts!)
+      for (const right of rights ?? [undefined]) {
+        const type = right === undefined ? result(left) : result(left, right);
+        if (type !== undefined && !results.some((known) => sameType(known, type)))
+          results.push(type);
+      }
+    return {
+      results,
+      failed,
+      narrowed:
+        narrowed && !failed
+          ? [lefts!, rights].flatMap((side) => (side === undefined ? [] : [union(side)]))
+          : null,
+    };
+  }
+
+  /**
+   * Runs `check` for an operation whose operands in `slots` so far held only null, and keeps what it reports for the
+   * end of the check instead of reporting it now.
+   */
+  #deferNullOnly(slots: readonly OpenType[], check: () => void): void {
+    const before = this.diagnostics.length;
+    check();
+    const found = this.diagnostics.splice(before);
+    if (found.length > 0)
+      this.#deferred.push({
+        kind: "nullOnly",
+        file: this.#file,
+        at: before,
+        slots,
+        diagnostics: found,
+      });
+  }
+
+  /**
+   * Reports the checks of {@link #deferred} that fail at the end of the check, at the place among the other diagnostics
+   * of their file where they would have been reported: operations whose operands held only null to the end, and stores
+   * that no result of their operation could fit once a later value decided the place's type.
+   */
+  #reportDeferred(): void {
+    const known = new Map<OpenType, boolean>();
+    const byFile = new Map<
+      number,
+      { readonly at: number; readonly found: readonly Diagnostic[] }[]
+    >();
+    const current = this.#file;
+    for (const check of this.#deferred) {
+      let found: readonly Diagnostic[] = [];
+      if (check.kind === "nullOnly") {
+        if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
+      } else {
+        // The message names lines as seen from the store's file.
+        this.#file = check.file;
+        const before = this.diagnostics.length;
+        if (this.#reportUnfit(check.place, check.expression, check.value))
+          found = this.diagnostics.splice(before);
+      }
+      if (found.length === 0) continue;
+      const reports = byFile.get(check.file) ?? [];
+      reports.push({ at: check.at, found });
+      byFile.set(check.file, reports);
+    }
+    this.#file = current;
+    for (const [file, reports] of byFile) {
+      const diagnostics = this.fileDiagnostics[file]!;
+      const merged: Diagnostic[] = [];
+      let next = 0;
+      for (const report of reports) {
+        for (; next < report.at; next += 1) merged.push(diagnostics[next]!);
+        for (const diagnostic of report.found) merged.push(diagnostic);
+      }
+      for (; next < diagnostics.length; next += 1) merged.push(diagnostics[next]!);
+      this.fileDiagnostics[file] = merged;
+    }
   }
 
   /**
@@ -5927,6 +6563,12 @@ class TypeChecker {
         expression,
         "A time before a unit is a number",
       );
+      // A range counts whole units, as `for` counts whole numbers.
+      if (command !== "media")
+        this.#checkWholeRangeBounds(
+          expression,
+          command === "wait" ? "A wait range bound" : "A timer range bound",
+        );
       return;
     }
     const range = resolved(nonNullTypeForUse(type)).kind === "range";
@@ -6339,9 +6981,16 @@ class Flow {
     return changes;
   }
 
-  forget(test: (variable: Variable) => boolean): void {
-    for (const fact of allFacts(test === sharedVariable ? this.#shared : this.#facts))
-      if (test(fact.variable)) this.set(fact.variable, undefined);
+  /** Forgets what is known about the variables where `test` holds. */
+  forget(test: (variable: Variable, type: StaticType) => boolean): void {
+    for (const fact of allFacts(this.#facts))
+      if (test(fact.variable, fact.type)) this.set(fact.variable, undefined);
+  }
+
+  /** Forgets what is known about variables that other code may change, where `test` holds. */
+  forgetShared(test: (variable: Variable, type: StaticType) => boolean): void {
+    for (const fact of allFacts(this.#shared))
+      if (test(fact.variable, fact.type)) this.set(fact.variable, undefined);
   }
 
   /**
@@ -6442,13 +7091,37 @@ function allFacts(root: FactNode | undefined): Fact[] {
   return facts;
 }
 
-function sharedVariable(variable: Variable): boolean {
-  return variable.shared;
+/**
+ * Whether a change of the kind `how` may undo what is known about a variable: its narrowed `type`. An assignment may
+ * undo anything. A change in place keeps the variable on the same list, set, dict, or object, so it is never null after
+ * it, but it may change which type that value has: an empty list that both `integer[]` and `string[]` hold may take a
+ * text, and a list that `xs is integer[]` found among the lists of a `list` may too. So only a declared member itself,
+ * the only one of its kind, stays known.
+ */
+function undoneBy(variable: Variable, type: StaticType, how: Sharing | false): boolean {
+  if (how !== "changes") return how === "assigns";
+  const declared = members(variable.type).map(resolved);
+  if (declared.some((member) => member.kind === "unknown" || member.kind === "open")) return true;
+  return members(type).some((member) => {
+    const value = resolved(member);
+    if (
+      value.kind !== "list" &&
+      value.kind !== "set" &&
+      value.kind !== "dict" &&
+      value.kind !== "object"
+    )
+      return false;
+    const sameKind = declared.filter((other) => other.kind === value.kind);
+    return sameKind.length !== 1 || sameKind[0] !== value;
+  });
 }
 
-/** What one iteration of a loop may do before the next test: the variables it assigns, and whether it may suspend. */
+/**
+ * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
+ * may suspend.
+ */
 interface LoopEffects {
-  readonly assigned: ReadonlySet<string>;
+  readonly writes: ReadonlyMap<string, Sharing>;
   readonly suspends: boolean;
 }
 
@@ -6471,10 +7144,10 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 
 /** What a program's loops and functions may change (ADR 0021 rule 5.5). */
 interface ProgramEffects {
-  /** Names that function bodies and timer or media blocks assign. */
-  readonly shared: ReadonlySet<string>;
-  /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
-  readonly rootAssigned: ReadonlySet<string>;
+  /** Names that function bodies and timer or media blocks assign or change in place. */
+  readonly shared: ReadonlyMap<string, Sharing>;
+  /** Names that the file's top level assigns or changes, which another file's `call` may run (ADR 0022 §5). */
+  readonly rootAssigned: ReadonlyMap<string, Sharing>;
   /** Whether the file calls a file, so another file's top level may run during the call. */
   readonly callsFiles: boolean;
   /** Whether the file enters `main.tease` again at its top, after the start values have run. */
@@ -6486,7 +7159,7 @@ interface ProgramEffects {
 interface LoopNode {
   readonly body: Block;
   readonly parent: LoopNode | null;
-  readonly assigned: Set<string>;
+  readonly writes: Map<string, Sharing>;
   suspends: boolean;
 }
 
@@ -6499,8 +7172,12 @@ type EffectWork =
  * include those of the loops inside it, but not those of timer or media blocks it starts, which run later.
  */
 function programEffects(program: Program): ProgramEffects {
-  const shared = new Set<string>();
-  const rootAssigned = new Set<string>();
+  const shared = new Map<string, Sharing>();
+  const rootAssigned = new Map<string, Sharing>();
+  const write = (name: string, how: Sharing, loop: LoopNode | null, inside: boolean): void => {
+    noteSharing(inside ? shared : rootAssigned, name, how);
+    if (loop !== null) noteSharing(loop.writes, name, how);
+  };
   let callsFiles = false;
   let entersMain = false;
   const nodes: LoopNode[] = [];
@@ -6514,7 +7191,7 @@ function programEffects(program: Program): ProgramEffects {
       work.push({ statement: statements[index]!, loop, inside });
   };
   const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
-    const node: LoopNode = { body, parent, assigned: new Set(), suspends: false };
+    const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
     nodes.push(node);
     return node;
   };
@@ -6545,11 +7222,7 @@ function programEffects(program: Program): ProgramEffects {
         COLLECTION_CHANGES.has(callee.property.name)
       ) {
         const root = rootName(callee.object);
-        if (root !== null) {
-          if (inside) shared.add(root);
-          else rootAssigned.add(root);
-          loop?.assigned.add(root);
-        }
+        if (root !== null) write(root, "changes", loop, inside);
       }
       handlers(expression);
       for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
@@ -6568,15 +7241,12 @@ function programEffects(program: Program): ProgramEffects {
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
     if (statement.kind === "globalStatement" && statement.assignment !== null)
-      (inside ? shared : rootAssigned).add(statement.name.name);
+      noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
-      // A store into an element or property changes the variable that holds it, too.
+      // A store into an element or property changes the variable that holds it in place, too.
       const root = rootName(statement.target);
-      if (root !== null) {
-        if (inside) shared.add(root);
-        else rootAssigned.add(root);
-        loop?.assigned.add(root);
-      }
+      if (root !== null)
+        write(root, statement.target.kind === "identifier" ? "assigns" : "changes", loop, inside);
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
@@ -6609,7 +7279,7 @@ function programEffects(program: Program): ProgramEffects {
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const node = nodes[index]!;
     if (node.parent === null) continue;
-    for (const name of node.assigned) node.parent.assigned.add(name);
+    for (const [name, how] of node.writes) noteSharing(node.parent.writes, name, how);
     node.parent.suspends ||= node.suspends;
   }
   return {
@@ -6618,7 +7288,7 @@ function programEffects(program: Program): ProgramEffects {
     callsFiles,
     entersMain,
     loops: new Map(
-      nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
+      nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
 }
@@ -6765,6 +7435,15 @@ function isWhileTrue(
 
 /** Methods that change the list or set they are called on. */
 /** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
+/** Whether a value of type `result` may fit a place of type `type` when the script runs, where a number may be whole. */
+function mayFit(type: StaticType, result: StaticType): boolean {
+  return (
+    isAssignable(type, result) ||
+    (isScalar(result, "number") &&
+      members(resolved(type)).some((member) => isScalar(member, "integer")))
+  );
+}
+
 const OPERAND_KINDS: readonly StaticType[] = [
   INTEGER_TYPE,
   NUMBER_TYPE,
@@ -7000,7 +7679,9 @@ function variablePlace(variable: Variable, text: PlaceText): Place {
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
-    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
   };
@@ -7013,20 +7694,24 @@ function elementPlace(
   text: PlaceText,
   inferred = false,
   owner?: PlacePath,
+  verb = "contain",
+  listed = false,
 ): Place {
-  const subject = name === null ? `This ${collection.kind}` : `'${name}'`;
-  const element = resolved(collection.element);
+  const holder = name === null ? `This ${collection.kind}` : `'${name}'`;
   return {
     type: collection.element,
     widening: extendPath(owner, "[]"),
     inferred: inferred ? "part" : undefined,
     label: null,
     elementOf: name,
-    subject:
-      element.kind === "open"
-        ? `${subject} holds a ${collection.kind}`
-        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`,
-    verb: "contain",
+    get subject() {
+      const element = resolved(collection.element);
+      return element.kind === "open"
+        ? `${holder} holds a ${collection.kind}`
+        : `${holder} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`;
+    },
+    verb,
+    listed,
     fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
   };
 }
@@ -7062,7 +7747,9 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
-    subject: `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`,
+    get subject() {
+      return `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`;
+    },
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
@@ -8199,6 +8886,19 @@ function conversionFix(
   return undefined;
 }
 
+/** The source of an operation on variables, properties, or numbers, such as `x / 4`; `null` for anything longer. */
+function operationText(expression: Expression): string | null {
+  const operation = unwrap(expression);
+  const operand = (part: Expression): string | null => expressionLabel(part) ?? literalText(part);
+  if (operation.kind === "unaryExpression") {
+    const text = operand(operation.operand);
+    return text === null ? null : `${operation.operator}${text}`;
+  }
+  if (operation.kind !== "binaryExpression") return null;
+  const [left, right] = [operand(operation.left), operand(operation.right)];
+  return left === null || right === null ? null : `${left} ${operation.operator} ${right}`;
+}
+
 function literalText(expression: Expression): string | null {
   const literal = unwrap(expression);
   if (literal.kind === "numberLiteral") return literal.raw;
@@ -8288,13 +8988,16 @@ function sourceText(expression: Expression): string | null {
   return null;
 }
 
-/** How to let a function return values of two types: declare a union result type. */
+/**
+ * How to let a function return values of two types: declare a union result type of `earlier`, what the returns before
+ * gave, and `other`.
+ */
 function returnUnionFix(
   declaration: FunctionDeclaration,
-  first: StaticType,
+  earlier: StaticType,
   other: StaticType,
 ): string {
-  const both = union([first, other]);
+  const both = union([earlier, other]);
   if (!isAnnotatable(both))
     return " A function returns one type. Use a separate function for values of another type.";
   const parameters = declaration.parameters.length === 0 ? "" : "(...)";

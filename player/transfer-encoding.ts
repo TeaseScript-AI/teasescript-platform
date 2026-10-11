@@ -48,10 +48,16 @@ export async function measuredJsonFile(
   return { file: new Blob([await compressed], { type: "application/gzip" }), jsonBytes };
 }
 
-/** Joins small pieces into ones of about `PIECE_LENGTH` characters. */
+/** Joins small pieces into ones of about `PIECE_LENGTH` characters; a longer piece stays as it is. */
 function* batched(pieces: Iterable<string>): Generator<string> {
   let pending = "";
   for (const piece of pieces) {
+    if (piece.length >= PIECE_LENGTH) {
+      if (pending !== "") yield pending;
+      pending = "";
+      yield piece;
+      continue;
+    }
     pending += piece;
     if (pending.length >= PIECE_LENGTH) {
       yield pending;

@@ -6,7 +6,11 @@ import {
 } from "../src/index.js";
 import { isMessagePresentation } from "../src/message-presentation.js";
 import { isFormUi, validFormResult } from "../src/runtime/actions/form.js";
-import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
+import {
+  storableCapturedMedia,
+  type CapturedMediaRecord,
+  type CapturedMediaRepository,
+} from "./captured-media.js";
 import type { MediaInUse } from "./captured-media-persistence.js";
 import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-export.js";
 import type { DebugHistoryMarks } from "./debug-history.js";
@@ -131,15 +135,48 @@ const REFERENCES_IN_TEXT =
  * session that cannot be read rejects, so a sweep defers.
  */
 export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaInUse | undefined {
-  return (
-    store &&
-    (async (scope) => capturedMediaReferencesInJson(JSON.stringify(await store.session(scope))))
-  );
+  return store && (async (scope) => capturedMediaReferencesIn(await store.session(scope)));
 }
 
-/** The captured-media references in serialized state, such as photos a session shows or holds in variables. */
-export function capturedMediaReferencesInJson(json: string): Set<string> {
-  return new Set(json.match(REFERENCES_IN_TEXT));
+/**
+ * The captured-media references in session data, such as photos a session shows or holds in variables: the references in
+ * its JSON, written one field of a record and one element of a list at a time rather than as one text. JSON decides
+ * everything else, as for the whole: a value it leaves out has none, and one it cannot write, such as a cycle, throws.
+ * A text is searched as it is, since a reference has no character JSON escapes.
+ */
+export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
+  const found = new Set<string>();
+  const search = (value: unknown): void => {
+    const json = typeof value === "string" ? value : JSON.stringify(value);
+    if (json !== undefined)
+      for (const [reference] of json.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
+  };
+  const searchElements = (value: unknown): void => {
+    if (!Array.isArray(value)) search(value);
+    // JSON writes a hole or a value it leaves out of a list as null, which has none.
+    else for (let index = 0; index < value.length; index += 1) search(value[index]);
+  };
+  for (const value of data) {
+    if (!isPlainRecord(value)) searchElements(value);
+    else
+      for (const [key, field] of Object.entries(value)) {
+        // JSON leaves out a field whose value it cannot write, and with it its key.
+        if (field === undefined || typeof field === "function" || typeof field === "symbol")
+          continue;
+        search(key);
+        searchElements(field);
+      }
+  }
+  return found;
+}
+
+/** A record JSON writes field by field: a plain object, not a list or a boxed value such as `new String()`. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    typeof value["toJSON"] !== "function"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -233,7 +270,10 @@ function validEvent(event: Record<string, unknown>): boolean {
   }
 }
 
-/** A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers checked against it. */
+/**
+ * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers and shown options
+ * checked against it.
+ */
 function validSettlement(settlement: unknown): boolean {
   if (
     !isRecord(settlement) ||
@@ -258,6 +298,7 @@ function validSettlement(settlement: unknown): boolean {
         ui,
         settlement["result"],
         transcriptText,
+        settlement["shownOptions"],
         settlement["settlementKind"] === "timedOut",
       ))
   );
@@ -375,15 +416,17 @@ export function memoryKeptRoomStore(): KeptRoomStore {
   };
 }
 
-const DATABASE_VERSION = 1;
+// 2: keeps each session's plan in a record of its own in `plans`, so keeping a step rewrites only what changed.
+const DATABASE_VERSION = 2;
 const ROOMS = "rooms";
 const SESSIONS = "sessions";
+const PLANS = "plans";
 const EVENTS = "events";
 const MEDIA = "media";
 
 /**
- * Opens the kept sessions of this browser in IndexedDB (`teasescript-kept-sessions`): sessions, events by scope and
- * position, and photos by scope and reference. Each operation is one transaction. Rejects when IndexedDB is unavailable
+ * Opens the kept sessions of this browser in IndexedDB (`teasescript-kept-sessions`): sessions and their plans by scope,
+ * events by scope and position, and photos by scope and reference. Each operation is one transaction. Rejects when IndexedDB is unavailable
  * or refused.
  */
 export async function openIndexedDbKeptSessionStore(
@@ -409,12 +452,22 @@ function openDatabase(name: string, rooms: boolean): Promise<IDBDatabase> {
       return;
     }
     const request = indexedDB.open(name, DATABASE_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
-      if (rooms) database.createObjectStore(ROOMS, { keyPath: "scope" });
-      database.createObjectStore(SESSIONS, { keyPath: "scope" });
-      database.createObjectStore(EVENTS);
-      database.createObjectStore(MEDIA, { keyPath: ["namespace", "reference"] });
+      if (event.oldVersion === 0) {
+        if (rooms) database.createObjectStore(ROOMS, { keyPath: "scope" });
+        database.createObjectStore(SESSIONS, { keyPath: "scope" });
+        database.createObjectStore(EVENTS);
+        database.createObjectStore(MEDIA, { keyPath: ["namespace", "reference"] });
+      } else {
+        // Sessions kept in version 1, each with its plan, are not carried over: their scripts show Start (owner
+        // decision, 2026-10-09). A debug room keeps its saved values and photos; kept sessions' photos go with them.
+        const upgrade = request.transaction!;
+        upgrade.objectStore(SESSIONS).clear();
+        upgrade.objectStore(EVENTS).clear();
+        if (!rooms) upgrade.objectStore(MEDIA).clear();
+      }
+      database.createObjectStore(PLANS, { keyPath: "scope" });
     };
     request.onblocked = () =>
       reject(new DOMException("Kept session storage is blocked.", "InvalidStateError"));
@@ -452,7 +505,10 @@ function transact<T>(
     let result: T;
     let failure: Error | null = null;
     transaction.oncomplete = () => resolve(result);
-    transaction.onabort = transaction.onerror = () =>
+    // A request's error reaches the transaction before the transaction has an error of its own, so it is the cause.
+    transaction.onerror = (event) =>
+      reject(failure ?? requestError(event) ?? new DOMException("Aborted.", "AbortError"));
+    transaction.onabort = () =>
       reject(failure ?? transaction.error ?? new DOMException("Aborted.", "AbortError"));
     work(
       transaction,
@@ -465,6 +521,10 @@ function transact<T>(
   });
 }
 
+/** The error of the request an `error` event comes from, or `null`. */
+const requestError = (event: Event) =>
+  event.target instanceof IDBRequest ? event.target.error : null;
+
 const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
   request.onsuccess = () => then(request.result);
 };
@@ -472,45 +532,57 @@ const got = <T>(request: IDBRequest<T>, then: (value: T) => void) => {
 function indexedDbStore(database: IDBDatabase): KeptSessionStore {
   return {
     session: (scope) =>
-      transact(database, [SESSIONS, EVENTS], "readonly", (transaction, done) =>
+      transact(database, [SESSIONS, PLANS, EVENTS], "readonly", (transaction, done) =>
         got(
           transaction.objectStore(SESSIONS).get(scope),
           (session: Record<string, unknown> | undefined) => {
             if (session === undefined) return done(null);
-            got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (events) =>
-              done({
-                planJson: session["planJson"],
-                snapshotJson: session["snapshotJson"],
-                marks: session["marks"],
-                events,
-              }),
+            got(
+              transaction.objectStore(PLANS).get(scope),
+              (plan: Record<string, unknown> | undefined) =>
+                got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (events) =>
+                  done({
+                    planJson: plan?.["planJson"],
+                    snapshotJson: session["snapshotJson"],
+                    marks: session["marks"],
+                    events,
+                  }),
+                ),
             );
           },
         ),
       ),
+    // The plan never changes while the session runs, so it is written only when it is given, which the session's first
+    // step does, and goes with the session: a later step reads and writes only the snapshot, marks, event count, and new
+    // events, and its plan is there whenever its session is.
     publish: (scope, update) =>
-      transact<void>(database, [SESSIONS, EVENTS], "readwrite", (transaction, _done, fail) => {
-        const sessions = transaction.objectStore(SESSIONS);
-        got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
-          const planJson = update.planJson ?? previous?.["planJson"];
-          const eventCount = previous?.["eventCount"] ?? 0;
-          if (typeof planJson !== "string") return fail(noPlan());
-          if (typeof eventCount !== "number" || update.eventsFrom > eventCount)
-            return fail(eventGap());
-          const events = transaction.objectStore(EVENTS);
-          events.delete(eventsFrom(scope, update.eventsFrom));
-          update.events.forEach((event, index) =>
-            events.put(event, [scope, update.eventsFrom + index]),
-          );
-          sessions.put({
-            scope,
-            planJson,
-            snapshotJson: update.snapshotJson,
-            marks: update.marks,
-            eventCount: update.eventsFrom + update.events.length,
+      transact<void>(
+        database,
+        [SESSIONS, PLANS, EVENTS],
+        "readwrite",
+        (transaction, _done, fail) => {
+          const sessions = transaction.objectStore(SESSIONS);
+          if (update.planJson !== null)
+            transaction.objectStore(PLANS).put({ scope, planJson: update.planJson });
+          got(sessions.get(scope), (previous: Record<string, unknown> | undefined) => {
+            if (update.planJson === null && previous === undefined) return fail(noPlan());
+            const eventCount = previous?.["eventCount"] ?? 0;
+            if (typeof eventCount !== "number" || update.eventsFrom > eventCount)
+              return fail(eventGap());
+            const events = transaction.objectStore(EVENTS);
+            events.delete(eventsFrom(scope, update.eventsFrom));
+            update.events.forEach((event, index) =>
+              events.put(event, [scope, update.eventsFrom + index]),
+            );
+            sessions.put({
+              scope,
+              snapshotJson: update.snapshotJson,
+              marks: update.marks,
+              eventCount: update.eventsFrom + update.events.length,
+            });
           });
-        });
-      }),
+        },
+      ),
     media: {
       get: (namespace, reference) =>
         transact(database, [MEDIA], "readonly", (transaction, done) =>
@@ -518,11 +590,19 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
             done(record ?? null),
           ),
         ),
-      // `add`, unlike `put`, fails instead of overwriting an existing record.
-      add: (record) =>
-        transact<void>(database, [MEDIA], "readwrite", (transaction) => {
-          transaction.objectStore(MEDIA).add(record);
-        }),
+      // `add`, unlike `put`, fails instead of overwriting an existing record. Each keep offers every photo of the
+      // session, so one kept already fails before its bytes are read again.
+      add: async (record) => {
+        const key = [record.namespace, record.reference];
+        const kept = await transact<boolean>(database, [MEDIA], "readonly", (transaction, done) =>
+          got(transaction.objectStore(MEDIA).getKey(key), (found) => done(found !== undefined)),
+        );
+        if (kept) throw new DOMException("The photo is stored already.", "ConstraintError");
+        const stored = await storableCapturedMedia(record);
+        return transact<void>(database, [MEDIA], "readwrite", (transaction) => {
+          transaction.objectStore(MEDIA).add(stored);
+        });
+      },
       delete: (namespace, reference) =>
         transact<void>(database, [MEDIA], "readwrite", (transaction) => {
           transaction.objectStore(MEDIA).delete([namespace, reference]);
@@ -539,8 +619,9 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
         ),
     },
     discard: (scope) =>
-      transact<void>(database, [SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
+      transact<void>(database, [SESSIONS, PLANS, EVENTS, MEDIA], "readwrite", (transaction) => {
         transaction.objectStore(SESSIONS).delete(scope);
+        transaction.objectStore(PLANS).delete(scope);
         transaction.objectStore(EVENTS).delete(scopeRange(scope));
         transaction.objectStore(MEDIA).delete(scopeRange(scope));
       }),
@@ -580,19 +661,23 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       ),
     create(scope, entries, photos) {
       checkedEntries(entries);
-      return transact<void>(
-        database,
-        [ROOMS, SESSIONS, EVENTS, MEDIA],
-        "readwrite",
-        (transaction) => {
-          // Nothing of an earlier room may stay; `add` fails when the scope has a room.
-          transaction.objectStore(SESSIONS).delete(scope);
-          transaction.objectStore(EVENTS).delete(scopeRange(scope));
-          transaction.objectStore(MEDIA).delete(scopeRange(scope));
-          transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
-          for (const photo of photos)
-            transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
-        },
+      // The photos' bytes are read before the transaction starts, which commits once no request of it is pending.
+      return Promise.all(photos.map(storableCapturedMedia)).then((stored) =>
+        transact<void>(
+          database,
+          [ROOMS, SESSIONS, PLANS, EVENTS, MEDIA],
+          "readwrite",
+          (transaction) => {
+            // Nothing of an earlier room may stay; `add` fails when the scope has a room.
+            transaction.objectStore(SESSIONS).delete(scope);
+            transaction.objectStore(PLANS).delete(scope);
+            transaction.objectStore(EVENTS).delete(scopeRange(scope));
+            transaction.objectStore(MEDIA).delete(scopeRange(scope));
+            transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
+            for (const photo of stored)
+              transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
+          },
+        ),
       );
     },
     values: (scope) => ({
@@ -619,11 +704,17 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       clear: () => changeValues(scope, () => []),
     }),
     discard: (scope) =>
-      transact<void>(database, [ROOMS, SESSIONS, EVENTS, MEDIA], "readwrite", (transaction) => {
-        transaction.objectStore(ROOMS).delete(scope);
-        transaction.objectStore(SESSIONS).delete(scope);
-        transaction.objectStore(EVENTS).delete(scopeRange(scope));
-        transaction.objectStore(MEDIA).delete(scopeRange(scope));
-      }),
+      transact<void>(
+        database,
+        [ROOMS, SESSIONS, PLANS, EVENTS, MEDIA],
+        "readwrite",
+        (transaction) => {
+          transaction.objectStore(ROOMS).delete(scope);
+          transaction.objectStore(SESSIONS).delete(scope);
+          transaction.objectStore(PLANS).delete(scope);
+          transaction.objectStore(EVENTS).delete(scopeRange(scope));
+          transaction.objectStore(MEDIA).delete(scopeRange(scope));
+        },
+      ),
   };
 }

@@ -24,7 +24,13 @@ function settled<T>(request: IDBRequest<T>): Promise<T> {
 function committed(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = transaction.onabort = () =>
+    // A request's error reaches the transaction before the transaction has an error of its own, so it is the cause.
+    transaction.onerror = (event) =>
+      reject(
+        (event.target instanceof IDBRequest ? event.target.error : null) ??
+          new Error("IndexedDB transaction failed."),
+      );
+    transaction.onabort = () =>
       reject(transaction.error ?? new Error("IndexedDB transaction failed."));
   });
 }

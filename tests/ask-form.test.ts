@@ -757,6 +757,11 @@ test("a form with a time limit settles by itself, with its answers as they stand
       settled.settlement.actionKind === "interaction" && settled.settlement.settlementKind,
       "timedOut",
     );
+    // A form that returns its answers records the options it showed, here of no cycle; one that returns null none.
+    assert.deepEqual(
+      settled.settlement.actionKind === "interaction" ? settled.settlement.shownOptions : undefined,
+      onTimeout === "submit" ? [null, null] : null,
+    );
     assert.equal(state(runUntilExit(plan, late.snapshot).snapshot), expected, onTimeout);
   }
   // A field the form cannot see from the start must still have a value when the form opens.

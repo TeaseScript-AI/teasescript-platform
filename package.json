@@ -7,10 +7,11 @@
     "node": "24.18.0"
   },
   "scripts": {
-    "build": "npm run build:typescript && node tools/run-parallel.mjs typecheck:player build:player build:editor",
+    "build": "npm run build:typescript && node tools/run-parallel.mjs typecheck:player build:player build:editor build:player-test-modules",
     "build:typescript": "node ./tools/clean-compiled-tests.mjs && tsc",
     "build:player": "vite build --config player/vue/vite.config.ts",
     "build:editor": "vite build --config editor/vue/vite.config.ts",
+    "build:player-test-modules": "vite build --config player/vue/vite.test-modules.config.ts",
     "typecheck": "tsc --noEmit && npm run typecheck:player && npm run typecheck:editor",
     "typecheck:player": "node ./tools/vue-typecheck.cjs --noEmit -p player/vue/tsconfig.json",
     "typecheck:editor": "node ./tools/vue-typecheck.cjs --noEmit -p editor/vue/tsconfig.json",

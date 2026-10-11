@@ -302,7 +302,7 @@ test("invalid dynamic timer durations fail deterministically before any action",
     [`${dynamic}let d = dynamic("soon")\ntimer d\nexit`, "TSR050", "d"],
     ["let d = -1\ntimer d s\nexit", "TSR050", "d"],
     ["let a = 3\ntimer (a..a) s\nexit", "TSR041", "a..a"],
-    ["let a = 0.5\ntimer (a..3) s\nexit", "TSR045", "a..3"],
+    [`${dynamic}let a = dynamic(0.5)\ntimer (a..3) s\nexit`, "TSR045", "a..3"],
     ["let a = -3\ntimer (a..3) s\nexit", "TSR050", "a..3"],
     [`${dynamic}let d = dynamic(1..3)\nwait d\nexit`, "TSR050", "d"],
   ];

@@ -134,6 +134,7 @@ class Recording {
       thrown: null,
       randomChoices: [],
       pausedAt: null,
+      input: null,
     });
   }
   export(overrides: Partial<DebugExport> = {}): DebugExport {
@@ -677,6 +678,7 @@ test("a recorded call that threw is compared like any other, and a failed anchor
     thrown: "RuntimeDataError",
     randomChoices: [],
     pausedAt: null,
+    input: null,
   };
   const exported = (operation: DebugOperation): DebugExport => ({
     ...failedRecording().export(),
@@ -737,6 +739,7 @@ test("a recorded call that threw is compared like any other, and a failed anchor
           thrown: null,
           randomChoices: [],
           pausedAt: null,
+          input: null,
         },
       ],
       complete: true,

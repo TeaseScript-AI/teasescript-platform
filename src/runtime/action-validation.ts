@@ -1966,6 +1966,8 @@ function validSettlementKindData(
       "result",
       "transcriptText",
       "ui",
+      // A form also records the options its cycles showed.
+      ...(settlement.interactionKind === "form" ? ["shownOptions"] : []),
     ])
   )
     return false;
@@ -2154,6 +2156,7 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
         ui,
         settlement.result,
         settlement.transcriptText,
+        settlement.shownOptions,
         settlement.settlementKind === "timedOut",
       )
     );

@@ -835,7 +835,12 @@ function withValue(
 }
 
 export type FormSubmission =
-  | { readonly ok: true; readonly result: InteractionResultValue; readonly transcriptText: string }
+  | {
+      readonly ok: true;
+      readonly result: InteractionResultValue;
+      readonly transcriptText: string;
+      readonly shownOptions: readonly (number | null)[];
+    }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -865,7 +870,23 @@ export function submitForm(
   // Every answer is shown in full; answers too long for one transcript line are refused rather than cut.
   if (!interactionStringFits(transcriptText))
     return refused("That is wrong. These answers are too long to send at once.");
-  return { ok: true, result: formResult(ui, answers), transcriptText };
+  return {
+    ok: true,
+    result: formResult(ui, answers),
+    transcriptText,
+    shownOptions: formShownOptions(ui, values),
+  };
+}
+
+/** For each field, the position of the option a cycle shows, else `null` (see the form settlement's `shownOptions`). */
+export function formShownOptions(
+  ui: FormUi,
+  values: readonly RuntimeFormValue[],
+): readonly (number | null)[] {
+  return ui.fields.map((field, index) => {
+    const value = values[index];
+    return field.kind === "cycle" && typeof value === "number" ? value : null;
+  });
 }
 
 /**
@@ -917,18 +938,17 @@ export type FormSummaryLine =
   | { readonly kind: "value"; readonly label: string; readonly value: string };
 
 /**
- * The summary of a form's settled `result` (V30 askForm; owner decision 2026-10-07): every field in field order, a
- * toggle with its state and any other field with its value as its button shows it, `Not set` for an optional field
- * without one. `null` when the result is not one this form returns, or when it cannot tell which option a cycle
- * showed, because several of its options have the returned value; the transcript text, built from the form's state,
- * says it.
+ * The summary of a form's settled `result` with the options its cycles showed (V30 askForm; owner decision
+ * 2026-10-07): every field in field order, a toggle with its state and any other field with its value as its button
+ * shows it, `Not set` for an optional field without one. `null` when they are not what this form settles with.
  */
 export function formSummaryOf(
   ui: FormUi,
   result: unknown,
+  shownOptions: unknown,
   presentation: TemporalContext["presentation"],
 ): readonly FormSummaryLine[] | null {
-  const values = formValuesOf(ui, result);
+  const values = formValuesOf(ui, result, shownOptions);
   return values === null ? null : formSummaryLines(ui, values, presentation);
 }
 
@@ -970,25 +990,37 @@ function formSummaryText(lines: readonly FormSummaryLine[]): string {
 }
 
 /**
- * The field values a form's settled `result` holds, as its form state holds them (a cycle by its option's index), or
- * `null` when the result is not one this form returns or a cycle's value is that of several of its options.
+ * The field values a form's settled `result` holds, as its form state held them (a cycle by the position of the option
+ * it showed, from `shownOptions`), or `null` when they are not what this form settles with: one answer per field, and
+ * for each cycle the position of an option with its answer as value.
  */
-function formValuesOf(ui: FormUi, result: unknown): readonly RuntimeFormValue[] | null {
+function formValuesOf(
+  ui: FormUi,
+  result: unknown,
+  shownOptions: unknown,
+): readonly RuntimeFormValue[] | null {
   const answers = formAnswersOf(ui, result);
-  if (answers === null) return null;
+  if (answers === null || !Array.isArray(shownOptions) || shownOptions.length !== ui.fields.length)
+    return null;
   const values: RuntimeFormValue[] = [];
   for (const [index, field] of ui.fields.entries()) {
     const answer = answers[index]!;
+    const shown: unknown = shownOptions[index];
     if (field.kind !== "cycle") {
+      if (shown !== null) return null;
       // EVIDENCE: validation: formAnswersOf checked every answer as a value of its field.
       values.push(answer as RuntimeFormValue);
       continue;
     }
-    const shown = field.options.flatMap((option, optionIndex) =>
-      serializableEquals(option.value, answer) ? [optionIndex] : [],
-    );
-    if (shown.length !== 1) return null;
-    values.push(shown[0]!);
+    if (
+      typeof shown !== "number" ||
+      !Number.isSafeInteger(shown) ||
+      shown < 0 ||
+      shown >= field.options.length ||
+      !serializableEquals(field.options[shown]!.value, answer)
+    )
+      return null;
+    values.push(shown);
   }
   return values;
 }
@@ -1304,19 +1336,22 @@ export function validFormResult(
   ui: FormUi,
   result: unknown,
   transcriptText: unknown,
+  shownOptions: unknown,
   timedOut = false,
 ): boolean {
+  // A form that returns `null` showed no options; one with answers shows, for each cycle, an option with its answer.
+  if (result === null ? shownOptions !== null : formValuesOf(ui, result, shownOptions) === null)
+    return false;
   // At its time limit a form says nothing for the player, and returns `null` or its answers as its limit says.
   if (timedOut) {
     if (ui.timeout === null || transcriptText !== null) return false;
-    if (ui.timeout.onTimeout === "cancel") return result === null;
-    return result !== null && formAnswersOf(ui, result) !== null;
+    return (ui.timeout.onTimeout === "cancel") === (result === null);
   }
   // A cancelled form returns `null`, with its cancel button's text.
   if (result === null) return ui.cancel !== null && transcriptText === ui.cancel.text;
   // A submitted form's line shows a date or time answer in the player's presentation then, which a later capture may
   // have replaced, so it is checked as text, as a date or time ask's line is.
-  return formAnswersOf(ui, result) !== null && typeof transcriptText === "string";
+  return typeof transcriptText === "string";
 }
 
 /**

@@ -203,7 +203,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1371,8 +1371,8 @@ async function packageScenario(cdp, origin) {
 }
 
 /**
- * The `missing-media` package refers to an image and a sound the package lacks, and to an image and a sound that are no
- * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
+ * The `missing-media` package refers to an image, a sound, and a speaker avatar the package lacks, and to an image, a
+ * sound, and an avatar that are no valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
  * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
  */
 /**
@@ -1435,8 +1435,26 @@ async function keptSessionScenario(cdp, origin, profile) {
 
   await reloadOnceKept("One point");
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
-  await physicalClick(cdp, start);
-  await waitFor(cdp, `!!${choice("One point")}`);
+  // The choice appears as soon as Continue leaves the page. On a touch device the composer takes no focus then, so no
+  // software keyboard opens. (A desktop with a mouse gives it focus, but this headless browser reports no hover.)
+  const point = await value(
+    cdp,
+    `(() => { const rect = document.querySelector('${start}').getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+  );
+  await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  try {
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await cdp.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await waitFor(cdp, `!!${choice("One point")}`);
+    await delay(300);
+    assertEqual(
+      await value(cdp, `!!document.activeElement?.matches('[data-composer-input]')`),
+      false,
+      "The composer took focus after Continue on a device without hover",
+    );
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+  }
   assertEqual(
     await value(
       cdp,
@@ -1714,10 +1732,38 @@ async function randomPickerScenario(cdp, origin) {
     5_000,
     "A refused copy claimed to copy",
   );
+  // After the mouse click, the tooltip says why nothing was copied.
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-slot="tooltip-content"]')?.textContent.trim().startsWith("Copying is not available here") === true`,
+    5_000,
+    "A refused copy did not say why in its tooltip",
+  );
   assertEqual(
     await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
     true,
     "A refused copy did not select the lines in view",
+  );
+  // Escape and at once Enter on Copy, which still has focus, refuse again: the label still says why.
+  for (const [key, code] of [
+    ["Escape", 27],
+    ["Enter", 13],
+  ])
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key,
+        code: key,
+        windowsVirtualKeyCode: code,
+      });
+  await delay(40);
+  assertEqual(
+    await value(
+      cdp,
+      `document.activeElement === ${copyButton} && ${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
+    ),
+    true,
+    "A refused copy retried at once by key lost its explanation",
   );
   await evaluate(
     cdp,
@@ -1780,6 +1826,31 @@ async function randomPickerScenario(cdp, origin) {
     await value(cdp, `${sidebar} + ' ' + ${picker("chance")}`),
     `${shown} true`,
     "Ctrl+B changed the sidebar while the picker asked",
+  );
+
+  // Tab from the grip onto the first outcome: the outcome list, which clips because it scrolls, keeps room for the
+  // outcome's 2px focus outline and its 2px separation.
+  for (let presses = 0; presses < 5; presses += 1) {
+    if (await value(cdp, `!!document.activeElement.closest('[data-random-draw-outcomes]')`)) break;
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Tab",
+        code: "Tab",
+        windowsVirtualKeyCode: 9,
+      });
+  }
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const list = document.querySelector('[data-random-draw-outcomes]').getBoundingClientRect();
+        const outcome = document.activeElement.closest('[data-random-draw-outcome]')?.getBoundingClientRect();
+        return !!outcome && Math.min(outcome.top - list.top, list.bottom - outcome.bottom, outcome.left - list.left, list.right - outcome.right) >= 4;
+      })()`,
+    ),
+    true,
+    "The outcome list clipped a focused outcome's outline",
   );
 
   await physicalClick(cdp, "[data-random-draw-outcome]");
@@ -2152,9 +2223,11 @@ async function missingMediaScenario(cdp, origin) {
   assertEqual(
     JSON.stringify(await value(cdp, `${notices}.sort()`)),
     JSON.stringify([
-      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 5)",
-      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 4)",
+      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 15)",
+      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 14)",
+      "warning Warning: Image could not be loaded: avatars/corrupt.png",
       "warning Warning: Image could not be loaded: images/corrupt.png",
+      "warning Warning: Image not found: avatars/missing.png",
       "warning Warning: Image not found: images/missing.png",
     ]),
     "The notifications did not list one warning per unusable path",
@@ -2346,13 +2419,22 @@ async function lateImageScenario(cdp, origin) {
     if (Date.now() > deadline) throw new Error("The Stage did not request the late image");
     await delay(50);
   }
+  // The image element that waits for the held response, kept so that it lives to fail, reports its failure after the
+  // Stage's own handler has seen it.
+  await value(
+    cdp,
+    `(() => {
+      window.lateImage = { element: document.querySelector('.stage-media'), failed: false };
+      window.lateImage.element.addEventListener('error', () => { window.lateImage.failed = true; });
+      return true;
+    })()`,
+  );
   await press("Hide");
   await press("Show");
   await waitFor(cdp, validShown, 5_000, "The valid image was not shown");
   lateImage.release();
   lateImage.release = null;
-  // Give the late response time to arrive and fail.
-  await delay(500);
+  await waitFor(cdp, "window.lateImage.failed", 5_000, "The late image did not report its failure");
   assertEqual(
     await value(cdp, validShown),
     true,
@@ -2623,8 +2705,27 @@ async function debugCountdownScenario(cdp, origin) {
     await physicalClick(cdp, "[data-settings-trigger]");
     await waitFor(cdp, `!!document.querySelector('[data-player-setting="debug-menu"]')`);
     await physicalClick(cdp, '[data-player-setting="debug-menu"]');
-    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    // The X is pressed once it stands still with nothing over it. Should Settings stay open, the failure names what
+    // the X's centre hits and which dialogs are open, the evidence an earlier, unreproduced timeout here lacked.
+    await settledClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    try {
+      await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    } catch {
+      const state = await value(
+        cdp,
+        `(() => {
+          const close = document.querySelector('[data-player-settings] [data-slot="dialog-close"]');
+          const rect = close?.getBoundingClientRect();
+          const hit = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return JSON.stringify({
+            dialogs: [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].map((dialog) => dialog.textContent.trim().slice(0, 40)),
+            settings: document.querySelector('[data-player-settings]')?.getAttribute('data-state') ?? null,
+            hit: hit?.outerHTML.slice(0, 120) ?? null,
+          });
+        })()`,
+      );
+      throw new Error(`Settings did not close: ${state}`);
+    }
   };
   // Scene time runs on in real time between steps, so a countdown may have passed its first seconds.
   const skip = async (expected, failure) => {
@@ -4581,6 +4682,12 @@ async function debugExportScenario(cdp, origin, profile) {
     Buffer.from(document.photos[0].data, "base64url").equals(pictureBytes),
     true,
     "The photo's original bytes",
+  );
+  // The name was sent with a click on Send; the picture answers through the picker, whose input is not recorded.
+  assertEqual(
+    JSON.stringify(document.sections.answers.map((answer) => answer.input)),
+    JSON.stringify(["send", null]),
+    "How each answer was given",
   );
 
   // The dialog fits a narrow screen with touch-sized rows.

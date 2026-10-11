@@ -6,10 +6,12 @@ import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
+  CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
+  serializeValidatedRuntimeJson,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -18,8 +20,10 @@ import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
 } from "../src/runtime/serializable-values.js";
+import { createFreshRuntimeSession, createRuntimeSession } from "../src/runtime/session.js";
 import {
   createFreshRuntimeSnapshot,
+  DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
@@ -68,6 +72,39 @@ test("checkpoint restoration accepts the configured call-depth ceiling", () => {
     restoreCheckpoint(createCheckpoint(compiled, snapshot)).snapshot.maxCallDepth,
     MAX_SUPPORTED_CALL_DEPTH,
   );
+});
+
+test("a call stack as deep as the default call depth saves, restores, and resumes", () => {
+  // Each caller waits inside its loop, in the argument of a mutating call, so every frame keeps a loop and a prepared
+  // reference.
+  const source = [
+    "function level(n) {",
+    "  let items = [n]",
+    "  repeat 1 {",
+    "    if n <= 1 {",
+    "      wait 1 s",
+    "      return 1",
+    "    }",
+    "    items.add(level(n - 1))",
+    "  }",
+    "  return items.length",
+    "}",
+    `let deepest = level(${DEFAULT_MAX_CALL_DEPTH})`,
+    "exit",
+  ].join("\n");
+  const compiled = plan(source);
+  const session = createFreshRuntimeSession(compiled);
+  session.run();
+  assert.equal(session.callStack().length, DEFAULT_MAX_CALL_DEPTH);
+  // As the Player keeps a session and opens it again: both capture and validate the state.
+  const kept = serializeValidatedRuntimeJson(session.exportSnapshot());
+  const restored = createRuntimeSession(compiled, JSON.parse(kept));
+  assert.equal(serializeValidatedRuntimeJson(restored.exportTrustedSnapshot()), kept);
+  restored.observeTime(1_000);
+  restored.run();
+  const view = restored.view();
+  assert.equal(view.status, "halted");
+  assert.equal(view.failure, null);
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
@@ -645,6 +682,43 @@ test("restores retained prepared list items across structural index shifts", () 
   );
 });
 
+test("restores a prepared timer state read after the call removes or replaces its list item", () => {
+  // The receiver `rows[0].state` names the running timer; `f` moves or assigns the paused one to that position. A
+  // timer's state is read when it is used, after `f` returns, still from the running timer.
+  for (const change of ["rows.removeFirst()", "rows[0] = paused"]) {
+    const { boundaries, events } = assertRuntimeResumeEquivalent(
+      [
+        "let running = timer async 10 s",
+        "let paused = timer async 10 s",
+        "paused.pause()",
+        "let rows = [running, paused]",
+        `function f {\n    ${change}\n    return "running"\n}`,
+        "say rows[0].state.contains(f())",
+        "exit",
+      ].join("\n"),
+    );
+
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["true"],
+      change,
+    );
+    // Some boundary inside `f` holds the receiver after the change detached it.
+    assert.ok(
+      boundaries.some((snapshot) =>
+        snapshot.callFrames.some((frame) =>
+          frame.callerTemporaries.some(
+            (temporary) =>
+              serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+              serializedObjectProperty(temporary.value, "detached") === true,
+          ),
+        ),
+      ),
+      change,
+    );
+  }
+});
+
 test("rejects malformed prepared-reference state in active and suspended temporaries", () => {
   const compiled = plan(
     [
@@ -702,9 +776,6 @@ test("rejects malformed prepared-reference state in active and suspended tempora
       setSerializedObjectProperty(descriptor, "rootName", null);
       setSerializedObjectProperty(descriptor, "detached", false);
     },
-    (descriptor) => {
-      setSerializedObjectProperty(descriptor, "capturedRoot", null);
-    },
   ];
 
   for (const mutate of mutations) {
@@ -714,6 +785,52 @@ test("rejects malformed prepared-reference state in active and suspended tempora
     );
     mutate(descriptor);
     assertCheckpointRejected(checkpoint, "TSK002");
+  }
+});
+
+test("a prepared reference keeps a copy of its root only where a later call in its preparation can read it", () => {
+  // `rows[pick()]` is prepared before `pick` runs. Its extension evaluates `removeFirst` after reading the root, so
+  // both keep a copy; `target.nested` in `target.nested[0] = replacement()` keeps none.
+  for (const [source, keepsRoot] of [
+    [
+      "let rows = [[[0]], [[1]]]\nfunction pick { return 0 }\nrows[pick()][rows[1][0].removeFirst() - 1][0] = 7",
+      true,
+    ],
+    [
+      "let target = { nested: [0] }\nfunction replacement { return 7 }\ntarget.nested[0] = replacement()",
+      false,
+    ],
+  ] as const) {
+    const compiled = plan(`${source}\nexit`);
+    const suspended = executeUntil(compiled, (candidate) => functionFrames(candidate).length === 1);
+    const base = mutableCheckpoint(createCheckpoint(compiled, suspended));
+    const descriptor = preparedReferenceValue(base.snapshot.callFrames.at(-1)!.callerTemporaries);
+    assert.equal(serializedObjectProperty(descriptor, "detached"), false, source);
+    assert.equal(
+      serializedObjectProperty(descriptor, "capturedRoot") !== undefined,
+      keepsRoot,
+      source,
+    );
+    if (keepsRoot) removeSerializedObjectProperty(descriptor, "capturedRoot");
+    else {
+      // The variable's own value: a root the path leads through, so only the plan's rule refuses it.
+      const root = base.snapshot.frames[0].bindings.find(
+        (binding: { name: string }) => binding.name === "target",
+      ).value;
+      descriptor.properties.splice(4, 0, { name: "capturedRoot", value: root });
+    }
+    assert.throws(
+      () => restoreCheckpoint(base),
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        error.message.includes(
+          keepsRoot
+            ? "the captured root is missing."
+            : "an attached descriptor keeps a captured root where the plan keeps none.",
+        ),
+      source,
+    );
   }
 });
 

@@ -787,6 +787,16 @@ export function setMediaVolume(media: MediaHandleRecord, volume: number): MediaW
   return null;
 }
 
+/** The properties a media handle has, which {@link mediaProperty} reads and restore validation accepts. */
+export const MEDIA_PROPERTIES: ReadonlySet<string> = new Set([
+  "position",
+  "elapsed",
+  "remaining",
+  "duration",
+  "volume",
+  "state",
+]);
+
 /**
  * Handle property reads at scene time `atMs`; `undefined` means the property does not exist. Finished and stopped
  * media read where playback ended, and no `remaining` time once the source loaded.
@@ -796,6 +806,7 @@ export function mediaProperty(
   name: string,
   atMs: number,
 ): SerializableRuntimeValue | undefined {
+  if (!MEDIA_PROPERTIES.has(name)) return undefined;
   const duration = (milliseconds: number): SerializableRuntimeValue => ({
     kind: "duration",
     milliseconds,

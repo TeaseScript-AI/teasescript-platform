@@ -219,6 +219,25 @@ test("without a spill store, or after it failed, points stop at the memory budge
   }
 });
 
+test("a state too large to save ends the history as a full store does, and earlier points stay", async (context) => {
+  const first = createPlayerRuntimeSession(twoChoices);
+  const history = new DebugHistory(first.plan, Promise.resolve(null), 1_000_000);
+  await settle();
+  history.follow(first, unmarked);
+  const second = choose(first, "One");
+  // The second state's JSON is too long for V8 to build.
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
+    if (typeof value === "object" && value !== null && "format" in value)
+      throw new RangeError("Invalid string length");
+    return stringify(value, ...rest);
+  });
+  history.follow(second, unmarked);
+  context.mock.restoreAll();
+  assert.equal(history.points.length, 1);
+  assert.equal(history.complete, false);
+});
+
 test("the spill store opens without crypto.randomUUID, which plain-HTTP pages lack", async () => {
   // Browsers offer crypto.randomUUID only in secure contexts; Debug over plain HTTP on a local network must still spill
   // its history beyond the memory budget.

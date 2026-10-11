@@ -6,6 +6,9 @@ import type { InjectionKey } from "vue";
  */
 export const speakerAvatarSource: InjectionKey<(path: string) => string | null> =
   Symbol("speaker-avatar-source");
+/** Reports an authored speaker `avatar` reference whose image the browser could not load or decode. */
+export const speakerAvatarFailure: InjectionKey<(path: string) => void> =
+  Symbol("speaker-avatar-failure");
 
 // Early assignments span the palette; neighboring hues use different lightness levels.
 // Each pair keeps its hue across themes.

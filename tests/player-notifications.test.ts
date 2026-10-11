@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, shallowRef, type ComputedRef, type Ref } from "vue";
-import { createServer } from "vite";
 
 import { PlayerNotices, playerNotices, type PlayerNotice } from "../player/notices.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface Notification {
   readonly notice: PlayerNotice;
@@ -28,30 +28,18 @@ let usePlayerToasts: (
 
 // Load the real Vue composables through the existing build tool, like the Player session host tests.
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerNotifications.ts",
-    );
-    const toasts: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerToasts.ts",
-    );
-    assert.equal(typeof module.usePlayerNotifications, "function");
-    assert.equal(typeof toasts.usePlayerToasts, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-    usePlayerNotifications = module.usePlayerNotifications as typeof usePlayerNotifications;
-    // EVIDENCE: validation: the toast export was checked callable just above, from the same real source build.
-    usePlayerToasts = toasts.usePlayerToasts as typeof usePlayerToasts;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerNotifications.ts",
+  );
+  const toasts: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerToasts.ts",
+  );
+  assert.equal(typeof module.usePlayerNotifications, "function");
+  assert.equal(typeof toasts.usePlayerToasts, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
+  usePlayerNotifications = module.usePlayerNotifications as typeof usePlayerNotifications;
+  // EVIDENCE: validation: the toast export was checked callable just above, from the same real source build.
+  usePlayerToasts = toasts.usePlayerToasts as typeof usePlayerToasts;
 });
 
 function setup(context: TestContext) {

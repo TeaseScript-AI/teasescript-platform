@@ -9,6 +9,7 @@ import {
   temporalConverted,
   temporalNow,
   temporalMethod,
+  calendarDurationProperty,
   temporalProperty,
 } from "./temporal-operations.js";
 import { normalizeColor } from "../color.js";
@@ -305,6 +306,9 @@ export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
   #referenceEpoch = 0;
+
+  /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
+  #keepPreparedRoot = false;
 
   /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
   #startValue = false;
@@ -704,9 +708,9 @@ export class Evaluator {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           trace?.readBinding(location.frame.id, expression.name, location.binding.value);
-          // Only the root of a prepared reference, reached through reference frames alone, keeps a copy: an index
-          // read after it can remove an ancestor of the value it selects. The receiver of an immediate call resolves
-          // through its binding, so it shares the root instead of copying it.
+          // Only the root of a prepared reference, reached through reference frames alone, keeps a copy, and only where
+          // the plan keeps one: for instance, a call in an index read after it can remove an ancestor of the value it
+          // selects. The receiver of an immediate call resolves through its binding, so it shares the root instead.
           const prepared = pending.every((pendingFrame) => pendingFrame.reference);
           result = {
             value: location.binding.value,
@@ -715,9 +719,11 @@ export class Evaluator {
               rootFrameId: location.frame.id,
               rootName: expression.name,
               path: [],
-              capturedRoot: prepared
-                ? cloneCapturedSerializableValue(location.binding.value)
-                : location.binding.value,
+              capturedRoot: !prepared
+                ? location.binding.value
+                : this.#keepPreparedRoot
+                  ? cloneCapturedSerializableValue(location.binding.value)
+                  : undefined,
               detached: false,
             },
             epoch: this.#referenceEpoch,
@@ -731,22 +737,26 @@ export class Evaluator {
             expression.temporaryId,
             expression.span,
           );
-          const descriptor = readPreparedReference(serialized, expression.span);
+          let descriptor = readPreparedReference(serialized, expression.span);
+          // A prepared-reference leaf only copies its descriptor; its parent resolves it at the receiver span. One
+          // that keeps a copy of its root is resolved here instead, so that it is detached at this use, as an
+          // assignment through it would be, once its path leads nowhere from its variable.
+          let value: SerializableRuntimeValue = null;
+          let epoch = -1;
+          if (!descriptor.detached && descriptor.capturedRoot !== undefined) {
+            value = this.#resolvePreparedReference(serialized, expression.span);
+            descriptor = readPreparedReference(serialized, expression.span);
+            epoch = this.#referenceEpoch;
+          }
           if (trace !== null)
             this.#tracePreparedReference(
               serialized,
               expression.temporaryId,
-              descriptor.capturedRoot,
+              descriptor.capturedRoot ??
+                this.#resolveDescriptor({ ...descriptor, path: [] }, expression.span),
               expression.span,
             );
-          result = {
-            // A prepared-reference leaf only copies its descriptor. Its parent resolves
-            // it at the receiver span; a root prepareReference does not read it.
-            value: null,
-            owned: false,
-            descriptor,
-            epoch: -1,
-          };
+          result = { value, owned: false, descriptor, epoch };
           pending.pop();
           continue;
         }
@@ -1362,9 +1372,76 @@ export class Evaluator {
       this.#traceVariableChange("assignment", receiverDescriptor, target.span);
   }
 
-  public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
-    const descriptor = this.#buildPreparedReference(expression);
-    return serializePreparedReference(this.#restorableDescriptor(descriptor, expression.span));
+  /**
+   * Runs `items += more`, or `items = items + more`, while the variable holds a list. The joined list starts with the
+   * variable's own elements, so copies of the added ones are appended in place, as `addAll` adds them, instead of a
+   * copy of the whole list for every addition. The result, its type check, its failures, and the prepared references
+   * it freezes are those of the assignment. Gives `false`, having evaluated nothing, for any other assignment, and
+   * while Debug traces, which explains the joined value.
+   */
+  public appendAssigned(
+    target: AssignmentTargetPlan,
+    value: ExpressionPlan,
+    typeCheck: TypeCheckPlan | undefined,
+  ): boolean {
+    if (
+      this.trace !== null ||
+      target.kind !== "identifier" ||
+      value.kind !== "binary" ||
+      value.operator !== "+" ||
+      value.left.kind !== "identifier" ||
+      value.left.name !== target.name ||
+      (typeCheck !== undefined && typeCheck.type.kind !== "list")
+    )
+      return false;
+    const location = findBindingLocation(this.snapshot, this.plan, target.name);
+    if (location === undefined) return false;
+    const list = location.binding.value;
+    if (!isList(list)) return false;
+    const left = this.evaluate(value.left);
+    const right = this.evaluate(value.right);
+    // The compiler reads the variable before a user call in `more`, so without one `more` changes the list only in
+    // place. Every store into the variable fits its type, so the joined list fits when the added elements do.
+    if (
+      left !== list ||
+      !isList(right) ||
+      (typeCheck !== undefined && !matchesValueType(right, typeCheck.type))
+    ) {
+      const joined = this.#binary(value, left, right);
+      if (typeCheck !== undefined) assertValueType(joined, typeCheck, value.span);
+      this.assign(target, joined);
+      return true;
+    }
+    detachPreparedReferencesForMutation(this.snapshot, {
+      rootFrameId: location.frame.id,
+      rootName: target.name,
+      path: [],
+    });
+    // Copies are taken first, so a list can add itself.
+    const added = right.items.map((item) => cloneCapturedSerializableValue(item));
+    for (const item of added) list.items.push(item);
+    return true;
+  }
+
+  /**
+   * `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. Gives
+   * the reference to store and the value it selects, which the debug trace shows instead of the reference.
+   */
+  public prepareReference(
+    expression: ExpressionPlan,
+    keepsRoot: boolean,
+  ): { readonly reference: SerializableRuntimeObject; readonly value: SerializableRuntimeValue } {
+    this.#keepPreparedRoot = keepsRoot;
+    const prepared = this.#evaluateMachine(expression, true);
+    let descriptor = prepared.descriptor!;
+    // A reference extended from one that keeps a copy for its own preparation shares that copy.
+    if (!keepsRoot && !descriptor.detached) descriptor = { ...descriptor, capturedRoot: undefined };
+    return {
+      reference: serializePreparedReference(
+        this.#restorableDescriptor(descriptor, expression.span),
+      ),
+      value: prepared.value,
+    };
   }
 
   /**
@@ -1380,6 +1457,11 @@ export class Evaluator {
     span: SourceSpan,
   ): PreparedReferenceDescriptor {
     if (descriptor.detached) return descriptor;
+    if (descriptor.capturedRoot === undefined) {
+      // Without a call after its root was read, nothing changed the variable while the reference was prepared.
+      this.#resolveDescriptor(descriptor, span);
+      return descriptor;
+    }
     if (!this.#resolves(descriptor, span)) {
       const detached = { ...descriptor, detached: true };
       this.#resolveDescriptor(detached, span);
@@ -1489,10 +1571,6 @@ export class Evaluator {
     if (!supported.has(method)) throw fault("TSR016", noCollectionMethod(receiver, method), span);
   }
 
-  #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
-    return this.#evaluateMachine(expression, true).descriptor!;
-  }
-
   #resolvePreparedReference(
     serialized: SerializableRuntimeValue,
     span: SourceSpan,
@@ -1502,7 +1580,12 @@ export class Evaluator {
     try {
       return this.#resolveDescriptor(descriptor, span);
     } catch (error) {
-      if (!(error instanceof RuntimeFault) || !isObject(serialized)) throw error;
+      if (
+        !(error instanceof RuntimeFault) ||
+        !isObject(serialized) ||
+        descriptor.capturedRoot === undefined
+      )
+        throw error;
       setCapturedSerializableProperty(serialized, "detached", true);
       return this.#resolveDescriptor({ ...descriptor, detached: true }, span);
     }
@@ -1526,7 +1609,9 @@ export class Evaluator {
       }
       value = binding.value;
     } else {
-      value = descriptor.capturedRoot;
+      // EVIDENCE: readPreparedReference and the reference machine give every detached or rootless reference a captured
+      // root, and #restorableDescriptor detaches only a reference that keeps one.
+      value = descriptor.capturedRoot!;
     }
     for (const step of descriptor.path) {
       if (step.kind === "property") {
@@ -3409,15 +3494,14 @@ export class Evaluator {
       return property;
     }
     if (isCalendarDuration(value)) {
-      // The components of a calendar duration (ADR 0026); `.days` counts calendar days and is not a length.
-      if (name === "months") return value.months;
-      if (name === "days") return value.days;
-      if (name === "exactOffset") return exactDuration(value.milliseconds);
-      throw fault(
-        "TSR017",
-        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
-        span,
-      );
+      const property = calendarDurationProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
+          span,
+        );
+      return property;
     }
     if (isDuration(value)) throw fault("TSR017", durationPropertyMessage(name), span);
     if (isTemporal(value)) {

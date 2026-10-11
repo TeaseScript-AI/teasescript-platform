@@ -120,6 +120,19 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
   assert.deepEqual(diagnostics("let a = 1 y\nexit"), [
     ["TSP033", "A year has no fixed length. Write '1 calendar y'."],
   ]);
+  // After a name, a member, a call, or parentheses too, also in an interpolation and over lines in parentheses.
+  const named = "let n = 3\nlet p = { delay: 3 }\nfunction f {\n  return 3\n}\n";
+  for (const [source, message] of [
+    ["wait n months", "A month has no fixed length. Write 'n calendar months'."],
+    ["let a = p.delay years", "A year has no fixed length. Write 'p.delay calendar years'."],
+    ["let a = f() month", "A month has no fixed length. Write 'f() calendar month'."],
+    ['let a = "${n months}"', "A month has no fixed length. Write 'n calendar months'."],
+    [
+      "let a = (\n  n + 1\n) months",
+      "A month has no fixed length. Write '(n + 1) calendar months'.",
+    ],
+  ] as const)
+    assert.deepEqual(diagnostics(`${named}${source}\nexit`), [["TSP033", message]], source);
   assert.deepEqual(diagnostics("let a = 2 calendar\nexit"), [
     ["TSP033", "Expected a calendar unit after 'calendar': day, week, month, or year."],
   ]);

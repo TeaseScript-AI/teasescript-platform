@@ -464,6 +464,16 @@ html:fullscreen { background: var(--background); }
   /* Focus scrolling keeps the outline and its separation inside the clip. */
   scroll-padding-block: calc(2px + var(--player-focus-offset));
 }
+/* The random draw picker's outcome list scrolls, so it clips: an inner gutter keeps an outcome's outline and its
+   separation inside, also where focus scrolls an outcome into view, and the negative margin keeps the layout as it was,
+   with 18rem of outcomes in view. */
+[data-random-draw-outcomes] {
+  --focus-gutter: calc(2px + var(--player-focus-offset));
+  max-block-size: calc(18rem + 2 * var(--focus-gutter));
+  margin: calc(-1 * var(--focus-gutter));
+  padding: var(--focus-gutter);
+  scroll-padding-block: var(--focus-gutter);
+}
 
 /* Player notice levels (PLAYER-UI "Player notices") use the theme status colours: info blue, warning orange, error
    red. Without a Player theme they fall back to the system canvas colours. */

@@ -468,6 +468,26 @@ test("a value the compiler cannot know, such as an untyped parameter, decides no
   );
 });
 
+test("an operation of unknown result stored in a global that another file decides later must fit that type", () => {
+  // '/' never gives text, so each store fails whenever it runs, also before 'b.tease' is checked.
+  const files = (store: string, decide: string): ProjectSourceFile[] => [
+    {
+      path: "main.tease",
+      source: "global g = null\nglobal gs = []\nglobal box = { t: null }\nput(8)\nexit",
+    },
+    { path: "a.tease", source: `global function put(x) {\n  ${store}\n}` },
+    { path: "b.tease", source: `global function decide {\n  ${decide}\n}` },
+  ];
+  assert.deepEqual(messages(files("g = x / 4", 'g = "a"')), [
+    "'g' holds text (string) or null since line 2 of b.tease, so it cannot be set to the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+  ]);
+  for (const [store, decide] of [
+    ["gs.add(x / 4)", 'gs.add("a")'],
+    ["box.t = x / 4", 'box.t = "a"'],
+  ] as const)
+    assert.deepEqual(diagnostics(files(store, decide)), [["a.tease", "TSV041", 2]], store);
+});
+
 test("a global that is still null at the top of main.tease may be tested before another file sets it", () => {
   // The start value makes `plain` null when main.tease begins, so the tested branch cannot run there; a later read,
   // after a call that may set it, takes the value.

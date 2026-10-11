@@ -568,11 +568,12 @@ may produce `5`, `6`, `7`, `8`, or `9`.
 
 may also produce `10`.
 
-`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, so a range
-written as their source or argument needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a
-compile error. Round it with `floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other
-bounds, such as one whose type the compiler cannot know or one of a range kept in a variable, are checked when the range
-is used. A `switch` case range matches any number within its bounds ([§32](#32-switch-statements)).
+`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, and `wait`
+and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them needs
+whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with `floor(...)`,
+`round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other bounds, such as one whose type the compiler
+cannot know or one of a range kept in a variable, are checked when the range is used. A `switch` case range matches any
+number within its bounds ([§32](#32-switch-statements)).
 
 Ranges may also be used in `switch` cases:
 
@@ -1024,6 +1025,10 @@ picks.add("three")    // compile error
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
   no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
+  An arithmetic operator on such a value may also give a value of unknown type. A place with a written type, or one
+  that a value decided, also later in checking order, still rejects it at compile time when no result of that operator
+  could fit, as in `let y: string = x / 4`, `y += x / 4` after `let y = "a"`, or `ys.add(x / 4)` after `let ys = []`
+  and before `ys.add("a")`, because `/` never gives text.
 
 ### Global variables
 
@@ -2280,8 +2285,8 @@ Rules:
 - Edits add nothing to the transcript. Submitting adds one player answer that lists every field with its state, in field
   order and never as a count: a toggle as on or off, and any other field as `label: value`, as its button shows it, or
   `label: Not set` for an optional field without a value. The Player shows one field per line, a toggle behind a check
-  or an empty box, or the plain text when a cycle's value is that of several of its options, which the result cannot
-  tell apart. The answer's plain text, for the transcript, exports, and screen readers, joins the fields with `, ` and
+  or an empty box, and a cycle with the option it showed, also where several of its options share a value. The
+  answer's plain text, for the transcript, exports, and screen readers, joins the fields with `, ` and
   marks a toggle `✓` or `✗`, such as `✓ crop / cane, ✗ paddle, ✓ whip` or `Intensity: High, Impact: 5`. Every answer is
   shown in full; answers too long for one transcript line are refused and the form stays open. (Owner decision,
   2026-10-07; it replaces the earlier `12 of 43 selected` and `5 of 6 fields set` counts.)

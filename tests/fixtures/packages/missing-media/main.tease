@@ -1,5 +1,15 @@
+speaker guide {
+    displayName: "Guide"
+    avatar: "avatars/missing.png"
+}
+speaker helper {
+    displayName: "Helper"
+    avatar: "avatars/corrupt.png"
+}
 showImage "images/missing.png"
 say "One", instant
+say as guide "Two", instant
+say as helper "Three", instant
 wait 30 s
 playAudio "sounds/missing.wav"
 playAudio "sounds/corrupt.wav"

@@ -591,6 +591,17 @@ function forUse(type: StaticType): StaticType {
   return value.kind === "never" ? resolved(type) : value;
 }
 
+/**
+ * How other code may change a variable: by assigning it, or only by changing the list, set, dict, or object it holds in
+ * place, which keeps the variable on the same value, so never null.
+ */
+export type Sharing = "assigns" | "changes";
+
+/** Records how `name` is changed, where an assignment says more than a change in place. */
+export function noteSharing<K>(writes: Map<K, Sharing>, name: K, how: Sharing): void {
+  if (writes.get(name) !== "assigns") writes.set(name, how);
+}
+
 /** The methods that change the list, set, or dict they are called on, and so the variable that holds it. */
 export const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "add",

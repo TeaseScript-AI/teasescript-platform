@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   activatePlayerRuntimeButton,
@@ -26,6 +25,7 @@ import {
 } from "../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface StorageHost {
@@ -76,24 +76,12 @@ let usePlayerSession: (options: {
 }) => StorageHost;
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    assert.equal(typeof module.usePlayerSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  assert.equal(typeof module.usePlayerSession, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
 });
 
 function deferred() {
@@ -732,6 +720,25 @@ test("without a running session, an edit is stored for the next Start", async (c
   await start(host, 'let k = load("k", default: 9)\nsay "${k}", instant\nexit');
   assert.deepEqual(said(host.session.value), ["9"]);
   assert.equal(host.debugEdits.value, null);
+});
+
+test("a saved value too long to write as text is compared without writing it, so its edit is stored", async (context) => {
+  const large: SerializableRuntimeValue = { kind: "list", items: ["too long"] };
+  const storage = memoryStorage({ k: large });
+  const { host } = createHost(context, storage.provider);
+  await host.loadScriptStorage();
+  // V8 cannot build a text longer than its limit; this list stands for one whose JSON would be longer.
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
+    if (typeof value === "object" && value !== null && "items" in value)
+      throw new RangeError("Invalid string length");
+    return stringify(value, ...rest);
+  });
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: large }), {
+    kind: "saved",
+    live: false,
+  });
+  assert.deepEqual([...storage.entries], [["k", 2]]);
 });
 
 /** Lets every pending promise reaction and the write report's later task run. */

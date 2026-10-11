@@ -1003,15 +1003,33 @@ async function topBarChecks(page) {
     await visible(show);
     const result = await page.evaluate(() => {
       const bar = document.querySelector(".player-top-bar");
-      const r = document.querySelector(".player-top-bar-title").getBoundingClientRect();
+      const title = document.querySelector(".player-top-bar-title");
+      const pill = title.firstElementChild;
+      const text = pill.querySelector(".player-top-bar-title-text");
+      const r = title.getBoundingClientRect();
+      const p = pill.getBoundingClientRect();
+      // The title row beside the pill, where the pill does not fill it.
+      const beside =
+        p.right < r.right - 8
+          ? document.elementFromPoint((p.right + r.right) / 2, r.y + r.height / 2)
+          : null;
       return {
-        passesThrough: !bar.contains(
-          document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
-        ),
+        passesThrough: beside === null || !bar.contains(beside),
+        cutOff: text.scrollWidth > text.clientWidth,
+        fullTitleButton: pill.matches("button[data-player-title-full]"),
         outerScroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    check(result.passesThrough, "The title must pass input through to the Stage");
+    check(
+      result.passesThrough,
+      "Beside the title pill, the bar must pass input through to the Stage",
+    );
+    // A pill the bar cuts off shows the full title on a tap (PLAYER-UI "Title and global panel controls"); otherwise it
+    // is plain text.
+    check(
+      result.fullTitleButton === result.cutOff,
+      `Only a cut-off title pill may take input: cut off ${result.cutOff}, button ${result.fullTitleButton}`,
+    );
     check(!result.outerScroll, "Top bar must not introduce document overflow");
   }
   await show.click();
@@ -1060,7 +1078,7 @@ async function topBarChecks(page) {
     "Unsupported fullscreen must remain disabled",
   );
   await unsupported.close();
-  return "PASS top controls stay reachable, the title passes input through, and fullscreen works";
+  return "PASS top controls stay reachable, the bar beside the title passes input through, only a cut-off title takes a tap, and fullscreen works";
 }
 
 async function tooltipClickFocusChecks(page) {
@@ -1963,6 +1981,34 @@ async function composerMouseFocusChecks(page) {
   return "PASS default composer focus and mouse Send keeps editing focus";
 }
 
+// In the buttons scenario the first interaction appears as Start leaves the page. Focus then belongs to nothing, so
+// with a mouse the composer takes it, as for any other interaction.
+async function startComposerFocusChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.goto(`${page.url().split("?")[0]}?dev&scenario=buttons`);
+  await page
+    .locator("[data-foreground-controls]")
+    .getByRole("button", { name: "Done counting", exact: true })
+    .waitFor();
+  const inputFocused = () =>
+    page.evaluate(() => document.activeElement?.matches("[data-composer-input]") === true);
+  await page
+    .waitForFunction(
+      () => document.activeElement?.matches("[data-composer-input]") === true,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "The composer did not take focus after Start");
+  check(
+    (await page.locator("html").getAttribute("data-player-keyboard-focus")) === "false",
+    "Focus after Start revealed a keyboard-navigation outline",
+  );
+  return "PASS the composer takes focus when Start leaves the page for an interaction";
+}
+
 async function composerSendFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2748,7 +2794,7 @@ async function developmentTimeChecks(page) {
   await foreground("Done").click();
   const waited = await entry("Waited").innerText();
   check(
-    /Waited 1\d(\.\d+)? s/.test(waited),
+    /Waited 1\d(\.\d+)? seconds\b/.test(waited),
     `+10 s did not reach the button's elapsed time: ${waited}`,
   );
   // Equal jumps announce again; the 30 s timer falls inside +1 min and fires during the jump.
@@ -2777,7 +2823,7 @@ async function developmentTimeChecks(page) {
   await foreground("Done").click();
   const thinkTime = await entry("Waited").innerText();
   check(
-    /Waited (\d+(\.\d+)? ms|[0-4](\.\d+)? s)/.test(thinkTime),
+    /Waited (\d+(\.\d+)? milliseconds?|[0-4](\.\d+)? seconds?)\b/.test(thinkTime),
     `Auto-skip advanced time while a button waited: ${thinkTime}`,
   );
   await foreground("Again").waitFor();
@@ -2814,6 +2860,7 @@ const groups = [
   toolContentChecks,
   composerNoticeChecks,
   composerMouseFocusChecks,
+  startComposerFocusChecks,
   composerSendFocusChecks,
   sidebarShortcutChecks,
   playerSettingsChecks,

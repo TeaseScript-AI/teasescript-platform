@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
-import { createServer } from "vite";
 
 import type { DebugHistoryPoint, DebugHistorySpill } from "../player/debug-history.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
@@ -18,6 +17,7 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for
 // inspection without running it or touching saved data; new input adopts it as the session, with its saved data.
@@ -107,36 +107,22 @@ let usePlayerDebug: (
 ) => { readonly active: Ref<boolean>; readonly rewind: Readonly<Ref<Rewind | null>> };
 
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    // No HMR websocket: parallel test runs must not compete for its default port.
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const session: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    const rewind: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/useDebugRewind.ts",
-    );
-    const debug: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerDebug.ts",
-    );
-    assert.equal(typeof debug.usePlayerDebug, "function");
-    // EVIDENCE: validation: as above.
-    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
-    assert.equal(typeof session.usePlayerSession, "function");
-    assert.equal(typeof rewind.useDebugRewind, "function");
-    // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-    usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-    // EVIDENCE: validation: as above.
-    useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
-  } finally {
-    await server.close();
-  }
+  const session: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  const rewind: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDebugRewind.ts",
+  );
+  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  assert.equal(typeof debug.usePlayerDebug, "function");
+  // EVIDENCE: validation: as above.
+  usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
+  assert.equal(typeof session.usePlayerSession, "function");
+  assert.equal(typeof rewind.useDebugRewind, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  // EVIDENCE: validation: as above.
+  useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
 });
 
 /** Saved data in memory, recording each provider call; `replace` can be made to fail. */

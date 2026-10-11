@@ -63,6 +63,7 @@ import {
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
 import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
+import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
@@ -568,6 +569,18 @@ export function withPlayerRuntimeDebugTrace(
     : Object.freeze({ ...session, debugTrace: context });
 }
 
+/**
+ * Runs `answer`, an operation on `session`, so that its debug recording keeps `input` as how the player gave the
+ * answer (DEBUGGER.md "Debug export").
+ */
+export function answeredByPlayerInput<T>(
+  session: PlayerRuntimeSession,
+  input: DebugAnswerInput,
+  answer: () => T,
+): T {
+  return session.recorder === null ? answer() : session.recorder.answeredBy(input, answer);
+}
+
 export function playerRuntimeForeground(
   session: PlayerRuntimeSession,
 ): PlayerForegroundPresentation | null {
@@ -617,7 +630,7 @@ export function playerRuntimeForeground(
       return Object.freeze({
         kind: "ask-image",
         accessibleName,
-        hint: action.ui.hint ?? "",
+        hint: action.ui.hint ?? "Add an image…",
         allowFile: action.ui.allowFile,
         allowCamera: action.ui.allowCamera,
         types: action.ui.types,
@@ -1915,8 +1928,9 @@ function appendTranscript(
         event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
-      const { ui, result } = event.settlement;
-      const summary = ui.kind === "form" ? formSummaryOf(ui, result, presentation) : null;
+      const { ui, result, shownOptions } = event.settlement;
+      const summary =
+        ui.kind === "form" ? formSummaryOf(ui, result, shownOptions, presentation) : null;
       if (summary !== null) formSummaries.set(event.settlement.transcriptEventSequence, summary);
     }
   }

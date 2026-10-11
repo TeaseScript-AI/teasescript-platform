@@ -22,14 +22,14 @@ chose one shared variable instead.
    still copies its value.
 4. The runtime keeps no JavaScript closure. A resource, each queued block, and a running block record the scope that
    holds each shared variable by its ID, in checkpointed, validated state (ADR 0015, ADR 0016). A scope that its code
-   leaves while a block still shares it is retained with all its variables and dropped once nothing shares it.
+   leaves while a block still shares it is retained with only the variables a block shares, and dropped once nothing
+   shares it.
 5. Types follow ADR 0021 rule 5.5: a wait or other suspension cancels what is known about a local that a block shares
    and assigns, and a block starts without the narrowing of the code around it.
 
 ## Consequences
 
 - A block cannot declare a local with the name of a variable it sees, which earlier blocks inside functions could.
-- A long-lived block keeps every variable of the scopes it shares, also large ones it does not use, in each checkpoint.
 - `docs/RUNTIME.md` describes the snapshot fields, their lifetime, and their validation.
 
 ## Alternatives considered

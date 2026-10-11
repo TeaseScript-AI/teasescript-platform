@@ -1,4 +1,8 @@
-import type { CapturedMediaRecord, CapturedMediaRepository } from "./captured-media.js";
+import {
+  storableCapturedMedia,
+  type CapturedMediaRecord,
+  type CapturedMediaRepository,
+} from "./captured-media.js";
 
 const DATABASE_VERSION = 1;
 const STORE = "media";
@@ -42,9 +46,11 @@ function repository(database: IDBDatabase): CapturedMediaRepository {
         request.onsuccess = () => resolve(request.result ?? null);
         request.onerror = () => reject(request.error);
       }),
-    add: (record: CapturedMediaRecord) =>
+    add: async (record: CapturedMediaRecord) => {
+      const stored = await storableCapturedMedia(record);
       // `add`, unlike `put`, fails instead of overwriting an existing record.
-      committed(database, (store) => store.add(record)),
+      return committed(database, (store) => store.add(stored));
+    },
     delete: (namespace, reference) =>
       committed(database, (store) => store.delete([namespace, reference])),
     listReferences: (namespace) =>
@@ -71,7 +77,12 @@ function committed(database: IDBDatabase, write: (store: IDBObjectStore) => void
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE, "readwrite");
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
+    // A request's error reaches the transaction before the transaction has an error of its own, so it is the cause.
+    transaction.onerror = (event) =>
+      reject(
+        (event.target instanceof IDBRequest ? event.target.error : null) ??
+          new DOMException("The write failed.", "UnknownError"),
+      );
     transaction.onabort = () =>
       reject(transaction.error ?? new DOMException("The write was aborted.", "AbortError"));
     write(transaction.objectStore(STORE));

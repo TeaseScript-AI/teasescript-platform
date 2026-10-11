@@ -241,6 +241,7 @@ const copyLabel = computed(() =>
       ? "Copying is not available here. The lines are selected, so copy them with the browser."
       : "Copy visible lines",
 );
+const copyTooltipOpen = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 async function copy() {
   const shown = shownLines();
@@ -251,11 +252,25 @@ async function copy() {
   } catch {
     copied = copyBySelection(text);
   }
-  if (!copied) selectLines(shown.map(({ element }) => element));
-  copyStatus.value = copied ? "copied" : "failed";
   clearTimeout(copiedTimer);
-  copiedTimer = setTimeout(() => (copyStatus.value = ""), 1500);
+  if (copied) {
+    // A copy closes the tooltip, as a click on another button does; the check mark shows it worked.
+    copyTooltipOpen.value = false;
+    copyStatus.value = "copied";
+    copiedTimer = setTimeout(() => (copyStatus.value = ""), 1500);
+    return;
+  }
+  selectLines(shown.map(({ element }) => element));
+  // A refused copy says why in the tooltip, open at once (the selection route's focus change closed it). The label
+  // stays while the tooltip is open, and as long as a copy's does once it closed.
+  copyStatus.value = "failed";
+  copyTooltipOpen.value = true;
 }
+watch(copyTooltipOpen, (open) => {
+  if (copyStatus.value !== "failed") return;
+  clearTimeout(copiedTimer);
+  if (!open) copiedTimer = setTimeout(() => (copyStatus.value = ""), 1500);
+});
 </script>
 
 <template>
@@ -296,7 +311,7 @@ async function copy() {
       :style="{ height: `${spacers[1]}px` }"
     /></code></pre>
     <div class="code-block-tools" data-code-block-tools>
-      <Tooltip>
+      <Tooltip v-model:open="copyTooltipOpen" disable-closing-trigger>
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
@@ -308,10 +323,14 @@ async function copy() {
             <component :is="copyStatus === 'copied' ? Check : Copy" />
           </Button>
         </TooltipTrigger>
-        <!-- The failure text wraps within the screen. -->
-        <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width)">{{
-          copyLabel
-        }}</TooltipContent>
+        <!-- The failure text wraps within the screen. The label stays current for assistive technology while the
+             tooltip stays open across a refused copy. -->
+        <TooltipContent
+          :collision-padding="8"
+          :aria-label="copyLabel"
+          class="max-w-(--reka-tooltip-content-available-width)"
+          >{{ copyLabel }}</TooltipContent
+        >
       </Tooltip>
       <Tooltip>
         <TooltipTrigger as-child>

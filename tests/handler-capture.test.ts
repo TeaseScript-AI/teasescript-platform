@@ -279,6 +279,43 @@ test("blocks keep shared variables alive across transfers, removal, and a call, 
   assert.ok(called.boundaries.every((snapshot) => sharedScopes(snapshot).length === 0));
 });
 
+test("a retained scope keeps only the variables its blocks share, each while a block shares it", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "function challenge {",
+      "    let stop = false",
+      "    let items = [1, 2, 3]",
+      '    let note = "soon"',
+      "    timer async 1 s {",
+      "        say note",
+      "    }",
+      '    showPermanentButton "Stop" {',
+      "        stop = true",
+      '        say "stopped ${stop}"',
+      "    }",
+      "}",
+      "challenge()",
+      "wait 3 s",
+      "exit",
+    ].join("\n"),
+    // Clicked once the timer has run.
+    { press: clicking([1], (snapshot) => snapshot.currentSessionTimeMs >= 1_000) },
+  );
+  assert.deepEqual(said(result.events), ["soon", "stopped true"]);
+  const retained = (from: number, to: number): string[][][] =>
+    result.boundaries
+      .filter(
+        (snapshot) =>
+          snapshot.callFrames.length === 0 &&
+          snapshot.currentSessionTimeMs >= from &&
+          snapshot.currentSessionTimeMs < to,
+      )
+      .map(sharedScopes);
+  // `items` is never kept; `note` goes once the timer has run.
+  assert.deepEqual(retained(0, 1_000).at(0), [["stop", "note"]]);
+  assert.deepEqual(retained(1_000, 3_000).at(-1), [["stop"]]);
+});
+
 /** A session that round-trips every state through checkpoint JSON, for steps the equivalence helper does not take. */
 class Session {
   readonly plan: InstructionPlan;

@@ -75,6 +75,49 @@ test("+ gives a new list of both lists' elements, and += and addAll append in pl
   );
 });
 
+test("+= on a list variable changes no copy or added list, and a join that does not fit changes nothing", () => {
+  const result = runValidSource(
+    [
+      DYNAMIC,
+      "let items: integer[] = [1]",
+      "let copy = items",
+      "items += [2]",
+      "items = items + [3]",
+      // Checked when the script runs, since the compiler cannot see the element type.
+      "let more = dynamic([4])",
+      "items += more",
+      "let element = [5]",
+      "let nested = [[0]]",
+      "nested += [element]",
+      "element.add(6)",
+      "nested += nested",
+      "nested[3].add(7)",
+      "say items",
+      "say copy",
+      "say element",
+      "say nested",
+      'let mixed: (integer | string)[] = [5, "a"]',
+      "let wrong = dynamic(mixed)",
+      "items += wrong",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["[1, 2, 3, 4]", "[1]", "[5, 6]", "[[0], [5], [0], [5, 7]]"]);
+  // The position counts the elements the list already holds.
+  assert.deepEqual(
+    [result.snapshot.failure?.code, result.snapshot.failure?.message],
+    [
+      "TSR058",
+      `'items' holds a list (integer[]), so it cannot take a list with text (string) "a" at [5].`,
+    ],
+  );
+  assert.deepEqual(
+    result.snapshot.frames[0]!.bindings.find((binding) => binding.name === "items")?.value,
+    { kind: "list", items: [1, 2, 3, 4] },
+  );
+});
+
 test("joined and appended elements keep the list's element type", () => {
   // Integers and numbers together are numbers, and a list declared with a union type takes both members.
   assert.deepEqual(

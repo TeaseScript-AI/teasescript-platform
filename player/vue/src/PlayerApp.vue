@@ -26,7 +26,7 @@ import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
-import { speakerAvatarSource } from "./speakerAvatar";
+import { speakerAvatarFailure, speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
@@ -107,6 +107,7 @@ provide(
   computed(() => themeIntent.value.contrast === "high"),
 );
 provide(speakerAvatarSource, props.player.resolveAsset);
+provide(speakerAvatarFailure, props.player.avatarFailed);
 usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
 // Player Settings persist in this browser. Contrast is part of the theme intent; the
@@ -610,8 +611,9 @@ async function toggleFullscreen() {
           </slot>
         </template>
 
+        <!-- A session a Player error stopped takes no input; its transcript stays. -->
         <RuntimeInteraction
-          :session="session"
+          :session="player.stopped.value ? null : session"
           :reset="player.interactionReset.value"
           :transcript-key="transcript.key"
           :entries="transcript.entries"

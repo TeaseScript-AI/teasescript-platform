@@ -780,6 +780,15 @@ test("an image request is presented, survives a restore while it waits, and show
   assert.equal(answerPlayerRuntimeImage(answered.session, reference, store), null);
 });
 
+test("an image request without a hint shows the default hint, and an explicitly empty one stays empty", () => {
+  const hintOf = (source: string) => {
+    const presented = playerRuntimeForeground(createPlayerRuntimeSession(source));
+    return presented?.kind === "ask-image" ? presented.hint : null;
+  };
+  assert.equal(hintOf('let pick = askImage("Show me.")\nexit'), "Add an image…");
+  assert.equal(hintOf('let pick = askImage("Show me.", hint: "")\nexit'), "");
+});
+
 test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {
   const initial = [{ key: "answer.2", value: "previous" }];
   const session = createPlayerRuntimeSession(
@@ -1042,7 +1051,7 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
-test("a cycle whose options share its value is answered with the option it showed, as one line", () => {
+test("a cycle whose options share its value is answered with the option it showed, line by line", () => {
   const session = createPlayerRuntimeSession(
     [
       "let answers = askForm fields: {",
@@ -1056,7 +1065,7 @@ test("a cycle whose options share its value is answered with the option it showe
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(stepped.session));
   const done = submitPlayerRuntimeForm(restored)!;
   assert.equal(done.outcome.kind, "completed");
-  // The result cannot tell the options apart, so the Player shows the transcript text, not a line per field.
+  // The result cannot tell the options apart; the settlement's shown option can, also after a restore.
   for (const shown of [
     done.session,
     restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(done.session)),
@@ -1066,7 +1075,7 @@ test("a cycle whose options share its value is answered with the option it showe
     );
     assert.deepEqual(answer?.kind === "message" ? [answer.text, answer.formSummary] : undefined, [
       "Pace: Fast",
-      undefined,
+      [{ kind: "value", label: "Pace", value: "Fast" }],
     ]);
   }
 });

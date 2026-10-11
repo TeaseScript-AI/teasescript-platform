@@ -149,6 +149,7 @@ import {
   currentTemporalContext,
   MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
+import { snapshotValidationAnalysis } from "./snapshot-validation-analysis.js";
 import type {
   RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
@@ -889,13 +890,32 @@ function executePlannedInstruction(
       return;
     }
     case "prepareReference": {
-      const reference = evaluator.prepareReference(instruction.expression);
-      setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
-      evaluator.trace?.writeTemporary(
-        evaluator.callFrameId(),
-        instruction.destinationTemporary,
-        reference,
+      const { reference, value } = evaluator.prepareReference(
+        instruction.expression,
+        snapshotValidationAnalysis(plan).preparedReferenceTemporaries.get(
+          instruction.destinationTemporary,
+        ) === true,
       );
+      setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
+      if (evaluator.trace !== null) {
+        // Debug explains the value the reference selected while it was prepared, as it explains a temporary that holds
+        // that value. Resolving the reference again could draw a random element a second time.
+        if (
+          instruction.expression.kind === "temporary" ||
+          instruction.expression.kind === "identifier"
+        )
+          evaluator.trace.copyTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+        else
+          evaluator.trace.writeTemporary(
+            evaluator.callFrameId(),
+            instruction.destinationTemporary,
+            value,
+          );
+      }
       advance(snapshot);
       return;
     }
@@ -904,10 +924,12 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     case "assign": {
-      const value = evaluator.evaluate(instruction.value);
-      if (instruction.typeCheck !== undefined)
-        assertValueType(value, instruction.typeCheck, instruction.value.span);
-      evaluator.assign(instruction.target, value);
+      if (!evaluator.appendAssigned(instruction.target, instruction.value, instruction.typeCheck)) {
+        const value = evaluator.evaluate(instruction.value);
+        if (instruction.typeCheck !== undefined)
+          assertValueType(value, instruction.typeCheck, instruction.value.span);
+        evaluator.assign(instruction.target, value);
+      }
       advance(snapshot);
       return;
     }
@@ -2250,10 +2272,10 @@ function executeLoopStart(
   const owner = currentCallFrameId(snapshot);
   let frame = snapshot.loopFrames.at(-1);
   if (frame?.loopId !== instruction.loopId || frame.callFrameId !== owner) {
+    // The call's own loops are those since it began, so a deep stack is not searched at each loop.
+    const callLoops = snapshot.loopFrames.slice(snapshot.callFrames.at(-1)?.loopBaseDepth ?? 0);
     if (
-      snapshot.loopFrames.some(
-        (item) => item.loopId === instruction.loopId && item.callFrameId === owner,
-      )
+      callLoops.some((item) => item.loopId === instruction.loopId && item.callFrameId === owner)
     ) {
       throw fault(
         "TSR042",

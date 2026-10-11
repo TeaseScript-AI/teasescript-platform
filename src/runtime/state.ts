@@ -91,15 +91,26 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { validateMediaState } from "./media-validation.js";
 import {
   cloneTimer,
+  TIMER_PROPERTIES,
   type RuntimeSettledTimerSnapshot,
   type RuntimeTimerHandlerInvocationSnapshot,
 } from "./timers.js";
 import {
   cloneMedia,
+  MEDIA_PROPERTIES,
   type RuntimeMediaCueInvocationSnapshot,
   type RuntimeSettledMediaSnapshot,
 } from "./media.js";
 import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
+import { stringLength } from "./string-operations.js";
+import { calendarDurationProperty, temporalProperty } from "./temporal-operations.js";
+import {
+  isCalendarDuration,
+  isCameraView,
+  isMediaHandle,
+  isTemporal,
+  isTimerHandle,
+} from "./value-predicates.js";
 import { validatePermanentButtonState } from "./permanent-button-validation.js";
 import {
   instructionKilledTemporaries,
@@ -118,9 +129,9 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 68;
-export const DEFAULT_MAX_CALL_DEPTH = 256;
-export const MAX_SUPPORTED_CALL_DEPTH = 4096;
+export const RUNTIME_SNAPSHOT_VERSION = 72;
+export const DEFAULT_MAX_CALL_DEPTH = 1024;
+export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
@@ -1015,6 +1026,9 @@ function cloneSettlement(
     result: cloneInteractionResult(settlement.result),
     transcriptText: settlement.transcriptText,
     ui: cloneInteractionUi(settlement.ui),
+    ...(settlement.shownOptions === undefined
+      ? {}
+      : { shownOptions: settlement.shownOptions && [...settlement.shownOptions] }),
   };
 }
 
@@ -1160,14 +1174,15 @@ function validateCapturedRuntimeSnapshotDetails(
   validateGlobals(value, plan, errors);
   validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
-  const preparedReferenceTemporaryIds = analysis?.preparedReferenceTemporaryIds;
+  const scopesById = referenceScopesById(scopes);
+  const preparedReferenceTemporaries = analysis?.preparedReferenceTemporaries;
   const preparedSayTemporaryOwnership = analysis?.preparedSayTemporaryOwnership;
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
-    scopes,
+    scopesById,
     value.speakers,
-    preparedReferenceTemporaryIds,
+    preparedReferenceTemporaries,
     "Runtime temporaries",
     errors,
   );
@@ -1188,7 +1203,8 @@ function validateCapturedRuntimeSnapshotDetails(
     plan,
     analysis,
     continuationRequests,
-    preparedReferenceTemporaryIds,
+    scopesById,
+    preparedReferenceTemporaries,
     preparedSayTemporaryOwnership,
     value,
     errors,
@@ -1465,6 +1481,8 @@ function validateLoopContexts(
     const context = serializedContext(snapshotValue, level);
     const active = new Set<number>();
     let previousStart = -1;
+    // A loop runs in the scopes above those of the loop around it, whose body opened a scope of its own.
+    let outerDepth = scopeStart;
     for (let index = loopStart; index < loopEnd; index += 1) {
       const frame = loops[index];
       if (!isPlainRecord(frame) || !nonNegativeSafeInteger(frame.loopId)) continue;
@@ -1475,17 +1493,23 @@ function validateLoopContexts(
         nonNegativeSafeInteger(position) &&
         position > planned.start &&
         position < planned.target;
+      // Without a plan, the position cannot tell whether the loop's body, with its own scope, holds it.
       if (
         frame.callFrameId !== owner ||
         active.has(frame.loopId) ||
-        scopeDepth <= scopeStart ||
-        (inBody ? scopeDepth >= scopeEnd : scopeDepth !== scopeEnd) ||
+        scopeDepth <= outerDepth ||
+        (plan === undefined
+          ? scopeDepth > scopeEnd
+          : inBody
+            ? scopeDepth >= scopeEnd
+            : scopeDepth !== scopeEnd) ||
         (scopeDepth < frameList.length &&
           (!isPlainRecord(frameList[scopeDepth]) || frameList[scopeDepth].file !== null))
       ) {
         errors.push("Runtime loop frame does not belong to its call context.");
       }
       active.add(frame.loopId);
+      if (scopeDepth > outerDepth) outerDepth = scopeDepth;
       if (plan === undefined) continue;
       if (
         planned === undefined ||
@@ -1580,28 +1604,25 @@ const preparedReferencePropertyNames = Object.freeze([
 
 function validatePreparedReferenceTemporaries(
   value: unknown,
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   speakers: unknown,
-  preparedTemporaryIds: ReadonlySet<number> | undefined,
+  preparedTemporaries: ReadonlyMap<number, boolean> | undefined,
   label: string,
   errors: string[],
 ): void {
-  if (
-    preparedTemporaryIds === undefined ||
-    preparedTemporaryIds.size === 0 ||
-    !Array.isArray(value)
-  )
+  if (preparedTemporaries === undefined || preparedTemporaries.size === 0 || !Array.isArray(value))
     return;
 
   for (const temporary of value) {
-    if (
-      !isPlainRecord(temporary) ||
-      !nonNegativeSafeInteger(temporary.id) ||
-      !preparedTemporaryIds.has(temporary.id)
-    ) {
-      continue;
-    }
-    const failure = validatePreparedReferenceDescriptor(temporary.value, frames, speakers);
+    if (!isPlainRecord(temporary) || !nonNegativeSafeInteger(temporary.id)) continue;
+    const keepsRoot = preparedTemporaries.get(temporary.id);
+    if (keepsRoot === undefined) continue;
+    const failure = validatePreparedReferenceDescriptor(
+      temporary.value,
+      scopesById,
+      speakers,
+      keepsRoot,
+    );
     if (failure !== null) {
       errors.push(`${label} contain malformed prepared-reference state: ${failure}`);
     }
@@ -1732,16 +1753,19 @@ function validPreparedSayContextualSpeaker(
   );
 }
 
+/** `keepsRoot`: whether the plan keeps a copy of the root of an attached reference in this temporary. */
 function validatePreparedReferenceDescriptor(
   value: unknown,
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   speakers: unknown,
+  keepsRoot: boolean,
 ): string | null {
   const properties = serializedObjectPropertyMap(value);
   if (
     properties === null ||
-    properties.size !== preparedReferencePropertyNames.length ||
-    preparedReferencePropertyNames.some((name) => !properties.has(name))
+    properties.size !==
+      preparedReferencePropertyNames.length - (properties.has("capturedRoot") ? 0 : 1) ||
+    preparedReferencePropertyNames.some((name) => name !== "capturedRoot" && !properties.has(name))
   ) {
     return "the descriptor must contain exactly the supported fields.";
   }
@@ -1774,22 +1798,32 @@ function validatePreparedReferenceDescriptor(
   if (rootFrameId === null && detached !== true) {
     return "a descriptor without a binding root must be detached.";
   }
-  if (capturedRoot === undefined) {
-    return "the captured root is missing.";
+  // A detached reference is its captured root; an attached one keeps a copy exactly where the plan does.
+  if ((capturedRoot !== undefined) !== (detached || keepsRoot)) {
+    return detached || keepsRoot
+      ? "the captured root is missing."
+      : "an attached descriptor keeps a captured root where the plan keeps none.";
   }
 
   const path = parsePreparedReferencePath(pathValue);
   if (path === null) return "the descriptor path is malformed.";
-  if (!preparedReferencePathResolves(capturedRoot, path, speakers)) {
+  if (capturedRoot !== undefined && !preparedReferencePathResolves(capturedRoot, path, speakers)) {
     return "the captured root does not satisfy the prepared path.";
   }
 
   if (rootFrameId !== null && rootName !== null) {
-    const binding = serializedFrameBinding(frames, rootFrameId, rootName);
+    const binding = serializedFrameBinding(scopesById, rootFrameId, rootName);
     if (!binding.found) {
       return "the binding root does not exist in the serialized scope frames.";
     }
-    if (!detached && !preparedReferencePathResolves(binding.value, path, speakers)) {
+    // A reference that keeps a copy of its root is detached at its next use once its path leads nowhere from its
+    // variable. A dict's `keys` and `values` are made anew at each read, so no change of the dict detaches a reference
+    // through them before that use.
+    if (
+      !detached &&
+      capturedRoot === undefined &&
+      !preparedReferencePathResolves(binding.value, path, speakers)
+    ) {
       return "the attached binding root does not satisfy the prepared path.";
     }
   }
@@ -1860,13 +1894,12 @@ function parsePreparedReferencePath(value: unknown): readonly PreparedReferenceP
 }
 
 function serializedFrameBinding(
-  frames: unknown,
+  scopesById: ReferenceScopesById,
   frameId: number,
   name: string,
 ): { readonly found: boolean; readonly value: unknown } {
-  if (!Array.isArray(frames)) return { found: false, value: null };
-  const frame = frames.find((candidate) => isPlainRecord(candidate) && candidate.id === frameId);
-  if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) {
+  const frame = scopesById.get(frameId);
+  if (frame === undefined || !Array.isArray(frame.bindings)) {
     return { found: false, value: null };
   }
   const binding = frame.bindings.find(
@@ -1939,9 +1972,30 @@ function preparedReferencePathResolves(
       current = property.value;
       continue;
     }
-    return false;
+    current = derivedProperty(current, step.name);
+    if (current === undefined) return false;
   }
   return true;
+}
+
+/**
+ * A property that the runtime reads from a value that does not hold it (`Evaluator.#getProperty`): one derived from a
+ * text, a calendar duration, or a date or time, or state of a timer, media, or camera handle; `undefined` when the
+ * value has no such property. A handle's property depends on that state, so it stands as an empty text here: only a
+ * text has a property of its own, `length`, which the runtime checks again when it resolves the reference.
+ */
+function derivedProperty(value: unknown, name: string): SerializableRuntimeValue | undefined {
+  if (typeof value === "string") return name === "length" ? stringLength(value) : undefined;
+  if (validateCapturedSerializableValue(value) !== null) return undefined;
+  // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured value above.
+  const runtimeValue = value as SerializableRuntimeValue;
+  if (isCalendarDuration(runtimeValue)) return calendarDurationProperty(runtimeValue, name);
+  if (isTemporal(runtimeValue)) return temporalProperty(runtimeValue, name);
+  return (isTimerHandle(runtimeValue) && TIMER_PROPERTIES.has(name)) ||
+    (isMediaHandle(runtimeValue) && MEDIA_PROPERTIES.has(name)) ||
+    (isCameraView(runtimeValue) && name === "placement")
+    ? ""
+    : undefined;
 }
 
 function serializedSpeakerProperty(
@@ -1984,7 +2038,8 @@ function validateCallFrames(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   continuationRequests: ContinuationRequests,
-  preparedReferenceTemporaryIds: ReadonlySet<number> | undefined,
+  scopesById: ReferenceScopesById,
+  preparedReferenceTemporaries: ReadonlyMap<number, boolean> | undefined,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership | undefined,
   snapshotValue: Record<string, unknown>,
   errors: string[],
@@ -2122,9 +2177,9 @@ function validateCallFrames(
     validateTemporaries(frame.callerTemporaries, plan, "Runtime caller temporaries", errors);
     validatePreparedReferenceTemporaries(
       frame.callerTemporaries,
-      referenceScopes(snapshotValue),
+      scopesById,
       speakers,
-      preparedReferenceTemporaryIds,
+      preparedReferenceTemporaries,
       "Runtime caller temporaries",
       errors,
     );
@@ -2181,9 +2236,8 @@ function validateCallFrames(
         // The caller stands at its call, or where it was interrupted.
         isPlainRecord(interruption) ? frame.returnInstruction : frame.returnInstruction - 1,
         contextLoopIds(
-          Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
-            ? loopFrames.slice(0, frame.loopBaseDepth)
-            : [],
+          Array.isArray(loopFrames) ? loopFrames : [],
+          nonNegativeSafeInteger(frame.loopBaseDepth) ? frame.loopBaseDepth : 0,
           callContextOwner(value, frameIndex),
         ),
         analysis!,
@@ -3146,6 +3200,19 @@ function referenceScopes(snapshot: Record<string, unknown>): unknown {
     : snapshot.frames;
 }
 
+/** Each of the {@link referenceScopes} by its ID, the first with that ID; built once per validation. */
+type ReferenceScopesById = ReadonlyMap<number, Record<string, unknown>>;
+
+function referenceScopesById(scopes: unknown): ReferenceScopesById {
+  const byId = new Map<number, Record<string, unknown>>();
+  if (!Array.isArray(scopes)) return byId;
+  for (const scope of scopes) {
+    if (isPlainRecord(scope) && typeof scope.id === "number" && !byId.has(scope.id))
+      byId.set(scope.id, scope);
+  }
+  return byId;
+}
+
 /**
  * The session's globals: the host's, then those that the start of `main.tease` set up so far, in its order (ADR 0022
  * §6). While it runs, exactly the globals and speakers before the next instruction are set up; after it, all of them. A
@@ -3959,13 +4026,14 @@ function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): stri
   }
 }
 
-/** The loops of a context, outermost first: the loop frames at the end that the context owns. */
+/** The loops of a context, outermost first: the loop frames just before `end` that the context owns. */
 function contextLoopIds(
   loopFrames: readonly unknown[],
+  end: number,
   owner: number | null | undefined,
 ): number[] {
   const loopIds: number[] = [];
-  for (let index = loopFrames.length - 1; index >= 0; index -= 1) {
+  for (let index = Math.min(end, loopFrames.length) - 1; index >= 0; index -= 1) {
     const frame = loopFrames[index];
     if (
       !isPlainRecord(frame) ||

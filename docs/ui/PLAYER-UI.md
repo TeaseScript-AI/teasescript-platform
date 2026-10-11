@@ -474,7 +474,9 @@ with Close or Escape, returns to the [start page](#session-start-and-user-activa
 and takes focus.
 
 When a script error stops the session, a line above the composer says "The script stopped because of an error." and
-offers **Details**; after an exception of the Player itself it says "The Player ran into an error." An error notice with
+offers **Details**. An exception of the Player itself also stops the session until the next Start: it no longer runs,
+observes time, or takes input; its captures, cameras, and media end; and late answers and reports, including save
+acknowledgements, are dropped. The line then says "The Player ran into an error." An error notice with
 **Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
 shows "Script error" and "In rules.tease, line 3.", then **Technical details**, collapsed, with the error code and the
 runtime's message ("TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0
@@ -730,9 +732,9 @@ The POC's letter-glyph avatars use twelve fixed colour families, with a light fi
 inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
 ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
 keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
-image replaces the glyph and is decorative beside the visible speaker name; while it is unavailable or fails to load,
-the glyph remains. Like Stage media, the reference is package-relative and resolved by the trusted host; an
-unresolvable avatar keeps the glyph.
+image replaces the glyph and is decorative beside the visible speaker name. Like Stage media, the reference is
+package-relative and resolved by the trusted host. An avatar that does not resolve or does not load keeps the glyph and,
+like a Stage image, is a warning [player notice](#player-notices).
 
 ## Composer and foreground interactions
 
@@ -888,8 +890,9 @@ used, such as on a page that is not a secure context, a request that allows only
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay
 below it, without a count of the answers: each field shows its own. A toggle is a Player action button with toggle
-semantics (`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it
-shows `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
+semantics (`aria-pressed`), its label behind a check or cross mark that alone shows whether it is on; like any action
+button, it looks pressed in only while held (Owner decision on #512, 2026-10-09). With authored options it shows
+`label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
 option. The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
 `label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
 field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
@@ -900,8 +903,8 @@ the composer notice. While a field is edited, **Back** (and Escape in the input)
 control keeps the action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and
 adds nothing to the transcript; submitting adds the player's answer listing every field
 ([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
-of the `›` response marker; screen readers read its plain text. A form with a cycle whose value several of its options
-share is shown as that plain text with the `›` marker, since its result cannot say which of them was shown. Exact
+of the `›` response marker; screen readers read its plain text. Each cycle line names the option the cycle showed,
+also where several of its options share a value. Exact
 unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for `choose`. A
 form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
-import { createServer } from "vite";
 
 import {
   answerPlayerRuntimeImage,
@@ -17,6 +16,7 @@ import type { DebugExportCandidate } from "../player/debug-export-assembly.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { CapturedMediaAdmission, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface ImageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
@@ -50,23 +50,12 @@ let usePlayerSession: (options: {
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
-  const server = await createServer({
-    configFile: false,
-    logLevel: "warn",
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true },
-  });
-  try {
-    const module: Record<string, unknown> = await server.ssrLoadModule(
-      "/player/vue/src/usePlayerSession.ts",
-    );
-    assert.equal(typeof module.usePlayerSession, "function");
-    // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
-    usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  } finally {
-    await server.close();
-  }
+  const module: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/usePlayerSession.ts",
+  );
+  assert.equal(typeof module.usePlayerSession, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
 });
 
 // Audio elements the Player host created, so a test can make one fail to load.
@@ -335,6 +324,48 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   host.prepare(() => createPlayerRuntimeSession(script));
   await host.activate();
   await until(() => messages().length === 2, "the new session did not report the missing media");
+});
+
+test("a speaker's avatar that is no package file is a warning when a message first shows it, also after input", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => (path === "avatars/guide.png" ? `/files/${path}` : null),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  const messages = () => host.notices.value.map((notice) => notice.message);
+  const answer = () => {
+    host.update(submitPlayerRuntimeComposer(host.session.value!, "go")!.session);
+    return nextTick();
+  };
+  const script = [
+    'speaker guide {\n  displayName: "Guide"\n  avatar: "avatars/guide.png"\n}',
+    'speaker helper {\n  displayName: "Helper"\n  avatar: "avatars/missing.png"\n}',
+    'say as guide "Hello", instant',
+    'let first = askText "Next?"',
+    // The speaker the session adds after input, and an avatar changed after input.
+    'say as helper "After", instant',
+    'say as helper "Again", instant',
+    'let second = askText "Next?"',
+    'guide.avatar = "avatars/changed.png"',
+    'say as guide "Changed", instant',
+    'let third = askText "Done?"',
+    "exit",
+  ].join("\n");
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.deepEqual(messages(), []);
+  await answer();
+  assert.deepEqual(messages(), ["Image not found: avatars/missing.png"]);
+  await answer();
+  assert.deepEqual(messages(), [
+    "Image not found: avatars/missing.png",
+    "Image not found: avatars/changed.png",
+  ]);
 });
 
 test("a package image the Stage cannot load is reported while the Stage shows it", async (context) => {
