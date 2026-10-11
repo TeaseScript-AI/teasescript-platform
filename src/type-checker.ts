@@ -151,6 +151,7 @@ import {
   type PossibleValue,
   type ScalarValue,
   TypeJoin,
+  decidedValue,
   members,
   type PropertyTable,
   misfitProperty,
@@ -3130,20 +3131,22 @@ class TypeChecker {
    */
   #inferredResult(context: FunctionContext): StaticType {
     const join = new TypeJoin();
+    // A return that holds only null decides no type, so a value of another type is compared with the first that does.
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
-      first ??= returned;
       if (!join.add(returned.type))
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first.type)} on line ${first.span.start.line + 1}.${returnUnionFix(context.fn.declaration, first.type, returned.type)}`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first!.type)} on line ${first!.span.start.line + 1}.${returnUnionFix(context.fn.declaration, join.type, returned.type)}`,
           returned.span,
         );
+      else if (first === undefined && decidedValue(returned.type).kind !== "never")
+        first = returned;
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
-    if (first === undefined) return NULL_TYPE;
+    if (context.returns.length === 0) return NULL_TYPE;
     return context.returnsNull ? optional(join.type) : join.type;
   }
 
@@ -8975,13 +8978,16 @@ function sourceText(expression: Expression): string | null {
   return null;
 }
 
-/** How to let a function return values of two types: declare a union result type. */
+/**
+ * How to let a function return values of two types: declare a union result type of `earlier`, what the returns before
+ * gave, and `other`.
+ */
 function returnUnionFix(
   declaration: FunctionDeclaration,
-  first: StaticType,
+  earlier: StaticType,
   other: StaticType,
 ): string {
-  const both = union([first, other]);
+  const both = union([earlier, other]);
   if (!isAnnotatable(both))
     return " A function returns one type. Use a separate function for values of another type.";
   const parameters = declaration.parameters.length === 0 ? "" : "(...)";

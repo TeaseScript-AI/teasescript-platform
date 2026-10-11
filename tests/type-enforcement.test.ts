@@ -1168,6 +1168,35 @@ test("a function's result type comes from its return values, and returns of diff
   );
 });
 
+test("a return of a variable that held only null decides no result type, also when several such variables reach it", () => {
+  // V30 §12: a variable that starts as null and never takes another value holds only null, so beside a list the
+  // result is that list, and may be null (#831).
+  const info = (rest: string, other = "return [1]") =>
+    `let kindA = null\nlet kindB = null\nfunction info(type) {\n    let typeout = null\n    if type == 0 {\n        typeout = kindA\n    } else {\n        typeout = kindB\n    }\n    if type == 0 {\n        return typeout\n    }\n    ${other}\n}\n${rest}\nexit`;
+  assert.deepEqual(sayTexts(info('say "${info(0)}"\nsay "${info(1)}"')), ["null", "1"]);
+  // The result is `integer[]?`: like any `T?`, a caller checks it for null before using it as a list.
+  assert.deepEqual(codes(info('let r = info(1)\nsay "${r.length}"')), [["TSV043", "r"]]);
+  assert.deepEqual(
+    codes(
+      info(
+        'let r = info(1)\nif r != null {\n    say "${r.length}"\n}\nlet n: integer[]? = info(0)\nlet s: string[]? = info(1)',
+      ),
+    ),
+    [["TSV041", "info(1)"]],
+  );
+  // A value of another type is compared with the return that decided the type, not with one that held only null.
+  assert.deepEqual(
+    mismatches(info("", 'if type == 1 {\n        return [1]\n    }\n    return "x"')),
+    [
+      [
+        "TSV044",
+        "'info' returns text (string) here, but a list (integer[]) on line 14. To return both, declare the result type, as in 'function info(...): integer[] | string | null'.",
+        '"x"',
+      ],
+    ],
+  );
+});
+
 test("annotated parameters and results are checked, and a default types a parameter like let", () => {
   assert.deepEqual(
     mismatches('function shout(times = 1) {\n    say "${times}"\n}\nshout(0.5)\nexit'),

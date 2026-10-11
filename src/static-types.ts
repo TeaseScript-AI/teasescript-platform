@@ -1368,10 +1368,15 @@ function* joinValuesTask(
   return undefined;
 }
 
-/** The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. */
-function decidedValue(type: StaticType): StaticType {
-  const value = nonNullType(type);
-  return value.kind === "open" ? NEVER_TYPE : value;
+/**
+ * The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. A place
+ * may hold one of several undecided slots, such as a variable given a different null-only variable on each branch.
+ */
+export function decidedValue(type: StaticType): StaticType {
+  return memberSubset(
+    type,
+    members(type).filter((member) => member.kind !== "null" && member.kind !== "open"),
+  );
 }
 
 /** Whether values of a type may be null, including a place that took null before any other value. */
