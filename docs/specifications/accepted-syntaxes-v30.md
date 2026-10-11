@@ -2693,8 +2693,8 @@ Rules:
 - With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
   button without a chat message.
 - The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-and-durations)),
-  measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
-  timeout.
+  measured in scene time like timers ([§27](#time)), without the time a block interrupted it
+  ([§27](#expiry-blocks)). When the timeout is reached, the returned duration equals the timeout.
 - If the caller does not need the elapsed time, the return value may be ignored.
 - A zero or negative timeout, a value that is not a duration, or a calendar duration, is an error. The compiler rejects
   a timeout it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime
@@ -3430,8 +3430,8 @@ playing audio or video. It may use top-level names, the variables of the code th
 ([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
-interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
-is inert while the block runs, so there are never two active story paths:
+interaction, `wait`, blocking timer, media, or a message's reading time. The interrupted action is inert while the
+block runs, so there are never two active story paths:
 
 - if the block completes normally, the interrupted action is presented again and the script continues where it
   left off;
@@ -3440,6 +3440,12 @@ is inert while the block runs, so there are never two active story paths:
 
 A `goto` from the block, also from a function that the block calls, discards the interrupted action and instruction
 in the same way.
+
+While a block runs, what the main path waits on stands still, and after a normal return it continues with the time it
+had left: a `wait`, a blocking timer and its visible countdown, a message's reading time, and the timeout of
+`showButton` or `askForm`. The elapsed time a `showButton` returns leaves out the time the block ran. Asynchronous
+timers and media keep running, and a wait for media to end ends with the media, also while a block runs (owner
+decision, 2026-10-11).
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
@@ -3533,8 +3539,8 @@ The text follows the rules of other button labels ([§16](#lists-in-text)). Butt
 Click and handler behavior:
 
 - A click runs the handler once, like a timer expiry block ([§27](#expiry-blocks)): it interrupts at the next
-  deterministic runtime boundary, also while the main path waits on an interaction, `wait`, or media, and waits while a
-  paced message still blocks the chat or another block runs. The interrupted action returns when the handler finishes.
+  deterministic runtime boundary, also while the main path waits on an interaction, `wait`, media, or a message's
+  reading time, and waits while another block runs. The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
 - The handler shares the variables of the code that showed the button
@@ -4275,10 +4281,11 @@ context. Effective style defaults are resolved when the runtime prepares the out
 properties. The resulting presentation is shown with the message.
 
 A paced `say`, with smart pacing or a positive duration, lasts its reading time, and the next statement runs only when
-the reading time ends or the player skips it (owner decision, 2026-10-11). Nothing runs meanwhile: no other message,
-question, button, form, media or camera change, message or permanent-button change, `wait`, timer, or other code. A due
-timer, cue, or button block waits for it too; permanent buttons already shown stay usable. `instant` and `0 s` show a
-message with no reading time, so `say "Hold.", instant` followed by `wait 30 s` takes exactly 30 seconds.
+the reading time ends or the player skips it (owner decision, 2026-10-11). Nothing after it runs meanwhile: no other
+message, question, button, form, media or camera change, message or permanent-button change, `wait`, timer, or other
+code. A timer, cue, or permanent-button block interrupts a reading time as it interrupts a `wait`
+([§27](#expiry-blocks)); permanent buttons already shown stay usable. `instant` and `0 s` show a message with no
+reading time, so `say "Hold.", instant` followed by `wait 30 s` takes exactly 30 seconds.
 
 ### Updatable messages
 
