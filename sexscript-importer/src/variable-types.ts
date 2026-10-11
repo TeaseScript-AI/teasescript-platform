@@ -743,9 +743,22 @@ function analyse(
   const elementWrites = new Map<Binding, TeaseType[]>();
   // Lists that start empty and get a variable whose type allows null, `answers[i] = answer` (storeElement).
   const nullableWrites = new Set<Binding>();
+  // Lists that get a stored number read without a default, which a missing key gives as null,
+  // `ids[i] = sexscriptLegacyLoadInteger(key)` (storeElement).
+  const missingReads = new Set<Binding>();
   const noteNullable = (list: Binding | undefined, value: IrExpression, scope: Scope): void => {
-    const type = typeOf(value, scope);
-    if (list !== undefined && value.kind === "variable" && type.kind === "optional")
+    if (list === undefined) return;
+    if (
+      (value.kind === "load" &&
+        (value.integer === true || value.number === true) &&
+        value.defaultValue === undefined) ||
+      (value.kind === "call" &&
+        value.local !== true &&
+        NULLABLE_LOADS.has(value.name) &&
+        value.positional.length === 1)
+    )
+      missingReads.add(list);
+    if (value.kind === "variable" && typeOf(value, scope).kind === "optional")
       nullableWrites.add(list);
   };
   // The types of the values written to each slot of a list of empty slots, `[null] * n`, also unknown ones.
@@ -1527,6 +1540,19 @@ function analyse(
       const nullable = listOf({ kind: "optional", value: element });
       change(() => (list.union = nullable));
     }
+  }
+  // So does a list written out with elements of one type, `ids = [0, 0, 0]`, where a stored number read without a
+  // default writes a missing key's null and the code compares its elements with null (stripordie's player IDs, whose
+  // null marks a free slot); where nothing tests for that null, the element keeps the value type it is used as.
+  const testedLists = nullComparedLists(statements);
+  for (const list of missingReads) {
+    if (!testedLists.has(list.name)) continue;
+    if (list.declaration === null || list.fixed !== undefined || list.union !== undefined) continue;
+    const type = bindingType(list);
+    const collection = type === undefined ? undefined : nonNull(type);
+    if (collection?.kind !== "list" || collection.element.kind !== "scalar") continue;
+    const nullable = listOf({ kind: "optional", value: collection.element });
+    change(() => (list.union = nullable));
   }
   // A list of empty slots whose slots get values of several types, or of a type the conversion does not know, such as
   // a parameter's, is a positional record (PainStacks' `[done, painLevel, shockTime, waitTime, glitch]`): its first
@@ -2418,6 +2444,53 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["takePhoto", { kind: "optional", value: scalar("string") }],
   ["askImage", scalar("string")],
 ]);
+
+/**
+ * The names of the lists whose elements the code compares with null: `list[i] == null`, or through the past-end read
+ * helper, `sexscriptLegacyItemAt(list, i) != null`.
+ */
+function nullComparedLists(statements: readonly IrStatement[]): Set<string> {
+  const names = new Set<string>();
+  const listOf = (value: unknown): string | null => {
+    if (!isRecord(value)) return null;
+    if (value.kind === "index" && isRecord(value.target) && value.target.kind === "variable")
+      return typeof value.target.name === "string" ? value.target.name : null;
+    if (
+      value.kind === "call" &&
+      value.name === "sexscriptLegacyItemAt" &&
+      Array.isArray(value.positional)
+    ) {
+      const [list] = value.positional;
+      return isRecord(list) && list.kind === "variable" && typeof list.name === "string"
+        ? list.name
+        : null;
+    }
+    return null;
+  };
+  const isNull = (value: unknown): boolean =>
+    isRecord(value) && value.kind === "literal" && value.value === null;
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
+      const tested = isNull(value.right)
+        ? listOf(value.left)
+        : isNull(value.left)
+          ? listOf(value.right)
+          : null;
+      if (tested !== null) names.add(tested);
+    }
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statements);
+  return names;
+}
+
+/** The legacy stored-number reads, which give null for a missing key where the call has no default. */
+const NULLABLE_LOADS = new Set(["sexscriptLegacyLoadInteger", "sexscriptLegacyLoadFloat"]);
 
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
 const HELPER_RESULTS = new Map<string, TeaseType>([

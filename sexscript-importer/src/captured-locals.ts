@@ -507,21 +507,84 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
       typed(parameter) &&
       !TEXT_TYPES.has(parameter)
     );
-  const [declared] = declarations;
-  if (declarations.length !== 1 || declared === undefined || declared.nested) return false;
-  if (declared.node.multipleAssignment === true) return false;
-  const value = asNode(declared.node.right);
-  const left = asNode(declared.node.left);
-  const type = typeof left?.originType === "string" ? left.originType : "java.lang.Object";
-  if (value?.kind === "closure") return false;
-  if (type === "boolean") return false;
-  // A text without a value starts as the empty text, as the conversion starts such a local (liftLocal), except where the
-  // function tells null apart, which a local the conversion keeps as null shows.
-  if (value === null || isEmpty(value))
-    return ZERO_TYPES.has(type) || (TEXT_TYPES.has(type) && !nullTested(block, name));
-  // A text set to a computed value may be null where it is read after a call, as above.
-  if (TEXT_TYPES.has(type)) return literal(value);
-  return literal(value) || typed(type);
+  // Groovy lets a function declare a name again only in a block apart from the first, such as another `case`; each
+  // declaration then sets the one script variable where it stands (liftLocal), so they must agree on its type.
+  if (declarations.length === 0) return false;
+  const types = new Set(declarations.map(({ node }) => originType(node)));
+  if (types.size !== 1) return false;
+  return declarations.every(({ node, nested }) => {
+    if (nested || node.multipleAssignment === true) return false;
+    const value = asNode(node.right);
+    const type = originType(node);
+    if (value?.kind === "closure") return false;
+    if (type === "boolean") return false;
+    // A text without a value starts as the empty text, as the conversion starts such a local (liftLocal), except where
+    // the function tells null apart, which a local the conversion keeps as null shows.
+    if (value === null || isEmpty(value))
+      return ZERO_TYPES.has(type) || (TEXT_TYPES.has(type) && !nullTested(block, name));
+    // A text set to a computed value may be null where it is read after a call, as above.
+    if (TEXT_TYPES.has(type)) return literal(value);
+    if (typed(type)) return true;
+    // Untyped declarations agree where their values are constants of one kind.
+    return literal(value) && (declarations.length === 1 || constantKinds(declarations).size === 1);
+  });
+}
+
+/**
+ * The function body with the name renamed where it is one of its locals: after one of its declarations, inside that
+ * declaration's block, as a variable or an implicit call. A use outside, or before a declaration in its block, is a
+ * script variable of the same name and stays. A body that declares no such local (a lifted parameter) renames every
+ * use.
+ */
+function renameLocal(block: AstNode, name: string, lifted: string): AstNode {
+  // The block that holds each declaration of the name, with where the declaration starts.
+  const scopes = new Map<AstNode, Array<{ line: number; column: number }>>();
+  const place = (node: AstNode, ancestors: readonly AstNode[]): void => {
+    if (node.kind === "declaration" && variableName(node.left) === name) {
+      const holder = [...ancestors].reverse().find((ancestor) => ancestor.kind === "block");
+      const span = node.span;
+      if (holder !== undefined && span !== null && span !== undefined)
+        scopes.set(holder, [
+          ...(scopes.get(holder) ?? []),
+          { line: span.line, column: span.column },
+        ]);
+    }
+    for (const child of children(node)) place(child, [...ancestors, node]);
+  };
+  place(block, []);
+  if (scopes.size === 0) return rename(block, name, lifted);
+  const after = (span: AstNode["span"], start: { line: number; column: number }): boolean =>
+    span !== null &&
+    span !== undefined &&
+    (span.line > start.line || (span.line === start.line && span.column >= start.column));
+  const scoped = (node: AstNode, ancestors: readonly AstNode[]): AstNode => {
+    const local = ancestors.some((ancestor) =>
+      (scopes.get(ancestor) ?? []).some((start) => after(node.span, start)),
+    );
+    if (node.kind === "variable" && node.name === name)
+      return local ? { ...node, name: lifted } : node;
+    const changed = mapChildren(node, (child) => scoped(child, [...ancestors, node]));
+    if (local && calledName(changed) === name)
+      return { ...changed, method: { ...asNode(changed.method)!, value: lifted } };
+    return changed;
+  };
+  return scoped(block, []);
+}
+
+/** The Groovy type a declaration gives its variable, `java.lang.Object` for `def`. */
+function originType(declaration: AstNode): string {
+  const left = asNode(declaration.left);
+  return typeof left?.originType === "string" ? left.originType : "java.lang.Object";
+}
+
+/** The kinds of the constant values that declarations give, `typeof` each constant, or `other`. */
+function constantKinds(declarations: ReadonlyArray<{ node: AstNode }>): Set<string> {
+  return new Set(
+    declarations.map(({ node }) => {
+      const value = asNode(node.right);
+      return value?.kind === "constant" ? typeof value.value : "other";
+    }),
+  );
 }
 
 /**
@@ -626,7 +689,7 @@ function liftLocal(
       ? [assignment(startingValue(type, node.span), node.span)]
       : [];
   };
-  const withValue = mapBlocks(rename(block, name, lifted), set);
+  const withValue = mapBlocks(renameLocal(block, name, lifted), set);
   const copied = { kind: "variable", span: block.span, name, type: "java.lang.Object" };
   const result =
     parameter === null

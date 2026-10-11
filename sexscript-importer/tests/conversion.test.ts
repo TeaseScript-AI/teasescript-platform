@@ -545,7 +545,7 @@ test(
       const sourcePath = path.join(directory, "start.groovy");
       writeFileSync(
         sourcePath,
-        'setInfos(4, "Lines", "A check.", "Me", "v1", 0xFFFFFF, "en", ["test"])\n\n// After a break.\ndef list = []\nshow(list[2])\n',
+        'setInfos(4, "Lines", "A check.", "Me", "v1", 0xFFFFFF, "en", ["test"])\n\n// After a break.\ndef count = "x"\nshow(count.toInteger())\n',
       );
       const files = [await parseGroovySource(sourcePath)];
       const written = emitTease(lowerSelfContainedPackage(files)[0]!).split("\n");
@@ -555,7 +555,7 @@ test(
       });
       assert.equal(
         report.smokeRuns[0]?.failure?.line,
-        written.findIndex((line) => line.startsWith("say listValue[2]")) + 1,
+        written.findIndex((line) => line.startsWith("say toInteger(count)")) + 1,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1990,6 +1990,9 @@ test("the captured-locals fixture says what Groovy's closures gave", async () =>
     "Item inner at 0",
     "Unset",
     "Unset",
+    "Mistakes 2 2",
+    "Other 6",
+    "Mistakes 2 2",
     "Tuned",
   ]);
 });
