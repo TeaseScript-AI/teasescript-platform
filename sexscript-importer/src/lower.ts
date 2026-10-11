@@ -1004,13 +1004,13 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         /^get[A-Z]/u.test(constantString(value.method) ?? "") &&
         types.localFunctions?.has(constantString(value.method) ?? "") !== true);
     // One that the script sets before every read never shows its start, where its only null is the start and every
-    // value set later is never null.
+    // value set later has a type without null (an input that may give null, as getImage, does not).
     const setOnlyFirst = (key: string): boolean => {
       const assigned = values.get(key) ?? [];
       return (
         setFirst.has(key) &&
         assigned.filter(startless).length <= 1 &&
-        assigned.every((value) => startless(value) || neverNull(value))
+        assigned.every((value) => startless(value) || (inferType(value, types) & NULL) === 0)
       );
     };
     walkAst(body, (node) => {

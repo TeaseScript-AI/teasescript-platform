@@ -3,7 +3,8 @@
 // regression would change what the player reads without any diagnostic: closure captures, shared lists, list growth and
 // positions, comparisons, defaults, and formatting. Real Groovy parsing, importer lowering, and the repository build's
 // compiler and runtime, with seed 1. `WAIT n` lines count only where the fixture's own preamble prints them. A fixture
-// that asks gets its `<name>.answers` in turn on both sides, and must use them all.
+// that asks gets its `<name>.answers` in turn on both sides, and must use them all. No camera is configured, so
+// takePhoto() gives null, as a fixture's preamble has getImage give.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -79,6 +80,18 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
   note(step.events);
   for (let turn = 0; turn < 500 && step.snapshot.status === "waiting"; turn += 1) {
     const action = step.snapshot.foregroundAction;
+    if (action?.kind === "capture") {
+      const completed = completeAction(plan, step.snapshot, {
+        actionId: action.actionId,
+        actionKind: "capture",
+        payload: { kind: "unavailable", reason: "unconfigured" },
+      });
+      assert.equal(completed.outcome.kind, "completed", `${name} refuses the missing camera`);
+      note(completed.events);
+      step = run(plan, completed.snapshot);
+      note(step.events);
+      continue;
+    }
     if (action?.kind === "interaction") {
       const answer = answers.shift();
       assert.ok(answer !== undefined, `${name} asks more often than its answers`);
