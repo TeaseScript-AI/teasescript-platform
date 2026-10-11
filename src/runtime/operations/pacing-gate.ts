@@ -44,3 +44,19 @@ export function settleBackgroundPacingGate(
   );
   return settlement;
 }
+
+/**
+ * What the player sees or hears waits for the reading time of the message before it, like a later `say` (owner
+ * decision, 2026-10-11): an active background pacing gate becomes the foreground action without prepared output, and
+ * the waiting instruction runs again once it settles. Returns whether it waits.
+ */
+export function holdForPacing(snapshot: RuntimeSnapshot): boolean {
+  const gate = snapshot.backgroundActions.find(
+    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+  );
+  if (gate === undefined) return false;
+  snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
+  snapshot.foregroundAction = Object.freeze({ ...gate, preparedOutput: null });
+  snapshot.status = "waiting";
+  return true;
+}

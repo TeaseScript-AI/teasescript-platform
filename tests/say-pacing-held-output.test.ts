@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProject } from "../src/compiler.js";
 import { interactionDeadlineMs } from "../src/runtime/actions/model.js";
 import {
   createCheckpoint,
@@ -293,7 +294,8 @@ test("a question appears together with its field in one step, once the message b
     held.events.map((event) => (event.kind === "say" ? event.text : event.kind)),
     ["A", "actionRequested"],
   );
-  assert.equal(heldGate(held.snapshot).preparedOutput?.text, "Name?");
+  // The question waits before it is said, so it holds no prepared output.
+  assert.equal(heldGate(held.snapshot).preparedOutput, null);
 
   const asked = run(compiled, observeTime(compiled, held.snapshot, 2_000).snapshot);
   // No reading time of its own comes between the question and its field.
@@ -310,6 +312,146 @@ test("a question appears together with its field in one step, once the message b
   const field = asked.snapshot.foregroundAction;
   assert.equal(field?.kind === "interaction" && field.createdAtMs, 2_000);
   assert.deepEqual(asked.snapshot.backgroundActions, []);
+});
+
+test("a block queued during a reading time runs before a question, never between it and its controls", () => {
+  const interrupt = ["timer async 1 s {", '    say "Interrupt", 3 s', "}", 'say "A", 2 s'];
+  for (const ask of [
+    'let answer = askText "Name?"',
+    'let mark = "?"\nlet answer = askText "Name${mark}", hint: "Type"',
+    'let answer = askBoolean "Name?"',
+    'let answer = askForm "Name?", fields: { on: false }, timeout: 1 s, onTimeout: "submit"',
+  ]) {
+    const seen = timeline([...interrupt, ask, "exit"].join("\n"));
+    // The block's message comes first and gets its reading time; then the question appears with its controls.
+    assert.deepEqual(seen.slice(0, 3), ["0 say A", "2000 say Interrupt", "5000 say Name?"], ask);
+    assert.match(seen[3]!, /^5000 (text|choice|form)$/u, ask);
+  }
+});
+
+test("in a block, a message's text, permanent buttons, and exit wait for a reading time, and media keep its timing", () => {
+  assert.deepEqual(
+    timeline(
+      [
+        'let line = say "Counter", instant',
+        'let close = showPermanentButton "Close" {',
+        "    exit",
+        "}",
+        "timer async 1 s {",
+        '    say "Reading", 5 s',
+        '    showImage "images/room.jpg"',
+        '    line.text = "Changed"',
+        "    removePermanentButton(close)",
+        '    say "Bye", 1 s',
+        "    exit",
+        "}",
+        "wait 10 s",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "0 say Counter",
+      "0 show Close",
+      "1000 say Reading",
+      "1000 image images/room.jpg",
+      "6000 text Changed",
+      "6000 remove button",
+      "6000 say Bye",
+      "7000 exit",
+    ],
+  );
+});
+
+test("a countdown appears, and starts, once the reading time before it ends, and a hidden timer starts at once", () => {
+  const compiled = plan(
+    [
+      'say "A", 2 s',
+      "let quiet = timer async hidden 10 s",
+      'let shown = timer(duration: 10 s, async: true, display: "mystery")',
+      'showButton "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  const timers = (snapshot: RuntimeSnapshot) =>
+    snapshot.backgroundActions.flatMap((action) =>
+      action.kind === "timer"
+        ? [`${action.timer.display} ${action.createdAtMs} ${action.timer.deadlineMs}`]
+        : [],
+    );
+  const held = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(timers(held.snapshot), ["hidden 0 10000"]);
+  assert.equal(heldGate(held.snapshot).deadlineMs, 2_000);
+  const shown = run(compiled, observeTime(compiled, held.snapshot, 2_000).snapshot);
+  assert.deepEqual(timers(shown.snapshot), ["hidden 0 10000", "mystery 2000 12000"]);
+  assert.equal(shown.snapshot.foregroundAction?.kind, "interaction");
+});
+
+test("a goto that removes a shown permanent button waits for the reading time, and one that removes nothing goes on", () => {
+  assert.deepEqual(
+    timeline(
+      [
+        'showPermanentButton "Hint" {',
+        '    say "Hint", instant',
+        "}",
+        'showPermanentButton "Always", persist: true {',
+        '    say "Always", instant',
+        "}",
+        'say "A", 5 s',
+        "goto next",
+        "label next",
+        'showButton "Go"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["0 show Hint", "0 show Always", "0 say A", "5000 remove button", "5000 button", "5000 exit"],
+  );
+
+  const kept = plan(
+    [
+      "let count = 0",
+      'showPermanentButton "Always", persist: true {',
+      '    say "Always", instant',
+      "}",
+      'say "A", 5 s',
+      "goto next",
+      "label next",
+      "count += 1",
+      'showButton "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  const held = run(kept, createFreshRuntimeSnapshot(kept));
+  // Leaving the entry removes no shown button here, so the goto and the code after it run during the reading time.
+  assert.equal(binding(held.snapshot, "count"), 1);
+  assert.equal(kept.instructions[held.snapshot.nextInstruction]?.kind, "interaction");
+});
+
+test("a goto to another file that removes a shown permanent button waits for the reading time", () => {
+  const compiled = compileProject([
+    {
+      path: "main.tease",
+      source: [
+        'showPermanentButton "Hint" {',
+        '    say "Hint", instant',
+        "}",
+        'say "A", 5 s',
+        'goto "next.tease"',
+      ].join("\n"),
+    },
+    { path: "next.tease", source: 'showButton "Go"\nexit' },
+  ]);
+  assert.deepEqual(compiled.diagnostics, []);
+  const project = compiled.plan!;
+  const held = run(project, createFreshRuntimeSnapshot(project));
+  assert.equal(heldGate(held.snapshot).deadlineMs, 5_000);
+  assert.equal(project.instructions[held.snapshot.nextInstruction]?.kind, "transfer");
+  assert.ok(held.snapshot.backgroundActions.some((action) => action.kind === "permanentButton"));
+  const moved = run(project, observeTime(project, held.snapshot, 5_000).snapshot);
+  assert.equal(
+    moved.snapshot.backgroundActions.some((action) => action.kind === "permanentButton"),
+    false,
+  );
+  assert.equal(moved.snapshot.foregroundAction?.kind, "interaction");
 });
 
 test("permanent buttons stay usable while a reading time holds output back", () => {

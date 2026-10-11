@@ -135,13 +135,9 @@ test("a pacing gate promotes after a newer delay settlement and resumes prepared
   );
 });
 
-test("explicit exit cleans released pacing lineage without admitting forged pacing work", () => {
-  // In a block, exit does not wait, so it ends the session while the released message's own gate runs.
-  const compiled = plan(
-    'timer async 1 ms {\n    say "first", 5 s\n    say "second", 5 s\n    exit\n}\nwait 1 min\nexit',
-  );
-  const started = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const promoted = run(compiled, observeTime(compiled, started.snapshot, 1).snapshot);
+test("explicit exit ends released pacing lineage without admitting forged pacing work", () => {
+  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
+  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
   const released = completeAction(compiled, promoted.snapshot, {
@@ -152,7 +148,15 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
   const beforeExit = executeInstruction(compiled, released.snapshot);
   const replacement = beforeExit.snapshot.backgroundActions[0];
   assert.equal(replacement?.kind, "chatPacingGate");
-  const exited = executeInstruction(compiled, beforeExit.snapshot);
+  // The exit waits for the released message's own gate; its skip replaces the release, and the session ends.
+  const exitHeld = executeInstruction(compiled, beforeExit.snapshot);
+  assert.equal(heldGate(exitHeld.snapshot).actionId, replacement!.actionId);
+  const replacementSkipped = completeAction(compiled, exitHeld.snapshot, {
+    actionId: replacement!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const exited = executeInstruction(compiled, replacementSkipped.snapshot);
 
   assert.equal(exited.snapshot.status, "halted");
   assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);

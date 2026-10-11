@@ -185,7 +185,7 @@ import {
   calculateSmartPacingDurationMs,
   exactPacingMilliseconds,
 } from "./actions/pacing.js";
-import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
+import { holdForPacing, settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 import { normalizeOpaqueColor } from "../color.js";
 import {
   returnFromTimerHandler,
@@ -1124,6 +1124,8 @@ function executePlannedInstruction(
       returnFromFunction(plan, snapshot, null, instruction.span, events, evaluator);
       return;
     case "say": {
+      // A question waits before it is said, so no block can come between it and its controls.
+      if (instruction.question === true && holdForPacing(snapshot)) return;
       executeSayAtomically(instruction, snapshot, evaluator, events);
       return;
     }
@@ -1397,7 +1399,7 @@ function executePlannedInstruction(
       return;
     case "exit":
       // The session ends, and its media stop, once the last message has been read.
-      if (holdStoryOutputForPacing(snapshot)) return;
+      if (holdForPacing(snapshot)) return;
       stopAllTimersForSessionEnd(snapshot);
       stopAllMediaForSessionEnd(snapshot);
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
@@ -3403,6 +3405,8 @@ export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): s
 /**
  * Starts an asynchronous timer as background timed work and, when used as a value, stores its handle. Operands are
  * evaluated in plan order before a range is drawn. A zero first round expires at once and queues its expiry block.
+ * A timer that may be shown first waits for the previous message's pacing, so its countdown runs from when it appears;
+ * a hidden one is invisible work and starts at once.
  */
 function startTimer(
   instruction: Extract<Instruction, { kind: "startTimer" }>,
@@ -3410,6 +3414,7 @@ function startTimer(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
+  if (timerMayShow(instruction) && holdForPacing(snapshot)) return;
   const duration = evaluator.evaluate(instruction.duration);
   const display =
     typeof instruction.display === "string"
@@ -3881,33 +3886,10 @@ function startMedia(
 }
 
 /**
- * What the player sees or hears waits for the reading time of the message before it, like a later `say` (owner
- * decision, 2026-10-11): an active background pacing gate becomes the foreground action without prepared output, and
- * the waiting instruction runs again once it settles. Returns whether it waits.
- */
-function holdForPacing(snapshot: RuntimeSnapshot): boolean {
-  const gate = snapshot.backgroundActions.find(
-    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
-  );
-  if (gate === undefined) return false;
-  snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
-  snapshot.foregroundAction = Object.freeze({ ...gate, preparedOutput: null });
-  snapshot.status = "waiting";
-  return true;
-}
-
-/**
- * Stage, camera, message-text, permanent-button, and `exit` output waits for pacing on the story path. Interrupt
- * blocks, and functions they call, keep their timing, so this output never waits while one runs.
- */
-function holdStoryOutputForPacing(snapshot: RuntimeSnapshot): boolean {
-  return !interruptRunning(snapshot) && holdForPacing(snapshot);
-}
-
-/**
- * Waits for pacing before story output that its own instruction cannot hold: media, camera, a message's text, and
+ * Waits for pacing before output that its own instruction cannot hold: media, camera, a message's text, and
  * `removePermanentButton`. A barrier with a receiver waits only when that receiver is a media handle, camera view, or
- * message handle.
+ * message handle. Stage, sound, video, and camera output keeps the timing of a timer, media, or button block, and of
+ * the functions it calls, so its barrier never waits while one runs (V30 §22); the others hold there too.
  */
 function executePacingBarrier(
   instruction: Extract<Instruction, { kind: "pacingBarrier" }>,
@@ -3915,7 +3897,7 @@ function executePacingBarrier(
   evaluator: Evaluator,
 ): void {
   if (
-    !interruptRunning(snapshot) &&
+    (instruction.holdsInBlocks === true || !interruptRunning(snapshot)) &&
     snapshot.backgroundActions.some((action) => action.kind === "chatPacingGate") &&
     (instruction.receiver === null || isPacedHandle(evaluator.evaluate(instruction.receiver)))
   ) {
@@ -3927,8 +3909,8 @@ function executePacingBarrier(
 
 /**
  * Shows a permanent button after the shown ones, as background work that waits for clicks. Its block runs for the
- * activation that showed it, like a timer's, and the script continues at once. On the story path it first waits for
- * the previous message's pacing.
+ * activation that showed it, like a timer's, and the script continues at once. It first waits for the previous
+ * message's pacing.
  */
 function showPermanentButton(
   instruction: Extract<Instruction, { kind: "showPermanentButton" }>,
@@ -3936,7 +3918,7 @@ function showPermanentButton(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  if (holdStoryOutputForPacing(snapshot)) return;
+  if (holdForPacing(snapshot)) return;
   const span = copySpan(instruction.span);
   const text = fieldText(
     evaluator.evaluate(instruction.text),
@@ -3999,6 +3981,14 @@ function showPermanentButton(
     } satisfies ActionRequestedEvent),
   );
   advance(snapshot);
+}
+
+/** Whether a timer may be shown: unless it is written `hidden`, its display is known only once it is evaluated. */
+function timerMayShow(instruction: Extract<Instruction, { kind: "startTimer" }>): boolean {
+  const display = instruction.display;
+  return typeof display === "string"
+    ? display !== "hidden"
+    : !(display.kind === "literal" && display.value === "hidden");
 }
 
 /** Handles whose changes wait for the previous message's pacing: media playback, camera views, and messages. */

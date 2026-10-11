@@ -599,6 +599,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
     "destinationTemporary",
     "skipPolicy",
     "pacing",
+    "question",
   ],
 ]);
 
@@ -1008,6 +1009,20 @@ function validateInstruction(
       if (value.pacing !== "smart" && value.pacing !== "instant") {
         validateExpression(value.pacing, `${path}.pacing`, errors, false, temporaryCount);
       }
+      if (
+        value.question !== undefined &&
+        (value.question !== true ||
+          value.pacing !== "instant" ||
+          value.destinationTemporary !== undefined)
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            "An ask's question is an instant say without a result.",
+            `${path}.question`,
+          ),
+        );
+      }
       return;
     case "wait":
       if (
@@ -1080,7 +1095,15 @@ function validateInstruction(
       }
       return;
     case "pacingBarrier":
-      if (!hasExactKeys(value, ["kind", "receiver", "span"])) {
+      if (
+        !hasExactKeys(
+          value,
+          "holdsInBlocks" in value
+            ? ["kind", "receiver", "holdsInBlocks", "span"]
+            : ["kind", "receiver", "span"],
+        ) ||
+        ("holdsInBlocks" in value && value.holdsInBlocks !== true)
+      ) {
         errors.push(planError("TSC002", "Pacing-barrier instruction has an invalid shape.", path));
       }
       if (value.receiver !== null) {

@@ -466,7 +466,8 @@ export class InstructionCompiler {
         // The target object is already prepared once; the barrier waits when it holds a media handle, camera view, or
         // message handle.
         if (target.plan.kind === "property" && PACED_HANDLE_PROPERTIES.has(target.plan.name)) {
-          this.#emitPacingBarrier(target.plan.object, statement.span);
+          // A message's text waits in blocks too; media and camera keep a block's timing.
+          this.#emitPacingBarrier(target.plan.object, statement.span, target.plan.name === "text");
         }
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
@@ -523,7 +524,7 @@ export class InstructionCompiler {
           method.kind === "identifier" &&
           method.name === "removePermanentButton"
         ) {
-          this.#emitPacingBarrier(null, statement.span);
+          this.#emitPacingBarrier(null, statement.span, true);
         }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
@@ -1158,12 +1159,21 @@ export class InstructionCompiler {
   }
 
   /**
-   * Main-story media, camera, message-text, and permanent-button removal output waits for the previous message's
-   * pacing. A handle operation passes its already evaluated receiver; the barrier then waits only for a media handle,
-   * a camera view, or a message handle.
+   * Media, camera, message-text, and permanent-button removal output waits for the previous message's pacing. A handle
+   * operation passes its already evaluated receiver; the barrier then waits only for a media handle, a camera view, or
+   * a message handle. Media and camera keep the timing of a block, so only other output `holdsInBlocks`.
    */
-  #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
-    this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
+  #emitPacingBarrier(
+    receiver: ExpressionPlan | null,
+    span: SourceSpan,
+    holdsInBlocks = false,
+  ): void {
+    this.instructions.push({
+      kind: "pacingBarrier",
+      receiver,
+      ...(holdsInBlocks ? { holdsInBlocks: true as const } : {}),
+      span: copySpan(span),
+    });
   }
 
   /** The variables that blocks of one resource share with the code that creates it, in the order of first use. */
@@ -1750,6 +1760,7 @@ export class InstructionCompiler {
           },
           skipPolicy: null,
           pacing: "instant",
+          question: true,
           span: copySpan(expression.span),
         });
       }
@@ -1808,6 +1819,7 @@ export class InstructionCompiler {
           textTemporary,
           skipPolicy: null,
           pacing: "instant",
+          question: true,
           span: copySpan(expression.span),
         };
         questionTemporaryIds = [
@@ -2090,6 +2102,7 @@ export class InstructionCompiler {
         textTemporary,
         skipPolicy: null,
         pacing: "instant",
+        question: true,
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
@@ -2166,6 +2179,7 @@ export class InstructionCompiler {
         textTemporary,
         skipPolicy: null,
         pacing: "instant",
+        question: true,
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(

@@ -970,13 +970,9 @@ test("an observation while a settled wait's continuation is pending settles noth
   assert.equal(validateRuntimeSnapshot(completed.snapshot, restored.plan).valid, true);
 });
 
-test("time release followed by explicit exit canonicalizes pacing release provenance", () => {
-  // In a block, exit does not wait, so it ends the session while the released message's own gate runs.
-  const compiled = plan(
-    'timer async 1 ms {\n    say "first", 5 s\n    say "second", 5 s\n    exit\n}\nwait 1 min\nexit',
-  );
-  const started = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const promoted = run(compiled, observeTime(compiled, started.snapshot, 1).snapshot);
+test("an exit waits for the gate of a released message and ends the session without release provenance", () => {
+  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
+  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
 
@@ -993,18 +989,30 @@ test("time release followed by explicit exit canonicalizes pacing release proven
     serializeCheckpoint(createCheckpoint(compiled, released.snapshot)),
   );
 
-  const exited = run(restoredRelease.plan, restoredRelease.snapshot);
+  // The exit waits for the released message's own gate, whose settlement then replaces the release.
+  const exitHeld = run(restoredRelease.plan, restoredRelease.snapshot);
+  assert.deepEqual(
+    exitHeld.events.map((event) => event.kind),
+    ["say", "actionRequested"],
+  );
+  const secondGate = exitHeld.snapshot.foregroundAction;
+  assert.equal(secondGate?.kind, "chatPacingGate");
+  const exited = run(
+    compiled,
+    observeTime(compiled, exitHeld.snapshot, secondGate!.deadlineMs).snapshot,
+  );
   assert.deepEqual(
     exited.events.map((event) => event.kind),
-    ["say", "actionRequested", "exit"],
+    ["exit"],
   );
   assert.equal(exited.snapshot.status, "halted");
   assert.equal(exited.snapshot.backgroundActions.length, 0);
   assert.equal(exited.snapshot.preparedSayOutput, null);
+  assert.equal(exited.snapshot.lastSettlement?.actionId, secondGate!.actionId);
   assert.equal(
     exited.snapshot.lastSettlement?.actionKind === "chatPacingGate"
       ? exited.snapshot.lastSettlement.releasedPreparedOutputInstruction
-      : null,
+      : undefined,
     null,
   );
   assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
@@ -1013,7 +1021,7 @@ test("time release followed by explicit exit canonicalizes pacing release proven
   );
 
   const replay = completeAction(compiled, exited.snapshot, {
-    actionId: gate!.actionId,
+    actionId: secondGate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });

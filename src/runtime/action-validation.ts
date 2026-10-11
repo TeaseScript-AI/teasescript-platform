@@ -719,20 +719,28 @@ function validPacingGateAction(
   if (!foreground) return action.preparedOutput === null;
   // Held output promotes the gate without prepared output and waits at the instruction that runs again.
   if (action.preparedOutput === null) {
-    return (
-      plan === undefined ||
-      (nonNegativeSafeInteger(snapshot.nextInstruction) &&
-        PACING_HOLD_INSTRUCTIONS.has(plan.instructions[snapshot.nextInstruction]?.kind ?? ""))
-    );
+    if (plan === undefined) return true;
+    if (!nonNegativeSafeInteger(snapshot.nextInstruction)) return false;
+    const holding = plan.instructions[snapshot.nextInstruction];
+    return holding?.kind === "say"
+      ? holding.question === true
+      : PACING_HOLD_INSTRUCTIONS.has(holding?.kind ?? "");
   }
   return validPreparedSayOutput(action.preparedOutput, snapshot, plan);
 }
 
-/** Instructions that hold their output behind an active pacing gate and run again once it settles. */
+/**
+ * Instructions that hold their output behind an active pacing gate and run again once it settles, besides an ask's
+ * question `say`.
+ */
 const PACING_HOLD_INSTRUCTIONS: ReadonlySet<string> = new Set([
   "pacingBarrier",
   "interaction",
   "showPermanentButton",
+  "startTimer",
+  "goto",
+  "transfer",
+  "end",
   "exit",
 ]);
 

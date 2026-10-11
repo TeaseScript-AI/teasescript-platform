@@ -410,6 +410,11 @@ export interface SayInstruction extends InstructionBase {
   readonly destinationTemporary?: number;
   readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly pacing: ExpressionPlan | "smart" | "instant";
+  /**
+   * An ask's question, said `instant` right before its interaction: it waits for the previous message's pacing before
+   * it is said, without prepared output, so that nothing comes between it and its controls.
+   */
+  readonly question?: true;
 }
 
 export type DurationUnitPlan = "ms" | "s" | "min" | "h" | "d" | "w";
@@ -462,12 +467,15 @@ export interface StartTimerInstruction extends InstructionBase {
 }
 
 /**
- * Waits for the previous message's pacing before main-story media presentation. With a `receiver`, it waits only
- * when that side-effect-free expression evaluates to a media handle or a camera view.
+ * Waits for the previous message's pacing before media and camera presentation, a message text write, or
+ * `removePermanentButton`. With a `receiver`, it waits only when that side-effect-free expression evaluates to a media
+ * handle, a camera view, or a message handle. Only a barrier that `holdsInBlocks` waits while a timer, media, or button
+ * block runs; media and camera keep a block's timing.
  */
 export interface PacingBarrierInstruction extends InstructionBase {
   readonly kind: "pacingBarrier";
   readonly receiver: ExpressionPlan | null;
+  readonly holdsInBlocks?: true;
 }
 
 /** `showImage <image>`, or `hideImage` when `image` is `null`. */

@@ -28,6 +28,7 @@ import type {
   RuntimeScopeFrameSnapshot,
   RuntimeSnapshot,
 } from "../state.js";
+import { holdForPacing } from "./pacing-gate.js";
 import { assertCounterCanAdvance, assertEventSequenceCapacity, copySpan } from "./support.js";
 import { stopTimerAction } from "./timer-lifecycle.js";
 import {
@@ -42,7 +43,8 @@ import {
  * interrupted is abandoned rather than resumed. A non-persistent timer or permanent button belongs to the activation
  * that started or showed it and goes, with its queued blocks, when that activation is left: by a goto from it, by its
  * end, or when a block's goto abandons it. A call leaves nothing. Persistent timers and buttons and all media stay
- * (V30 §22, §27, §28). A root that leaves the stack stays retained while a block may still need it.
+ * (V30 §22, §27, §28). A root that leaves the stack stays retained while a block may still need it. A transfer that
+ * would remove a shown button or countdown first waits for the previous message's pacing, like other output.
  */
 
 /**
@@ -67,6 +69,7 @@ export function executeGoto(
     segment !== undefined
       ? activationRootsFrom(snapshot, segment)
       : new Set([rootId, ...activationRootsFrom(snapshot, innermostFileCallIndex(snapshot))]);
+  if (holdVisibleCleanup(snapshot, left)) return;
   removeNonPersistentWork(snapshot, left, instruction.span, events);
   if (segment !== undefined) resetActivation(snapshot, segment);
   else replaceCurrentRoot(snapshot, snapshot.retainedScopes.splice(retained, 1)[0]!);
@@ -93,6 +96,12 @@ export function executeTransfer(
     }
     assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   }
+  // A goto leaves the current activation; it waits, before it draws or resolves its destination, when that is seen.
+  const left =
+    instruction.mode === "goto"
+      ? activationRootsFrom(snapshot, innermostFileCallIndex(snapshot))
+      : null;
+  if (left !== null && holdVisibleCleanup(snapshot, left)) return;
   const destination =
     "value" in instruction.destination
       ? resolveComputed(
@@ -110,8 +119,7 @@ export function executeTransfer(
           evaluator.control,
         );
   const root = freshRoot(snapshot, destination);
-  if (instruction.mode === "goto") {
-    const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
+  if (left !== null) {
     removeNonPersistentWork(snapshot, left, instruction.span, events);
     replaceCurrentRoot(snapshot, root);
   } else {
@@ -154,7 +162,9 @@ export function executeEnd(
     );
   }
   if (index < 0) assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
+  const left = activationRootsFrom(snapshot, index);
+  if (holdVisibleCleanup(snapshot, left)) return;
+  removeNonPersistentWork(snapshot, left, instruction.span, events);
   if (index < 0) {
     // A glob fallback draws its file each time it is used.
     const fallback = drawDestination(plan, snapshot, snapshot.fallback!, trace, control);
@@ -334,6 +344,28 @@ function activationRootsFrom(snapshot: RuntimeSnapshot, index: number): Set<numb
 }
 
 /**
+ * Holds a transfer that would remove a shown permanent button or a countdown that is not hidden while a reading time
+ * runs (owner decision, 2026-10-11). A transfer whose cleanup the player cannot see continues at once.
+ */
+function holdVisibleCleanup(snapshot: RuntimeSnapshot, left: ReadonlySet<number>): boolean {
+  const visible = snapshot.backgroundActions.some(
+    (action) =>
+      (action.kind === "permanentButton" && leavesWith(action.button, left)) ||
+      (action.kind === "timer" &&
+        action.timer.display !== "hidden" &&
+        leavesWith(action.timer, left)),
+  );
+  return visible && holdForPacing(snapshot);
+}
+
+function leavesWith(
+  owned: RuntimeTimerSnapshot | RuntimePermanentButtonSnapshot,
+  left: ReadonlySet<number>,
+): boolean {
+  return !owned.persist && left.has(owned.rootScopeId);
+}
+
+/**
  * Stops the non-persistent timers and removes the non-persistent permanent buttons of the activations a transfer
  * leaves, with their queued blocks.
  */
@@ -344,7 +376,7 @@ function removeNonPersistentWork(
   events: InterpreterEvent[],
 ): void {
   const leaves = (owned: RuntimeTimerSnapshot | RuntimePermanentButtonSnapshot): boolean =>
-    !owned.persist && left.has(owned.rootScopeId);
+    leavesWith(owned, left);
   const stopping = snapshot.backgroundActions.filter(
     (action) => action.kind === "timer" && leaves(action.timer),
   );

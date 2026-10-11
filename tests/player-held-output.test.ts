@@ -8,6 +8,7 @@ import {
   playerRuntimeMedia,
   playerRuntimePacingGate,
   playerRuntimePermanentButtons,
+  playerRuntimeTimers,
   pressPlayerRuntimePermanentButton,
   skipPlayerRuntimePacing,
   type PlayerRuntimeSession,
@@ -76,5 +77,41 @@ test("a permanent button pressed during a reading time is taken, and its block r
   assert.deepEqual(
     playerRuntimePermanentButtons(session.state).map(({ label, busy }) => [label, busy]),
     [["Hint", false]],
+  );
+});
+
+test("the Player shows a question with its field after a block that was queued during the reading time", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      "timer async 1 s {",
+      '    say "Interrupt", 3 s',
+      "}",
+      'say "A", 2 s',
+      'let answer = askText "Name?"',
+      "exit",
+    ].join("\n"),
+  );
+  session = observePlayerRuntimeTime(session, 1_000).session;
+  session = observePlayerRuntimeTime(session, 2_000).session;
+  assert.deepEqual(texts(session), ["A", "Interrupt"]);
+  assert.equal(playerRuntimeForeground(session), null);
+  session = observePlayerRuntimeTime(session, 5_000).session;
+  assert.deepEqual(texts(session), ["A", "Interrupt", "Name?"]);
+  assert.equal(playerRuntimeForeground(session)?.kind, "ask-text");
+});
+
+test("the Player shows a countdown only once the reading time before it ends, with its full length", () => {
+  let session = createPlayerRuntimeSession(
+    'say "Ten seconds.", 2 s\nlet t = timer async 10 s "Left"\nshowButton "Go"\nexit',
+  );
+  assert.deepEqual(playerRuntimeTimers(session.state, 0), []);
+  session = observePlayerRuntimeTime(session, 2_000).session;
+  assert.deepEqual(
+    playerRuntimeTimers(session.state, 2_000).map(({ kind, name, remainingSeconds }) => [
+      kind,
+      name,
+      remainingSeconds,
+    ]),
+    [["visible", "Left", 10]],
   );
 });
