@@ -299,6 +299,8 @@ interface LowerContext {
   bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
+  /** Bindings declared with a Groovy type other than Object, which convert what is stored in them. */
+  typedVariables: ReadonlySet<string>;
   /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
   integerArrays: ReadonlySet<string>;
   /** Variables declared without a value that only C-style loops which set them first use (loopOnlyCounters). */
@@ -2024,6 +2026,7 @@ function lowerFileOnce(
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
+    typedVariables: new Set(),
     integerArrays: new Set(),
     loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
@@ -2156,6 +2159,7 @@ function lowerFileOnce(
     context.constantInitializers = declarationInitializers(body, context.types);
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.typedVariables = typedVariables(body, context.bindings);
     context.fractionalArguments = fractionalArguments(body, context);
     context.integerArrays = integerArrays(body, context.bindings);
     context.loopOnlyCounters = loopOnlyCounters(body, context.bindings);
@@ -3326,6 +3330,7 @@ function lowerHelperMethod(
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
+    typedVariables: new Set(),
     integerArrays: new Set(),
     loopOnlyCounters: new Set(),
     fixedClosureCalls: new Map(),
@@ -11813,10 +11818,25 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
 /**
  * A compound assignment used as a value, `save("k", total -= 5)`: Groovy changed the variable and used its new value,
  * so the change comes first, as its own statement, and the statement uses the variable. As for `++x`, this needs a
- * statement that reads the variable nowhere else and calls no local function.
+ * statement that reads the variable nowhere else and calls no local function. A plain assignment used as a value,
+ * `while ((name = getString("Name?", "")) == "")`, is the same where the variable has no Groovy type: Groovy used the
+ * assigned value, which then is what the variable holds, and in a loop's condition the change comes before every test.
+ * Its variable may be read again after it (isHoistable rejects a read before it), as the new value Groovy read too.
  */
 function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression | null {
-  const name = variableName(asNode(node.left));
+  const left = asNode(node.left);
+  if (
+    node.operator === "=" &&
+    (left?.kind !== "variable" ||
+      context.typedVariables.has(bindingKey(left, context.bindings) ?? ""))
+  )
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_ASSIGNMENT_VALUE",
+      "An assignment is used as a value here (Groovy assigned, then used the assigned value, for example as a condition); this is often a mistake for ==. Make the assignment its own statement.",
+    );
+  const name = variableName(left);
   const root = context.statementRoot;
   let uses = 0;
   let localCalls = false;
@@ -11829,7 +11849,7 @@ function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression 
   if (
     name === null ||
     root === null ||
-    uses !== 1 ||
+    (uses !== 1 && node.operator !== "=") ||
     localCalls ||
     !isHoistable(root, node, context)
   ) {
@@ -11837,7 +11857,7 @@ function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression 
       context,
       node,
       "SX_ASSIGNMENT_VALUE",
-      "A compound assignment is used as a value where the change cannot simply come before the statement: the variable is used again in the statement, the change is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the assignment to its own statement.",
+      `${node.operator === "=" ? "An" : "A compound"} assignment is used as a value where the change cannot simply come before the statement: the variable is used again in the statement, the change is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the assignment to its own statement.`,
     );
   }
   const statements = lowerAssignment(node, node.span, context);
@@ -12574,16 +12594,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&" ? "and" : "or", left, right };
   }
   const mapped = operator;
-  if (operator !== null && ["+=", "-=", "*=", "/=", "%="].includes(operator))
+  if (operator !== null && ["=", "+=", "-=", "*=", "/=", "%="].includes(operator))
     return lowerCompoundValue(node, context);
-  if (operator === "=") {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_ASSIGNMENT_VALUE",
-      "An assignment is used as a value here (Groovy assigned, then used the assigned value, for example as a condition); this is often a mistake for ==. Make the assignment its own statement.",
-    );
-  }
   if (
     mapped === null ||
     !new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "and", "or"]).has(mapped)
@@ -16479,6 +16491,18 @@ function asStoredText(value: IrExpression, node: AstNode, context: LowerContext)
   const type = inferType(node, context.types);
   if (type === UNKNOWN || onlyOf(type, STRING | NULL)) return value;
   return (type & NULL) === 0 ? templateOrLiteral([{ value }]) : useHelper(context, "text", [value]);
+}
+
+/** Bindings declared with a Groovy type other than Object. */
+function typedVariables(body: AstNode, keys: BindingKeys): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    const key = bindingKey(left, keys);
+    if (key !== null && (text(left?.originType) ?? "java.lang.Object") !== "java.lang.Object")
+      names.add(key);
+  });
+  return names;
 }
 
 /** Bindings declared with a Groovy integer type. */
