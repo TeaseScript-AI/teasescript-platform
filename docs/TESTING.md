@@ -534,7 +534,7 @@ inspection, all four interaction completions and rejections, pacing skip, explic
 The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
 reading times that hold every later statement, including instant output, interactions, media, timers, and `wait`,
-typed/time settlement, blocks and button clicks that wait for a reading time, deterministic event ordering,
+typed/time settlement, timer, cue, and button blocks that interrupt a reading time, deterministic event ordering,
 checkpoint/JSON restore equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
 exhaustion and terminal transition atomicity. The dependency-free browser smoke script covers primary pointer/touch and
 eligible Space input, interactive-input priority, rejection feedback, canonical transcript rendering, checkpoint
