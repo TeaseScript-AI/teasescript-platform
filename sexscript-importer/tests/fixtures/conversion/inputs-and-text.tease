@@ -1,5 +1,7 @@
-let name = askText("What is your name?").replace("\n", " ")
-let weight = askNumber "Your weight?", prefill: 0
+say prose "What is your name?", instant
+let name = askText().replace("\n", " ")
+say prose "Your weight?", instant
+let weight = askNumber prefill: 0
 say prose "Hello ${name}, you said ${weight}.", instant
 say prose "Choose a task", instant
 let task = choose 0: "Kneel",
@@ -20,7 +22,8 @@ if name != "" {
 // The question of an endless loop's condition is asked again in every round.
 let roundValue = 0
 while true {
-  let ignoredAnswer1 = askText "Round ${roundValue}"
+  say prose "Round ${roundValue}", instant
+  let ignoredAnswer1 = askText
   roundValue += 1
   if roundValue == 2 {
     break
@@ -34,7 +37,8 @@ function menu {
   question = ["Yes", "No"]
 }
 question = "Kneel?"
-let kneel = askBoolean question
+say prose question, instant
+let kneel = askBoolean
 // A question read from storage may be null, which kept the current text, so it is still tested.
 let stored = load "question", default: ""
 if stored != "" {
@@ -43,9 +47,11 @@ if stored != "" {
 let answer = askText().replace("\n", " ")
 // A question that may be null elsewhere needs no test right after it was set to text.
 stored = "Ready now?"
-let ready = askBoolean stored
+say prose stored, instant
+let ready = askBoolean
 // A character of a text is its one-character substring, also counted from the end.
-let code = askText("Square?", prefill: "B4").replace("\n", " ")
+say prose "Square?", instant
+let code = askText(prefill: "B4").replace("\n", " ")
 say prose "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}", instant
 // Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
 function honorific {
@@ -53,7 +59,8 @@ function honorific {
 }
 let question2 = "Ready, ${honorific()}?"
 let option = "Yes, ${honorific()}"
-if askBoolean question2, yesText: option {
+say prose question2, instant
+if askBoolean yesText: option {
   say prose "Good.", instant
 }
 // A range goes through its values with their positions.
@@ -64,7 +71,8 @@ for value in 5..=6 {
 }
 // FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
 // legacy button did, also where it is an askBoolean's noText.
-if askBoolean "Who controls the key?", yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
+say prose "Who controls the key?", instant
+if askBoolean yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
   say prose "Fine.", instant
 }
 // show() returned null, so a menu whose message is show(text) showed the text and then its options.

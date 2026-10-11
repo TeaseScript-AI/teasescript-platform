@@ -8,13 +8,15 @@ function sexscriptLegacyCastText(value): string? {
 // compares it with null or passes it on, and Groovy truth treats null like the empty text and false.
 let name = ""
 function ask {
-  name = askText("Your name?").replace("\n", " ")
+  say prose "Your name?", instant
+  name = askText().replace("\n", " ")
 }
 let finished = false
 if name == "" {
   ask()
 }
-if askBoolean "Finished?" {
+say prose "Finished?", instant
+if askBoolean {
   finished = true
 }
 if not finished {
@@ -31,12 +33,14 @@ mood = "calm"
 report()
 // A text whose value the code passes on, or that a switch matches against null, keeps its null start.
 let toy: string? = null
-if askBoolean "A toy?" {
+say prose "A toy?", instant
+if askBoolean {
   toy = "paddle"
 }
 let chosen: string? = toy
 let room: string? = null
-if askBoolean "Inside?" {
+say prose "Inside?", instant
+if askBoolean {
   room = "hall"
 }
 if room == null {
@@ -57,7 +61,8 @@ let answer: string? = null
 if answer == "" {
   say prose "No answer", instant
 }
-answer = askText("Answer?").replace("\n", " ")
+say prose "Answer?", instant
+answer = askText().replace("\n", " ")
 let hint: string? = null
 function remind(text = hint) {
   say prose "Hint: ${text}", instant
@@ -67,7 +72,8 @@ remind()
 // One that the script sets before every read, in the block that reads it or one around it, never shows its start, so it
 // starts empty also where the code passes it on or tests it for null.
 let gag = ""
-if askBoolean "A gag?" {
+say prose "A gag?", instant
+if askBoolean {
   gag = "ball"
   let worn = gag
   if gag != null {

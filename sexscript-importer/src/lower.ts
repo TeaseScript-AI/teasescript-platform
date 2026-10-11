@@ -49,7 +49,6 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import {
   hasEffect,
-  withAskQuestions,
   withNestedBlocks,
   withoutBlankText,
   withoutRepeatedText,
@@ -2340,8 +2339,8 @@ function lowerFileOnce(
   }
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped, animations and counters made messages that change in place, repeated texts
-  // shortened, and texts folded into asks. Every text is said at once, a text with blank lines as one message, and
-  // every legacy wait stays as written (literal timing, owner decision 2026-10-11).
+  // shortened. Every text is said at once as prose, a question too before its field opens, a text with blank lines as
+  // one message, and every legacy wait stays as written (owner decisions 2026-10-11).
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
@@ -2354,7 +2353,6 @@ function lowerFileOnce(
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withoutRepeatedText(texts, diagnostics);
-  texts = withAskQuestions(texts, diagnostics);
   texts = withGroovyRanges(texts, (base) => freshName(base, context));
   const statements = [
     ...helperStatements(context.syntheticHelpers),
@@ -18139,8 +18137,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         );
       }
       // Legacy getBoolean shows its text like show() and then two buttons, the first meaning true, as askBoolean does
-      // (#712); its text becomes the ask's question (withAskQuestions), and the button texts are written where they
-      // are not askBoolean's own "Yes" and "No".
+      // (#712); its text is said before the buttons, and the button texts are written where they are not askBoolean's
+      // own "Yes" and "No".
       const labels = args.slice(1);
       const computed = { nodes: call.arguments.slice(1), values: labels };
       if (!pushPrompt(context, node, call.arguments[0]!, args[0]!, null, computed)) return null;

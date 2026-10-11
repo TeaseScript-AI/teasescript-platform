@@ -14,7 +14,8 @@ function yesText {
   return "Yes"
 }
 let option = yesText()
-let result = askBoolean "Question", yesText: option
+say prose "Question", instant
+let result = askBoolean yesText: option
 function getRandom(maxValue) {
   return maxValue - 1
 }
@@ -24,7 +25,8 @@ let count = 0
 let ready = false
 // NOTE SX_NULL_ONLY_VARIABLE line 11: question is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
 let answer = askText().replace("\n", " ")
-let ignoredAnswer1 = askBoolean "Ready?"
+say prose "Ready?", instant
+let ignoredAnswer1 = askBoolean
 let match = 1
 if count == match {
   say prose "matched", instant

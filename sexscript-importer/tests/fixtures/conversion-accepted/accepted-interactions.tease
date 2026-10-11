@@ -8,9 +8,12 @@ function sexscriptLegacyShowButton(text, timeout) {
   }
   return (showButton text, timeout: timeout * 1 s) / 1 s
 }
-let ready = askBoolean "Are you ready?"
-let sure = askBoolean "Really?", yesText: "Yes, Mistress"
-let count = askInteger "How many?", prefill: 10
+say prose "Are you ready?", instant
+let ready = askBoolean
+say prose "Really?", instant
+let sure = askBoolean yesText: "Yes, Mistress"
+say prose "How many?", instant
+let count = askInteger prefill: 10
 showPopup "Session starts now"
 showButton "Quick!", timeout: 3 s
 // A zero timeout showed the button for its 10 ms safety margin and returned 0.

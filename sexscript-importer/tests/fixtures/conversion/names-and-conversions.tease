@@ -26,7 +26,8 @@ while row < 2 {
   say prose "Row ${row}", instant
   row += 1
 }
-if askBoolean "Again?" {
+say prose "Again?", instant
+if askBoolean {
   let rowValue = 5
   say prose "Row ${rowValue}", instant
 }

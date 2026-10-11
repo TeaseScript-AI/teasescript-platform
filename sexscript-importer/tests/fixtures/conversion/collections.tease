@@ -322,7 +322,8 @@ let drainSpeed = 0
 for stroke in 1..=2 {
   say prose "Stroke ${stroke}", instant
   if load("training.edge", default: false) == true {
-    if askBoolean "Over the edge?" {
+    say prose "Over the edge?", instant
+    if askBoolean {
       break
     }
     save false as "training.edge"
@@ -339,7 +340,8 @@ let shots = [
 ]
 let letters = "AB"
 let column = -1
-let cell = askText("Shoot (A1 to B2):", prefill: "A1").replace("\n", " ")
+say prose "Shoot (A1 to B2):", instant
+let cell = askText(prefill: "A1").replace("\n", " ")
 if cell.length == 2 {
   column = letters.indexOf(cell.substring(0, 1))
 }
@@ -352,7 +354,8 @@ say prose "Shot ${shots[0][0]}", instant
 // Farkel's cheating roll of seven dice into six values.
 let rolled = [0, 0, 0]
 let throwCount = 3
-if askBoolean "Cheat?" {
+say prose "Cheat?", instant
+if askBoolean {
   throwCount = 4
 }
 for i in 0..throwCount {
@@ -367,7 +370,8 @@ say prose "Rolled ${rolled.length}", instant
 // A literal position past the end of a shorter list the variable is set to elsewhere reads null, as Farkel's finals
 // after a bracket of one.
 let finalists = ["Anna", "Bea"]
-if askBoolean "Bye?" {
+say prose "Bye?", instant
+if askBoolean {
   finalists = ["Anna"]
 }
 // NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
@@ -377,7 +381,8 @@ say prose "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}", i
 let owned = []
 let ownedCount = 0
 for toy in ["paddle", "cane"] {
-  if askBoolean "Own a ${toy}?" {
+  say prose "Own a ${toy}?", instant
+  if askBoolean {
     // NOTE SX_LIST_GROWTH line 114: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
     if ownedCount < owned.length {
       owned[ownedCount] = toy
@@ -416,7 +421,8 @@ let chosen = choose sexscriptLegacyMenuOptions(collectResult2 + ["Back"], 0)
 // NOTE SX_COLLECTION_TEXT_NESTED line 135: Groovy turned this list into text like [a, [b, c]]; a helper shows lists and maps inside it the same way, but the importer cannot tell what the inner elements are: a date or time inside shows in TeaseScript's form, and a map the conversion made an object stops the script.
 say prose "Shocks ${sexscriptLegacyListText(shocks)} chosen ${chosen}", instant
 let spare = []
-if askBoolean "Spare?" {
+say prose "Spare?", instant
+if askBoolean {
   spare = [1, 2]
 }
 // TODO SX_COLLECTION_TEXT line 138: Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and this list may be null or hold maps, which the conversion may show otherwise. Format the list explicitly.
@@ -433,7 +439,8 @@ if kept < shocks.length {
 }
 // A position that add() calls before it show inside the list, or at its end, is written in place or appended.
 let picks = []
-if askBoolean "Pick?" {
+say prose "Pick?", instant
+if askBoolean {
   picks.add("a")
   picks[0] = "b"
   if picks.length == 1 {
@@ -460,7 +467,8 @@ say prose "Kept ${finallyKept.length} ${finallyCount}", instant
 let fixedSlots = []
 let fixedFilled = 0
 // NOTE SX_JAVA_ARRAY_CONVERSION line 165: A Java int[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
-if askBoolean "Fixed?" {
+say prose "Fixed?", instant
+if askBoolean {
   fixedSlots = sexscriptLegacyArray(2, 0)
 }
 fixedSlots[fixedFilled] = 5

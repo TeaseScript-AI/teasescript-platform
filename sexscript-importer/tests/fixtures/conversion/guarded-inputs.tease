@@ -5,26 +5,32 @@ while true {
   if name == "" {
     answered = true
   } else {
-    answered = not askBoolean("Is ${name} your name?")
+    say prose "Is ${name} your name?", instant
+    answered = not askBoolean()
   }
   if not answered {
     break
   }
-  name = askText("What is your name?", prefill: "slave").replace("\n", " ")
+  say prose "What is your name?", instant
+  name = askText(prefill: "slave").replace("\n", " ")
 }
 let conditional = name.length > 3
 if conditional {
-  conditional = askBoolean "May I shorten it?"
+  say prose "May I shorten it?", instant
+  conditional = askBoolean
 }
 if conditional {
   say prose "Hello, ${name.substring(0, 3)}", instant
 }
-let conditional2 = askBoolean("Do you remember the contract?") or true
+say prose "Do you remember the contract?", instant
+let conditional2 = askBoolean() or true
 if conditional2 {
-  conditional2 = askBoolean "Did you read it?"
+  say prose "Did you read it?", instant
+  conditional2 = askBoolean
 }
 if conditional2 {
-  conditional2 = askBoolean "Will you take the consequences?"
+  say prose "Will you take the consequences?", instant
+  conditional2 = askBoolean
 }
 if conditional2 {
   say prose "Then we begin.", instant

@@ -312,8 +312,8 @@ export type IrExpression =
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**
-   * Single-field input. `question` is said in the chat before the field opens (#634); a lowered prompt is a preceding
-   * `say` until withAskQuestions moves it here. `defaultValue` prefills the field, written
+   * Single-field input. `question` is said in the chat before the field opens (#634); a legacy prompt stays a `say`
+   * before it, which shows as prose at once (owner decisions 2026-10-11). `defaultValue` prefills the field, written
    * `askText "Name?", default: value` (V30 §20).
    */
   | {

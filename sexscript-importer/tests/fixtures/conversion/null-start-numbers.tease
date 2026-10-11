@@ -33,7 +33,8 @@ report()
 // A number that the code compares with null keeps its null start, since null and 0 differ there.
 let level = null
 function pick {
-  level = askInteger "Level?", prefill: 3
+  say prose "Level?", instant
+  level = askInteger prefill: 3
 }
 if level == null {
   pick()

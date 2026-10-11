@@ -173,8 +173,6 @@ export interface FeasibilityReport {
   };
   /** Literal image and sound paths that no file of the package matches (`SX_MEDIA_MISSING`). */
   missingMedia: number;
-  /** Asks that took the text said right before them as their question (`SX_ASK_QUESTION`, #634). */
-  askQuestions: number;
   /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
   blankTexts: number;
   /**
@@ -335,7 +333,6 @@ export function analyzeFeasibility(
     rootDiagnosticsByCode: emptyCounts(),
     repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0, animation: 0 },
     missingMedia: 0,
-    askQuestions: 0,
     blankTexts: 0,
     forms: { sequences: 0, menus: 0 },
     buttonDurations: { compared: 0, variables: 0 },
@@ -465,7 +462,6 @@ export function analyzeFeasibility(
       else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
       else if (code === "SX_REPEATED_TEXT_ANIMATION") report.repeatedText.animation += 1;
       else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
-      else if (code === "SX_ASK_QUESTION") report.askQuestions += 1;
       else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
       else if (code === "SX_SETTINGS_FORM") report.forms.sequences += 1;
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;

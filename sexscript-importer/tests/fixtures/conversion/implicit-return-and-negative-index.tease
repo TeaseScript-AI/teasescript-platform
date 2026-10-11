@@ -198,14 +198,17 @@ let twiceValue = sexscriptLegacyTimes(top([["x", "y"]]), 2)
 say prose "Twice ${twiceValue.join(",")}", instant
 // A character of a text that only the converted types prove text reads through a helper: type inference reads the
 // `shot` of both blocks as one variable, of unknown type.
-if askBoolean "Replay?" {
+say prose "Replay?", instant
+if askBoolean {
   // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
   let shot = load "game.shot", default: sexscriptLegacyValue(null)
   say prose "Saved ${shot}", instant
 }
-if askBoolean "Shoot?" {
+say prose "Shoot?", instant
+if askBoolean {
   let shot = ""
-  shot = askText("Your shot (A1 to G7):").replace("\n", " ")
+  say prose "Your shot (A1 to G7):", instant
+  shot = askText().replace("\n", " ")
   say prose "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}", instant
 }
 // A list repeated by a count that may be missing is repeated as a number.

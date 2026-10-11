@@ -23,19 +23,8 @@ export function withoutRepeatedText(
     // Whether only waits came after the previous text.
     let onlyWaits = true;
     const result: IrStatement[] = [];
-    // A wait that follows a wait across a dropped text joins it: `wait 1` five times between dots becomes `wait 5`.
-    let joinsWait = false;
     for (const item of items) {
       const statement = withNestedBlocks(item, block);
-      const last = result.at(-1);
-      if (joinsWait && statement.kind === "wait" && last?.kind === "wait") {
-        const joined = joinedWait(last, statement);
-        if (joined !== null) {
-          result[result.length - 1] = joined;
-          continue;
-        }
-      }
-      joinsWait = false;
       if (statement.kind === "say") {
         const tokens = textTokens(statement.value);
         if (tokens === null) {
@@ -63,7 +52,6 @@ export function withoutRepeatedText(
             "Dropped a text that only repeated the text before it, which the legacy display replaced.",
             statement,
           );
-          joinsWait = last?.kind === "wait";
           continue;
         }
         if (repeat !== null) {
@@ -139,26 +127,6 @@ function handleText(statement: IrStatement, shown: Shown | null): Shown | null |
   const tokens = textTokens(statement.value);
   if (shown?.handle !== name || tokens === null) return null;
   return { ...shown, tokens: statement.operator === "+=" ? [...shown.tokens, ...tokens] : tokens };
-}
-
-type WaitStatement = Extract<IrStatement, { kind: "wait" }>;
-
-function joinedWait(first: WaitStatement, second: WaitStatement): WaitStatement | null {
-  const left = first.duration;
-  const right = second.duration;
-  if (
-    first.unit !== second.unit ||
-    first.visible ||
-    second.visible ||
-    left.kind !== "literal" ||
-    right.kind !== "literal" ||
-    typeof left.value !== "number" ||
-    typeof right.value !== "number"
-  )
-    return null;
-  // Rounded to milliseconds, so 0.1 and 0.2 give 0.3.
-  const total = Math.round((left.value + right.value) * 1000) / 1000;
-  return { ...first, duration: { kind: "literal", value: total } };
 }
 
 type Token = { char: string } | { value: IrExpression; key: string };
@@ -531,11 +499,6 @@ export function withoutRepeatedChainText<
   });
 }
 
-/** An ask that says a question before it opens: a single-field input or a form, or `askImage`. */
-function isAsk(value: IrExpression): boolean {
-  return value.kind === "input" || (value.kind === "call" && value.name === "askImage");
-}
-
 /** Built-ins and generated helpers whose calls only compute a value. */
 const PURE_CALLS: ReadonlySet<string> = new Set([
   "toInteger",
@@ -629,114 +592,6 @@ export function effectBefore(statement: IrStatement, target: IrExpression): bool
     return value;
   });
   return reached && effect;
-}
-
-const ASKING_STATEMENTS: ReadonlySet<string> = new Set([
-  "let",
-  "assign",
-  "expression",
-  "if",
-  "switch",
-  "return",
-  "save",
-  "showImage",
-]);
-
-/**
- * An ask's text is its question, which the Player says in the chat as the asking speaker before the field opens
- * (#634): a `say` right before a statement that asks once, with only comments between them and the same speaker,
- * becomes that ask's question. A loop condition asks again on every round, and an ask that a condition may skip is
- * no sure next step, so neither takes the question.
- */
-export function withAskQuestions(
-  statements: IrStatement[],
-  diagnostics: MigrationDiagnostic[],
-): IrStatement[] {
-  const block = (items: IrStatement[]): IrStatement[] => {
-    const result: IrStatement[] = [];
-    for (const item of items) {
-      const statement = withNestedBlocks(item, block);
-      let position = result.length - 1;
-      while (position >= 0 && result[position]!.kind === "comment") position -= 1;
-      const previous = result[position];
-      const merged =
-        previous?.kind === "say" && previous.prose !== true
-          ? withQuestion(statement, previous)
-          : null;
-      if (merged === null) {
-        result.push(statement);
-        continue;
-      }
-      result.splice(position, 1);
-      result.push(merged);
-      diagnostics.push({
-        code: "SX_ASK_QUESTION",
-        severity: "info",
-        message:
-          "The text said right before this ask is its question, which the Player says before the field opens.",
-        span: statement.span,
-      });
-    }
-    return result;
-  };
-  return block(statements);
-}
-
-/**
- * The statement with its one sure ask taking the text as its question; null where it has no such single ask. An
- * `askImage` whose message already says the same text keeps it, and the `say` goes.
- */
-function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | null {
-  if (!ASKING_STATEMENTS.has(statement.kind)) return null;
-  let asks = 0;
-  let sure = true;
-  let found: IrExpression | null = null;
-  const said = textTokens(say.value);
-  const count = (value: IrExpression, guarded: boolean): void => {
-    if (isAsk(value)) found = value;
-    if (value.kind === "input") {
-      asks += 1;
-      if (guarded || value.question !== undefined || value.speaker !== say.speaker) sure = false;
-    }
-    if (value.kind === "call" && value.name === "askImage") {
-      asks += 1;
-      const message = value.positional[0];
-      const asked = message === undefined ? null : textTokens(message);
-      const repeats =
-        said !== null &&
-        asked !== null &&
-        repeatedPart(said, asked, sameToken) === "all" &&
-        repeatedPart(asked, said, sameToken) === "all";
-      const empty = message === undefined || (message.kind === "literal" && message.value === null);
-      if (guarded || say.speaker !== undefined || !(empty || repeats)) sure = false;
-    }
-    if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
-      count(value.left, guarded);
-      count(value.right, true);
-      return;
-    }
-    mapChildren(value, (child) => {
-      count(child, guarded);
-      return child;
-    });
-  };
-  mapOwnExpressions(statement, (value) => {
-    count(value, false);
-    return value;
-  });
-  // The text is said where the ask opens, so nothing with an effect may run in the statement before it.
-  if (asks !== 1 || !sure || found === null || effectBefore(statement, found)) return null;
-  const ask = (value: IrExpression): IrExpression => {
-    if (value.kind === "input") return { ...value, question: say.value };
-    if (value.kind === "call" && value.name === "askImage") {
-      const message = value.positional[0];
-      return message === undefined || (message.kind === "literal" && message.value === null)
-        ? { ...value, positional: [say.value, ...value.positional.slice(1)] }
-        : value;
-    }
-    return mapChildren(value, ask);
-  };
-  return mapOwnExpressions(statement, ask);
 }
 
 /**

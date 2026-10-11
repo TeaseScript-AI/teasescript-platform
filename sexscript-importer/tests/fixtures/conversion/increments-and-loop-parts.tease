@@ -30,7 +30,8 @@ say prose "Tally ${tally[3]} ${tally[0]}, score ${stats.score}", instant
 for i in 0..2 {
   say prose "Warm up ${i}", instant
 }
-if askBoolean "Again?" {
+say prose "Again?", instant
+if askBoolean {
   for i in 0..3 {
     say prose "Again ${i}", instant
   }
@@ -78,7 +79,8 @@ powerLevel += 1
 powerLevel = toInteger(min(powerLevel, 5))
 say prose "Power ${powerLevel}", instant
 // A conditional start or step of a C-style for is computed first, as in a statement (MatchDares' shuffled deck).
-let deckStart = askInteger "Shuffle?", prefill: 1
+say prose "Shuffle?", instant
+let deckStart = askInteger prefill: 1
 let card = 3
 if deckStart == 1 {
   card = 2

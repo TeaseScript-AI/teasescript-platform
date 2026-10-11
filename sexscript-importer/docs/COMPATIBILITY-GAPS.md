@@ -138,14 +138,10 @@ implemented):
 The importer converts these with an inline `NOTE` or reports them when it cannot prove equivalence:
 
 - `show()` replaced the single text area; `say` appends to a transcript. `show(null)` only cleared the text, so it is
-  dropped. Input functions showed their text like `show()`; a `null` text kept the current text. A text input's text
-  becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
-default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
-  the ask with the ask's speaker; otherwise it stays a `say` before the statement. The report counts the asks that
-  took their question (`askQuestions`, `SX_ASK_QUESTION`; 892 in 108 selected units). The same holds for the photo
-  that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
-  repeats goes. A text is not folded into an ask across something with an effect that the statement runs first, as in
-  `n = before() + getInteger(null)`.
+  dropped. Input functions showed their text like `show()`; a `null` text kept the current text. An input's text is
+  said as prose at once before its field opens, as a `show()` text is, and the ask has no question of its own: an
+  ask's question would be a bubble with the Player's pacing (owner decisions 2026-10-11, prose and literal timing,
+  superseding the questions folded into asks of #634 and #636).
 - Paragraphs (owner decision 2026-10-11, superseding the paragraph split of 2026-10-07): one legacy `show()` is one
   `say`, and a blank line in its text stays inside that message, which prose shows as a paragraph break; an ask's
   question and a form's question stay whole too.
@@ -741,7 +737,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is
-  dropped, joining the waits around it; a text that adds only punctuation, with only waits between, is an animation
+  dropped, its waits each kept as written; a text that adds only punctuation, with only waits between, is an animation
   such as growing dots, which becomes one updatable message (below). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
   the repeat ends at a word boundary, and only literal text and interpolations of identical expressions compare. Any
   other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text

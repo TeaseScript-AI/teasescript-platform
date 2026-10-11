@@ -101,7 +101,8 @@ save points as "game.points"
 // A labelled block runs in place; one that declares a variable keeps it in its own scope.
 let ready = false
 if true {
-  let answer = askBoolean "Ready?"
+  say prose "Ready?", instant
+  let answer = askBoolean
   if answer {
     ready = true
   }

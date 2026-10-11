@@ -58,7 +58,8 @@ let total = 1 + conditional2
 // An input on the right of && asks only when the left side allows it.
 let conditional3 = missed > 1
 if conditional3 {
-  conditional3 = askBoolean "Continue?"
+  say prose "Continue?", instant
+  conditional3 = askBoolean
 }
 if conditional3 {
   say prose "Continuing", instant

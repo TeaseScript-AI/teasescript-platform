@@ -67,7 +67,8 @@ if load("toys.dildo", default: false) != true {
 // A save of an owned item corrects the answer, so the item is still asked first.
 let conditional = load("clothes.panties", default: false) == true
 if conditional {
-  conditional = not askBoolean("Are you wearing your panties?")
+  say prose "Are you wearing your panties?", instant
+  conditional = not askBoolean()
 }
 if conditional {
   save false as "clothes.panties"

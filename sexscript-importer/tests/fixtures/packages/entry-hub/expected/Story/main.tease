@@ -4,7 +4,8 @@ title: "The Story"
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
 say prose "Pick a chapter", instant
-if askBoolean "First chapter?" {
+say prose "First chapter?", instant
+if askBoolean {
   goto "Story/first.tease"
 }
 goto "Story/second.tease"

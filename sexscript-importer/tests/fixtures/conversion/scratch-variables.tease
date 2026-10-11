@@ -13,7 +13,8 @@ let responseBoolean = false
 let responseNumber = 0
 let response = "Start"
 say prose response, instant
-responseBoolean = askBoolean "Ready?"
+say prose "Ready?", instant
+responseBoolean = askBoolean
 if responseBoolean {
   say prose "Ready", instant
 }
