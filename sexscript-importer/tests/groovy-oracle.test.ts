@@ -2,7 +2,8 @@
 // (tools/groovy-oracle.ts records `<name>.out`). Each one is a case where the conversion compiles and runs, so a
 // regression would change what the player reads without any diagnostic: closure captures, shared lists, list growth and
 // positions, comparisons, defaults, and formatting. Real Groovy parsing, importer lowering, and the repository build's
-// compiler and runtime, with seed 1. `WAIT n` lines count only where the fixture's own preamble prints them.
+// compiler and runtime, with seed 1. `WAIT n` lines count only where the fixture's own preamble prints them. A fixture
+// that asks gets its `<name>.answers` in turn on both sides, and must use them all.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -13,7 +14,7 @@ import { emitTease } from "../src/emit-tease.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
 import { repositoryBuildUrl } from "../src/repository-build.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
-import { ORACLE_FIXTURES, oracleFixtureNames } from "../tools/groovy-oracle.ts";
+import { ORACLE_FIXTURES, oracleAnswers, oracleFixtureNames } from "../tools/groovy-oracle.ts";
 
 interface OracleEvent {
   kind?: string;
@@ -21,17 +22,28 @@ interface OracleEvent {
 }
 interface OracleSnapshot {
   status: string;
-  foregroundAction?: { kind?: string; createdAtMs?: number; deadlineMs?: number } | null;
+  foregroundAction?: {
+    kind?: string;
+    actionId?: number;
+    interactionKind?: string;
+    createdAtMs?: number;
+    deadlineMs?: number;
+  } | null;
+}
+interface OracleStep {
+  snapshot: OracleSnapshot;
+  events: OracleEvent[];
 }
 interface OracleRuntime {
   compileSource(source: string): { plan?: unknown };
   createFreshRuntimeSnapshot(plan: unknown, options: { seed: number }): OracleSnapshot;
-  run(plan: unknown, snapshot: OracleSnapshot): { snapshot: OracleSnapshot; events: OracleEvent[] };
-  observeTime(
+  run(plan: unknown, snapshot: OracleSnapshot): OracleStep;
+  observeTime(plan: unknown, snapshot: OracleSnapshot, now: number): OracleStep;
+  completeAction(
     plan: unknown,
     snapshot: OracleSnapshot,
-    now: number,
-  ): { snapshot: OracleSnapshot; events: OracleEvent[] };
+    request: unknown,
+  ): OracleStep & { outcome: { kind?: string } };
 }
 
 const unavailable = ((): string | false => {
@@ -51,7 +63,9 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
   const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
   assert.ok(typeof runtime === "object" && runtime !== null);
   // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts).
-  const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as OracleRuntime;
+  const { compileSource, createFreshRuntimeSnapshot, run, observeTime, completeAction } =
+    runtime as OracleRuntime;
+  const answers = [...(oracleAnswers(name) ?? [])];
   const parsed = await parseGroovySource(path.join(ORACLE_FIXTURES, `${name}.groovy`));
   const [program] = lowerSelfContainedPackage([parsed], {});
   assert.ok(program !== undefined);
@@ -65,6 +79,26 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
   note(step.events);
   for (let turn = 0; turn < 500 && step.snapshot.status === "waiting"; turn += 1) {
     const action = step.snapshot.foregroundAction;
+    if (action?.kind === "interaction") {
+      const answer = answers.shift();
+      assert.ok(answer !== undefined, `${name} asks more often than its answers`);
+      const payload =
+        action.interactionKind === "choice"
+          ? { kind: "selectedOption", optionIndex: Number(answer) }
+          : { kind: "submittedText", submittedText: answer };
+      const { actionId, interactionKind } = action;
+      const completed = completeAction(plan, step.snapshot, {
+        actionId,
+        actionKind: "interaction",
+        interactionKind,
+        payload,
+      });
+      assert.equal(completed.outcome.kind, "completed", `${name} refuses the answer ${answer}`);
+      note(completed.events);
+      step = run(plan, completed.snapshot);
+      note(step.events);
+      continue;
+    }
     const deadline = action?.deadlineMs;
     if (deadline === undefined) break;
     if (waits && action?.kind === "delay")
@@ -75,6 +109,7 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
     note(step.events);
   }
   assert.equal(step.snapshot.status, "halted", `${name} does not halt`);
+  assert.deepEqual(answers, [], `${name} leaves answers unused`);
   return lines;
 }
 

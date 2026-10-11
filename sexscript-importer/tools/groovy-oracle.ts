@@ -7,8 +7,11 @@
  * Each fixture is `tests/fixtures/groovy-oracle/<name>.groovy`. It runs with a preamble that defines the SexScript calls
  * the fixtures use: `show(value)` prints the value, and `wait(seconds)` prints nothing; a fixture whose
  * `<name>.preamble.groovy` exists runs with that preamble instead, such as one that prints `WAIT <seconds>` where the
- * waits are what the fixture is about. The output goes to `<name>.out`. Java comes from the PATH, the Groovy JAR from
- * SEXSCRIPT_GROOVY_JAR or the local Maven repository, as for the parser.
+ * waits are what the fixture is about. A fixture whose `<name>.answers` exists asks: each line answers one ask in turn, a
+ * text ask with its text and a choice with its option's position from 0, and `getString(question, fallback)` and
+ * `getSelectedValue(question, options)` print the question and return the next answer. The output goes to
+ * `<name>.out`. Java comes from the PATH, the Groovy JAR from SEXSCRIPT_GROOVY_JAR or the local Maven repository, as for
+ * the parser.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,6 +29,27 @@ export const ORACLE_FIXTURES = fileURLToPath(
  */
 export const DEFAULT_PREAMBLE =
   "def show = { Object value -> println(value) }\ndef wait = { Object value -> }\n";
+
+/** The answers a fixture's asks get in turn (`<name>.answers`, one per line), or null where it does not ask. */
+export function oracleAnswers(name: string): string[] | null {
+  const answersPath = path.join(ORACLE_FIXTURES, `${name}.answers`);
+  if (!existsSync(answersPath)) return null;
+  const lines = readFileSync(answersPath, "utf8").split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+/** The SexScript asks for Groovy, as closures like the preamble's, answering from the list `answers`. */
+function answersPreamble(answers: readonly string[]): string {
+  const texts = answers.map(
+    (answer) => `'${answer.replace(/[\\']/gu, (character) => `\\${character}`)}'`,
+  );
+  return (
+    `def answers = [${texts.join(", ")}]\n` +
+    "def getString = { Object question, Object fallback -> println(question); answers.remove(0) }\n" +
+    "def getSelectedValue = { Object question, Object options -> println(question); answers.remove(0) as int }\n"
+  );
+}
 
 /** The fixture names, in name order. */
 export function oracleFixtureNames(): string[] {
@@ -45,7 +69,10 @@ function groovyJar(): string {
 /** Runs a fixture with its preamble in Groovy and returns what it printed, or the error that stopped it. */
 function record(name: string): { output: string; error: string | null } {
   const preamblePath = path.join(ORACLE_FIXTURES, `${name}.preamble.groovy`);
-  const preamble = existsSync(preamblePath) ? readFileSync(preamblePath, "utf8") : DEFAULT_PREAMBLE;
+  const answers = oracleAnswers(name);
+  const preamble =
+    (answers === null ? "" : answersPreamble(answers)) +
+    (existsSync(preamblePath) ? readFileSync(preamblePath, "utf8") : DEFAULT_PREAMBLE);
   const source = readFileSync(path.join(ORACLE_FIXTURES, `${name}.groovy`), "utf8");
   const directory = mkdtempSync(path.join(tmpdir(), "groovy-oracle-"));
   try {
