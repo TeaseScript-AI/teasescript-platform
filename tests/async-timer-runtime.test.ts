@@ -544,7 +544,12 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   assert.equal(session.snapshot.foregroundAction?.kind, "delay", "the block now waits");
   assert.equal(session.answer("Early"), "suspendedAction", "the interrupted prompt is inert");
   session.at(7_000);
-  assert.deepEqual(session.snapshot.foregroundAction, prompt, "the same prompt is re-presented");
+  // The prompt stood still for the two seconds the block ran.
+  assert.deepEqual(
+    session.snapshot.foregroundAction,
+    { ...prompt, pausedMs: 2_000 },
+    "the same prompt is re-presented",
+  );
   assert.equal(session.answer("Ada"), "completed");
   // The question is said once; the returning field does not say it again.
   assert.deepEqual(session.said(), ["Name?", "Hurry up.", "Still waiting.", "Hello Ada"]);
@@ -575,7 +580,12 @@ test("an expiry block that changes the default speaker leaves the interrupted as
   session.at(5_000);
   assert.equal(session.snapshot.foregroundAction?.kind, "delay", "the block now waits");
   session.at(7_000);
-  assert.deepEqual(session.snapshot.foregroundAction, prompt, "the same prompt is re-presented");
+  // The prompt stood still for the two seconds the block ran.
+  assert.deepEqual(
+    session.snapshot.foregroundAction,
+    { ...prompt, pausedMs: 2_000 },
+    "the same prompt is re-presented",
+  );
   assert.equal(session.snapshot.defaultSpeaker, speakerId("guide"));
   assert.equal(session.answer("Ada"), "completed");
   assert.deepEqual(
@@ -613,7 +623,7 @@ test("exit in an expiry block cancels the interrupted ask without assigning it",
   assert.equal(late.outcome.kind, "staleAction");
 });
 
-test("an interrupted wait settles in deadline order and its path continues once", () => {
+test("an interrupted wait stands still and continues with its remaining time after the block", () => {
   const session = new Session(
     [
       "let t = timer async 1 s {",
@@ -626,15 +636,26 @@ test("an interrupted wait settles in deadline order and its path continues once"
       "exit",
     ].join("\n"),
   );
+  const wait = session.snapshot.foregroundAction;
   session.at(1_000);
   session.at(3_000);
-  const settled = session.events.filter((event) => event.kind === "actionCompleted");
+  // The main wait would have ended at 3 s; it stands still while the block runs.
   assert.equal(
-    settled.at(-1)?.kind === "actionCompleted" && settled.at(-1)?.settlement.actionKind,
-    "delay",
+    session.events.some(
+      (event) => event.kind === "actionCompleted" && event.settlement.actionId === wait?.actionId,
+    ),
+    false,
   );
   assert.deepEqual(session.said(), ["block start"], "the interrupted path stays suspended");
   session.at(6_000);
+  assert.deepEqual(session.said(), ["block start", "block end"]);
+  // It had two of its three seconds left when the block started at 1 s, and the block ended at 6 s.
+  const resumed = session.snapshot.foregroundAction;
+  assert.equal(resumed?.actionId, wait?.actionId);
+  assert.equal(resumed?.kind === "delay" ? resumed.deadlineMs : null, 8_000);
+  session.at(7_999);
+  assert.deepEqual(session.said(), ["block start", "block end"]);
+  session.at(8_000);
   assert.deepEqual(session.said(), ["block start", "block end", "main after wait"]);
 });
 
@@ -656,7 +677,10 @@ test("expiry blocks run one at a time in due order, and later expiries queue beh
   // B's wait ends at 6 s, so a late observation at 10 s runs the whole block and then the queued C and A.
   session.at(10_000);
   assert.deepEqual(session.said(), ["B start", "B end", "C", "A"]);
-  session.at(20_000);
+  // The main wait stood still for the five seconds B ran, so it ends at 25 s instead of 20 s.
+  session.at(24_999);
+  assert.deepEqual(session.said(), ["B start", "B end", "C", "A"]);
+  session.at(25_000);
   assert.deepEqual(session.said(), ["B start", "B end", "C", "A", "main"]);
 });
 
@@ -913,7 +937,8 @@ test("repeat overrides, nested and interrupting expiry blocks, and stops stay ch
   const rootEnd = new Session(
     'timer async 1 s {\n  timer async 0 ms { say "nested" }\n  wait 1 s\n}\nwait 2 s\nexit',
   );
-  rootEnd.at(1_000).at(2_000);
+  // The block's wait holds the main wait for one second, so the session ends at 3 s.
+  rootEnd.at(1_000).at(2_000).at(3_000);
   assert.deepEqual(rootEnd.said(), ["nested"]);
   assert.equal(rootEnd.snapshot.status, "halted");
 
@@ -1205,16 +1230,31 @@ test("reading times in blocks, skips while a block is queued, and terminal compl
   ).at(5_000);
   assert.deepEqual(queued.said(), ["first", "second"]);
 
-  // A block due during a reading time waits for it; a skip ends the reading time and the block runs first.
+  // A block due during a reading time interrupts it at once; a skip waits until the due block has run.
   const skipping = new Session(
     'timer async 1 s { say "handler", 0 s }\nsay "first", 2 s\nwait 10 s\nexit',
     { pacing: true },
   );
-  const held = observeTime(skipping.plan, skipping.snapshot, 1_500).snapshot;
-  assert.equal(held.pendingTimerHandlers.length, 1);
-  const gate = held.foregroundAction;
+  const blockDue = observeTime(skipping.plan, skipping.snapshot, 1_500).snapshot;
+  assert.equal(blockDue.pendingTimerHandlers.length, 1);
+  const gate = blockDue.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  const skipped = completeAction(skipping.plan, held, {
+  const early = completeAction(skipping.plan, blockDue, {
+    actionId: gate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(early.outcome.kind, "executionPending");
+  const interrupted = run(skipping.plan, blockDue);
+  assert.deepEqual(
+    interrupted.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["handler"],
+  );
+  // The block took no time, so the reading time still ends at 2 s, and a skip now ends it.
+  const reading = interrupted.snapshot.foregroundAction;
+  assert.equal(reading?.actionId, gate!.actionId);
+  assert.equal(reading?.kind === "chatPacingGate" ? reading.deadlineMs : null, 2_000);
+  const skipped = completeAction(skipping.plan, interrupted.snapshot, {
     actionId: gate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
@@ -1223,13 +1263,9 @@ test("reading times in blocks, skips while a block is queued, and terminal compl
   const resumed = run(skipping.plan, skipped.snapshot);
   assert.deepEqual(
     resumed.events.flatMap((event) =>
-      event.kind === "say"
-        ? [event.text]
-        : event.kind === "actionRequested"
-          ? [event.action.kind]
-          : [],
+      event.kind === "actionRequested" ? [event.action.kind] : [],
     ),
-    ["handler", "delay"],
+    ["delay"],
   );
 
   const button = new Session('timer async 1 s { say "handler", 0 s }\nshowButton "Continue"\nexit');

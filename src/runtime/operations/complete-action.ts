@@ -16,6 +16,7 @@ import type {
   RuntimeInteractionActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
+import { interactionStartMs } from "../actions/model.js";
 import type {
   ActionCompletedEvent,
   DeveloperWarningEvent,
@@ -474,7 +475,7 @@ function completeInteraction(
       ? Object.freeze({
           kind: "duration" as const,
           milliseconds: Math.min(
-            current.currentSessionTimeMs - action.createdAtMs,
+            current.currentSessionTimeMs - interactionStartMs(action),
             action.timeoutMs ?? Infinity,
           ),
         })

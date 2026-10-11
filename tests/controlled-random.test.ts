@@ -198,7 +198,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let items = ["x", "y"]',
         "let t = timer(duration: (1..=3) s, async: true, repeat: true) {",
-        '  say "tick ${items}"',
+        '  say "tick ${items}", instant',
         "}",
         "wait 4 s",
         "t.remaining = 0 s",

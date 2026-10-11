@@ -23,8 +23,9 @@ import {
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
 /**
- * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for an interaction result handoff,
- * for a message's reading time (a foreground pacing gate), and for a pending storage write.
+ * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for an interaction result handoff
+ * and for a pending storage write or capture. They interrupt a `wait`, an interaction, a media wait, and a message's
+ * reading time alike (owner decision on #829, 2026-10-11).
  */
 export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   if (!timerHandlerQueuedAndUnblocked(snapshot)) return false;
@@ -33,6 +34,7 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
     foreground === null ||
     foreground.kind === "delay" ||
     foreground.kind === "interaction" ||
+    foreground.kind === "chatPacingGate" ||
     foreground.kind === "mediaPlayback"
   );
 }

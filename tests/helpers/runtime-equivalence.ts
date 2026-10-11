@@ -451,6 +451,7 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
     foregroundAction: snapshot.foregroundAction,
     backgroundActions: snapshot.backgroundActions,
     suspendedAction: interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
+    suspendedAtMs: interruptFrame(snapshot)?.timerInterruption?.startedAtMs ?? null,
     cameraView: snapshot.cameraView,
     queuedBlocks: snapshot.pendingTimerHandlers.length,
     debugMode: snapshot.debugMode,
@@ -460,8 +461,8 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
 }
 
 /**
- * Waiting with nothing runnable: only a time observation or a click can make progress. A queued block held behind
- * pacing or a running block is not runnable.
+ * Waiting with nothing runnable: only a time observation or a click can make progress. A queued block held behind a
+ * running block is not runnable, and the action a block suspended stands still, so it has no deadline to observe.
  */
 function awaitsTime(view: RuntimeSessionView): boolean {
   return view.status === "waiting" && !view.runnable;
@@ -499,7 +500,7 @@ function dueDelayStep(
   if (playing.length > 0) {
     deadlines.push(view.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
   }
-  for (const action of [view.foregroundAction, ...view.backgroundActions, view.suspendedAction]) {
+  for (const action of [view.foregroundAction, ...view.backgroundActions]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
     }

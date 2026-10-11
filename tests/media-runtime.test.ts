@@ -1143,8 +1143,9 @@ test("stopAudio cancels queued cue blocks, and finish never runs", () => {
       "exit",
     ].join("\n"),
   );
-  // The timer block waits from 400 ms to 600 ms; the cue at 500 ms queues behind it and is dropped by stopAudio.
-  session.load(1, 1_000).at(1_000, [1, 1_000]).at(2_000);
+  // The timer block waits from 400 ms to 600 ms; the cue at 500 ms queues behind it and is dropped by stopAudio. The
+  // main wait stands still meanwhile, so it ends at 2.2 s.
+  session.load(1, 1_000).at(1_000, [1, 1_000]).at(2_200);
   assert.deepEqual(session.said(), ["stopped"]);
   assert.equal(session.snapshot.status, "halted");
 });

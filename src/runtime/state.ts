@@ -19,6 +19,7 @@ import {
 } from "./temporal-captures.js";
 import type {
   RuntimeActionSettlementSnapshot,
+  RuntimeChatPacingGateActionSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
@@ -292,25 +293,29 @@ export interface RuntimeParameterStateSnapshot {
 }
 
 /**
- * An expiry block running as an interrupt. The interrupted foreground delay or interaction is inert here and is
- * restored, or settled when its deadline has passed, when the block returns normally.
+ * An expiry block running as an interrupt. The interrupted foreground action is inert and stands still from
+ * `startedAtMs`, the scene time the block started; when the block returns normally it is restored with the time it had
+ * left (owner decision on #829, 2026-10-11). Only a media wait still ends with its media meanwhile.
  */
 export type RuntimeTimerInterruptionSnapshot =
   | {
       readonly timerId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     }
   /** A media cue block owned by a media record instead of a timer. */
   | {
       readonly mediaId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     }
   /** The block of a clicked permanent button, which may have been removed since. */
   | {
       readonly buttonId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
 
@@ -318,6 +323,7 @@ export type RuntimeTimerInterruptionSnapshot =
 export type RuntimeInterruptibleActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
+  | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
@@ -331,7 +337,7 @@ export interface RuntimeCallFrameSnapshot {
   readonly functionName: string;
   /** A user call site, or the timer statement for an expiry block. */
   readonly callSiteSpan: SourceSpan;
-  /** For an expiry block, the interrupted position, or the continuation once its suspended delay settled. */
+  /** For an expiry block, the interrupted position, or the continuation once its suspended media wait settled. */
   returnInstruction: number;
   /** `null` only for an expiry block, which returns no value. */
   readonly destinationTemporary: number | null;
@@ -826,11 +832,12 @@ function cloneInterruption(
     interruption.suspendedAction === null
       ? null
       : cloneForegroundAction(interruption.suspendedAction);
+  const { dueAtMs, startedAtMs } = interruption;
   return "mediaId" in interruption
-    ? { mediaId: interruption.mediaId, dueAtMs: interruption.dueAtMs, suspendedAction }
+    ? { mediaId: interruption.mediaId, dueAtMs, startedAtMs, suspendedAction }
     : "buttonId" in interruption
-      ? { buttonId: interruption.buttonId, dueAtMs: interruption.dueAtMs, suspendedAction }
-      : { timerId: interruption.timerId, dueAtMs: interruption.dueAtMs, suspendedAction };
+      ? { buttonId: interruption.buttonId, dueAtMs, startedAtMs, suspendedAction }
+      : { timerId: interruption.timerId, dueAtMs, startedAtMs, suspendedAction };
 }
 
 function cloneInteractionResultHandoff(
@@ -909,6 +916,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
     createdAtMs: action.createdAtMs,
+    ...(action.pausedMs === undefined ? {} : { pausedMs: action.pausedMs }),
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
     ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),
@@ -2322,9 +2330,9 @@ function validateFileCallFrame(
 }
 
 /**
- * An expiry-block frame records the interrupted position and, while it is still pending, the interrupted foreground
- * delay or interaction. That action is validated against the interrupted context: the caller's scopes, loops, call
- * frames, and temporaries at the recorded position.
+ * An expiry-block frame records the interrupted position, the scene time the block started, and, while it is still
+ * pending, the interrupted foreground action. That action is validated against the interrupted context: the caller's
+ * scopes, loops, call frames, and temporaries at the recorded position, at the time the block started.
  */
 function validateTimerHandlerFrame(
   frame: Record<string, unknown>,
@@ -2344,11 +2352,13 @@ function validateTimerHandlerFrame(
       ? "buttonId"
       : "timerId";
   if (
-    !hasExactKeys(interruption, [owner, "dueAtMs", "suspendedAction"]) ||
+    !hasExactKeys(interruption, [owner, "dueAtMs", "startedAtMs", "suspendedAction"]) ||
     !positiveSafeInteger(interruption[owner]) ||
     !validSessionTime(interruption.dueAtMs) ||
+    !validSessionTime(interruption.startedAtMs) ||
     !validSessionTime(now) ||
-    interruption.dueAtMs > now ||
+    interruption.dueAtMs > interruption.startedAtMs ||
+    interruption.startedAtMs > now ||
     !Array.isArray(frame.arguments) ||
     frame.arguments.length !== 0
   ) {
@@ -2368,20 +2378,22 @@ function validateTimerHandlerFrame(
   const loopBase = frame.loopBaseDepth;
   if (!nonNegativeSafeInteger(scopeBase) || !nonNegativeSafeInteger(loopBase)) return;
   const interruptedLoops = Array.isArray(loopFrames) ? loopFrames.slice(0, loopBase) : [];
+  const action = interruption.suspendedAction;
   validateCurrentTemporaryRequirements(
     frame.callerTemporaries,
     activeLoopIdOf(interruptedLoops, callContextOwner(callFrames, frameIndex)),
     resume,
     "running",
-    false,
+    isPlainRecord(action) && action.kind === "chatPacingGate",
     plan,
     errors,
   );
   validateSelfHandleBinding(frame, interruption, frames, plan, errors);
-  const action = interruption.suspendedAction;
   if (action === null) return;
+  // The suspended action stands still from the block's start, so its time is checked as of then.
   const view = {
     ...snapshotValue,
+    currentSessionTimeMs: interruption.startedAtMs,
     nextInstruction: resume,
     frames: Array.isArray(frames) ? frames.slice(0, scopeBase) : frames,
     loopFrames: interruptedLoops,
@@ -2392,7 +2404,10 @@ function validateTimerHandlerFrame(
   };
   if (
     !isPlainRecord(action) ||
-    (action.kind !== "delay" && action.kind !== "interaction" && action.kind !== "mediaPlayback") ||
+    (action.kind !== "delay" &&
+      action.kind !== "interaction" &&
+      action.kind !== "chatPacingGate" &&
+      action.kind !== "mediaPlayback") ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");

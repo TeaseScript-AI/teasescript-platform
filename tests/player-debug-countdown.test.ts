@@ -100,20 +100,21 @@ test("every reading time counts down, and what follows a message counts down onl
   );
 });
 
-test("a block's own foreground work counts down while the action it interrupted waits hidden", () => {
+test("a block's own foreground work counts down while the action it interrupted stands still hidden", () => {
+  // The button had two of its three seconds left when the block started; it gets them back when the block returns.
   assert.deepEqual(
     countdowns(
       'timer async 1 s { wait 5 s }\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 3_000, 6_000],
     ),
-    [B(3_000), W(6_000), W(6_000), null],
+    [B(3_000), W(6_000), W(6_000), B(8_000)],
   );
   assert.deepEqual(
     countdowns(
       'timer async 1 s {\n  say "H", 5 s\n  say "I", 2 s\n}\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 6_000, 8_000],
     ),
-    [B(3_000), P(6_000), P(8_000), null],
+    [B(3_000), P(6_000), P(8_000), B(10_000)],
   );
   assert.deepEqual(
     countdowns(

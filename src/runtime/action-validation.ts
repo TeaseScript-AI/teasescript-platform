@@ -229,7 +229,7 @@ function validForegroundActionKind(
   }
   if (action.kind === "chatPacingGate") {
     return (
-      validPacingGateAction(action, snapshot, plan) &&
+      validPacingGateAction(action, snapshot, plan, allowDue) &&
       hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
     );
   }
@@ -502,6 +502,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
     (isPlainRecord(foreground) &&
       (foreground.kind === "delay" ||
         foreground.kind === "interaction" ||
+        foreground.kind === "chatPacingGate" ||
         foreground.kind === "mediaPlayback"))
   );
 }
@@ -644,11 +645,12 @@ function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
+  allowDue: boolean,
 ): boolean {
   return (
     isPacingGateShape(action) &&
     validPacingGateIdentity(action, snapshot) &&
-    validPacingGateTiming(action, snapshot) &&
+    validPacingGateTiming(action, snapshot, allowDue) &&
     validPacingGateCreationProvenance(action, snapshot, plan)
   );
 }
@@ -691,9 +693,11 @@ function validPacingGateIdentity(
   );
 }
 
+/** `allowDue` admits a reading time due exactly now, as for a delay. */
 function validPacingGateTiming(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
+  allowDue: boolean,
 ): boolean {
   return (
     validSessionTime(action.createdAtMs) &&
@@ -702,7 +706,7 @@ function validPacingGateTiming(
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
     (action.deadlineMs > snapshot.currentSessionTimeMs ||
       (action.deadlineMs === snapshot.currentSessionTimeMs &&
-        (snapshot.status === "failed" || catchUpPaused(snapshot))))
+        (snapshot.status === "failed" || allowDue)))
   );
 }
 
@@ -1016,10 +1020,14 @@ function validInteractionTiming(
   snapshot: Record<string, unknown>,
   allowDue: boolean,
 ): boolean {
+  // An interaction that stood still while blocks ran counts its time from later, but never from after now.
+  const pausedMs = action.pausedMs ?? 0;
   if (
     !validSessionTime(action.createdAtMs) ||
     !validSessionTime(snapshot.currentSessionTimeMs) ||
-    action.createdAtMs > snapshot.currentSessionTimeMs
+    (action.pausedMs !== undefined && (!validSessionTime(pausedMs) || !(pausedMs > 0))) ||
+    typeof pausedMs !== "number" ||
+    action.createdAtMs + pausedMs > snapshot.currentSessionTimeMs
   )
     return false;
   if (action.timeoutMs === null) return true;
@@ -1030,10 +1038,10 @@ function validInteractionTiming(
     !Number.isFinite(action.timeoutMs)
   )
     return false;
-  const deadlineMs = action.createdAtMs + action.timeoutMs;
+  const deadlineMs = action.createdAtMs + pausedMs + action.timeoutMs;
   return (
     validSessionTime(deadlineMs) &&
-    deadlineMs > action.createdAtMs &&
+    deadlineMs > action.createdAtMs + pausedMs &&
     (allowDue || deadlineMs > snapshot.currentSessionTimeMs)
   );
 }
@@ -1063,6 +1071,7 @@ function validInteractionAction(
       "timeoutMs",
       "requestEventSequence",
       ...(action.interactionKind === "form" ? ["form"] : []),
+      ...(Object.hasOwn(action, "pausedMs") ? ["pausedMs"] : []),
     ])
   )
     return false;

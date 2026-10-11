@@ -659,7 +659,8 @@ export function playerRuntimeForeground(
 /**
  * Visible and mystery timers at the Player's session-time estimate, in creation order: a blocking timer (also while
  * an expiry block interrupts it) and every running or paused async timer. Hidden timers and `wait` produce no entry,
- * and a settled timer disappears with its action. A paused timer shows its frozen remaining time.
+ * and a settled timer disappears with its action. A paused timer, and a blocking timer while a block interrupts it,
+ * show their frozen remaining time.
  */
 export function playerRuntimeTimers(
   state: PlayerRuntimeState,
@@ -667,15 +668,18 @@ export function playerRuntimeTimers(
 ): readonly PlayerTimerPresentation[] {
   const now = Math.max(state.observedSessionTimeMs, currentSessionTimeMs);
   const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
-  const delays = [state.foregroundAction, state.suspendedAction];
-  for (const action of delays) {
+  const delays = [
+    { action: state.foregroundAction, at: now },
+    { action: state.suspendedAction, at: state.suspendedAtMs ?? now },
+  ];
+  for (const { action, at } of delays) {
     if (action?.kind !== "delay" || action.display === "hidden") continue;
     timers.push({
       actionId: action.actionId,
       id: `runtime-timer-${action.actionId}`,
       kind: action.display,
       ...(action.label === null ? {} : { name: action.label }),
-      remainingSeconds: Math.max(0, action.deadlineMs - now) / 1000,
+      remainingSeconds: Math.max(0, action.deadlineMs - at) / 1000,
       totalSeconds: (action.deadlineMs - action.createdAtMs) / 1000,
     });
   }
@@ -713,11 +717,8 @@ function timedDeadlines(
 ): number[] {
   const deadlines: number[] = [];
   if (state.status === "failed") return deadlines;
-  for (const action of [
-    state.foregroundAction,
-    ...state.backgroundActions,
-    state.suspendedAction,
-  ]) {
+  // An action a block suspended stands still, so it needs no observation until the block returns.
+  for (const action of [state.foregroundAction, ...state.backgroundActions]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
     } else if (
@@ -728,7 +729,7 @@ function timedDeadlines(
       deadlines.push(action.timer.deadlineMs);
     }
   }
-  // A button with a timeout times out only while it is presented; a suspended one waits for its block to return.
+  // A button with a timeout times out only while it is presented.
   const button = activePlayerRuntimeInteraction(state);
   const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
   if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
@@ -824,7 +825,7 @@ export interface PlayerDebugTimer {
   readonly display: "hidden" | "visible" | "mystery";
   readonly label: string | null;
   readonly repeat: boolean;
-  /** `suspended`: a blocking timer whose time runs on while a block interrupts it. */
+  /** `suspended`: a blocking timer that stands still while a block interrupts it. */
   readonly state: "running" | "paused" | "suspended";
   readonly remainingMs: number;
   readonly startedAt: PlayerDebugSourceLocation;
@@ -948,7 +949,10 @@ export function playerRuntimeDebugNow(
       label: action.label,
       repeat: false,
       state: suspended ? "suspended" : "running",
-      remainingMs: Math.max(0, action.deadlineMs - now),
+      remainingMs: Math.max(
+        0,
+        action.deadlineMs - (suspended ? (snapshot.suspendedAtMs ?? now) : now),
+      ),
       startedAt: debugLocation(plan, action.owningInstruction),
     });
   }

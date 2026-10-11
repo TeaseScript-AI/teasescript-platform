@@ -205,9 +205,10 @@ test("a late observation gives the same events and state as observing every dead
     100,
   );
   continueAt(interrupted, START + 10_000, NEUTRAL);
-  const lateCatchUp = observe(runSession(copy(interrupted)), 200);
-  const onTimeCatchUp = observe(observe(runSession(copy(interrupted)), 125), 200);
-  assert.deepEqual(says(lateCatchUp), [iso(START + 50), iso(START + 10_025), iso(START + 10_100)]);
+  // The main wait stands still while the block waits from 50 ms to 125 ms, so it ends at 275 ms.
+  const lateCatchUp = observe(runSession(copy(interrupted)), 275);
+  const onTimeCatchUp = observe(observe(runSession(copy(interrupted)), 125), 275);
+  assert.deepEqual(says(lateCatchUp), [iso(START + 50), iso(START + 10_025), iso(START + 10_175)]);
   assert.deepEqual(lateCatchUp.events, onTimeCatchUp.events);
   assert.deepEqual(lateCatchUp.snapshot, onTimeCatchUp.snapshot);
 });
@@ -292,12 +293,13 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
     }),
   );
   assert.equal(stored.outcome.kind, "completed");
-  observe(runSession(held), 200);
+  // The main wait stood still for the millisecond the first block held, so it ends at 201 ms.
+  observe(runSession(held), 201);
   assert.deepEqual(says(held), [
     iso(START + 2),
     iso(START + 2),
     iso(START + 10_010),
-    iso(START + 20_080),
+    iso(START + 20_081),
   ]);
 });
 

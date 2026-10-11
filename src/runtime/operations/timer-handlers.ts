@@ -2,7 +2,11 @@ import type { RandomControl } from "../random-control.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
 import type { InterpreterEvent } from "../events.js";
-import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
+import type {
+  RuntimeCallFrameSnapshot,
+  RuntimeInterruptibleActionSnapshot,
+  RuntimeSnapshot,
+} from "../state.js";
 import { processDueWork } from "./observe-time.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 
@@ -32,12 +36,13 @@ export function startTimerHandler(
   const suspendedAction = snapshot.foregroundAction;
   if (
     suspendedAction !== null &&
-    (suspendedAction.kind === "chatPacingGate" ||
-      suspendedAction.kind === "storageWrite" ||
-      suspendedAction.kind === "capture")
+    (suspendedAction.kind === "storageWrite" || suspendedAction.kind === "capture")
   ) {
-    throw new Error("Only a foreground delay, interaction, or media wait can be interrupted.");
+    throw new Error(
+      "Only a foreground delay, interaction, reading time, or media wait can be interrupted.",
+    );
   }
+  const startedAtMs = snapshot.currentSessionTimeMs;
   const frame: RuntimeCallFrameSnapshot = {
     kind: "function",
     id: snapshot.nextCallFrameId,
@@ -50,10 +55,20 @@ export function startTimerHandler(
     destinationTemporary: null,
     timerInterruption:
       "mediaId" in invocation
-        ? { mediaId: invocation.mediaId, dueAtMs: invocation.dueAtMs, suspendedAction }
+        ? { mediaId: invocation.mediaId, dueAtMs: invocation.dueAtMs, startedAtMs, suspendedAction }
         : "buttonId" in invocation
-          ? { buttonId: invocation.buttonId, dueAtMs: invocation.dueAtMs, suspendedAction }
-          : { timerId: invocation.timerId, dueAtMs: invocation.dueAtMs, suspendedAction },
+          ? {
+              buttonId: invocation.buttonId,
+              dueAtMs: invocation.dueAtMs,
+              startedAtMs,
+              suspendedAction,
+            }
+          : {
+              timerId: invocation.timerId,
+              dueAtMs: invocation.dueAtMs,
+              startedAtMs,
+              suspendedAction,
+            },
     callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,
@@ -92,9 +107,9 @@ export function startTimerHandler(
 }
 
 /**
- * A normal return from an expiry block resumes the interrupted path. A still-pending interaction or delay becomes the
- * foreground action again with its original identity. A delay settled meanwhile continues at its continuation, which
- * the frame already records.
+ * A normal return from an expiry block resumes the interrupted path. A still-pending action becomes the foreground
+ * action again with its original identity and the time it had left: it stood still while the block ran. A media wait
+ * that ended meanwhile continues at its continuation, which the frame already records.
  */
 export function returnFromTimerHandler(
   plan: InstructionPlan,
@@ -118,8 +133,26 @@ export function returnFromTimerHandler(
 }
 
 function restoreSuspendedAction(snapshot: RuntimeSnapshot, frame: RuntimeCallFrameSnapshot): void {
-  const suspended = frame.timerInterruption!.suspendedAction;
+  const { suspendedAction: suspended, startedAtMs } = frame.timerInterruption!;
   if (suspended === null) return;
-  snapshot.foregroundAction = suspended;
+  snapshot.foregroundAction = resumedAction(suspended, snapshot.currentSessionTimeMs - startedAtMs);
   snapshot.status = "waiting";
+}
+
+/**
+ * An interrupted action after a block that ran for `stoodStillMs`: its remaining time is what it had when the block
+ * started (owner decision on #829, 2026-10-11). A media wait is not timed; it ends with its media.
+ */
+function resumedAction(
+  action: RuntimeInterruptibleActionSnapshot,
+  stoodStillMs: number,
+): RuntimeInterruptibleActionSnapshot {
+  if (stoodStillMs === 0 || action.kind === "mediaPlayback") return action;
+  if (action.kind === "interaction")
+    return Object.freeze({ ...action, pausedMs: (action.pausedMs ?? 0) + stoodStillMs });
+  return Object.freeze({
+    ...action,
+    createdAtMs: action.createdAtMs + stoodStillMs,
+    deadlineMs: action.deadlineMs + stoodStillMs,
+  });
 }

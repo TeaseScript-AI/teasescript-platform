@@ -64,11 +64,11 @@ test("a skip in the Player ends the reading time and shows what follows at once"
   assert.equal(playerRuntimeForeground(skipped!.session)?.kind, "show-button");
 });
 
-test("a permanent button stays usable during a reading time, and its block's message follows the reading time", () => {
+test("a permanent button stays usable during a reading time, and its block interrupts it at once", () => {
   let session = createPlayerRuntimeSession(
     [
       'showPermanentButton "Hint" {',
-      '  say "Try the red one.", instant',
+      '  say "Try the red one.", 2 s',
       "}",
       'say "A long message.", 5 s',
       'showButton "Done"',
@@ -81,17 +81,22 @@ test("a permanent button stays usable during a reading time, and its block's mes
   const pressed = pressPlayerRuntimePermanentButton(observe(session, 1_000), 1);
   assert.equal(pressed.outcome.kind, "pressed");
   session = pressed.session;
+  // The hint shows at once, and the button stays inactive while its block reads it out.
+  assert.deepEqual(transcript(session), ["A long message.", "Try the red one."]);
   assert.deepEqual(playerRuntimePermanentButtons(session.state), [
     { buttonId: 1, label: "Hint", busy: true },
   ]);
-  assert.deepEqual(transcript(session), ["A long message."]);
-  assert.notEqual(playerRuntimePacingGate(session), null);
+  assert.equal(playerRuntimePacingGate(session)?.deadlineMs, 3_000);
 
-  session = observe(session, 5_000);
-  assert.deepEqual(transcript(session), ["A long message.", "Try the red one."]);
+  // The long message then gets back the four seconds it had left.
+  session = observe(session, 3_000);
   assert.deepEqual(playerRuntimePermanentButtons(session.state), [
     { buttonId: 1, label: "Hint", busy: false },
   ]);
+  assert.equal(playerRuntimePacingGate(session)?.deadlineMs, 7_000);
+  session = observe(session, 6_999);
+  assert.equal(playerRuntimeForeground(session), null);
+  session = observe(session, 7_000);
   assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
 });
 

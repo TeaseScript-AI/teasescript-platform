@@ -1,97 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { Story } from "./helpers/story-session.js";
 
 /*
  * A paced `say` lasts its reading time, and the next statement runs after it unless the player skips it (owner
  * decision on #829, 2026-10-11; RUNTIME.md "Message reading time"). Reading times below are exact durations, so each
  * expected moment follows from the source.
  */
-
-/** A session at the default reading speed, driven by time observations, skips, and permanent-button clicks. */
-class Story {
-  readonly plan: InstructionPlan;
-  snapshot: RuntimeSnapshot;
-  readonly events: InterpreterEvent[] = [];
-
-  constructor(source: string, options: { readonly persistentScriptStorage?: boolean } = {}) {
-    this.plan = compileValidPlan(source);
-    this.snapshot = createFreshRuntimeSnapshot(this.plan, options);
-    this.#run();
-  }
-
-  #run(): void {
-    const result = run(this.plan, this.snapshot);
-    this.events.push(...result.events);
-    this.snapshot = result.snapshot;
-  }
-
-  at(nowMs: number): this {
-    const observed = observeTime(this.plan, this.snapshot, nowMs);
-    assert.equal(observed.outcome.kind, "observed");
-    this.events.push(...observed.events);
-    this.snapshot = observed.snapshot;
-    this.#run();
-    return this;
-  }
-
-  skip(): this {
-    const gate = this.snapshot.foregroundAction;
-    assert.equal(gate?.kind, "chatPacingGate", "a reading time runs");
-    const skipped = completeAction(this.plan, this.snapshot, {
-      actionId: gate!.actionId,
-      actionKind: "chatPacingGate",
-      payload: { kind: "skip" },
-    });
-    assert.equal(skipped.outcome.kind, "completed");
-    this.events.push(...skipped.events);
-    this.snapshot = skipped.snapshot;
-    this.#run();
-    return this;
-  }
-
-  press(buttonId: number): string {
-    const pressed = pressPermanentButton(this.plan, this.snapshot, buttonId);
-    this.events.push(...pressed.events);
-    this.snapshot = pressed.snapshot;
-    this.#run();
-    return pressed.outcome.kind;
-  }
-
-  said(): string[] {
-    return this.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
-  }
-
-  /** The kinds of the actions requested so far, in order. */
-  requested(): string[] {
-    return this.events.flatMap((event) =>
-      event.kind === "actionRequested" ? [event.action.kind] : [],
-    );
-  }
-
-  reading(): boolean {
-    return this.snapshot.foregroundAction?.kind === "chatPacingGate";
-  }
-
-  binding(name: string): SerializableRuntimeValue | undefined {
-    return this.snapshot.frames[0]?.bindings.find((binding) => binding.name === name)?.value;
-  }
-}
 
 const READ = 'say "Read this.", 2 s';
 
@@ -263,11 +188,11 @@ test("a form's time limit and a button's timeout count from when they appear", (
   assert.deepEqual(button.at(5_000).said(), ["Read this.", "3 seconds"]);
 });
 
-test("a permanent button stays usable during a reading time, and its block runs when the reading time ends", () => {
+test("a permanent button stays usable during a reading time, and its block interrupts it at once", () => {
   const story = new Story(
     [
       'showPermanentButton "Hint" {',
-      '  say "Try the red one.", instant',
+      '  say "Try the red one.", 2 s',
       "}",
       'say "A long message.", 5 s',
       'say "Next.", instant',
@@ -276,11 +201,11 @@ test("a permanent button stays usable during a reading time, and its block runs 
   );
   story.at(1_000);
   assert.equal(story.press(1), "pressed");
-  assert.deepEqual(story.said(), ["A long message."]);
-  assert.equal(story.reading(), true);
-  story.at(4_999);
-  assert.deepEqual(story.said(), ["A long message."]);
-  story.at(5_000);
+  assert.deepEqual(story.said(), ["A long message.", "Try the red one."]);
+  // The long message had four of its five seconds left; it gets them back after the hint's two.
+  story.at(6_999);
+  assert.deepEqual(story.said(), ["A long message.", "Try the red one."]);
+  story.at(7_000);
   assert.deepEqual(story.said(), ["A long message.", "Try the red one.", "Next."]);
 });
 
@@ -305,8 +230,8 @@ test("a skip ends the reading time and starts what follows at once", () => {
   assert.equal(refused.outcome.kind, "invalidPayload");
 });
 
-test("a timer block due during a reading time runs when it ends, before the next statement", () => {
-  const story = new Story(
+test("a timer block and a media cue block interrupt a reading time at once", () => {
+  const timer = new Story(
     [
       'timer async 1 s { say "Ping.", instant }',
       'say "A long message.", 5 s',
@@ -314,17 +239,42 @@ test("a timer block due during a reading time runs when it ends, before the next
       "exit",
     ].join("\n"),
   );
-  story.at(1_000);
-  assert.deepEqual(story.said(), ["A long message."]);
-  assert.equal(story.snapshot.pendingTimerHandlers.length, 1);
-  story.at(5_000);
-  assert.deepEqual(story.said(), ["A long message.", "Ping.", "Next."]);
+  timer.at(1_000);
+  assert.deepEqual(timer.said(), ["A long message.", "Ping."]);
+  // The block took no time, so the reading time still ends at 5 s.
+  timer.at(4_999);
+  assert.deepEqual(timer.said(), ["A long message.", "Ping."]);
+  timer.at(5_000);
+  assert.deepEqual(timer.said(), ["A long message.", "Ping.", "Next."]);
+
+  const cue = new Story(
+    [
+      'let music = playAudio async "music.mp3" {',
+      "  at 1 s {",
+      '    say "Listen.", 1 s',
+      "  }",
+      "}",
+      'say "A long message.", 5 s',
+      'say "Next.", instant',
+      "exit",
+    ].join("\n"),
+  );
+  cue.load(1, 60_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(cue.said(), ["A long message.", "Listen."]);
+  // The cue's own message lasts one second, which the long message gets back.
+  cue.at(5_999, [1, 5_999]);
+  assert.deepEqual(cue.said(), ["A long message.", "Listen."]);
+  cue.at(6_000, [1, 6_000]);
+  assert.deepEqual(cue.said(), ["A long message.", "Listen.", "Next."]);
 });
 
-test("a checkpoint taken during a reading time restores to the same continuation", () => {
+test("a checkpoint taken during a block that interrupted a reading time restores to the same continuation", () => {
   const story = new Story(
     [
-      'timer async 1 s { say "Ping.", instant }',
+      "timer async 1 s {",
+      '  say "Ping.", instant',
+      "  wait 2 s",
+      "}",
       'let line = say "Counting", instant',
       'say "A long message.", 5 s',
       'line.text = "Counted"',
@@ -334,27 +284,33 @@ test("a checkpoint taken during a reading time restores to the same continuation
     ].join("\n"),
   );
   story.at(1_500);
-  assert.equal(story.reading(), true);
+  assert.deepEqual(story.said(), ["Counting", "A long message.", "Ping."]);
+  assert.equal(story.snapshot.foregroundAction?.kind, "delay");
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(story.plan, story.snapshot)),
   );
   assert.deepEqual(restored.snapshot, story.snapshot);
-  const direct = run(story.plan, observeTime(story.plan, story.snapshot, 5_000).snapshot);
-  const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 5_000).snapshot);
-  assert.deepEqual(resumed.events, direct.events);
-  assert.deepEqual(resumed.snapshot, direct.snapshot);
-  assert.deepEqual(
-    direct.events.flatMap((event) =>
-      event.kind === "say"
-        ? [event.text]
-        : event.kind === "messageUpdated"
-          ? [`updated ${event.text}`]
-          : [],
-    ),
-    ["Ping.", "updated Counted", "Ready?"],
-  );
-  assert.equal(direct.snapshot.stageImage, "images/room.jpg");
-  assert.equal(direct.snapshot.foregroundAction?.kind, "interaction");
+  // The block waits until 3 s; the reading time then has four seconds left, until 7 s.
+  for (const atMs of [6_999, 7_000]) {
+    const direct = run(story.plan, observeTime(story.plan, story.snapshot, atMs).snapshot);
+    const resumed = run(
+      restored.plan,
+      observeTime(restored.plan, restored.snapshot, atMs).snapshot,
+    );
+    assert.deepEqual(resumed.events, direct.events, `${atMs}`);
+    assert.deepEqual(resumed.snapshot, direct.snapshot, `${atMs}`);
+    assert.deepEqual(
+      direct.events.flatMap((event) =>
+        event.kind === "say"
+          ? [event.text]
+          : event.kind === "messageUpdated"
+            ? [`updated ${event.text}`]
+            : [],
+      ),
+      atMs === 7_000 ? ["updated Counted", "Ready?"] : [],
+      `${atMs}`,
+    );
+  }
 });
 
 test("reading times resume identically from every checkpoint boundary", () => {

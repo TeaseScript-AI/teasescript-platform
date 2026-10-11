@@ -56,8 +56,13 @@ export interface RuntimeInteractionActionSnapshot {
    */
   readonly createdAtMs: number;
   /**
-   * A button's timeout or a form's time limit; it times out at `createdAtMs + timeoutMs`. Always `null` for other
-   * interactions.
+   * The scene time the interaction stood still while blocks interrupted it, present once positive. Its timeout and a
+   * button's elapsed time leave it out (owner decision on #829, 2026-10-11).
+   */
+  readonly pausedMs?: number;
+  /**
+   * A button's timeout or a form's time limit; it times out at `createdAtMs + pausedMs + timeoutMs`. Always `null` for
+   * other interactions.
    */
   readonly timeoutMs: number | null;
   readonly requestEventSequence: number;
@@ -86,7 +91,12 @@ export type InteractionResultValue =
 
 /** The scene time at which a button with a timeout times out, or `null`. */
 export function interactionDeadlineMs(action: RuntimeInteractionActionSnapshot): number | null {
-  return action.timeoutMs === null ? null : action.createdAtMs + action.timeoutMs;
+  return action.timeoutMs === null ? null : interactionStartMs(action) + action.timeoutMs;
+}
+
+/** The scene time an interaction's timeout and elapsed time count from: when it appeared, plus the time it stood still. */
+export function interactionStartMs(action: RuntimeInteractionActionSnapshot): number {
+  return action.createdAtMs + (action.pausedMs ?? 0);
 }
 
 /**

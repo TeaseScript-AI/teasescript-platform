@@ -1031,14 +1031,14 @@ test("a snapshot keeps the startup a phase of its own, before anything else and 
     rejected(copy);
   }
 
-  // After the startup, no saved position leads back into it: here the root position that a timer block, which waits
-  // while the main wait has settled, returns to.
+  // After the startup, no saved position leads back into it: here the root position that a waiting timer block returns
+  // to, where the main wait it interrupted stands still.
   const interrupted = observeTime(plan, run(plan, expired).snapshot, 2000).snapshot;
   const frame = interrupted.callFrames[0];
   assert.ok(
     frame?.kind === "function" &&
       frame.timerInterruption !== null &&
-      frame.timerInterruption.suspendedAction === null,
+      frame.timerInterruption.suspendedAction?.kind === "delay",
   );
   restorable(interrupted);
   for (let position = 0; position < prefixEnd; position += 1) {
