@@ -90,8 +90,8 @@ function chooseValue {
   // TODO SX_CAPTURING_CLOSURE line 67: This closure value captures local pick of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
   // | def set = { -> pick = "x" }
   let setValue = null
-  // NOTE SX_NULL_ONLY_VARIABLE line 68: none is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
-  if pick == null {
+  let none = null
+  if pick == none {
     say prose "Unset", instant
   } else {
     say prose "Set", instant

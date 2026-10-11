@@ -23,7 +23,7 @@ let xs = [1, 2, 3]
 say prose "Pick ${xs[getRandom(xs.length)]}", instant
 let count = 0
 let ready = false
-// NOTE SX_NULL_ONLY_VARIABLE line 11: question is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+let question = null
 let answer = askText().replace("\n", " ")
 say prose "Ready?", instant
 let ignoredAnswer1 = askBoolean

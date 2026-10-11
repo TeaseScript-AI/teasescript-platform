@@ -77,9 +77,9 @@ let spanker: string? = sexscriptLegacyLoadFirstTrue(paddles)
 say prose "Spanker ${spanker}", instant
 // A number that a restore may leave null orders below every value, which the comparison writes out, so it narrows.
 let square: integer? = -1
-// NOTE SX_NULL_ONLY_VARIABLE line 18: saved is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.
+let saved = null
 function restore {
-  square = null
+  square = saved
 }
 if randomInteger(0..2) == 0 {
   restore()

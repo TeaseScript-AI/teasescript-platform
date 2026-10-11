@@ -147,9 +147,10 @@ function registerFixtures(
   }
 }
 
-// A note on a variable that a unit's source patch took the value out of names that patch, not the legacy script.
+// The note on a switch on a variable that a unit's source patch took the value out of names that patch, not the
+// legacy script.
 test(
-  "a null-only variable's note names the source patch that took its value out",
+  "a switch note on a null-only variable names the source patch that took its value out",
   { skip: parserUnavailable },
   async () => {
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-patched-"));
@@ -157,9 +158,14 @@ test(
       const sourcePath = path.join(directory, "toy.groovy");
       writeFileSync(
         sourcePath,
-        ["def osName = null", 'if (osName == "mac") show("Speaking")', 'show("Done")', ""].join(
-          "\n",
-        ),
+        [
+          "def osName = null",
+          "switch (osName) {",
+          '  case "mac": show("Speaking"); break',
+          '  default: show("Done")',
+          "}",
+          "",
+        ].join("\n"),
       );
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
         sourcePatches: [
@@ -168,7 +174,7 @@ test(
       });
       assert.match(
         emitTease(program!),
-        /osName is given no value in the script as the unit's patch speech-ignored changed it/u,
+        /This switch is on osName, which the unit's patch speech-ignored left without a value/u,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });

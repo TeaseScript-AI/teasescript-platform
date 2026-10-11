@@ -848,7 +848,8 @@ function analyse(
       (name) => {
         const found = scope.resolve(name);
         if (found === undefined) return UNKNOWN;
-        const type = bindingType(found) ?? UNKNOWN;
+        // A variable the script never gives a value reads null (nullOnlyVariables).
+        const type = bindingType(found) ?? (found.declaration?.nullOnly === true ? NULL : UNKNOWN);
         return scope.rulesOutNull(found) ? nonNull(type) : type;
       },
       (name) => results.get(name),

@@ -167,6 +167,8 @@ export type IrStatement =
       global?: true;
       /** The counter a C-style `for` declared, which Groovy scoped to its loop. */
       loopCounter?: true;
+      /** A variable the script never gives a value, which only holds null, as typing reads it (nullOnlyVariables). */
+      nullOnly?: true;
     })
   | (IrBase & {
       kind: "assign";

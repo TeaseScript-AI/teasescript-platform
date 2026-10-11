@@ -143,7 +143,7 @@ export interface LowerOptions {
   mixinModules?: readonly MixinModuleInfo[];
   /**
    * Variables whose value a unit's source patch took out of this script, with the patch's ID, which a note on what the
-   * script no longer does names (the null-only variable).
+   * script no longer does names (a switch on a null-only variable).
    */
   patchedAssignments?: ReadonlyMap<string, string>;
   /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
@@ -323,7 +323,7 @@ interface LowerContext {
   writeTargets: Set<AstNode>;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
-  /** Variables that only ever hold null, whose declarations are left out and whose reads read null (nullOnlyVariables). */
+  /** Variables that only ever hold null, a switch on which keeps only its default (nullOnlyVariables). */
   nullOnly: ReadonlySet<string>;
   /** LowerOptions.patchedAssignments. */
   patchedAssignments: ReadonlyMap<string, string>;
@@ -1733,9 +1733,10 @@ function declaredWrites(body: AstNode, keys: BindingKeys): DeclaredWrites {
 
 /**
  * Variables that only ever hold null: declared without a value or with null, and never set, counted, or changed
- * anywhere else in the script, as SubChallenges' `def ChallengeType0` beside `typeout = ChallengeType0`. They are the
- * legacy script's dead variables, whose every read gave null. A name that a loop or another declaration binds too is
- * left alone, since its reads may be another variable's.
+ * anywhere else in the script, as ToyExpanded's `osName`, which its unit patch leaves unset. They are the legacy
+ * script's dead variables, whose every read gave null; they are kept as written (the compiler takes such a variable as
+ * null, #831). A name that a loop or another declaration binds too is left alone, since its reads may be another
+ * variable's.
  */
 function nullOnlyVariables(body: AstNode, context: LowerContext): Set<string> {
   const declared = new Set<string>();
@@ -5436,28 +5437,10 @@ function lowerDeclaration(
       ),
     ];
   }
-  // A variable that only ever held null is left out, with a note where it was declared.
-  if (context.nullOnly.has(bindingKey(node.left, context.bindings) ?? "")) {
-    const diagnostic: MigrationDiagnostic = {
-      code: "SX_NULL_ONLY_VARIABLE",
-      severity: "info",
-      message: context.patchedAssignments.has(name)
-        ? `${name} is given no value in the script as the unit's patch ${context.patchedAssignments.get(name)!} changed it, so it only holds null; the conversion leaves it out and reads null where it was read.`
-        : `${name} is never given a value in the legacy script, so it only held null; the conversion leaves it out and reads null where it was read.`,
-      span,
-    };
-    context.diagnostics.push(diagnostic);
-    context.renderedDiagnostics.add(diagnostic);
-    const line = span === null ? "" : ` line ${span.line}`;
-    return [
-      {
-        kind: "comment",
-        text: `// NOTE ${diagnostic.code}${line}: ${diagnostic.message}`,
-        trailing: false,
-        span,
-      },
-    ];
-  }
+  // A variable that only ever held null starts as null, as written, not with a number's or a text's start; typing reads
+  // it as null (nullOnlyVariables).
+  if (context.nullOnly.has(bindingKey(node.left, context.bindings) ?? ""))
+    return [{ kind: "let", name, value: { kind: "literal", value: null }, nullOnly: true, span }];
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
   // A counter that only its loops use is declared by each of them (loopOnlyCounters).
   if (
@@ -9759,22 +9742,6 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const thenNode = asNode(node.then);
   const elseNode = asNode(node.else);
-  // A test that a variable which only ever held null holds a value never passed: the branch is left out.
-  if (
-    conditionNode !== null &&
-    (elseNode === null || elseNode.kind === "empty") &&
-    nullOnlyTruth(conditionNode, context) === false
-  ) {
-    const line = node.span === null ? "" : ` line ${node.span.line}`;
-    return [
-      {
-        kind: "comment",
-        text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This test needs a value in a variable that only ever held null, so it never passed; the conversion leaves its branch out.`,
-        trailing: false,
-        span: node.span,
-      },
-    ];
-  }
   const condition = conditionNode === null ? null : lowerCondition(conditionNode, context);
   if (condition === null || thenNode === null || thenNode.kind === "empty") {
     return [
@@ -9817,10 +9784,16 @@ function switchDefaultOnly(node: AstNode, context: LowerContext): IrStatement[] 
   if (defaultSource === null) return null;
   const line = node.span === null ? "" : ` line ${node.span.line}`;
   const statements = eliminateSwitchBreaks(withoutTerminalBreak(defaultSource));
+  const name = valueNode.kind === "variable" ? text(valueNode.name) : null;
+  const patch = name === null ? undefined : context.patchedAssignments.get(name);
+  const held =
+    patch === undefined
+      ? "a variable that only ever held null"
+      : `${name}, which the unit's patch ${patch} left without a value, so it only holds null`;
   return [
     {
       kind: "comment",
-      text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This switch is on a variable that only ever held null, which no case matched; the conversion keeps only its default.`,
+      text: `// NOTE SX_NULL_ONLY_VARIABLE${line}: This switch is on ${held}, which no case matched; the conversion keeps only its default.`,
       trailing: false,
       span: node.span,
     },
@@ -9836,28 +9809,6 @@ function holdsOnlyNull(node: AstNode, context: LowerContext): boolean {
     isNullConstant(node) ||
     (node.kind === "variable" && context.nullOnly.has(bindingKey(node, context.bindings) ?? ""))
   );
-}
-
-/**
- * The outcome of a test on a variable that only ever held null (nullOnlyVariables): `x`, `!x`, `x == null`,
- * `x != null`, and an `&&` whose first test is known false. Null where the outcome is not known that way.
- */
-function nullOnlyTruth(node: AstNode, context: LowerContext): boolean | null {
-  const nullOnly = (side: AstNode | null): boolean => side !== null && holdsOnlyNull(side, context);
-  if (node.kind === "variable") return nullOnly(node) ? false : null;
-  if (node.kind === "not") {
-    const inner = asNode(node.value);
-    const truth = inner === null ? null : nullOnlyTruth(inner, context);
-    return truth === null ? null : !truth;
-  }
-  if (node.kind !== "binary") return null;
-  const [left, right] = [asNode(node.left), asNode(node.right)];
-  if (node.operator === "&&")
-    return left !== null && nullOnlyTruth(left, context) === false ? false : null;
-  if (node.operator !== "==" && node.operator !== "!=") return null;
-  if (!nullOnly(left) || !nullOnly(right) || (isNullConstant(left!) && isNullConstant(right!)))
-    return null;
-  return node.operator === "==";
 }
 
 function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
@@ -11692,11 +11643,6 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
       }
-      if (
-        !context.writeTargets.has(node) &&
-        context.nullOnly.has(bindingKey(node, context.bindings) ?? "")
-      )
-        return { kind: "literal", value: null };
       if (
         context.checksUndefinedVariables &&
         !context.types.variables.has(name) &&
