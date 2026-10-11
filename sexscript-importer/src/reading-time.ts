@@ -1,3 +1,4 @@
+import { CLOCK_CALLS } from "./clock-loops.ts";
 import { SYSTEM_SPEAKER } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { hasEffect, ownEffect, withNestedBlocks } from "./repeated-text.ts";
@@ -17,8 +18,9 @@ const visibleText = await loadVisibleText();
 
 /**
  * Legacy `show()` displayed its text at once, so authors timed its reading with the `wait()` after it, where the Player
- * gives every `say` a skippable reading time. A literal wait right after a text, at most 1.5 times the text's reading
- * time, goes and the Player's reading time takes over; this includes a wait before a button or an ask, where the player
+ * gives every `say` a skippable reading time. A literal wait right after a text, or after it and statements that only
+ * set variables, which take no time, at most 1.5 times the text's reading time, goes and the Player's reading time
+ * takes over; this includes a wait before a button or an ask, where the player
  * decides when to go on (owner decisions 2026-10-07). A longer wait is time for an action or a task and stays
  * (`afterText`), as does any other wait. A text before a wait that stays appears without reading time (`instant`, owner
  * decision 2026-10-05), so that the wait alone sets its timing; withoutCutReadingTimes takes it away again where it
@@ -29,8 +31,8 @@ const visibleText = await loadVisibleText();
  * measure is the shortest reading time the text can have. A wait stays as it is where another wait follows it, a pause
  * the author made; after the system speaker's text, which the importer adds; and where it keeps a beat (owner decision
  * 2026-10-07), whatever its length: after a text without letters, which has nothing to read (`3`, `...`, a number), and
- * a loop's tick, a second at most after a text the loop's body builds anew each pass, as a clock or a countdown does. A
- * beat's text keeps `instant`, as do the messages of animations and counters (withMessageHandles), whose waits stay.
+ * a loop's tick, a second at most or computed, after a text the loop's body builds anew each pass, as a clock, a
+ * countdown, or a text typed out a character at a time does. A beat's text keeps `instant`, as do the messages of animations and counters (withMessageHandles), whose waits stay.
  */
 export function withReadingTimes(
   statements: IrStatement[],
@@ -40,17 +42,36 @@ export function withReadingTimes(
     diagnostics.push({ code, severity: "info", message, span: statement.span });
   };
   const block = (items: IrStatement[], loopBody = false): IrStatement[] => {
-    const nested = items.map((item) =>
-      withNestedBlocks(item, (body) =>
+    // A text said only where it is not empty (withoutBlankText) pairs with the wait after it as the text alone would; a
+    // wait that its reading time replaces stays for the path where it is empty and nothing is said.
+    const guards = new Map<number, Extract<IrStatement, { kind: "if" }>>();
+    const nested = items.map((item, index) => {
+      const text = item.kind === "if" && item.guard === "blank" ? item.then[0] : undefined;
+      if (item.kind === "if" && text?.kind === "say") {
+        guards.set(index, item);
+        return text;
+      }
+      return withNestedBlocks(item, (body) =>
         block(body, item.kind === "while" || item.kind === "repeat" || item.kind === "for"),
-      ),
-    );
+      );
+    });
     // The index of the next statement that is no blank line or comment, -1 for none.
     const next: number[] = Array.from(nested, () => -1);
     for (let index = nested.length - 2; index >= 0; index -= 1)
       next[index] = significant(nested[index + 1]!) ? index + 1 : next[index + 1]!;
+    // The index of the statement at `index` or the first after it that does more than set a variable to a value without
+    // effects, which takes no time: a text's wait may follow such statements, as a countdown's step of its count.
+    const past = (index: number): number => {
+      let at = index;
+      while (at !== -1 && setsOnly(nested[at]!)) at = next[at]!;
+      return at;
+    };
     const result = [...nested];
     const dropped = new Set<number>();
+    // The texts that moved after the sound that legacy started after them, by their places, and the places of the waits
+    // that texts' reading times replaced.
+    const moved = new Map<number, number>();
+    const waitOf = new Map<number, number>();
     nested.forEach((statement, index) => {
       // A sound that starts between a text and its wait took no time in legacy, so the wait is the text's (owner
       // decision 2026-10-08).
@@ -69,7 +90,7 @@ export function withReadingTimes(
         return;
       }
       if (statement.kind !== "say") return;
-      const waitIndex = sound === -1 ? next[index]! : next[sound]!;
+      const waitIndex = past(sound === -1 ? next[index]! : next[sound]!);
       const wait = nested[waitIndex];
       if (wait?.kind !== "wait" || wait.visible) return;
       // In a loop that polls the clock, the wait is the time the loop waits for: a text's reading time passes no time.
@@ -98,11 +119,12 @@ export function withReadingTimes(
         result[index] = { ...statement, instant: true, beat: true };
         return;
       }
-      // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown.
+      // A loop that says a text it builds anew each pass, a second at most apart, ticks: a clock or a countdown; so does
+      // one whose wait is computed, which no reading time replaces, as a countdown at a given speed or a text typed out
+      // a character at a time.
       if (
         loopBody &&
-        milliseconds !== null &&
-        milliseconds <= TICK_MS &&
+        (milliseconds === null || milliseconds <= TICK_MS) &&
         builtAtRuntime(statement.value)
       ) {
         report(
@@ -145,9 +167,60 @@ export function withReadingTimes(
         );
         result[index] = nested[sound]!;
         result[sound] = { ...statement, readingTime: wait };
+        moved.set(index, sound);
       } else result[index] = { ...statement, readingTime: wait };
       dropped.add(waitIndex);
+      waitOf.set(index, waitIndex);
     });
+    for (const [index, guard] of guards) {
+      const at = moved.get(index) ?? index;
+      const text = result[at]!;
+      const replaced = text.kind === "say" ? text.readingTime : undefined;
+      const waitIndex = waitOf.get(index);
+      // What stays between the text and its wait, a sound or a setting, runs before the wait on the empty path too, so
+      // the wait stays where it was there, for that path only; where a setting there changes the text, the test would
+      // come too late, and the wait stays for both paths.
+      const crossed =
+        waitIndex === undefined || moved.has(index)
+          ? []
+          : nested.slice(index + 1, waitIndex).filter(significant);
+      const tested = guard.condition.kind === "binary" ? guard.condition.left : null;
+      if (
+        text.kind !== "say" ||
+        replaced === undefined ||
+        waitIndex === undefined ||
+        crossed.length === 0 ||
+        tested === null
+      ) {
+        result[at] = { ...guard, then: [text], else: replaced === undefined ? [] : [replaced] };
+        continue;
+      }
+      dropped.delete(waitIndex);
+      const name = tested.kind === "variable" ? tested.name : null;
+      const changes = crossed.some(
+        (item) =>
+          (item.kind === "let" && item.name === name) ||
+          (item.kind === "assign" && item.target.kind === "variable" && item.target.name === name),
+      );
+      if (changes) {
+        const { readingTime: _readingTime, ...said } = text;
+        result[at] = { ...guard, then: [{ ...said, instant: true }], else: [] };
+        continue;
+      }
+      result[at] = { ...guard, then: [text], else: [] };
+      result[waitIndex] = {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: tested,
+          right: { kind: "literal", value: "" },
+        },
+        then: [replaced],
+        else: [],
+        span: replaced.span,
+      };
+    }
     return dropped.size === 0 ? result : result.filter((_, index) => !dropped.has(index));
   };
   return block(statements);
@@ -159,6 +232,25 @@ const SOUND_BEAT =
 /** A text said at once with the sound that starts after it, a beat that sets its own timing. */
 function soundBeat(text: Extract<IrStatement, { kind: "say" }>): IrStatement {
   return { ...text, instant: true, beat: true };
+}
+
+/**
+ * Whether a statement only sets a variable, or an element of one, to a value without effects that does not read the
+ * clock: a wait moved past a clock reading, or one that goes, would change the time it measures.
+ */
+function setsOnly(statement: IrStatement): boolean {
+  if (statement.kind !== "let" && statement.kind !== "assign") return false;
+  let effect = false;
+  const clock = (value: IrExpression): IrExpression => {
+    effect ||= value.kind === "call" && CLOCK_CALLS.has(value.name);
+    return mapChildren(value, clock);
+  };
+  mapOwnExpressions(statement, (value) => {
+    effect ||= hasEffect(value);
+    clock(value);
+    return value;
+  });
+  return !effect;
 }
 
 /** Whether a text is fixed or interpolates only variables. */

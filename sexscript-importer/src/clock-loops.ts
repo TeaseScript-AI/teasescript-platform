@@ -8,7 +8,8 @@ import { mapChildren } from "./variable-types.ts";
 const TICK_SECONDS = 0.1;
 
 /** Calls that read the clock. */
-const CLOCK_CALLS = new Set(["getAbsoluteDateTime", "getDateTime", "getDate", "getTime"]);
+/** The built-in calls that read the clock. */
+export const CLOCK_CALLS = new Set(["getAbsoluteDateTime", "getDateTime", "getDate", "getTime"]);
 /** The operators whose result a clock value carries into, as in `t + 1`. */
 const ARITHMETIC = new Set(["+", "-", "*", "/", "%"]);
 

@@ -1,3 +1,4 @@
+import { withPhotoEnds } from "./photo-ends.ts";
 import { datePatternFields, datePatternKind } from "./java-time.ts";
 import { withClockLoopTicks } from "./clock-loops.ts";
 import { withCounterLoops } from "./counter-loops.ts";
@@ -47,6 +48,7 @@ import {
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import {
+  hasEffect,
   withAskQuestions,
   withNestedBlocks,
   withoutBlankText,
@@ -68,6 +70,19 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
+import {
+  type CapturedLocal,
+  liftableCaptures,
+  spanKey,
+  withLiftedLocals,
+  withPassedLocals,
+} from "./captured-locals.ts";
+import {
+  children as astChildren,
+  mapChildren as mapAstChildren,
+  withListAliasesAsPaths,
+  withTupleAssignments,
+} from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
@@ -235,6 +250,14 @@ interface LowerContext {
   } | null;
   /** Functions generated from closure values, emitted at the program root. */
   closureFunctions: IrStatement[];
+  /** The positions at which a call of each script function passes a value that may hold a fraction. */
+  fractionalArguments: ReadonlyMap<string, ReadonlySet<number>>;
+  /** The locals of their functions that closure values read or set, which the next lowering lifts (lowerParsedFile). */
+  capturedLocals: CapturedLocal[];
+  /** The closure values whose captured locals this lowering passes or lifts, by spanKey, with those locals' names. */
+  resolvedClosures: ReadonlyMap<string, readonly string[]>;
+  /** The closure values that stay unconverted, whose converted body had an error, with the locals they capture. */
+  excludedClosures: ReadonlyMap<string, readonly string[]>;
   /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
   actions: Set<string>;
   /** Counter for variables that keep an input result the legacy statement ignored. */
@@ -1132,6 +1155,149 @@ function recordListFields(
 }
 
 /**
+ * The fields of maps that stay as written: a variable declared with a map literal of texts, numbers, or flags, or a sum
+ * of such maps, that nothing sets again, writes a field of, changes by a method, or passes on, and that is only read by
+ * a named field, by a key, or by a method that reads it, gone through by a loop, or added to another such map
+ * (fight_arena's ATTACK_TYPE and FAVOR_CHOICE, whose fields are its switches' cases). Each such field has the type of
+ * its value, or of the field of another such map it reads, as `binding.field`.
+ */
+function constantMapFields(
+  body: AstNode,
+  keys: BindingKeys,
+  types: TypeEnvironment,
+): Map<string, number> {
+  // The fields of each map declared with a literal or a sum of such maps, the later sum's field over the earlier's.
+  const literals = new Map<string, Map<string, AstNode>>();
+  // The maps each sum reads, which must stay as written too.
+  const sources = new Map<string, string[]>();
+  const rejected = new Set<string>();
+  const reads = new Set<AstNode>();
+  const entriesOf = (value: AstNode | null, used: string[]): Map<string, AstNode> | null => {
+    if (value?.kind === "map") {
+      const entries = new Map<string, AstNode>();
+      for (const entry of nodeArray(value.entries)) {
+        const field = constantString(entry.key);
+        const item = asNode(entry.value);
+        if (field !== null && item !== null) entries.set(field, item);
+      }
+      return entries;
+    }
+    if (value?.kind === "variable") {
+      const key = bindingKey(value, keys);
+      const entries = key === null ? undefined : literals.get(key);
+      if (key === null || entries === undefined) return null;
+      reads.add(value);
+      used.push(key);
+      return entries;
+    }
+    if (value?.kind === "binary" && value.operator === "+") {
+      const left = entriesOf(asNode(value.left), used);
+      const right = left === null ? null : entriesOf(asNode(value.right), used);
+      return left === null || right === null ? null : new Map([...left, ...right]);
+    }
+    return null;
+  };
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? asNode(node.left) : null;
+    const key = target?.kind === "variable" ? bindingKey(target, keys) : null;
+    if (key === null || target === null) return;
+    reads.add(target);
+    const used: string[] = [];
+    const entries = node.kind === "declaration" ? entriesOf(asNode(node.right), used) : null;
+    if (entries === null || literals.has(key)) rejected.add(key);
+    else {
+      literals.set(key, entries);
+      sources.set(key, used);
+    }
+  });
+  walkAst(body, (node) => {
+    // Reads of a field, a key, or by a method that reads, and a loop's collection.
+    const receiver =
+      node.kind === "property"
+        ? asNode(node.object)
+        : node.kind === "binary" && node.operator === "["
+          ? asNode(node.left)
+          : node.kind === "methodCall" &&
+              (READING_COLLECTION_METHODS.has(constantString(node.method) ?? "") ||
+                [
+                  "each",
+                  "eachWithIndex",
+                  "keySet",
+                  "values",
+                  "containsKey",
+                  "containsValue",
+                  "get",
+                ].includes(constantString(node.method) ?? ""))
+            ? asNode(node.object)
+            : node.kind === "for"
+              ? asNode(node.collection)
+              : null;
+    if (receiver?.kind === "variable") reads.add(receiver);
+    // A write of a field or a key.
+    if (node.kind === "binary" && /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u.test(String(node.operator))) {
+      const left = asNode(node.left);
+      const written =
+        left?.kind === "property"
+          ? asNode(left.object)
+          : left?.kind === "binary" && left.operator === "["
+            ? asNode(left.left)
+            : null;
+      const key = written?.kind === "variable" ? bindingKey(written, keys) : null;
+      if (key !== null) rejected.add(key);
+    }
+    if (node.kind === "postfix" || node.kind === "prefix") {
+      const operand = asNode(node.expression) ?? asNode(node.value);
+      const owner =
+        operand?.kind === "property"
+          ? asNode(operand.object)
+          : operand?.kind === "binary" && operand.operator === "["
+            ? asNode(operand.left)
+            : null;
+      const key = owner?.kind === "variable" ? bindingKey(owner, keys) : null;
+      if (key !== null) rejected.add(key);
+    }
+  });
+  // Any other use, such as an argument, an alias, or another method, may change the map unseen.
+  walkAst(body, (node) => {
+    if (node.kind !== "variable" || reads.has(node)) return;
+    const key = bindingKey(node, keys);
+    if (key !== null && literals.has(key)) rejected.add(key);
+  });
+  // Whether a map and every map its sum reads stay as written, once for each map, as sums may share their sources.
+  const staying = new Map<string, boolean>();
+  const stays = (key: string): boolean => {
+    const known = staying.get(key);
+    if (known !== undefined) return known;
+    // A map that its own sum reaches again does not stay.
+    staying.set(key, false);
+    const result = !rejected.has(key) && (sources.get(key) ?? []).every((source) => stays(source));
+    staying.set(key, result);
+    return result;
+  };
+  // A field's type: that of its constant, or of the field of another such map it reads.
+  const fieldType = (value: AstNode, seen: ReadonlySet<AstNode>): number | null => {
+    if (value.kind === "constant") return value.value === null ? null : inferType(value, types);
+    const receiver = value.kind === "property" ? asNode(value.object) : null;
+    const field = value.kind === "property" ? constantString(value.property) : null;
+    const key = receiver?.kind === "variable" ? bindingKey(receiver, keys) : null;
+    const source = key === null || field === null ? undefined : literals.get(key)?.get(field);
+    if (key === null || source === undefined || seen.has(source) || !stays(key)) return null;
+    return fieldType(source, new Set([...seen, source]));
+  };
+  const fields = new Map<string, number>();
+  for (const [key, entries] of literals) {
+    if (!stays(key)) continue;
+    for (const [field, value] of entries) {
+      const type = fieldType(value, new Set([value]));
+      if (type !== null) fields.set(`${key}.${field}`, type);
+    }
+  }
+  return fields;
+}
+
+/**
  * Records one body's map uses: object fields; and for dicts, the types of their values (literal values, `map[key] =`,
  * `map.key =`, and `put`), the types of their keys, and the literal keys every assigned map has and nothing removes.
  */
@@ -1635,6 +1801,118 @@ export function lowerParsedFile(
   file: ParsedGroovyFile,
   options: LowerOptions = {},
 ): MigrationProgram {
+  // A file whose closure values read or set locals of their functions lowers again with those locals passed or lifted
+  // (withPassedLocals, withLiftedLocals); a closure value inside such a closure value shows what it captures only then.
+  // A closure whose converted body then has an error stays as it was, unconverted, and the file lowers again without
+  // resolving it, so that code that cannot convert does not come into the script.
+  let lifted: CapturedLocal[] = [];
+  // The closures that stay unconverted, by spanKey, with the locals they capture.
+  const excluded = new Map<string, string[]>();
+  // A script variable of a file whose functions modules call, or that is a module, is the package's, which the
+  // functions of other files may reach while one runs: such a file only passes locals (withPassedLocals).
+  let lifts = (options.mixinModules ?? []).length === 0;
+  let previous: MigrationProgram | null = null;
+  for (let round = 0; round < 6; round += 1) {
+    const found: CapturedLocals = { locals: [], body: null, excluded, lifts };
+    const program = lowerFileOnce(file, options, lifted, found);
+    if (
+      lifts &&
+      (program.module !== undefined || (program.loadsModuleDirectories ?? []).length > 0)
+    ) {
+      lifts = false;
+      // A lowering that lifted locals lowers again without.
+      if (lifted.length > 0) continue;
+    }
+    const failed = failedClosures(program, lifted, excluded);
+    if (failed.length > 0) {
+      for (const closure of failed)
+        excluded.set(closure, [
+          ...new Set(
+            lifted.filter((local) => local.closure === closure).map((local) => local.name),
+          ),
+        ]);
+      lifted = lifted.filter((local) => !excluded.has(local.closure));
+      continue;
+    }
+    previous = program;
+    const key = (local: CapturedLocal): string => `${local.body} ${local.closure} ${local.name}`;
+    const known = new Set(lifted.map(key));
+    const next = [
+      ...lifted,
+      ...found.locals.filter((local) => !known.has(key(local)) && !excluded.has(local.closure)),
+    ];
+    // The file lowers again only where that resolves more locals.
+    const more =
+      found.body !== null &&
+      liftableCaptures(found.body, next, lifts).length >
+        liftableCaptures(found.body, lifted, lifts).length;
+    if (!more) return program;
+    lifted = next;
+  }
+  return (
+    previous ??
+    lowerFileOnce(file, options, [], { locals: [], body: null, excluded: new Map(), lifts: false })
+  );
+}
+
+/** The closures whose captures a lowering resolved and whose converted body has an error, by spanKey. */
+function failedClosures(
+  program: MigrationProgram,
+  lifted: readonly CapturedLocal[],
+  excluded: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const spans = new Map<string, SourceSpan>();
+  for (const local of lifted) {
+    if (excluded.has(local.closure)) continue;
+    const [line, column, endLine, endColumn] = local.closure.split(":").map(Number);
+    if (
+      line === undefined ||
+      column === undefined ||
+      endLine === undefined ||
+      endColumn === undefined
+    )
+      continue;
+    spans.set(local.closure, { line, column, endLine, endColumn });
+  }
+  const inside = (span: SourceSpan, outer: SourceSpan): boolean =>
+    (span.line > outer.line || (span.line === outer.line && span.column >= outer.column)) &&
+    (span.endLine < outer.endLine ||
+      (span.endLine === outer.endLine && span.endColumn <= outer.endColumn));
+  const failed: string[] = [];
+  for (const [key, span] of spans)
+    if (
+      program.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.severity === "error" &&
+          diagnostic.span !== null &&
+          // A closure value in it that captures locals is resolved, or stays as it was, by its own round.
+          diagnostic.code !== "SX_CAPTURING_CLOSURE" &&
+          diagnostic.code !== "SX_NESTED_CLOSURE" &&
+          inside(diagnostic.span, span),
+      )
+    )
+      failed.push(key);
+  return failed;
+}
+
+/**
+ * The locals that closure values captured in one lowering, the script body it lowered before lifting any, and the
+ * closures that stay unconverted, with the locals they capture.
+ */
+interface CapturedLocals {
+  locals: CapturedLocal[];
+  body: AstNode | null;
+  excluded: ReadonlyMap<string, readonly string[]>;
+  /** Whether the lowering may lift locals to script variables, besides passing them. */
+  lifts: boolean;
+}
+
+function lowerFileOnce(
+  file: ParsedGroovyFile,
+  options: LowerOptions,
+  lifted: readonly CapturedLocal[],
+  found: CapturedLocals,
+): MigrationProgram {
   const context: LowerContext = {
     diagnostics: [],
     metadata: null,
@@ -1667,6 +1945,10 @@ export function lowerParsedFile(
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
+    fractionalArguments: new Map(),
+    capturedLocals: found.locals,
+    resolvedClosures: new Map(),
+    excludedClosures: new Map(),
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
@@ -1765,6 +2047,29 @@ export function lowerParsedFile(
     );
     context.bindings = bindingKeys(desugared, file.sourceName);
     body = splitScratchVariables(desugared, context);
+    body = withHostArguments(body);
+    // Changes through an element or an iterated item reach the list they came from, as Groovy's shared lists did.
+    body = withListAliasesAsPaths(
+      withTupleAssignments(body, (base) => freshName(base, context)),
+      (base) => freshName(base, context),
+    );
+    found.body = body;
+    // The closures whose locals are passed, and the locals lifted, by their functions.
+    const resolvable = liftableCaptures(body, lifted, found.lifts);
+    const closures = new Set(resolvable.map((local) => local.closure));
+    const names = new Set(resolvable.map((local) => `${local.body} ${local.name}`));
+    const resolved = new Map<string, string[]>();
+    for (const local of lifted)
+      if (closures.has(local.closure) || names.has(`${local.body} ${local.name}`))
+        resolved.set(local.closure, [
+          ...new Set([...(resolved.get(local.closure) ?? []), local.name]),
+        ]);
+    context.resolvedClosures = resolved;
+    context.excludedClosures = found.excluded;
+    const passed = withPassedLocals(body, lifted);
+    body = found.lifts
+      ? withLiftedLocals(passed.body, passed.rest, (base) => freshName(base, context))
+      : passed.body;
   }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
@@ -1793,6 +2098,7 @@ export function lowerParsedFile(
     context.constantInitializers = declarationInitializers(body, context.types);
     context.changingPaths = changingVariables(body, context.bindings);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.fractionalArguments = fractionalArguments(body, context);
     context.integerArrays = integerArrays(body, context.bindings);
     context.loopOnlyCounters = loopOnlyCounters(body, context.bindings);
     context.fixedClosureCalls = fixedClosureCalls(body);
@@ -1828,7 +2134,10 @@ export function lowerParsedFile(
       variables,
       listElements,
       ...(context.types.bindingTypes === undefined ? {} : { bindingTypes }),
-      recordFields: new Map([...context.mapUses.recordListFields].map((field) => [field, LIST])),
+      recordFields: new Map([
+        ...constantMapFields(body, context.bindings, context.types),
+        ...[...context.mapUses.recordListFields].map((field): [string, number] => [field, LIST]),
+      ]),
     };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
@@ -1849,7 +2158,7 @@ export function lowerParsedFile(
     mixin === null
       ? undefined
       : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
-  const typedStatements = withLegacyMarkup(
+  const markedStatements = withLegacyMarkup(
     withEnforcedTypes(
       withSetUpActions(
         withDirectClosureCalls(
@@ -1870,6 +2179,18 @@ export function lowerParsedFile(
     context,
     stripsTags,
   );
+  const typedStatements = withPhotoEnds(markedStatements, (statement) => {
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_PHOTO_MISSING_END",
+      severity: "warning",
+      message:
+        "getImage() gave null when neither the webcam nor the file chooser gave a picture, and the script then failed where it used it; the session ends here when no photo comes.",
+      span: statement.span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    return diagnostic;
+  });
   // The truth and ordering helpers go where variable typing wrote all their tests plainly.
   for (const [helper, name] of [
     ["truth", "sexscriptLegacyTruth"],
@@ -1904,6 +2225,7 @@ export function lowerParsedFile(
   texts = withAskQuestions(texts, diagnostics);
   texts = withParagraphs(texts, diagnostics, options.keepParagraphs === true);
   texts = withoutCutReadingTimes(texts, diagnostics);
+  texts = withGroovyRanges(texts, (base) => freshName(base, context));
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
@@ -2350,33 +2672,36 @@ function lowerHelperCompilationUnit(
     statements.push(lowered);
   }
   const { diagnostics } = baseContext;
-  const typedStatements = withoutCutReadingTimes(
-    withReadingTimes(
-      withMessageHandles(
-        withClockLoopTicks(
-          withElapsedDurations(
-            withFillableLoads(
-              withParsedLoads(
-                withSwitchLadders(
-                  withCounterLoops(
-                    withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+  const typedStatements = withGroovyRanges(
+    withoutCutReadingTimes(
+      withReadingTimes(
+        withMessageHandles(
+          withClockLoopTicks(
+            withElapsedDurations(
+              withFillableLoads(
+                withParsedLoads(
+                  withSwitchLadders(
+                    withCounterLoops(
+                      withEnforcedTypes([...fieldStatements, ...statements], baseContext),
+                    ),
                   ),
+                  baseContext.syntheticHelpers,
                 ),
-                baseContext.syntheticHelpers,
+                true,
               ),
+              diagnostics,
               true,
             ),
             diagnostics,
-            true,
           ),
           diagnostics,
+          false,
         ),
         diagnostics,
-        false,
       ),
       diagnostics,
     ),
-    diagnostics,
+    (base) => freshName(base, baseContext),
   );
   return {
     sourceName: file.sourceName,
@@ -2974,6 +3299,11 @@ function lowerHelperMethod(
       ),
     },
     closureFunctions: baseContext.closureFunctions,
+    fractionalArguments: new Map(),
+    // A helper class's methods are not script functions, whose locals withLiftedLocals lifts.
+    capturedLocals: [],
+    resolvedClosures: new Map(),
+    excludedClosures: new Map(),
     actions: baseContext.actions,
     ignoredInputs: 0,
     switchValues: 0,
@@ -3240,13 +3570,14 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
 /**
  * A loop over an inclusive range whose only statement adds a number to a variable, `for it in 1..=n { p += 1 }`, only
  * counts; Groovy finished it at once, while TeaseScript runs it out of its instruction budget for a large n. It adds the
- * count in one step where the range is not empty: `if n >= 1 { p += n }`. The bounds are read twice, so they must be
+ * count in one step where the range is not empty: `if n >= 1 { p += n }`; a Groovy range that may count down
+ * (rangeDirection) is never empty and adds its length, `p += abs(n - 1) + 1`. The bounds are read twice, so they must be
  * free of effects.
  */
 function withCountedLoops(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement): IrStatement => {
     if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
-    const { from, to, inclusive } = statement.collection;
+    const { from, to, inclusive, either } = statement.collection;
     const [only, ...rest] = statement.body;
     if (
       !inclusive ||
@@ -3271,6 +3602,26 @@ function withCountedLoops(statements: IrStatement[]): IrStatement[] {
             right: { kind: "literal", value: 1 },
           };
     const step = only.value.value;
+    // A Groovy range that may count down holds its bounds and every whole number between them.
+    if (either === true) {
+      const length: IrExpression = {
+        kind: "binary",
+        operator: "+",
+        left: {
+          kind: "call",
+          name: "abs",
+          positional: [{ kind: "binary", operator: "-", left: to, right: from }],
+          named: {},
+        },
+        right: { kind: "literal", value: 1 },
+      };
+      return {
+        ...only,
+        value:
+          step === 1 ? length : { kind: "binary", operator: "*", left: length, right: only.value },
+        span: statement.span,
+      };
+    }
     return {
       kind: "if",
       condition: { kind: "binary", operator: ">=", left: to, right: from },
@@ -4119,14 +4470,17 @@ function hoistDeferred(
     if (part === deferred && elements !== UNKNOWN) listElements.set(name, elements);
     context.types = { ...context.types, variables, listElements };
     const span = part.span ?? statement.span;
-    declarations.push(
-      syntheticAssignment(
-        true,
-        syntheticVariable(name, span),
-        substituteNodes(part, replacements),
-        span,
-      ),
-    );
+    const value = substituteNodes(part, replacements);
+    // Groovy failed on arithmetic with the null sum() of no element, `(list.sum() - stime)` (ShockJack).
+    const parent = path.at(-2);
+    if (
+      part === deferred &&
+      loop?.name === "sum" &&
+      parent?.kind === "binary" &&
+      ["-", "*", "/", "%"].includes(String(parent.operator))
+    )
+      value.failsWhenEmpty = true;
+    declarations.push(syntheticAssignment(true, syntheticVariable(name, span), value, span));
     replacements.set(part, syntheticVariable(name, span));
   }
   const result: IrStatement[] = [];
@@ -4944,8 +5298,11 @@ function lowerDeclaration(
     context.loopOnlyCounters.has(bindingKey(asNode(node.left), context.bindings) ?? "")
   )
     return [];
-  // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
+  // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed; a photo copy that it holds keeps
+  // the photo's reference (stripordie's `def File tempfile = new File(dir + "images/...") << ...`).
   if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
+  if (photoCopy(right) !== null && onlySizeReads(name, context))
+    return lowerAssignment(right, span, context);
   const java = javaDeclaration(name, right, span, javaHost(context));
   if (java !== null) return java;
   if (context.classLoaderVariables.has(name) && isGroovyClassLoaderConstructor(right)) {
@@ -5261,10 +5618,15 @@ function lowerClosureDeclaration(
         (item: unknown) => isRecord(item) && item.name === record.name,
       );
       const declared = isRecord(raw) ? text(raw.type)?.replace(/^java\.(lang|math)\./u, "") : null;
+      // So does an untyped one with a whole default that a call passes a fraction (jeuxdemain_femme's
+      // `animationTeton(this, 0.5, 10)` for `bPMT = 1`).
+      const position = closureParameters.indexOf(record);
       const fractional =
-        declared !== null &&
-        declared !== undefined &&
-        ["float", "double", "Float", "Double", "BigDecimal", "Number"].includes(declared) &&
+        ((declared !== null &&
+          declared !== undefined &&
+          ["float", "double", "Float", "Double", "BigDecimal", "Number"].includes(declared)) ||
+          ((declared === null || declared === undefined || declared === "Object") &&
+            context.fractionalArguments.get(name)?.has(position) === true)) &&
         defaultValue?.kind === "literal" &&
         typeof defaultValue.value === "number" &&
         Number.isInteger(defaultValue.value);
@@ -5854,8 +6216,9 @@ function functionLocalNames(body: AstNode, parameters: readonly string[]): Set<s
 /**
  * A closure used as a value (stored in data, passed as an argument, kept in a local) becomes a string action ID.
  * A closure that only forwards to a function (`{ f() }`, `{ a -> f(a) }`) uses that function's name; any other
- * closure body becomes a generated function. Calls of such values go through the package dispatcher. Closures
- * capturing local variables of their enclosing function are not converted.
+ * closure body becomes a generated function. Calls of such values go through the package dispatcher. A closure that
+ * captures locals of its enclosing function is not converted here; it records them, and the file lowers again with
+ * those locals as script variables (withLiftedLocals).
  */
 function lowerClosureValue(
   closure: AstNode,
@@ -5887,6 +6250,15 @@ function lowerClosureValue(
     if (name !== null && locals.has(name) && !ownNames.has(name)) captured.add(name);
   });
   if (captured.size > 0) {
+    for (const name of captured) {
+      context.capturedLocals.push({
+        body: spanKey(enclosing?.body?.span ?? null),
+        closure: spanKey(closure.span),
+        function: enclosing?.name ?? "",
+        parameters: enclosing?.parameters ?? [],
+        name,
+      });
+    }
     return unsupportedExpression(
       context,
       closure,
@@ -5911,6 +6283,23 @@ function lowerClosureValue(
   }
   const base = hint ?? context.currentFunction?.name ?? "script";
   const name = `${base}Callback${context.closureFunctions.length + 1}`;
+  // A closure whose captured locals withPassedLocals or withLiftedLocals resolved converts only where its body does;
+  // otherwise it stays as it was, unconverted, rather than bring code that cannot convert into the script.
+  const resolved = context.resolvedClosures.get(spanKey(closure.span));
+  const excludedLocals = context.excludedClosures.get(spanKey(closure.span));
+  if (excludedLocals !== undefined)
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_CAPTURING_CLOSURE",
+      `This closure value captures local ${excludedLocals.join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
+  const before = {
+    diagnostics: context.diagnostics.length,
+    functions: context.closureFunctions.length,
+    actions: new Set(context.actions),
+    comments: context.comments.next,
+  };
   const outerFunction = context.currentFunction;
   context.currentFunction = { name, locals: ownNames, body, parameters: parameterNames };
   context.functionDepth += 1;
@@ -5938,6 +6327,22 @@ function lowerClosureValue(
     context.functionDepth -= 1;
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
+  }
+  if (
+    resolved !== undefined &&
+    context.diagnostics.slice(before.diagnostics).some(({ severity }) => severity === "error")
+  ) {
+    context.diagnostics.length = before.diagnostics;
+    context.closureFunctions.length = before.functions;
+    context.actions.clear();
+    for (const action of before.actions) context.actions.add(action);
+    context.comments.next = before.comments;
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_CAPTURING_CLOSURE",
+      `This closure value captures local ${resolved.join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
   }
   context.actions.add(name);
   return { kind: "literal", value: name, action: true };
@@ -6332,7 +6737,8 @@ function lowerAssignment(
   const copy = photoCopy(node);
   if (operator === "<<" && copy !== null) {
     const source = lowerExpression(copy.source, context);
-    if (source === null) return [];
+    const prefix = copy.prefix === undefined ? null : lowerExpression(copy.prefix, context);
+    if (source === null || (copy.prefix !== undefined && prefix === null)) return [];
     addDiagnostic(
       context,
       "SX_PHOTO_COPY",
@@ -6343,7 +6749,15 @@ function lowerAssignment(
     return [
       {
         kind: "save",
-        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` },
+        // Under the key a delete of the same path clears (lowerExpressionStatement).
+        key:
+          prefix === null
+            ? { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` }
+            : templateOrLiteral([
+                { text: SENT_IMAGE_PREFIX },
+                ...(prefix.kind === "template" ? prefix.parts : [{ value: prefix }]),
+                { text: `images/${copy.path}` },
+              ]),
         value: source,
         span,
       },
@@ -7771,7 +8185,7 @@ function lowerCollectionAssignment(
       : assign(initial);
   const loop: IrStatement = { kind: "for", variable, collection, body, span };
   const empty: IrStatement[] =
-    call.name === "sum" && !nonEmpty
+    call.name === "sum" && !nonEmpty && right.failsWhenEmpty === true
       ? [
           {
             kind: "if",
@@ -7781,20 +8195,43 @@ function lowerCollectionAssignment(
               left: { kind: "property", target: collection, name: "length" },
               right: { kind: "literal", value: 0 },
             },
-            then: [
-              {
-                kind: "assign",
-                target: { kind: "variable", name: target },
-                operator: "=",
-                value: { kind: "literal", value: null },
-                span,
-              },
-            ],
+            then: [{ kind: "exit", span }],
             else: [],
             span,
           },
         ]
-      : [];
+      : call.name === "sum" && !nonEmpty
+        ? [
+            {
+              kind: "if",
+              condition: {
+                kind: "binary",
+                operator: "==",
+                left: { kind: "property", target: collection, name: "length" },
+                right: { kind: "literal", value: 0 },
+              },
+              then: [
+                {
+                  kind: "assign",
+                  target: { kind: "variable", name: target },
+                  operator: "=",
+                  value: { kind: "literal", value: null },
+                  span,
+                },
+              ],
+              else: [],
+              span,
+            },
+          ]
+        : [];
+  if (right.failsWhenEmpty === true && empty.length > 0)
+    addDiagnostic(
+      context,
+      "SX_SUM_EMPTY_ENDS",
+      "warning",
+      "Groovy sum() of no element was null, and the arithmetic with it failed, which stopped the script; the session ends there.",
+      span,
+    );
   if (!readsTarget) return [start, loop, ...empty];
   const accumulated: IrExpression = { kind: "variable", name: accumulator };
   const store: IrStatement = declaration
@@ -9551,9 +9988,9 @@ function lowerIterated(
     );
     return useHelper(context, "items", [collection]);
   }
+  if (collection.kind !== "range") return collection;
   const toNode = node.kind === "range" ? asNode(node.to) : null;
-  if (collection.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
-    return collection;
+  if (toNode === null || !mayBeFractional(toNode, context)) return rangeDirection(collection);
   addDiagnostic(
     context,
     "SX_RANGE_FLOOR",
@@ -9562,7 +9999,117 @@ function lowerIterated(
     node.span,
   );
   const name = collection.inclusive ? "floor" : "ceil";
-  return { ...collection, to: { kind: "call", name, positional: [collection.to], named: {} } };
+  return rangeDirection({
+    ...collection,
+    to: { kind: "call", name, positional: [collection.to], named: {} },
+  });
+}
+
+/**
+ * A Groovy range ran down where its first bound was greater, `1..0` through 1 and 0, where a TeaseScript range is empty
+ * (owner decision 2026-10-10). A range of two literals keeps its direction as written: one that counts down becomes
+ * the list of its numbers. One whose direction shows only at runtime is marked `either`, for withGroovyRanges, unless it
+ * starts at 0 or below and ends at a length, which it never passes going down.
+ */
+function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpression {
+  const integer = (value: IrExpression): number | null => {
+    if (
+      value.kind === "literal" &&
+      typeof value.value === "number" &&
+      Number.isInteger(value.value)
+    )
+      return value.value;
+    if (value.kind === "unary" && value.operator === "-") {
+      const inner = integer(value.value);
+      return inner === null ? null : -inner;
+    }
+    return null;
+  };
+  const from = integer(range.from);
+  const to = integer(range.to);
+  if (from !== null && to !== null) {
+    if (from <= to) return range;
+    const last = range.inclusive ? to : to + 1;
+    if (from - last < 100) {
+      const items: IrExpression[] = [];
+      for (let value = from; value >= last; value -= 1) items.push({ kind: "literal", value });
+      return { kind: "list", items };
+    }
+  }
+  if (from !== null && from <= 0 && range.to.kind === "property" && range.to.name === "length")
+    return range;
+  return { ...range, either: true };
+}
+
+/**
+ * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through the positions of
+ * the range, an ascending TeaseScript range from 0, and take each number from the first bound in the range's
+ * direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset * sign(n - 1) … }`, so that a pass may end the loop
+ * or wait before the next number is computed. A bound that the body may change, through a variable it sets or a
+ * function of the script it calls, is computed once before the loop, as Groovy computed the range. This runs after the
+ * passes that read a loop's range, such as the counters of withMessageHandles; withCountedLoops has folded the loops
+ * that only count.
+ */
+export function withGroovyRanges(
+  statements: IrStatement[],
+  fresh: (base: string) => string,
+): IrStatement[] {
+  return statements.flatMap((item): IrStatement[] => {
+    const statement = withNestedBlocks(item, (body) => withGroovyRanges(body, fresh));
+    if (
+      statement.kind !== "for" ||
+      statement.collection.kind !== "range" ||
+      statement.collection.either !== true
+    )
+      return [statement];
+    const { from, to, inclusive } = statement.collection;
+    const { variable, body, span } = statement;
+    const before: IrStatement[] = [];
+    // Groovy computed the range once, its first bound first, before the first pass.
+    const bound = (value: IrExpression, suffix: string): IrExpression => {
+      if (value.kind === "literal") return value;
+      const name = fresh(`${variable}${suffix}`);
+      before.push({ kind: "let", name, value, span });
+      return { kind: "variable", name };
+    };
+    const first = bound(from, "From");
+    const last = bound(to, "To");
+    const zero = first.kind === "literal" && first.value === 0;
+    const distance: IrExpression = zero
+      ? last
+      : { kind: "binary", operator: "-", left: last, right: first };
+    const offset = fresh(`${variable}Offset`);
+    const call = (name: string, value: IrExpression): IrExpression => ({
+      kind: "call",
+      name,
+      positional: [value],
+      named: {},
+    });
+    const step: IrExpression = {
+      kind: "binary",
+      operator: "*",
+      left: { kind: "variable", name: offset },
+      right: call("sign", distance),
+    };
+    const number: IrExpression = zero
+      ? step
+      : { kind: "binary", operator: "+", left: first, right: step };
+    return [
+      ...before,
+      {
+        ...statement,
+        variable: offset,
+        // A range that starts at a fraction goes through the numbers a whole step apart from it.
+        collection: {
+          kind: "range",
+          from: { kind: "literal", value: 0 },
+          to: call(inclusive ? "floor" : "ceil", call("abs", distance)),
+          inclusive,
+        },
+        body: [{ kind: "let", name: variable, value: number, span }, ...body],
+      },
+    ];
+  });
 }
 
 /**
@@ -9660,7 +10207,7 @@ function mayIndexPastEnd(
 }
 
 /** Whether a variable used as a list position is ever assigned a negative number, such as -1 for "none yet". */
-function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
+function mayIndexNegative(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   // `choice - 1` after a menu whose first button gave 0, such as a "Back" button.
   if (node.kind === "binary" && node.operator === "-") {
     const right = constantValue(asNode(node.right) ?? undefined);
@@ -9669,9 +10216,13 @@ function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
-  return (
-    key !== null &&
-    (context.assignedValues.get(key) ?? []).some((value) => negativeConstantIndex(value) !== null)
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  // Also through another variable, `colIndex = unfairColIndex` after `unfairColIndex = -1` (PainStacks).
+  return (context.assignedValues.get(key) ?? []).some(
+    (value) =>
+      negativeConstantIndex(value) !== null ||
+      (value.kind === "variable" && mayIndexNegative(value, context, seen)),
   );
 }
 
@@ -9696,6 +10247,16 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
  */
 function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
   if (node.kind === "methodCall") {
+    // Groovy sum() of a list without elements is null (ShockJack's `while (shockTimeList.sum() < stime)`).
+    const receiver = asNode(node.object);
+    if (
+      constantString(node.method) === "sum" &&
+      receiver !== null &&
+      nodeArray(asNode(node.arguments)?.items).length === 0 &&
+      !(receiver.kind === "list" && nodeArray(receiver.items).length > 0) &&
+      receiver.kind !== "range"
+    )
+      return true;
     const name = legacyApiCall(node, context)?.name ?? "";
     if (DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name)) return true;
     // A function of the package whose returns include null, such as a stored value or a `return null`.
@@ -9736,6 +10297,176 @@ const WHOLE_NUMBER_METHODS = new Set([
   "floor",
   "ceil",
 ]);
+
+/**
+ * For each script function, the positions at which one of its calls passes a value that may give a fraction: a
+ * fractional literal, a division, or a variable assigned one, also through `+`, `-`, `*`, and `%`.
+ */
+function fractionalArguments(body: AstNode, context: LowerContext): Map<string, Set<number>> {
+  const gives = (node: AstNode | null, seen: Set<string>): boolean => {
+    if (node === null) return false;
+    if (node.kind === "constant")
+      return typeof node.value === "number" && !Number.isInteger(node.value);
+    if (node.kind === "unaryMinus" || node.kind === "unaryPlus")
+      return gives(asNode(node.value), seen);
+    if (node.kind === "binary") {
+      const operator = text(node.operator) ?? "";
+      if (operator === "/") return true;
+      return (
+        ["+", "-", "*", "%"].includes(operator) &&
+        (gives(asNode(node.left), seen) || gives(asNode(node.right), seen))
+      );
+    }
+    if (node.kind !== "variable") return false;
+    const key = bindingKey(node, context.bindings);
+    if (key === null || seen.has(key) || context.integerVariables.has(key)) return false;
+    seen.add(key);
+    return [
+      ...(context.assignedValues.get(key) ?? []),
+      ...(context.compoundValues.get(key) ?? []),
+    ].some((value) => gives(value, seen));
+  };
+  // The script's functions by name, to tell which parameters only take part in arithmetic.
+  const functions = new Map<string, AstNode>();
+  walkAst(body, (node) => {
+    const value = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (value?.kind === "closure" && name !== null && !functions.has(name))
+      functions.set(name, value);
+  });
+  const result = new Map<string, Set<number>>();
+  // A call by a name that a closure around it binds, as a parameter or a local, calls that value, not the function.
+  const visit = (node: AstNode, shadowed: ReadonlySet<string>): void => {
+    const inner = node.kind === "closure" ? new Set([...shadowed, ...boundNames(node)]) : shadowed;
+    if (node.kind === "methodCall" && node.implicitThis === true) {
+      const name = constantString(node.method);
+      const closure = name === null ? undefined : functions.get(name);
+      if (name !== null && context.functions.has(name) && !inner.has(name))
+        nodeArray(asNode(node.arguments)?.items).forEach((argument, position) => {
+          const parameter = closure === undefined ? null : closureParameterNode(closure, position);
+          // A whole default widens to a number only where the function uses it in arithmetic alone, where a
+          // fraction gives what it gave in Groovy; a list position, a text position, or a range would not take one.
+          if (parameter !== null && !arithmeticOnly(closure!, String(parameter.name))) return;
+          if (gives(argument, new Set()))
+            result.set(name, new Set([...(result.get(name) ?? []), position]));
+        });
+    }
+    for (const child of astChildren(node)) visit(child, inner);
+  };
+  visit(body, new Set());
+  return result;
+}
+
+/** The names a closure binds: its parameters (`it` where it declares none) and the locals it declares. */
+function boundNames(closure: AstNode): string[] {
+  const names = (groovyParameters(closure.parameters) ?? []).map((parameter) => parameter.name);
+  if (names.length === 0 && closure.parameterSpecified !== true) names.push("it");
+  const walk = (node: AstNode): void => {
+    if (node !== closure && node.kind === "closure") return;
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) names.push(name);
+    }
+    for (const child of astChildren(node)) walk(child);
+  };
+  walk(closure);
+  return names;
+}
+
+/** The parameter record of a closure at a position, or null. */
+function closureParameterNode(closure: AstNode, position: number): Record<string, unknown> | null {
+  const parameters = Array.isArray(closure.parameters) ? closure.parameters : [];
+  const parameter: unknown = parameters[position];
+  return isRecord(parameter) && typeof parameter.name === "string" ? parameter : null;
+}
+
+/** Whether an untyped parameter has a whole number written as its default, `n = 1`. */
+function wholeDefault(parameter: Record<string, unknown>): boolean {
+  const type = text(parameter.type);
+  if (type !== null && type !== undefined && type !== "java.lang.Object" && type !== "Object")
+    return false;
+  const initial = parameter.initialExpression ?? parameter.default;
+  const value = isAstNode(initial) ? initial : null;
+  return (
+    value?.kind === "constant" && typeof value.value === "number" && Number.isInteger(value.value)
+  );
+}
+
+/**
+ * Whether a closure reads its parameter only as an operand of arithmetic or a comparison, `n * 2`, `n > 0`, or sets it,
+ * so that a fraction in it gives what it gave in Groovy.
+ */
+function arithmeticOnly(closure: AstNode, name: string): boolean {
+  let only = true;
+  const operators = new Set(["+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!="]);
+  const walk = (node: AstNode, parent: AstNode | null): void => {
+    if (node.kind === "variable" && variableName(node) === name) {
+      const operator = parent?.kind === "binary" ? text(parent.operator) : null;
+      const set =
+        parent !== null &&
+        (parent.kind === "declaration" || ASSIGNMENT_OPERATORS.has(String(parent.operator))) &&
+        asNode(parent.left) === node;
+      const unary = parent?.kind === "unaryMinus" || parent?.kind === "unaryPlus";
+      if (
+        !set &&
+        !unary &&
+        (operator === null || operator === undefined || !operators.has(operator))
+      )
+        only = false;
+    }
+    for (const child of astChildren(node)) walk(child, node);
+  };
+  walk(asNode(closure.body) ?? closure, null);
+  return only;
+}
+
+const ASSIGNMENT_OPERATORS = new Set(["=", "+=", "-=", "*=", "/=", "%="]);
+
+/** The variables the body sets to a fraction written out, a division, or another such variable, by name. */
+function fractionalNames(body: AstNode): Set<string> {
+  const values: Array<[string, AstNode]> = [];
+  walkAst(body, (node) => {
+    const set =
+      node.kind === "declaration" ||
+      (node.kind === "binary" && ASSIGNMENT_OPERATORS.has(String(node.operator)))
+        ? variableName(node.left)
+        : null;
+    const value = asNode(node.right);
+    if (set !== null && value !== null) values.push([set, value]);
+  });
+  const names = new Set<string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, value] of values)
+      if (!names.has(name) && syntacticFraction(value, names)) {
+        names.add(name);
+        changed = true;
+      }
+  }
+  return names;
+}
+
+/** Whether a value may be a fraction by its form: a fractional literal, a division, or a variable of `names`. */
+function syntacticFraction(node: AstNode, names: ReadonlySet<string>): boolean {
+  if (node.kind === "constant")
+    return typeof node.value === "number" && !Number.isInteger(node.value);
+  if (node.kind === "unaryMinus" || node.kind === "unaryPlus") {
+    const value = asNode(node.value);
+    return value !== null && syntacticFraction(value, names);
+  }
+  if (node.kind === "binary") {
+    const operator = text(node.operator) ?? "";
+    if (operator === "/") return true;
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    return (
+      ["+", "-", "*", "%"].includes(operator) &&
+      ((left !== null && syntacticFraction(left, names)) ||
+        (right !== null && syntacticFraction(right, names)))
+    );
+  }
+  return node.kind === "variable" && names.has(variableName(node) ?? "");
+}
 
 /**
  * Whether a Groovy number may hold a fraction: a fractional literal, a division (which gave a decimal where it did not
@@ -11545,6 +12276,11 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     if (context.menuIndexes.has(node)) return { kind: "index", target, index };
     // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
     // position for null.
+    // A variable of Groovy's multiple assignment took null past the end of the list (withTupleAssignments).
+    if (node.tupleItem === true) {
+      const read = useHelper(context, "itemAt", [target, index]);
+      return read.kind === "call" ? { ...read, open: true } : read;
+    }
     if (
       !context.writeTargets.has(node) &&
       (mayIndexPastEnd(indexNode, context, targetNode) || nullComparedReads.has(node))
@@ -13439,6 +14175,29 @@ function lowerObjectMethodCallExpression(
   if (name === "format" && receiverName === "String" && argumentsNodes.length >= 1) {
     const formatted = formatText(argumentsNodes, node, context);
     if (formatted !== undefined) return formatted;
+    // A pattern known only at runtime, such as a text a function gets (PainStacks' countdown), is written by a helper.
+    if (constantString(argumentsNodes[0]) === null) {
+      const pattern = lowerExpression(argumentsNodes[0]!, context);
+      if (pattern === null) return null;
+      const values: IrExpression[] = [];
+      for (const argument of argumentsNodes.slice(1)) {
+        const value = lowerExpression(argument, context);
+        if (value === null) return null;
+        values.push(value);
+      }
+      addDiagnostic(
+        context,
+        "SX_FORMAT_RUNTIME",
+        "warning",
+        "Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.",
+        node.span,
+      );
+      context.syntheticHelpers.add("fixed");
+      return useHelper(context, "format", [
+        pattern,
+        { kind: "list", items: values.map((value) => templateOrLiteral([{ value }])) },
+      ]);
+    }
   }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
     const listParts = listText(targetNode, context);
@@ -16941,6 +17700,32 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       context.popupTimers += 1;
       const start = context.popupTimers === 1 ? "popupStart" : `popupStart${context.popupTimers}`;
+      // Legacy timing started once the message was computed.
+      let message = args[0]!;
+      if (!isPure(call.arguments[0]!, context)) {
+        const name = start.replace("popupStart", "popupMessage");
+        context.prelude.push({ kind: "let", name, value: message, span: node.span });
+        message = { kind: "variable", name };
+      }
+      // The workaround's OK button closes the popup, so its waiting time is the popup's, in whole seconds as legacy
+      // counted them.
+      if (!context.accepted.has("showPopup")) {
+        const [text] = popupStatements(message, node.span, context);
+        context.prelude.push(text!);
+        return {
+          kind: "call",
+          name: "toInteger",
+          positional: [
+            {
+              kind: "binary",
+              operator: "/",
+              left: { kind: "button", label: { kind: "literal", value: "OK" }, timeout: null },
+              right: { kind: "duration", value: 1, unit: "s" },
+            },
+          ],
+          named: {},
+        };
+      }
       const seconds = currentSeconds();
       addDiagnostic(
         context,
@@ -16949,13 +17734,6 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.`,
         node.span,
       );
-      // Legacy timing started once the message was computed.
-      let message = args[0]!;
-      if (!isPure(call.arguments[0]!, context)) {
-        const name = start.replace("popupStart", "popupMessage");
-        context.prelude.push({ kind: "let", name, value: message, span: node.span });
-        message = { kind: "variable", name };
-      }
       context.prelude.push(
         { kind: "let", name: start, value: seconds, span: node.span },
         ...popupStatements(message, node.span, context),
@@ -17769,6 +18547,65 @@ function sourceTextOf(node: AstNode, context: LowerContext): string {
   lines[lines.length - 1] = lines.at(-1)!.slice(0, span.endColumn - 1);
   lines[0] = lines[0]!.slice(span.column - 1);
   return singleLine(lines.map((line) => line.trim()).join(" "));
+}
+
+/**
+ * A script function whose parameter is named `main` took the legacy script object, `f(this, …)`, whose methods it called
+ * as `main.show(…)`, which convert as the SexScript calls they were (callParts); the script object has no TeaseScript
+ * value, so a call passes null there instead, which the function only hands on (jeuxdemain_femme's animations and
+ * punishments, every call of which was a TODO).
+ */
+function withHostArguments(body: AstNode): AstNode {
+  const positions = new Map<string, number>();
+  const closures = new Map<string, AstNode>();
+  walkAst(body, (node) => {
+    const closure = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (closure?.kind !== "closure" || name === null) return;
+    const position = (groovyParameters(closure.parameters) ?? []).findIndex(
+      (parameter) => parameter.name === "main",
+    );
+    if (position >= 0) positions.set(name, position);
+    closures.set(name, closure);
+  });
+  if (positions.size === 0) return body;
+  // A call that may pass a fraction for a whole default the function uses other than in arithmetic keeps its script
+  // object, and stays a TODO as before: that parameter keeps its whole type (fractionalArguments).
+  const fractions = fractionalNames(body);
+  const keepsWhole = (closure: AstNode, items: AstNode[], position: number): boolean =>
+    items.some((item, index) => {
+      if (index === position) return false;
+      const parameter = closureParameterNode(closure, index);
+      return (
+        parameter !== null &&
+        wholeDefault(parameter) &&
+        !arithmeticOnly(closure, String(parameter.name)) &&
+        syntacticFraction(item, fractions)
+      );
+    });
+  const rewrite = (node: AstNode): AstNode => {
+    const changed = mapAstChildren(node, rewrite);
+    const call = changed.kind === "methodCall" && changed.implicitThis === true ? changed : null;
+    const name = call === null ? "" : (constantString(call.method) ?? "");
+    const position = call === null ? undefined : positions.get(name);
+    const list = call === null ? null : asNode(call.arguments);
+    const items = nodeArray(list?.items);
+    if (position === undefined || list === null || variableName(items[position]) !== "this")
+      return changed;
+    const closure = closures.get(name);
+    if (closure !== undefined && keepsWhole(closure, items, position)) return changed;
+    const span = items[position]!.span;
+    return {
+      ...changed,
+      arguments: {
+        ...list,
+        items: items.map((item, index) =>
+          index === position ? { kind: "constant", span, value: null } : item,
+        ),
+      },
+    };
+  };
+  return rewrite(body);
 }
 
 function callParts(
@@ -18863,16 +19700,22 @@ export function packageFilePath(path: string): string {
 
 /**
  * `new File("images/x.jpg") << new File(photo).getBytes()` (or `photo.getBytes()`): the target's path below `images/`
- * and the photo; null for another statement.
+ * and the photo; null for another statement. A path below the data folder, `new File(dir + "images/x.jpg")`, gives its
+ * folder as `prefix` (stripordie's `getDataFolder()`).
  */
-export function photoCopy(node: AstNode): { path: string; source: AstNode } | null {
+export function photoCopy(
+  node: AstNode,
+): { path: string; source: AstNode; prefix?: AstNode } | null {
   if (node.kind !== "binary" || node.operator !== "<<") return null;
   const target = asNode(node.left);
   const bytes = asNode(node.right);
-  const path =
+  const pathNode =
     target !== null && isFileConstructor(target)
-      ? constantString(nodeArray(asNode(target.arguments)?.items)[0])
+      ? asNode(nodeArray(asNode(target.arguments)?.items)[0])
       : null;
+  const joined =
+    pathNode?.kind === "binary" && pathNode.operator === "+" ? asNode(pathNode.left) : null;
+  const path = constantString(joined === null ? pathNode : asNode(pathNode?.right));
   if (path === null || !/^images\//iu.test(path)) return null;
   if (
     bytes?.kind !== "methodCall" ||
@@ -18884,7 +19727,12 @@ export function photoCopy(node: AstNode): { path: string; source: AstNode } | nu
     file !== null && isFileConstructor(file)
       ? (nodeArray(asNode(file.arguments)?.items)[0] ?? null)
       : file;
-  return source === null ? null : { path: path.slice("images/".length), source };
+  if (source === null) return null;
+  return {
+    path: path.slice("images/".length),
+    source,
+    ...(joined === null ? {} : { prefix: joined }),
+  };
 }
 
 function isFileConstructor(node: AstNode): boolean {
@@ -19058,7 +19906,12 @@ function isFileValue(node: AstNode | null, context: LowerContext): boolean {
   if (isFileConstructor(node)) return true;
   const key = node.kind === "variable" ? bindingKey(node, context.bindings) : null;
   const values = key === null ? undefined : context.assignedValues.get(key);
-  return values !== undefined && values.length > 0 && values.every(isFileConstructor);
+  // A file that a photo copy wrote, `new File(path) << photo.getBytes()`, is that file too.
+  return (
+    values !== undefined &&
+    values.length > 0 &&
+    values.every((value) => isFileConstructor(value) || photoCopy(value) !== null)
+  );
 }
 
 /**

@@ -40,3 +40,17 @@ show("${fields.size()} fields at ${stamp}")
 def pictures = loadString("game.pictures") ?: "a.jpg|b.jpg|"
 def pictureList = pictures.split("\\|")
 show("" + pictureList.size() + " pictures, first " + pictures.split("\\|")[0])
+// The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
+for (word in "Kneel, now.".tokenize(" ")) {
+	if (word[word.length() - 1] == "," || word[word.length() - 1] == ".") word = word.substring(0, word.length() - 1)
+	show("Word " + word)
+}
+// A pattern known only at runtime, such as a text a function gets, is written by a helper as Java wrote it
+// (PainStacks' countdown).
+def countdownText = { String pattern, int seconds -> String.format(pattern, (int) (seconds / 60), seconds % 60) }
+show(countdownText("Wait %d:%02d", 75))
+def shockPattern = "Shock time %.1f seconds, %d%% done"
+show(String.format(shockPattern, 2.25f, 50))
+// Java's 0 flag fills after a minus sign.
+def paddedPattern = "Score %05d"
+show(String.format(paddedPattern, -7))

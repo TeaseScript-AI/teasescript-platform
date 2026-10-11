@@ -1839,6 +1839,199 @@ test(
   },
 );
 
+// BreatheAcademy's breath-hold countdown and typed-out text: legacy showed one text per tick and waited the tick, so a
+// player who never skips sees them take the time the author wrote, not a reading time per message.
+test(
+  "countdowns and texts typed out a character at a time keep their legacy pace",
+  { skip: parserUnavailable },
+  async () => {
+    const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+    assert.ok(typeof runtime === "object" && runtime !== null);
+    // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+    const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-pace-"));
+    try {
+      const file = path.join(directory, "pace.groovy");
+      writeFileSync(
+        file,
+        [
+          "def countDown = { text, time, speed ->",
+          "  def left = time / speed",
+          "  (1..(time / speed)).each {",
+          '    show(text + "\\n\\n" + (left * speed).toInteger() + " seconds")',
+          "    left = left - 1",
+          "    wait(speed)",
+          "  }",
+          "}",
+          "def textSpeed = 2",
+          "def typing = { message ->",
+          '  def shown = ""',
+          "  for (c in message) {",
+          "    shown += c",
+          "    show(shown)",
+          "    wait(1 / textSpeed)",
+          "  }",
+          "}",
+          'countDown("Hold your breath", 3, 0.5)',
+          'countDown("", 2, 1)',
+          'typing("5....4....3....2....1..........CUM!")',
+          // A clock reading between a text and its wait measures the wait, which stays after the reading.
+          'show("Keep holding.")',
+          "def started = getTime()",
+          "wait(2)",
+          'if (getTime() - started < 2) show("Too soon")',
+          "",
+        ].join("\n"),
+      );
+      const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+      const { plan } = compileSource(tease);
+      assert.ok(plan !== undefined, tease);
+      const times: number[] = [];
+      const texts: string[] = [];
+      const note = (events: readonly PacedEvent[], at: PacedSnapshot): void => {
+        for (const event of events)
+          if (event.kind === "say") {
+            times.push(at.currentSessionTimeMs ?? NaN);
+            texts.push(event.text ?? "");
+          }
+      };
+      let step = run(
+        plan,
+        createFreshRuntimeSnapshot(plan, { seed: 1, wallClockMs: Date.UTC(2026, 9, 2, 12) }),
+      );
+      note(step.events, step.snapshot);
+      for (let turn = 0; turn < 200 && step.snapshot.status === "waiting"; turn += 1) {
+        // A player who never skips: time goes on to the earliest deadline, a reading time's or a wait's.
+        const deadlines = [
+          step.snapshot.foregroundAction,
+          ...(step.snapshot.backgroundActions ?? []),
+        ]
+          .map((action) => action?.deadlineMs)
+          .filter((deadline) => deadline !== undefined);
+        const observed = observeTime(plan, step.snapshot, Math.min(...deadlines));
+        note(observed.events, observed.snapshot);
+        step = run(plan, observed.snapshot);
+        note(step.events, step.snapshot);
+      }
+      assert.equal(step.snapshot.status, "halted", tease);
+      // Six ticks of half a second, two of a second, and 35 characters half a second apart: 3 + 2 + 17.5 s, two texts
+      // per tick and one per character; then the held text, whose wait the clock measured.
+      assert.equal(times.length, 12 + 4 + 35 + 1, tease);
+      assert.equal(times.at(-1)! - times[0]!, 22_500, tease);
+      assert.equal(texts.at(-1), "Keep holding.", tease);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+/** What a conversion fixture says when it runs to its end, with time passing to each wait's end. */
+async function fixtureSays(name: string): Promise<string[]> {
+  const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+  assert.ok(typeof runtime === "object" && runtime !== null);
+  // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+  const { compileSource, createFreshRuntimeSnapshot, run, observeTime } = runtime as PacedRuntime;
+  const tease = readFileSync(
+    fileURLToPath(new URL(`./fixtures/conversion/${name}.tease`, import.meta.url)),
+    "utf8",
+  );
+  const { plan } = compileSource(tease);
+  assert.ok(plan !== undefined);
+  const said: string[] = [];
+  const note = (events: readonly PacedEvent[]): void => {
+    for (const event of events) if (event.kind === "say") said.push(event.text ?? "");
+  };
+  let step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+  note(step.events);
+  for (let turn = 0; turn < 20 && step.snapshot.status === "waiting"; turn += 1) {
+    const observed = observeTime(
+      plan,
+      step.snapshot,
+      step.snapshot.foregroundAction?.deadlineMs ?? NaN,
+    );
+    note(observed.events);
+    step = run(plan, observed.snapshot);
+    note(step.events);
+  }
+  assert.equal(step.snapshot.status, "halted");
+  return said;
+}
+
+// The list-aliases fixture says what Groovy said: the element changes reached the list they came from.
+test("the list-aliases fixture says what Groovy's shared lists gave", async () => {
+  assert.deepEqual(await fixtureSays("list-aliases"), [
+    "Done 2",
+    "Rows 3 2",
+    "First false false",
+    "Last first true",
+    "Cells 0 1",
+    "Counts 6 7,5,2",
+    "Slots 5 1",
+    "Held 1",
+    "Kept 1",
+    "Top 1",
+  ]);
+});
+
+// The captured-locals fixture says what Groovy said where its closure values set and read their functions' locals; the
+// closures that stay unconverted, one the script keeps and one whose converted body has an error, say nothing.
+test("the captured-locals fixture says what Groovy's closures gave", async () => {
+  assert.deepEqual(await fixtureSays("captured-locals"), [
+    "Rounds 2",
+    "Rounds 3",
+    "Rounds 3 4",
+    "Pick!",
+    "Seen 0",
+    "Seen 1",
+    "Count 1",
+    "Item a at 1",
+    "Item inner at 0",
+    "Item b at 1",
+    "Item inner at 0",
+    "Unset",
+    "Unset",
+    "Tuned",
+  ]);
+});
+
+// Groovy ranges ran down where the first bound was greater, also where only the values showed it: `1..0` went through
+// 1 and 0, and `1..<0` through 1 (Domme2's reward of 0 points ran twice).
+test("ranges count down as Groovy's did", { skip: parserUnavailable }, async () => {
+  const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+  assert.ok(typeof runtime === "object" && runtime !== null);
+  // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
+  const { compileSource, createFreshRuntimeSnapshot, run } = runtime as PacedRuntime;
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-ranges-"));
+  try {
+    const file = path.join(directory, "ranges.groovy");
+    writeFileSync(
+      file,
+      [
+        'def said = ""',
+        "(3..1).each { said += it }",
+        "def none = 0",
+        '(1..none).each { said += " " + it }',
+        'for (k in 1..<none) said += " <" + k',
+        'for (k in 2..3) said += " +" + k',
+        "show(said)",
+        "",
+      ].join("\n"),
+    );
+    const tease = emitTease(lowerParsedFile(await parseGroovySource(file)));
+    const { plan } = compileSource(tease);
+    assert.ok(plan !== undefined, tease);
+    const step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+    assert.equal(step.snapshot.status, "halted", tease);
+    assert.deepEqual(
+      step.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ["321 1 0 <1 +2 +3"],
+      tease,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 // Groovy read an input's question before it computed the pre-filled value, which may change what the question reads.
 // The hierarchical storage fixture says what the same script said with legacy storage (PropertiesWorker, ported to
 // Groovy as an oracle): elements read and rebuilt, a key that is a value first, a shorter list, a null element, and the
@@ -1923,6 +2116,8 @@ interface PacedEvent {
 }
 interface PacedSnapshot {
   status: string;
+  currentSessionTimeMs?: number;
+  backgroundActions?: ReadonlyArray<{ deadlineMs?: number }>;
   foregroundAction?: {
     kind?: string;
     actionId?: number;
@@ -1938,7 +2133,10 @@ interface PacedCompletion {
 }
 interface PacedRuntime {
   compileSource(source: string): { plan?: unknown };
-  createFreshRuntimeSnapshot(plan: unknown, options: { seed: number }): PacedSnapshot;
+  createFreshRuntimeSnapshot(
+    plan: unknown,
+    options: { seed: number; wallClockMs?: number },
+  ): PacedSnapshot;
   run(plan: unknown, snapshot: PacedSnapshot): { snapshot: PacedSnapshot; events: PacedEvent[] };
   observeTime(
     plan: unknown,

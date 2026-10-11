@@ -1,0 +1,20 @@
+--- a/scripts/jewell/trainSissyLevelTwo.groovy
++++ b/scripts/jewell/trainSissyLevelTwo.groovy
+@@ -59,7 +59,7 @@
+ 	save("cybermistress.points", loadInteger("cybermistress.points")-5)
+ 	show("Now, here we start a very serve punishment, you worthless little sissy whore.")
+ 	wait(8)
+-	save("jewell.punishment", 9)
++	save("cybermistress.punishment", 9)
+ 	return "jewell/punishments"
+ 
+ case "cheater":
+@@ -330,7 +330,7 @@
+ 		showButton("Sorry, Mistress")
+ 		show("You're going to be punished, you lazy whore!")
+ 		showButton("Yes, Mistress")
+-		save("jewell.punishment",8)
++		save("cybermistress.punishment",8)
+ 		return("jewell/punishments")
+ 	}
+ 	block = "permission"

@@ -120,6 +120,11 @@ interface Binding {
    * starts with.
    */
   placeholder?: TeaseType;
+  /**
+   * A list of empty slots, Groovy `[null] * n`, whose slots get values of several or of unknown types (a positional
+   * record), which the declaration keeps open.
+   */
+  open?: boolean;
 }
 
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
@@ -254,8 +259,8 @@ function declaredResult(
   const optional = all.length < types.length || all.some((type) => type.kind === "optional");
   // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
   // does (V30 §17).
-  if (shared.kind !== "union" && (unknowns || !(optional && returnsNull(statement.body))))
-    return null;
+  // A list whose elements mix types, `return ["WIN", 0]` (ShockJack), needs its union written as a union does.
+  if (!hasUnion(shared) && (unknowns || !(optional && returnsNull(statement.body)))) return null;
   const type: TeaseType = optional ? { kind: "optional", value: shared } : shared;
   const written = annotation(type);
   return written === null ? null : { type, written };
@@ -432,6 +437,11 @@ export function enforceVariableTypes(
             binding.placeholder === undefined ? null : emptyValue(binding.placeholder);
           if (placeholder !== null) next = { ...next, value: placeholder };
           if (truncations.has(statement)) next = { ...next, value: truncate(next.value) };
+          // An open variable has no written type: its values are checked where they are used.
+          if (binding.open === true) {
+            const { type: _type, ...untyped } = next;
+            next = { ...untyped, value: helperCall("value", [next.value]) };
+          }
           if (integerLoads.has(statement)) {
             result.annotated += 1;
             next = { ...next, type: binding.optional ? "integer?" : "integer" };
@@ -452,12 +462,17 @@ export function enforceVariableTypes(
             (binding.widened &&
               type !== undefined &&
               (nonNull(type).kind === "list" || typeName(nonNull(type)) === "number"));
-          if (needed && written !== null) {
+          if (needed && written !== null && binding.open !== true) {
             result.annotated += 1;
             next = { ...next, type: written };
           }
           // An empty list needs its element type written.
-          if (placeholder?.kind === "list" && written !== null && next.type === undefined)
+          if (
+            placeholder?.kind === "list" &&
+            written !== null &&
+            next.type === undefined &&
+            binding.open !== true
+          )
             next = { ...next, type: written };
           if (
             next.type === undefined &&
@@ -579,16 +594,19 @@ export function enforceVariableTypes(
             if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
             return rewritten;
           }
-          return {
-            ...statement,
-            operator: "=",
-            value: truncate({
-              kind: "binary",
-              operator: statement.operator === "+=" ? "+" : "-",
-              left: statement.target,
-              right: statement.value,
-            }),
-          };
+          return withIntegerIndexes(
+            {
+              ...statement,
+              operator: "=",
+              value: truncate({
+                kind: "binary",
+                operator: statement.operator === "+=" ? "+" : "-",
+                left: statement.target,
+                right: statement.value,
+              }),
+            },
+            indexes,
+          );
         }
         case "function":
           return { ...statement, body: rewrite(statement.body) };
@@ -721,6 +739,17 @@ function analyse(
   closedCalls: boolean,
 ): Analysis {
   const knownNull = knownNullCompares(statements);
+  // The types of the elements stored in each list that starts without an element type (storeElement).
+  const elementWrites = new Map<Binding, TeaseType[]>();
+  // Lists that start empty and get a variable whose type allows null, `answers[i] = answer` (storeElement).
+  const nullableWrites = new Set<Binding>();
+  const noteNullable = (list: Binding | undefined, value: IrExpression, scope: Scope): void => {
+    const type = typeOf(value, scope);
+    if (list !== undefined && value.kind === "variable" && type.kind === "optional")
+      nullableWrites.add(list);
+  };
+  // The types of the values written to each slot of a list of empty slots, `[null] * n`, also unknown ones.
+  const slotWrites = new Map<Binding, TeaseType[]>();
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -1135,6 +1164,17 @@ function analyse(
       findIndexes(value, scope);
       passArguments(value, scope);
     }
+    // `total += pair[1]` adds the element as `total + pair[1]` does, so an element of several types is read open too.
+    if (
+      item.kind === "assign" &&
+      item.operator !== "=" &&
+      item.value.kind === "index" &&
+      item.value.dict !== true &&
+      isMixed(typeOf(item.value, scope))
+    ) {
+      openElements.add(item.value);
+      analysis.indexes.add(item.value);
+    }
     if (item.kind === "for") findBounds(item.collection, scope);
     switch (item.kind) {
       case "let": {
@@ -1170,12 +1210,21 @@ function analyse(
         const value = typeOf(item.value, scope);
         if (item.target.kind === "index" && item.target.target.kind === "variable") {
           const list = scope.resolve(item.target.target.name);
-          if (list !== undefined && item.operator === "=") storeElement(list, value, item);
+          if (list !== undefined && item.operator === "=" && emptySlots(list.declaration?.value))
+            slotWrites.set(list, [...(slotWrites.get(list) ?? []), value]);
+          if (list !== undefined && item.operator === "=") {
+            noteNullable(list, item.value, scope);
+            storeElement(list, value, item);
+          }
           return;
         }
         if (item.target.kind !== "variable") return;
         const target = scope.resolve(item.target.name);
         if (target === undefined) return;
+        // A value of a type the conversion does not know, such as an element of Groovy's multiple assignment, keeps
+        // the variable open.
+        if (item.value.kind === "call" && item.value.open === true && target.open !== true)
+          change(() => (target.open = true));
         const type = bindingType(target);
         const first = item.value.kind === "template" ? item.value.parts[0] : undefined;
         if (
@@ -1272,7 +1321,10 @@ function analyse(
           value.dict !== true
         ) {
           const list = scope.resolve(value.target.name);
-          if (list !== undefined) storeElement(list, typeOf(value.arguments[0]!, scope), item);
+          if (list !== undefined) {
+            noteNullable(list, value.arguments[0]!, scope);
+            storeElement(list, typeOf(value.arguments[0]!, scope), item);
+          }
         }
         return;
       }
@@ -1392,6 +1444,8 @@ function analyse(
     const type = bindingType(list);
     const collection = type === undefined ? undefined : nonNull(type);
     if (collection?.kind !== "list" || nonNull(value).kind === "unknown") return;
+    if (collection.element.kind === "unknown")
+      elementWrites.set(list, [...(elementWrites.get(list) ?? []), nonNull(value)]);
     // A list that starts empty takes its element type from its first element (ADR 0021 rule 1.3), so an element that
     // holds several types needs that union written on the declaration.
     if (
@@ -1447,6 +1501,44 @@ function analyse(
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
+  }
+  // A list that starts empty takes the type of the element it gets first, so one whose elements are of several types,
+  // `out[0] = text` and `out[1] = 0` (ADR 0021 rule 1.3), needs their union written on its declaration.
+  for (const [list, written] of elementWrites) {
+    if (list.declaration === null || list.fixed !== undefined || list.union !== undefined) continue;
+    // Empty slots hold null until written, which no union of the written types takes; the slots rule below opens them.
+    if (emptySlots(list.declaration.value)) continue;
+    let element: TeaseType | null = written[0]!;
+    for (const type of written.slice(1)) {
+      if (element === null) break;
+      element = isAssignable(element, type)
+        ? element
+        : isAssignable(type, element)
+          ? type
+          : unionOf(element, type);
+    }
+    if (element?.kind === "union" && annotation(listOf(element)) !== null) {
+      const union = listOf(element);
+      change(() => (list.union = union));
+    }
+    // An element that may be null, `answers[i] = answer` after `answer = snapfile` (interrogation), holds null in
+    // Groovy's list as well: the list's elements may be null.
+    else if (element?.kind === "scalar" && nullableWrites.has(list)) {
+      const nullable = listOf({ kind: "optional", value: element });
+      change(() => (list.union = nullable));
+    }
+  }
+  // A list of empty slots whose slots get values of several types, or of a type the conversion does not know, such as
+  // a parameter's, is a positional record (PainStacks' `[done, painLevel, shockTime, waitTime, glitch]`): its first
+  // value would fix one element type, so the list stays open.
+  for (const [list, written] of slotWrites) {
+    if (list.open === true || list.declaration === null || list.fixed !== undefined) continue;
+    const types = written.filter((type) => type.kind !== "null").map(nonNull);
+    const several = types.some(
+      (type) =>
+        type.kind === "unknown" || !isAssignable(types[0]!, type) || !isAssignable(type, types[0]!),
+    );
+    if (several) change(() => (list.open = true));
   }
   // A parameter without a Groovy type that some call gives a number that may be a fraction, `numSeries / 4`, and every
   // other call a number or a whole number, holds numbers, so a variable it sets does too (DisciplineClinic's numSeries).
@@ -1539,9 +1631,13 @@ function analyse(
  * endless loop (`while true` without a `break` of its own, as from Groovy `for (;;)`) keeps them from it.
  */
 function mayFallOff(statements: readonly IrStatement[]): boolean {
-  const last = statements.findLast(
+  const items = statements.filter(
     (statement) => !["comment", "blank", "function"].includes(statement.kind),
   );
+  // A statement that never ends normally, such as an `if` whose every branch returns, ends the block there too, also
+  // where unreachable code follows it (ShockJack's playBlackJackRound).
+  if (items.slice(0, -1).some((statement) => !mayFallOff([statement]))) return false;
+  const last = items.at(-1);
   switch (last?.kind) {
     case "return":
     case "exit":
@@ -1753,6 +1849,19 @@ function nullTestedNames(value: unknown, names = new Set<string>()): Set<string>
   }
   for (const child of Object.values(value)) nullTestedNames(child, names);
   return names;
+}
+
+/** Groovy `[null] * n`, a list of n empty slots. */
+function emptySlots(value: IrExpression | undefined): boolean {
+  const items =
+    value?.kind === "call" && value.name === "sexscriptLegacyRepeatList"
+      ? value.positional[0]
+      : undefined;
+  return (
+    items?.kind === "list" &&
+    items.items.length > 0 &&
+    items.items.every((item) => item.kind === "literal" && item.value === null)
+  );
 }
 
 /** The type a variable keeps, or undefined when the compiler does not check it (a null or unknown initializer). */
@@ -1995,6 +2104,9 @@ export function annotation(type: TeaseType): string | null {
     value.kind === "scalar" ||
     value.kind === "temporal" ||
     (value.kind === "list" && value.element.kind === "scalar") ||
+    (value.kind === "list" &&
+      value.element.kind === "optional" &&
+      value.element.value.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
     (value.kind === "list" && hasUnion(value) && writableElements(value.element)) ||
     // Any list, object, dict, or range is written by its kind, which an optional one needs: `list | null`.
@@ -2293,6 +2405,7 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["chance", scalar("boolean")],
   ["round", scalar("integer")],
   ["floor", scalar("integer")],
+  ["sign", scalar("integer")],
   ["ceil", scalar("integer")],
   ["toInteger", scalar("integer")],
   ["toNumber", scalar("number")],
@@ -2310,6 +2423,10 @@ const CALL_RESULTS = new Map<string, TeaseType>([
 const HELPER_RESULTS = new Map<string, TeaseType>([
   ["sexscriptLegacyLoadFirstTrue", { kind: "optional", value: scalar("string") }],
   ["sexscriptLegacyLoadIntegerOr", scalar("integer")],
+  ["sexscriptLegacyFormat", scalar("string")],
+  // The parts of a text, which the helpers build from its characters.
+  ["sexscriptLegacyTokenize", listOf(scalar("string"))],
+  ["sexscriptLegacySplit", listOf(scalar("string"))],
 ]);
 
 export function expressionType(
@@ -2436,7 +2553,8 @@ export function expressionType(
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
       return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
     case "call": {
-      const helper = HELPER_RESULTS.get(value.name);
+      // A generated helper's result, not that of a script function of the same name (`local`).
+      const helper = value.local === true ? undefined : HELPER_RESULTS.get(value.name);
       if (helper !== undefined) return helper;
       // A function of the package returns what its `return` values share.
       const local = result(value.name);

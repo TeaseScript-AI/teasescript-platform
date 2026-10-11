@@ -139,6 +139,20 @@
       "category": "b",
       "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which is slow to walk. Read the days from 20 days ago to two days ahead directly instead: availability is only ever saved for the day the session runs, which a later session in a time zone behind sees as a day or, across the date line, two days ahead; a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
       "diff": "availability-cleanup.diff"
+    },
+    {
+      "id": "toy-release-requests",
+      "layer": "source",
+      "category": "b",
+      "reason": "addToy registered the request to remove a worn toy with closures that capture its toyState, which TeaseScript cannot express, so the converter dropped the request and no toy could be asked off in the lounge. Give requestables an optional arg (null as before for the others), which the menu already passes to the action, pass it to the condition as well, and register the toy's state as arg with closures that take it; the custom request functions ignore the argument as before. Ported from ToyExpanded.",
+      "diff": "toy-release-requests.diff"
+    },
+    {
+      "id": "soon-text",
+      "layer": "source",
+      "category": "b",
+      "reason": "The calendar and the debug lounge line showed times with java.time (localTimeOf(s).format(soonFormatter), pattern \"EEEE 'at' h:mma\"), which does not convert, and the calendar's collect over the plans, which returns early inside a show() argument, did not convert either, so the Calendar request showed nothing. Format the same text from the local time arithmetic of localTimeOffset (English day names and AM/PM, as the English pattern gave), and list the plans in a loop that skips a plan without an event, as before. Ported from ToyExpanded.",
+      "diff": "soon-text.diff"
     }
   ]
 }

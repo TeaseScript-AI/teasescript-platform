@@ -201,8 +201,11 @@ export type IrStatement =
       condition: IrExpression;
       then: IrStatement[];
       else: IrStatement[];
-      /** `prompt` marks the importer's test that a legacy input's question is not null before it is shown. */
-      guard?: "prompt";
+      /**
+       * `prompt` marks the importer's test that a legacy input's question is not null before it is shown; `blank`, its
+       * test that a text only switch cases set is not empty before it is said (withoutBlankText).
+       */
+      guard?: "prompt" | "blank";
     })
   /** `wholeBound` marks a `<` or `<=` condition whose right side variable typing proves a whole number, never null. */
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[]; wholeBound?: true })
@@ -353,7 +356,15 @@ export type IrExpression =
       unread?: true;
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
-  | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean; count?: true }
+  | {
+      kind: "range";
+      from: IrExpression;
+      to: IrExpression;
+      inclusive: boolean;
+      count?: true;
+      /** A Groovy range a loop goes through, which counts down where its first bound is greater at runtime. */
+      either?: true;
+    }
   /**
    * A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). `calendar`
    * marks a calendar step, the same clock time a number of days later, which time model 2 writes `1 calendar day`,
@@ -381,6 +392,8 @@ export type IrExpression =
       positional: IrExpression[];
       named: Record<string, IrExpression>;
       local?: true;
+      /** A value of a type the conversion does not know, which keeps a variable it is assigned to open. */
+      open?: true;
     }
   /** Interpolated string: literal text segments and `${...}` values in source order. */
   | { kind: "template"; parts: Array<{ text: string } | { value: IrExpression }> };

@@ -88,6 +88,13 @@ test(
         ...played(quiet, "stops"),
         runs: [{ stop: { kind: "empty", detail: "the session ended without showing anything" } }],
       });
+      // A unit marked by hand as not playable shows the reason, for any files, and leaves the play counts.
+      await write("converted/server/main.tease", '---\ntitle: "Server"\n---\nsay "Hi"\nexit\n');
+      await write("checks/server/result.json", {
+        ...played("say 1\nexit\n", "not-playable"),
+        reason: "Needs a local LM Studio server.",
+        runs: [],
+      });
       await write("converted/stub/.conversion.json", {
         unitStatus: "unfinished-content-stub",
         converter: "def5678",
@@ -164,9 +171,11 @@ test(
           ["Night Walk", "plays to the end", null],
           ["popup", "owner-approved", null],
           ["quiet", "shows nothing", null],
+          ["server", "not playable", null],
           ["stub", "unfinished stub", null],
         ],
       );
+      assert.equal(entries[7]!.status.detail, "Needs a local LM Studio server.");
       assert.match(entries[0]!.status.detail, /^main\.tease:5:5 TSV002 /u);
 
       const page = renderCatalogPage(entries, {
@@ -193,14 +202,15 @@ test(
           Number(value),
         ]),
         [
-          ["Listed", 8],
-          ["Convert fully", 7],
-          ["Compile", 5],
+          ["Listed", 9],
+          ["Convert fully", 8],
+          ["Compile", 6],
           ["Play to the end", 3],
           ["Played on an older conversion", 1],
           ["Parked (step limit)", 1],
           ["Do not start", 1],
           ["Do not compile", 2],
+          ["Not playable", 1],
           ["Verified", 1],
           ["Owner-approved", 1],
           ["Unfinished stubs", 1],
@@ -259,7 +269,7 @@ test(
       );
       // A stub is listed without a Player link.
       assert.match(page, /<td class="title"><b>Stub<\/b><\/td>/u);
-      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 8);
+      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 9);
 
       await writeSourceViews(entries, path.join(work, "catalog"));
       assert.equal(

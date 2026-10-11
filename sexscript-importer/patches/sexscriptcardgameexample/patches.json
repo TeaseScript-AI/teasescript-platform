@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "A card is text such as \"A♠\", whose first character is its rank and second its suit; card[0] and card[1] read them. The functions take the deck as a parameter, whose type the converter cannot tell, so the converted index read the text as a list and stopped the script. substring takes the same one-character texts.",
       "diff": "card-characters.diff"
+    },
+    {
+      "id": "end-choice",
+      "layer": "source",
+      "category": "b",
+      "reason": "The demo asks for the simple card game or more examples in a loop whose end flag nothing sets, so the session never ended; the legacy player ended the script by closing it. As in ShockYourself's end-session, the question also offers End, which leaves the loop and ends the session (owner decision).",
+      "diff": "end-choice.diff"
     }
   ]
 }

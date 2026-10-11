@@ -179,3 +179,12 @@ if ("012" == digits.sum()) show("All digits")
 def answer = ""
 answer = digits.sum()
 show("Answer " + answer)
+// The sum of a list without elements is null, which Groovy ordered below every number (ShockJack's shock times).
+def shockTimes = []
+while (shockTimes.sum() < 5) shockTimes.add(2)
+show("Shocks " + shockTimes.size())
+// Arithmetic with the sum of no element failed in Groovy, whose sum() was null, so the session ends there (ShockJack).
+def shockTimeList = [3]
+def lastTime = 2
+shockTimeList[-1] -= (shockTimeList.sum() - lastTime)
+show("Times " + shockTimeList[0])

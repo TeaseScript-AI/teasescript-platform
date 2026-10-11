@@ -34,6 +34,27 @@
       "category": "e",
       "reason": "The bedtime spreader-bar choice tests clothes.spreader_bar, which nothing saves; the toy chest saves the spreader bar as toys.spreader_bar, so the choice always went back to picking a toy. Read toys.spreader_bar.",
       "diff": "spreader-bar-key.diff"
+    },
+    {
+      "id": "zero-counts",
+      "layer": "source",
+      "category": "e",
+      "reason": "The reward and punish helpers, the supervised wanking rounds and the counted spanking ran (1..n).each, which Groovy ran downward for n = 0, twice (1 and 0): ending the dice game at round 10 gave 2 reward points, an answer within a second of the bathroom check 2 punish points, a reward of 0 two wanking rounds, and a discovery spanking drawn as 0 two swats per set. Run each count only when it is at least 1.",
+      "diff": "zero-counts.diff"
+    },
+    {
+      "id": "kink-clamps",
+      "layer": "source",
+      "category": "e",
+      "reason": "The meal and chore nipple kinks save 2 for clothes-pins and 22 for nipple clamps, then save 2 again one button later, so kinkundo's case 22 for the clamps never ran and the clamps were taken off as clothes-pins. Drop the second save.",
+      "diff": "kink-clamps.diff"
+    },
+    {
+      "id": "late-hours",
+      "layer": "source",
+      "category": "e",
+      "reason": "The bed-time clock edge subtracts jewell.latehours, the late-hours setting of the jewell tease, which this package never saves, so it stopped there in Groovy as in the conversion. Take a missing setting as 0, jewell's own default.",
+      "diff": "late-hours.diff"
     }
   ]
 }

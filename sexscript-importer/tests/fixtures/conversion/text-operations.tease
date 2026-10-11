@@ -12,6 +12,72 @@ function sexscriptLegacyFixed(value, digits, factor) {
   let fraction = scaled - whole * factor
   return "${minus}${whole}.${toString(fraction).padStart(digits, "0")}"
 }
+function sexscriptLegacyFormat(pattern, values) {
+  let result = ""
+  let rest = pattern
+  let next = 0
+  while rest.indexOf("%") >= 0 {
+    let at = rest.indexOf("%")
+    result += rest.substring(0, at)
+    rest = rest.substring(at + 1)
+    if rest.startsWith("%") {
+      result += "%"
+      rest = rest.substring(1)
+      continue
+    }
+    let fill = " "
+    if rest.startsWith("0") {
+      fill = "0"
+      rest = rest.substring(1)
+    }
+    let width = 0
+    while rest.length > 0 and "0123456789".indexOf(rest.substring(0, 1)) >= 0 {
+      width = width * 10 + toInteger(rest.substring(0, 1))
+      rest = rest.substring(1)
+    }
+    let digits = 6
+    if rest.startsWith(".") {
+      digits = 0
+      rest = rest.substring(1)
+      while rest.length > 0 and "0123456789".indexOf(rest.substring(0, 1)) >= 0 {
+        digits = digits * 10 + toInteger(rest.substring(0, 1))
+        rest = rest.substring(1)
+      }
+    }
+    let conversion = rest.substring(0, 1)
+    rest = rest.substring(1)
+    let text = ""
+    if next < values.length {
+      text = values[next]
+    }
+    next += 1
+    if conversion == "d" {
+      text = toString(toInteger(text))
+    }
+    if conversion != "s" and conversion != "d" and conversion != "f" {
+      text = "%" + conversion
+    }
+    if conversion == "f" {
+      text = sexscriptLegacyFixed(toNumber(text), digits, pow(10, digits))
+    }
+    if width > 0 {
+      if fill == "0" and text.startsWith("-") {
+        text = "-" + text.substring(1).padStart(width - 1, "0")
+      } else {
+        text = text.padStart(width, fill)
+      }
+    }
+    result += text
+  }
+  return result + rest
+}
+function sexscriptLegacyTextAt(text, position) {
+  let at = position
+  if at < 0 {
+    at += text.length
+  }
+  return text.substring(at, at + 1)
+}
 function sexscriptLegacyTokenize(text, delimiters) {
   let tokens = []
   let current = ""
@@ -91,4 +157,28 @@ if pictures == "" or pictures == "" {
 }
 let pictureList = sexscriptLegacySplit(pictures, "|")
 say "${pictureList.length} pictures, first ${pictures.split("|")[0]}"
+// The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
+for word in sexscriptLegacyTokenize("Kneel, now.", " ") {
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  if sexscriptLegacyTextAt(word, word.length - 1) == "," or sexscriptLegacyTextAt(word, word.length - 1) == "." {
+    word = word.substring(0, word.length - 1)
+  }
+  say "Word ${word}"
+}
+// A pattern known only at runtime, such as a text a function gets, is written by a helper as Java wrote it
+// (PainStacks' countdown).
+function countdownText(pattern, seconds) {
+  // NOTE SX_FORMAT_RUNTIME line 50: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
+  return sexscriptLegacyFormat(pattern, ["${toInteger(seconds / 60)}", "${seconds % 60}"])
+}
+say countdownText("Wait %d:%02d", 75)
+let shockPattern = "Shock time %.1f seconds, %d%% done"
+// NOTE SX_FORMAT_RUNTIME line 53: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
+say sexscriptLegacyFormat(shockPattern, ["${2.25}", "${50}"])
+// Java's 0 flag fills after a minus sign.
+let paddedPattern = "Score %05d"
+// NOTE SX_FORMAT_RUNTIME line 56: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
+say sexscriptLegacyFormat(paddedPattern, ["${-7}"])
 exit

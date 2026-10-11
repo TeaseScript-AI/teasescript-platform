@@ -75,7 +75,8 @@ export interface Status {
     | "error"
     | "partial"
     | "stub"
-    | "parked";
+    | "parked"
+    | "notplayable";
   /** A few words for the table. */
   readonly label: string;
   readonly detail: string;
@@ -155,7 +156,9 @@ interface ImporterReport {
 /** The fields of a `play-check.ts` result the status uses. */
 export interface PlayCheck {
   readonly contentHash: string;
-  readonly verdict: "plays" | "stops" | "no-start" | "parked";
+  readonly verdict: "plays" | "stops" | "no-start" | "parked" | "not-playable";
+  /** Why the unit cannot be played, for a `not-playable` verdict, which is set by hand and holds for any files. */
+  readonly reason: string | null;
   /** The step limit of its runs; 300 before checks recorded it. */
   readonly stepLimit: number;
   readonly checkedAt: string;
@@ -478,8 +481,10 @@ async function readEntry(
   )
     .filter((check) => check !== null)
     .sort((left, right) => right.checkedAt.localeCompare(left.checkedAt));
-  // The latest check of the current files, else the latest check of any files (a newer conversion of a verified copy).
-  const current = checks.find((check) => check.contentHash === hash) ?? null;
+  // The latest check of the current files or a not-playable mark, which holds for any files; else the latest check of
+  // any files (a newer conversion of a verified copy).
+  const current =
+    checks.find((check) => check.contentHash === hash || check.verdict === "not-playable") ?? null;
   const play = current ?? checks[0] ?? null;
   // An explorer folder holds `<unit>.json`, or `<unit>/<unit>.json` when each unit was explored into its own folder.
   const explorerReports = (
@@ -675,9 +680,17 @@ function packageStatus(
 export function parsePlayCheck(value: unknown): PlayCheck | null {
   if (!isRecord(value) || typeof value.contentHash !== "string") return null;
   const { verdict, checkedAt, runs, coverage } = value;
-  if (verdict !== "plays" && verdict !== "stops" && verdict !== "no-start" && verdict !== "parked")
+  if (
+    verdict !== "plays" &&
+    verdict !== "stops" &&
+    verdict !== "no-start" &&
+    verdict !== "parked" &&
+    verdict !== "not-playable"
+  )
     return null;
   if (typeof checkedAt !== "string" || !Array.isArray(runs) || !isRecord(coverage)) return null;
+  const reason = typeof value.reason === "string" && value.reason !== "" ? value.reason : null;
+  if (verdict === "not-playable" && reason === null) return null;
   const strings = (item: unknown): string[] =>
     Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [];
   const count = (item: unknown): number => (typeof item === "number" ? item : 0);
@@ -685,6 +698,7 @@ export function parsePlayCheck(value: unknown): PlayCheck | null {
     contentHash: value.contentHash,
     stepLimit: typeof value.stepLimit === "number" ? value.stepLimit : 300,
     verdict,
+    reason,
     checkedAt,
     runs: runs.map((run) => {
       const stop = isRecord(run) && isRecord(run.stop) ? run.stop : {};
@@ -792,6 +806,8 @@ export function parseExplorerReport(value: unknown): ExplorerReport | null {
  * compiler's error for the checked files, when they are the current ones and do not compile.
  */
 function playStatus(play: PlayCheck, compileError: string | null): Status {
+  if (play.verdict === "not-playable")
+    return { kind: "notplayable", label: "not playable", detail: play.reason ?? "" };
   const { files, fileCount, sites, siteCount, choices } = play.coverage;
   const coverage = `${play.runs.length} runs reached ${files.length} of ${fileCount} files, ${sites} of ${siteCount} interactions, and ${choices} choices.`;
   const missing = [...play.missingImages, ...play.missingMedia];
@@ -1022,6 +1038,11 @@ export function renderCatalogPage(
     ],
     ["Do not start", count("nostart"), "The session ends at Start without showing anything."],
     ["Do not compile", count("error"), "The listed files do not compile, or lack main.tease."],
+    [
+      "Not playable",
+      count("notplayable"),
+      "Marked by hand as not playable, for the reason its status gives; left out of the play counts.",
+    ],
     [
       "Not played in the Player",
       count("compiles") + count("unbuilt"),

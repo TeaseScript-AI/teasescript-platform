@@ -55,6 +55,13 @@
       "category": "e",
       "reason": "Sissy level one counts each mismatched answer in errors (def errors = 0), but the plug-or-dildo mismatch adds to error, a variable that does not exist, so Groovy failed there and the conversion left the statement out as a TODO. Count it in errors.",
       "diff": "sissy-errors-count.diff"
+    },
+    {
+      "id": "punishment-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Sissy level two's two punishments save their severity, 9 and 8, under jewell.punishment and go to the punishments script, which reads cybermistress.punishment, as the package's own notes say a punishment is asked for; so the punishment took whatever severity an earlier one had left, or none. Save the key the punishments read.",
+      "diff": "punishment-key.diff"
     }
   ]
 }

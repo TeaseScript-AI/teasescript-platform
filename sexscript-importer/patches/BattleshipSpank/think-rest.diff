@@ -1,0 +1,20 @@
+--- a/scripts/BattleshipSpank.groovy
++++ b/scripts/BattleshipSpank.groovy
+@@ -332,6 +332,7 @@
+ def GetEnemyShot = {//-----------------------------------------------------------
+ 	def ThinkString = Title+"Thinking"
+ 	def nThink = 0
++	def nRest = 0
+ 	def TotalGrid = [[0, 0, 0, 0, 0, 0, 0],
+ 		[0, 0, 0, 0, 0, 0, 0],
+ 		[0, 0, 0, 0, 0, 0, 0],
+@@ -377,6 +378,9 @@
+ 				if(MyScores[j-1]>0){
+ 					def e = true
+ 					while(e){
++						// A short rest every 1,000 placements lets the TeaseScript player run the long think in parts.
++						nRest++
++						if(nRest%1000==0)wait(0.01)
+ 						x0 = getRandom(ASize)
+ 						y0 = getRandom(ASize)
+ 						direction = getRandom(2)//0 horizontal, 1 vertical

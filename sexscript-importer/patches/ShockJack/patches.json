@@ -1,0 +1,39 @@
+{
+  "patches": [
+    {
+      "id": "estim-files",
+      "layer": "source",
+      "category": "b",
+      "reason": "getEstimFileNames went through the package's sounds/ShockYourself folder with File.traverse inside a try/catch, which the conversion does not follow, and took each file name's part before its number through regular expressions, so the game had no estim sounds. The folder is walked with eachFile, keeping only its files as traverse did, which the conversion lists at conversion time, and the trailing number is cut off character by character, which gives the same names. The catch only showed that Shock Yourself was not installed, where the folder was missing; the package holds the folder, so the try/catch goes.",
+      "diff": "estim-files.diff"
+    },
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The main loop shows the rules menu after the intro forever; the legacy player ended the script by closing it, and its only exits were the errors for a missing or incomplete sounds folder, which the package's sound files make unreachable. A TeaseScript session needs an end, so the rules menu after the intro also offers End session.",
+      "diff": "end-session.diff"
+    },
+    {
+      "id": "settings-ranges",
+      "layer": "source",
+      "category": "b",
+      "reason": "loadConfig cleared the pain level and shock time range lists and added each stored setting, null for a missing one, then took a list's defaults where any value was null. TeaseScript checks each value as it goes into a list of numbers, so the missing settings of a first start stopped the script there. The settings are read into new lists that keep only stored values, and a list that misses one takes its defaults, as the null test meant.",
+      "diff": "settings-ranges.diff"
+    },
+    {
+      "id": "settings-defaults",
+      "layer": "source",
+      "category": "b",
+      "reason": "loadConfig read the stored shock time to start with and the player's and dealer's clothing counts, then called getEstimFileNames before it took the defaults of the missing ones. The script call between keeps the converter from joining each default to its read, so the three whole-number variables took 0 for a missing setting and a first game started with no shock time and nothing to strip. The three defaults move directly after their reads, which nothing between used, so a missing setting takes its default as before.",
+      "diff": "settings-defaults.diff"
+    },
+    {
+      "id": "card-ranks",
+      "layer": "source",
+      "category": "b",
+      "reason": "Counting a hand's points, finding a queen and choosing the dealer's cheat card read a card's rank as the first character of its text, such as \"6S\"[0]. TeaseScript indexes only lists and dicts, and where the card came through a parameter the conversion could not tell it was text, so the play stopped at the first count. The rank is read as substring(0, 1), which is the same one-character text Groovy gave, so every count, test and pick stays the same.",
+      "diff": "card-ranks.diff"
+    }
+  ]
+}

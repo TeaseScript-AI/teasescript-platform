@@ -158,3 +158,84 @@ def check = { limit, n = limit ->
 	show("Result ${value}")
 }
 check("good")
+// A list that starts empty and gets elements of several types holds their union, and an element read where one type
+// is needed is read open (Concentration's pairs).
+def pair = []
+pair[0] = "Hearts"
+pair[1] = 3
+show("Pair " + pair[0] + " " + (pair[1] + 1))
+// A list of empty slots whose slots get values of several types, one of them a parameter's, is a record, which stays
+// open (PainStacks' stack items).
+def stackItem = { level, time ->
+	List item = [null] * 3
+	item[0] = false
+	item[1] = level
+	item[2] = time
+	return item
+}
+def slots = stackItem(4, 2.5)
+show("Item " + slots[1] + " " + slots[2])
+// A function whose returns are pairs of a text and a number declares their union, also where dead code follows its
+// returning branches, and an element added with += is read open (ShockJack's rounds).
+def playRound = { int score ->
+	if (score > 21) {
+		return ["BUST", 0]
+	} else if (score == 21) {
+		return ["WIN", 2]
+	} else {
+		return ["STAND", 1]
+	}
+	show("never")
+}
+def shockTime = 0
+def outcome = playRound(21)
+shockTime += outcome[1]
+show(outcome[0] + " " + shockTime)
+// A script variable keeps its own type beside a function's variable of the same name, so a list it indexes grows as
+// Groovy's did (interrogation's answers), and a list that gets a variable that may be null holds null (its mug shot).
+def given = []
+for (def pos = 0; pos < 2; pos++) given[pos] = loadString("answer." + pos)
+def countBack = { n -> for (def pos = n; pos > 0; pos--) show("Left " + pos) }
+countBack(2)
+def shot = ""
+if (getBoolean("Photo?")) shot = null
+given[0] = shot
+show("Given " + given.size())
+// A function that writes its result right before it returns it returns that value's type, so a text cast of the
+// result needs no null test (trick_or_treat_poker's getRandomBetween).
+def randomBetween = { min, max ->
+	def nr = getRandom(max - min) + min
+	nr = Math.round(nr)
+	return nr
+}
+save("game.lowest", 2)
+def lowest = load("game.lowest")
+def drawn = randomBetween(lowest, 5)
+show("Drawn " + (drawn as String).length())
+// A variable declared with a type converts what it is set to, so the function returns its type: a text here.
+def digits = { String x = ""; x = 3; return x }
+show(digits() + 1)
+// The type of the variable a function returns is that of its own declaration, also one around the function, which
+// converts what the function sets it to; a closure's own variable of the name is another variable.
+String label = ""
+def relabel = { label = 3; return label }
+show(relabel() + 1)
+amount = "before"
+def recount = {
+	def inner = { String amount = "nested"; return amount }
+	amount = 3
+	return amount
+}
+show(recount().intValue() + 1)
+// A typed declaration in another block is another variable, which does not type the binding the function returns.
+weight = "before"
+if (false) {
+	String weight = "nested"
+}
+def reweigh = { weight = 3; return weight }
+show(reweigh().intValue() + 1)
+// A script function of a generated helper's name keeps the result it returns.
+def sexscriptLegacyFormat = { -> return 3 }
+def formatted = sexscriptLegacyFormat()
+formatted = null
+show("Formatted " + formatted)

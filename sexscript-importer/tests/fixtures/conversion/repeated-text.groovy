@@ -38,3 +38,12 @@ show("Processing.")
 wait(5)
 show("Processing.")
 wait(5)
+// A variable that starts empty and gets its text in switch cases is said where it is not empty: no case may apply,
+// where legacy only cleared the display (Domme2's menu greetings).
+def greeting = ""
+switch (getRandom(2)) {
+	case 0: greeting = "Did you behave yourself?"; break
+	case 1: greeting = "Back already?"; break
+}
+def picked = getSelectedValue(greeting, ["Ask", "Chores"])
+show("Picked " + picked)

@@ -5,10 +5,14 @@ let half = 2.5
 for it in 0..toInteger(half) {
   say "Tick ${it}"
 }
-for i in 0..=floor(half) {
+let iTo = floor(half)
+for iOffset in 0..=floor(abs(iTo)) {
+  let i = iOffset * sign(iTo)
   say "Up to ${i}"
 }
-for it in 0..ceil(half) {
+let itTo = ceil(half)
+for itOffset in 0..ceil(abs(itTo)) {
+  let it = itOffset * sign(itTo)
   say "Below ${it}"
 }
 // Java's nextInt took a whole number only, here one a variable that may hold a fraction holds.
@@ -20,8 +24,47 @@ let whole = 3
 for it in 0..whole {
   say "Again ${it}"
 }
-for i in 0..whole {
+let iTo2 = whole
+for iOffset2 in 0..ceil(abs(iTo2)) {
+  let i = iOffset2 * sign(iTo2)
   say "Whole ${i}"
 }
 say "Drawn ${randomInteger(0..whole)}"
+// A Groovy range ran down where its first bound was greater: written so, it is the list of its numbers (guillotine's
+// countdown), and where only the values show it, a helper counts either way (Domme2's reward of 0 points ran twice).
+for it in [3, 2, 1] {
+  say "Down ${it}"
+}
+let rewardPoints = randomInteger(0..2)
+let itTo2 = rewardPoints
+for itOffset2 in 0..=floor(abs(itTo2 - 1)) {
+  let it = 1 + itOffset2 * sign(itTo2 - 1)
+  say "Stroke ${it}"
+}
+let kTo = rewardPoints
+for kOffset in 0..ceil(abs(kTo)) {
+  let k = kOffset * sign(kTo)
+  say "Before ${k}"
+}
+// A range whose direction shows only at runtime is computed once, its first bound first, and one that starts at a
+// fraction goes through the numbers a whole step from it.
+let low = 1
+function lift {
+  low = 3
+  return 4
+}
+let kFrom = low
+let kTo2 = floor(lift())
+for kOffset2 in 0..=floor(abs(kTo2 - kFrom)) {
+  let k = kFrom + kOffset2 * sign(kTo2 - kFrom)
+  say "Bound ${k}"
+}
+let start = 2.5
+let stop = 5
+let kFrom2 = start
+let kTo3 = stop
+for kOffset3 in 0..=floor(abs(kTo3 - kFrom2)) {
+  let k = kFrom2 + kOffset3 * sign(kTo3 - kFrom2)
+  say "Half ${k}"
+}
 exit

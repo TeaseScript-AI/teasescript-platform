@@ -80,6 +80,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "removePermanentButton",
   "round",
   "showButton",
+  "sign",
   "sqrt",
   "takePhoto",
   "toBoolean",
@@ -921,7 +922,7 @@ export function lowerPackage(
       const paths: string[] = [];
       walkAst(file.root, (node) => {
         const copy = photoCopy(node);
-        if (copy !== null) paths.push(copy.path);
+        if (copy !== null && copy.prefix === undefined) paths.push(copy.path);
       });
       return paths;
     }),

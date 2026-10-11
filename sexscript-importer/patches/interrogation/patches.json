@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "summary-face",
+      "layer": "source",
+      "category": "b",
+      "reason": "Watching a player chose the female face when the player's summary, held in a list of cached summaries that starts with empty slots, mentions her or she; the test read the list slot four times. The conversion types the slots as possibly null, so each read stopped the package from compiling, although the slot was filled just before. The test reads text1, which already holds the same summary, after a check for null that legacy never needed: a stored summary was text, and a missing one made legacy fail where the check now keeps the male face.",
+      "diff": "summary-face.diff"
+    },
+    {
+      "id": "typed-answer",
+      "layer": "source",
+      "category": "b",
+      "reason": "The interview asked each question again until the answer was not empty, in the variable answer that also takes the mug shot, which is null where no photo came. TeaseScript keeps a variable that a loop sets at the type it is declared with when the loop starts again, so the test of the answer's length read text that may be null and stopped the package from compiling, although the loop starts with empty text and only ever sets text. The loop asks into typed, which only holds text, and answer takes it after the loop, so every question, answer, and stored value stays the same.",
+      "diff": "typed-answer.diff"
+    }
+  ]
+}

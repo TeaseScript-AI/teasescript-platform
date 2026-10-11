@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "estim-files",
+      "layer": "source",
+      "category": "b",
+      "reason": "getEstimFileNames went through the package's sounds/ShockYourself folder with File.traverse inside a try/catch, which the conversion does not follow, and took each file name's part before its number through regular expressions, so the game had no estim sounds. The folder is walked with eachFile, keeping only its files as traverse did, which the conversion lists at conversion time, and the trailing number is cut off character by character, which gives the same names. The catch only showed that Shock Yourself was not installed, where the folder was missing; the package holds the folder, so the try/catch goes.",
+      "diff": "estim-files.diff"
+    },
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The main loop shows the title menu forever; the legacy player ended the script by closing it, and its only exits were the errors for a missing or incomplete sounds folder, which the package's sound files make unreachable. A TeaseScript session needs an end, so the title menu also offers End session.",
+      "diff": "end-session.diff"
+    }
+  ]
+}

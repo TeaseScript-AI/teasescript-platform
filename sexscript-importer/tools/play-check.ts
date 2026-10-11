@@ -250,11 +250,20 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   const present = new Set(files);
   const timed = timedButtons(sources);
   const outFolder = path.join(out, id);
+  // A result that cannot be read or parsed is no result to keep, so a check again replaces it.
+  const last = await readFile(path.join(outFolder, "result.json"), "utf8").then(
+    (text) => {
+      try {
+        return parsePlayCheck(JSON.parse(text));
+      } catch {
+        return null;
+      }
+    },
+    () => null,
+  );
+  // A package marked by hand as not playable keeps the mark; remove its result to check it again.
+  if (last?.verdict === "not-playable") return null;
   if (!values.again) {
-    const last = await readFile(path.join(outFolder, "result.json"), "utf8").then(
-      (text) => parsePlayCheck(JSON.parse(text)),
-      () => null,
-    );
     // A package whose runs ended at the step limit, parked or taken for a loop, is tried again when the limit rises.
     const limited =
       last !== null &&
