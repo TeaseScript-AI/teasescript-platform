@@ -18,7 +18,7 @@
       "id": "sex-partners-text",
       "layer": "source",
       "category": "e",
-      "reason": "The number of sex partners is asked as free text (getString) and saved as typed, and closing a session clears the collateral answer by saving \"\"; the summary then reads it with loadInteger(), which parsed the text as a Double and stopped the script on \"\" or on any answer that is not a number. The summary's null check shows the intent: a missing count reads as 0. The summary now reads the text and takes it as a whole number only where it is one, else as missing.",
+      "reason": "The number of sex partners is asked as free text (getString) and saved as typed, and closing a session clears the collateral answer by saving \"\"; the summary then reads it with loadInteger(), which parsed the text as a Double and stopped the script on \"\" or on any answer that is not a number. The summary's null check shows the intent: a missing count reads as 0. The summary now reads the text and parses it as loadInteger() did, as a number whose whole part it takes (\"12.0\" is 12), where it is one, else takes it as missing.",
       "diff": "sex-partners-text.diff"
     }
   ]

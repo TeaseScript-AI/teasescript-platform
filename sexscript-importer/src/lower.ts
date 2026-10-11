@@ -10243,11 +10243,11 @@ function literalListLength(list: AstNode, context: LowerContext): number | null 
  * The largest value a whole position can have, where it is made of numbers, `getRandom(n)` of a written number, sums
  * and differences, or a variable only ever set to such values; undefined otherwise.
  */
-function largestValue(
-  node: AstNode,
-  context: LowerContext,
-  seen = new Set<string>(),
-): number | undefined {
+function largestValue(node: AstNode, context: LowerContext): number | undefined {
+  // Each variable's bounds once, as sums may read the same variable along many paths; a variable that reaches itself
+  // has none.
+  const seen = new Set<string>();
+  const known = new Map<string, number | undefined>();
   const bound = (value: AstNode, largest: boolean): number | undefined => {
     const constant = constantValue(value);
     if (typeof constant === "number") return Number.isInteger(constant) ? constant : undefined;
@@ -10276,14 +10276,22 @@ function largestValue(
     if (key === null || seen.has(key) || (context.compoundValues.get(key) ?? []).length > 0)
       return undefined;
     if (context.steppedBindings.has(key)) return undefined;
+    const memo = `${largest ? "max" : "min"} ${key}`;
+    if (known.has(memo)) return known.get(memo);
     const values = context.assignedValues.get(key) ?? [];
     if (values.length === 0) return undefined;
     seen.add(key);
     const bounds = values.map((item) => bound(item, largest));
     seen.delete(key);
-    const known = bounds.filter((item): item is number => item !== undefined);
-    if (known.length !== bounds.length) return undefined;
-    return largest ? Math.max(...known) : Math.min(...known);
+    const numbers = bounds.filter((item): item is number => item !== undefined);
+    const result =
+      numbers.length !== bounds.length
+        ? undefined
+        : largest
+          ? Math.max(...numbers)
+          : Math.min(...numbers);
+    known.set(memo, result);
+    return result;
   };
   return bound(node, true);
 }
@@ -15664,45 +15672,10 @@ function markSequentialWrites(body: AstNode, context: LowerContext): void {
   });
   const isConstant = (node: AstNode | undefined, value: number): boolean =>
     constantValue(node) === value;
-  // A 1 set where the counter is 0, `if (n == 0) n = 1` (Escape's `nimp` where no implement was chosen), counts up by
-  // one as well.
-  const stepsFromZero = new Set<AstNode>();
-  walkAst(body, (node) => {
-    if (node.kind !== "if") return;
-    const condition = asNode(node.condition);
-    const tested =
-      condition?.kind === "binary" &&
-      text(condition.operator) === "==" &&
-      isConstant(asNode(condition.right) ?? undefined, 0)
-        ? bindingKey(asNode(condition.left), keys)
-        : null;
-    if (tested === null) return;
-    const then = asNode(node.then);
-    const statements =
-      then?.kind === "block" ? nodeArray(then.statements) : then === null ? [] : [then];
-    for (const statement of statements) {
-      const expression =
-        statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-      const value =
-        expression?.kind === "binary" && text(expression.operator) === "="
-          ? asNode(expression.right)
-          : null;
-      if (
-        value !== null &&
-        isConstant(value, 1) &&
-        bindingKey(asNode(expression!.left), keys) === tested
-      )
-        stepsFromZero.add(value);
-    }
-  });
   const counts = (key: string): boolean =>
     !decremented.has(key) &&
     (context.assignedValues.get(key) ?? []).every(
-      (value) =>
-        isConstant(value, 0) ||
-        isNullConstant(value) ||
-        isEmptyGroovyExpression(value) ||
-        stepsFromZero.has(value),
+      (value) => isConstant(value, 0) || isNullConstant(value) || isEmptyGroovyExpression(value),
     ) &&
     (context.compoundValues.get(key) ?? []).every(
       (value) => text(value.operator) === "+" && isConstant(asNode(value.right) ?? undefined, 1),
@@ -16018,7 +15991,8 @@ function growingListWrite(
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
   // A list that starts empty and is later set to lists of unknown length, `imp = []`, then `imp[nimp] = …` beside
   // `nimp++` and `imp = shuffle(imp, nimp)` (OwlSays, Escape), grows by appending where the writes count up with a
-  // counter; a write at another position of such a list is taken to lie inside it, as in a list of unknown length.
+  // counter, and is padded up to a write at another position, which may lie past its end (Escape's `nimp`, which the
+  // script sets to 1 where no implement was chosen).
   // A Java array has a fixed length, which a write past its end failed on, so a variable that may hold one does not grow.
   const array = (node: AstNode): boolean =>
     node.kind === "array" ||
@@ -16028,8 +16002,7 @@ function growingListWrite(
     isEmptyList(assigned[0]) &&
     assigned.every(
       (node) => (node.kind !== "list" || nodeArray(node.items).length === 0) && !array(node),
-    ) &&
-    sequentialWrites.has(targetNode);
+    );
   // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
   // `label[2] = exit`, grows it too.
   const position = indexNode === null ? undefined : constantValue(indexNode);

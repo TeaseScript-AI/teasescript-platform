@@ -510,6 +510,16 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
   // Groovy lets a function declare a name again only in a block apart from the first, such as another `case`; each
   // declaration then sets the one script variable where it stands (liftLocal), so they must agree on its type.
   if (declarations.length === 0) return false;
+  // Every use of the name must be one of these locals: a use outside their blocks, or before a declaration in its
+  // block, is a script variable of the same name that renaming would change.
+  if (
+    !withinDeclarations(
+      block,
+      name,
+      declarations.map(({ node }) => node),
+    )
+  )
+    return false;
   const types = new Set(declarations.map(({ node }) => originType(node)));
   if (types.size !== 1) return false;
   return declarations.every(({ node, nested }) => {
@@ -528,6 +538,47 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
     // Untyped declarations agree where their values are constants of one kind.
     return literal(value) && (declarations.length === 1 || constantKinds(declarations).size === 1);
   });
+}
+
+/**
+ * Whether every variable of the name in the function's body stands in a block that declares it, after that
+ * declaration, so that it is one of these locals.
+ */
+function withinDeclarations(
+  block: AstNode,
+  name: string,
+  declarations: readonly AstNode[],
+): boolean {
+  // The block that holds each declaration, with where the declaration starts.
+  const scopes = new Map<AstNode, Array<{ line: number; column: number }>>();
+  const place = (node: AstNode, ancestors: readonly AstNode[]): void => {
+    if (declarations.includes(node)) {
+      const holder = [...ancestors].reverse().find((ancestor) => ancestor.kind === "block");
+      const span = node.span;
+      if (holder !== undefined && span !== null && span !== undefined)
+        scopes.set(holder, [
+          ...(scopes.get(holder) ?? []),
+          { line: span.line, column: span.column },
+        ]);
+    }
+    for (const child of children(node)) place(child, [...ancestors, node]);
+  };
+  place(block, []);
+  if (scopes.size === 0) return false;
+  const after = (span: AstNode["span"], start: { line: number; column: number }): boolean =>
+    span !== null &&
+    span !== undefined &&
+    (span.line > start.line || (span.line === start.line && span.column >= start.column));
+  let inside = true;
+  const check = (node: AstNode, ancestors: readonly AstNode[]): void => {
+    if (node.kind === "variable" && variableName(node) === name)
+      inside &&= ancestors.some((ancestor) =>
+        (scopes.get(ancestor) ?? []).some((start) => after(node.span, start)),
+      );
+    for (const child of children(node)) check(child, [...ancestors, node]);
+  };
+  check(block, []);
+  return inside;
 }
 
 /** The Groovy type a declaration gives its variable, `java.lang.Object` for `def`. */
