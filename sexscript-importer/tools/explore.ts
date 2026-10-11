@@ -18,9 +18,11 @@
  * `tools/explore-report.ts`; `--no-report` leaves it out), and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
- * given. `--until-stalled` runs each unit until it is done or stalled instead (see `ExploreOptions.untilStalled`), with
- * no state limit and a time cap of two hours unless `--max-states` or `--budget-seconds` is given; the report's
- * `search.audit` says how it ended: `complete`, `stalled`, `spiral`, or `capped`.
+ * given. `--until-stalled` runs each unit until it is done instead: exhausted, or on a plateau, no new code or condition
+ * way in the second half of the run (see `ExploreOptions.untilStalled`), with safety caps only: two hours, and as many
+ * states as three quarters of the heap hold at about 3 KB each, unless `--budget-seconds` or `--max-states` is given.
+ * `search.stoppedBy` says whether the run finished (`exhausted`, `plateau`) or a cap cut it off (`budget`,
+ * `operations`, `maxStates`), and `search.audit` how it ended: `complete`, `stalled`, `spiral`, or `capped`.
  *
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
@@ -48,7 +50,7 @@
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
-import { setFlagsFromString } from "node:v8";
+import { getHeapStatistics, setFlagsFromString } from "node:v8";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +58,7 @@ import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 import { loadRepositoryPackageScanner } from "../src/compile-check.ts";
 import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
-import { explore, type CorpusEntry, type ExploreResult } from "../src/explorer-search.ts";
+import { cutOff, explore, type CorpusEntry, type ExploreResult } from "../src/explorer-search.ts";
 import {
   EPOCH_MS,
   loadEngine,
@@ -74,6 +76,11 @@ const SELF = fileURLToPath(import.meta.url);
 const HEAP_GROWING = "--heap-growing-percent";
 /** Until stalled, the default time cap per unit. */
 const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
+/**
+ * Until stalled, the heap a kept state takes, about (measured: 2.3 KB on SpankedHeroRPG at 148,621 states, without the
+ * snapshot store, which lies outside the heap); the default state cap keeps three quarters of the heap for them.
+ */
+const STATE_BYTES = 3000;
 /** Missed ways the summary lists per unit, by the code behind them. */
 const WORKING_TOWARD_ROWS = 8;
 /** Session numbers shown one by one; the later ones are shown together. */
@@ -217,7 +224,7 @@ async function main(args: string[]): Promise<void> {
   const maxStates =
     values["max-states"] === undefined
       ? untilStalled
-        ? Number.MAX_SAFE_INTEGER
+        ? Math.floor((getHeapStatistics().heap_size_limit * 3) / 4 / STATE_BYTES)
         : 20000
       : Number(values["max-states"]);
   const storeMb = values["store-mb"] === undefined ? null : Number(values["store-mb"]);
@@ -748,7 +755,8 @@ function oneLine(header: ReportHeader, result: ExploreResult | null): string {
       : `${corpus.coverageAtStart.percent}% from ${corpus.replayed} of ${corpus.loaded} corpus entries ` +
         `(${corpus.stale} stale, ${corpus.replayMs} ms), then `;
   return (
-    `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
+    `${fromCorpus}${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states ` +
+    `(${search.stoppedBy}${cutOff(search.stoppedBy) ? ": cut off" : ""}), ` +
     `${crashes.length} crashes` +
     (crashes.some((crash) => crash.chosen === true)
       ? ` (${crashes.filter((crash) => crash.chosen === true).length} only with chosen random outcomes)`
@@ -951,13 +959,13 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       const progress = fields(audit.progress);
       const spiral = fields(audit.spiral);
       lines.push(
-        `- Until stalled: ${audit.result}` +
+        `- Until done: ${audit.result}` +
           (typeof spiral.location === "string"
             ? ` at \`${spiral.location}\` (${count(spiral.share)}% of the expansions since the last progress)`
             : "") +
           `; last progress after ${count(audit.lastProgressAt)} operations, window ${count(audit.window)}; ` +
-          `progress: ${count(progress.code)} new code, ${count(progress.ways)} new ways, ${count(progress.closer)} closer ` +
-          `(and ${count(progress.cells)} new cells, which do not hold a run up)`,
+          `progress: ${count(progress.code)} new code, ${count(progress.ways)} new ways ` +
+          `(and ${count(progress.closer)} closer, ${count(progress.cells)} new cells, which do not hold a run up)`,
       );
     }
     lines.push(

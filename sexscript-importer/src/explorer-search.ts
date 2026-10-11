@@ -154,21 +154,21 @@ const DEPTH_EXPLORE_SHARE = 1 / 8;
  */
 const FORCED_SHARE = 1 / 16;
 /**
- * Until stalled: the operations without progress after which a run stops, at least, and more per coverable line; and
- * how many times the longest stretch without progress that progress still ended the window grows to.
+ * Until stalled: the operations without progress after which a run stops on a plateau, at least, and more per coverable
+ * line.
  */
 const STALL_OPERATIONS = 20_000;
 const STALL_OPERATIONS_PER_LINE = 20;
-const STALL_GAP_FACTOR = 3;
 /** Until stalled: a stall is a spiral when one place took this share of the expansions since the last progress. */
 const SPIRAL_SHARE = 1 / 2;
 
 /**
- * Until stalled: how many operations without progress stop a run of a plan with `lines` coverable lines, when the
- * longest stretch without progress that progress ended so far was `gap` operations.
+ * Until stalled: how many operations without progress stop a run of a plan with `lines` coverable lines on a plateau,
+ * when its last progress came after `last` operations: as many again, so that the whole second half of the run brought
+ * nothing new (which also covers every stretch without progress that progress ended so far); at least the minimum.
  */
-export function stallWindow(lines: number, gap: number): number {
-  return Math.max(STALL_OPERATIONS + STALL_OPERATIONS_PER_LINE * lines, STALL_GAP_FACTOR * gap);
+export function stallWindow(lines: number, last: number): number {
+  return Math.max(STALL_OPERATIONS + STALL_OPERATIONS_PER_LINE * lines, last);
 }
 /** With guidance: the fewest instructions a region of code not reached yet must have to be led toward. */
 const MIN_REGION = 10;
@@ -396,10 +396,11 @@ export interface ExploreOptions {
    */
   readonly storedLeads?: boolean;
   /**
-   * Run until done or stalled: no work budget is needed, and `budgetMs` is only a safety cap. The run stops after
-   * {@link stallWindow} operations without progress: new code or a new condition way, or a state closer to a comparison
-   * a missed way needs. New cells are counted but do not hold a run up: cells of counters keep coming long after
-   * anything else does. `search.audit` says how the run ended. Off by default.
+   * Run until done: no work budget is needed, and `budgetMs` and `maxStates` are only safety caps. The run stops when it
+   * is exhausted or on a plateau, after {@link stallWindow} operations without progress, new code or a new condition
+   * way: the second half of the run. States closer to a comparison a missed way needs, and new cells, are counted but
+   * do not hold a run up: counters keep coming closer and make new cells long after anything else is new.
+   * `search.audit` says how the run ended. Off by default.
    */
   readonly untilStalled?: boolean;
   /** The snapshot store's limit in bytes; an eighth of the memory by default, from 256 MiB to 4 GiB. */
@@ -624,11 +625,19 @@ export interface Closest {
   trend?: "improving" | "flat";
 }
 
+/**
+ * Whether a search that stopped so was cut off by a cap (time, work, or states) before it finished: a warning, as its
+ * coverage is not all the search would reach. One that is exhausted, or on a plateau, finished.
+ */
+export function cutOff(stoppedBy: string): boolean {
+  return stoppedBy !== "exhausted" && stoppedBy !== "plateau";
+}
+
 /** How a run until stalled ended, and the progress it made. */
 export interface Audit {
   /**
-   * `complete`: nothing was left to try and no line is of unknown reach; `stalled`: no progress for `window`
-   * operations, or nothing left to try with lines of unknown reach; `spiral`: a stall in which one place took most
+   * `complete`: nothing was left to try and no line is of unknown reach; `stalled`: a plateau, no new code or condition
+   * way for `window` operations, or nothing left to try with lines of unknown reach; `spiral`: a stall in which one place took most
    * expansions since the last progress (`spiral`), a problem of the explorer; `capped`: the time or state cap came first.
    */
   result: "complete" | "stalled" | "spiral" | "capped";
@@ -638,8 +647,8 @@ export interface Audit {
   lastProgressAt: number;
   longestGap: number;
   /**
-   * Progress events: steps that ran new code, took a new way, or came closer to a comparison; and new cells, which do not
-   * count as progress for the stall.
+   * Progress events: steps that ran new code or took a new way; and steps that came closer to a comparison and new
+   * cells, which do not count as progress for the plateau.
    */
   progress: { code: number; ways: number; cells: number; closer: number };
   spiral?: { location: string; prompt: string; share: number };
@@ -720,10 +729,12 @@ export interface ExploreResult {
      */
     engineErrors: { count: number; first: ({ message: string } & Repro) | null };
     /**
-     * Why the search stopped: `budget` is the time budget, `operations` the work budget, `stalled` no progress for the
-     * stall window (with `untilStalled`).
+     * Why the search stopped. It finished: `exhausted`, nothing left to try, or `plateau`, with `untilStalled`, no new
+     * code or condition way for the stall window, the second half of the run ({@link stallWindow}). It was cut off, a
+     * warning that it did not finish ({@link cutOff}): `budget`, the time budget; `operations`, the work budget;
+     * `maxStates`, the state cap.
      */
-    stoppedBy: "exhausted" | "budget" | "operations" | "maxStates" | "stalled";
+    stoppedBy: "exhausted" | "plateau" | "budget" | "operations" | "maxStates";
     /** With `untilStalled`: how the run ended, and its progress. */
     audit?: Audit;
     /** Runtime operations the run called: the work that `budgetOps` limits. */
@@ -2186,9 +2197,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       functionAt[index] = Number(definition.id);
   const untilStalled = options.untilStalled === true;
   /**
-   * The run's progress (steps that ran new code, took a new condition way, or came closer to a comparison a missed way
-   * needs; and new cells, which are only counted), the operations done at the last one, the longest stretch without
-   * progress that progress ended, and where expansions went since the last progress.
+   * The run's progress (steps that ran new code or took a new condition way; and new cells and steps that came closer to
+   * a comparison a missed way needs, which are only counted), the operations done at the last one, the longest stretch
+   * without progress that progress ended, and where expansions went since the last progress.
    */
   const progress = { code: 0, ways: 0, cells: 0, closer: 0 };
   let progressAt = 0;
@@ -2196,7 +2207,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const sinceProgress = new Map<number | null, number>();
   const progressed = (kind: keyof typeof progress): void => {
     progress[kind] += 1;
-    if (kind === "cells") return;
+    if (kind === "cells" || kind === "closer") return;
     longestGap = Math.max(longestGap, session.operations - progressAt);
     progressAt = session.operations;
     sinceProgress.clear();
@@ -4083,14 +4094,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         }),
       ).size
     : 0;
-  const window = () => (untilStalled ? stallWindow(lines, longestGap) : Infinity);
-  const spent = (): "operations" | "budget" | "stalled" | null =>
+  const window = () => (untilStalled ? stallWindow(lines, progressAt) : Infinity);
+  const spent = (): "operations" | "budget" | "plateau" | null =>
     session.operations >= budgetOps
       ? "operations"
       : performance.now() - started >= options.budgetMs
         ? "budget"
         : !replaying && session.operations - progressAt >= window()
-          ? "stalled"
+          ? "plateau"
           : null;
   const outOfBudget = () => spent() !== null;
   const full = () => outOfBudget() || nodes.length >= options.maxStates;
@@ -4617,11 +4628,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       0,
     ];
     const share = since === 0 ? 0 : most / since;
-    const spiral = stoppedBy === "stalled" && since >= ANALYZE_EVERY && share >= SPIRAL_SHARE;
+    const spiral = stoppedBy === "plateau" && since >= ANALYZE_EVERY && share >= SPIRAL_SHARE;
     const span = spot === null ? null : compactSpan(instructions[spot]?.span);
     audit = {
       result:
-        stoppedBy === "stalled"
+        stoppedBy === "plateau"
           ? spiral
             ? "spiral"
             : "stalled"

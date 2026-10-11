@@ -342,14 +342,14 @@ function stopShown(search: Fields): string {
   switch (search.stoppedBy) {
     case "exhausted":
       return " It tried everything it could think of.";
+    case "plateau":
+      return " It stopped when more play no longer reached anything new: nothing in the second half of its play.";
     case "maxStates":
-      return ` It stopped at its limit of ${count(search.states).toLocaleString("en")} kept game states.`;
+      return ` It was cut off at its limit of ${count(search.states).toLocaleString("en")} kept game states before it finished.`;
     case "budget":
-      return " It stopped at its time budget.";
-    case "stalled":
-      return " It stopped when more play no longer reached anything new.";
+      return " It was cut off at its time budget before it finished.";
     default:
-      return " It stopped at its step budget.";
+      return " It was cut off at its step budget before it finished.";
   }
 }
 

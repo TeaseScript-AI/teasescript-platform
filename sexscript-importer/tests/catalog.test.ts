@@ -237,7 +237,7 @@ test(
       );
       assert.ok(
         page.includes(
-          '<td class="explorer"><details title="Explored 2026-10-06 with explorer 6d0902c4, 30 s budget. The search stopped at its budget after 40 states. It reached 1 of 2 lines (50%). Paths: 1 ended normally, 0 failed, 0 stuck, 3 still open. First crash: TSR025 at main.tease:7. List index 0 is outside the valid range. First trap: loop at main.tease:6."><summary><span class="status error">50% &middot; 1 crash &middot; 1 trap</span></summary>',
+          '<td class="explorer"><details title="Explored 2026-10-06 with explorer 6d0902c4, 30 s budget. The search was cut off at its budget after 40 states. It reached 1 of 2 lines (50%). Paths: 1 ended normally, 0 failed, 0 stuck, 3 still open. First crash: TSR025 at main.tease:7. List index 0 is outside the valid range. First trap: loop at main.tease:6."><summary><span class="status error">50% &middot; 1 crash &middot; 1 trap</span></summary>',
         ),
       );
       assert.match(

@@ -1365,7 +1365,7 @@ function renderExplorer(entry: CatalogEntry): string {
     ...(report.states === null
       ? []
       : [
-          `The search ${report.stoppedBy === "exhausted" ? "reached every state" : "stopped at its budget"} after ${report.states} states.`,
+          `The search ${report.stoppedBy === "exhausted" ? "reached every state" : report.stoppedBy === "plateau" ? "stopped when more play reached nothing new" : "was cut off at its budget"} after ${report.states} states.`,
         ]),
     ...(coverage === null || coverage.visited === null || coverage.coverable === null
       ? []

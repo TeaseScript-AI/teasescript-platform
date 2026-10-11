@@ -15,7 +15,7 @@ import {
   type PlanDiagnostic,
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
-import { explore, noteOf, type CorpusEntry } from "../src/explorer-search.ts";
+import { cutOff, explore, noteOf, type CorpusEntry } from "../src/explorer-search.ts";
 import { playtestReport } from "../tools/explore-report.ts";
 import { clockModel, flipGap, holdsAt, storedHolds, timeContext } from "../src/explorer-time.ts";
 import {
@@ -1815,7 +1815,7 @@ test(
         }),
       ),
     );
-    assert.match(report, /stopped at its limit of 20,003 kept game states/u);
+    assert.match(report, /cut off at its limit of 20,003 kept game states before it finished/u);
     // A missed way is only not proven unreachable: the report does not present it as reachable.
     assert.match(
       report,
@@ -2116,7 +2116,7 @@ test(
 );
 
 test(
-  "a comparison of two variables is measured as their difference: read where the condition's function runs, it reports the closest difference and its trend, and each closer one is progress until stalled",
+  "a comparison of two variables is measured as their difference: read where the condition's function runs, it reports the closest difference and its trend, and each closer one is counted but does not hold a run up",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -2149,10 +2149,10 @@ test(
     assert.equal(best?.trend, "improving");
     assert.ok(typeof best?.value === "number" && best.value > -1000 && best.value < 0);
     assert.equal(best?.distance, -Number(best?.value));
-    // Every round brings the pair closer: only the cap ends the run.
-    const capped = run(true, 6000).search;
-    assert.equal(capped.audit?.result, "capped");
-    assert.ok((capped.audit?.progress.closer ?? 0) > 100);
+    // Every round brings the pair closer, but nothing new comes: the run ends on a plateau.
+    const plateau = run(true, 100_000).search;
+    assert.equal(plateau.stoppedBy, "plateau");
+    assert.ok((plateau.audit?.progress.closer ?? 0) > 100);
   },
 );
 
@@ -2198,7 +2198,7 @@ test(
 );
 
 test(
-  "until stalled, a run ends complete when nothing is left to try, as a spiral when one place took the work since the last progress, and capped while a counter still comes closer",
+  "until done, a run ends complete when nothing is left to try, on a plateau when its second half brought nothing new, a spiral when one place took that work, also while a counter still comes closer, and cut off by a cap",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -2225,17 +2225,21 @@ test(
       'let count = 0\nwhile true {\n  let pick = choose again: "Again", leave: "Leave"\n  if pick == "leave" {\n' +
       "    exit\n  }\n  count += 1\n";
     const spiral = run(`${loop}}\n`);
-    assert.equal(spiral.stoppedBy, "stalled");
+    assert.equal(spiral.stoppedBy, "plateau");
     assert.equal(spiral.audit?.result, "spiral");
     assert.deepEqual(
       spiral.audit?.spiral && [spiral.audit.spiral.location, spiral.audit.spiral.share],
       ["main.tease:3", 100],
     );
     assert.ok(spiral.operations - spiral.audit!.lastProgressAt >= spiral.audit!.window);
-    // A missed way needs the count at a million: every round is closer, so only the cap ends the run.
-    const capped = run(`${loop}  if count >= 1000000 {\n    say "Done."\n  }\n}\n`, 25_000);
-    assert.equal(capped.audit?.result, "capped");
-    assert.ok((capped.audit?.progress.closer ?? 0) > 1000);
+    // A missed way needs the count at a million: every round is closer, which does not hold the run up.
+    const counter = run(`${loop}  if count >= 1000000 {\n    say "Done."\n  }\n}\n`, 100_000);
+    assert.deepEqual([counter.stoppedBy, counter.audit?.result], ["plateau", "spiral"]);
+    assert.ok((counter.audit?.progress.closer ?? 0) > 1000);
+    // A work budget smaller than the plateau window cuts the run off.
+    const capped = run(`${loop}}\n`, 5000);
+    assert.deepEqual([capped.stoppedBy, capped.audit?.result], ["operations", "capped"]);
+    assert.ok(cutOff(capped.stoppedBy) && !cutOff(spiral.stoppedBy) && !cutOff(complete.stoppedBy));
     // Once play takes a way, coming closer to its other comparison is no progress; the way still missed is flat.
     const reached = run(
       `${loop}  if count >= 1000000 or count >= 100 {\n    say "Hundred."\n  }\n  if count < 0 {\n    say "Never."\n  }\n}\n`,
