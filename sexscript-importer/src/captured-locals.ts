@@ -524,23 +524,29 @@ function liftable(block: AstNode, local: CapturedLocal, parameter: string | null
   return literal(value) || typed(type);
 }
 
-/** Whether the block compares a variable with null, `x == null` or `x != null`, or reads it null-safely, `x?.size()`. */
+/**
+ * Whether the block may tell a variable's null apart from the empty text: it compares the variable by `==`, `!=`, `<=>`,
+ * `in`, a pattern, or `instanceof`, switches on it, gives it to `?:`, or reads it null-safely, `x?.size()`. A comparison
+ * with another variable may compare with null too, so any comparison counts.
+ */
 function nullTested(block: AstNode, name: string): boolean {
+  const comparing = new Set(["==", "!=", "<=>", "in", "==~", "=~", "instanceof"]);
   let tested = false;
-  walkAst(block, (node) => {
-    if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
-      const [left, right] = [asNode(node.left), asNode(node.right)];
-      const isNull = (side: AstNode | null): boolean =>
-        side?.kind === "constant" && side.value === null;
+  const walk = (node: AstNode, parent: AstNode | null): void => {
+    if (node.kind === "variable" && variableName(node) === name && parent !== null) {
+      if (parent.kind === "binary" && comparing.has(String(parent.operator))) tested = true;
+      if (parent.kind === "switch" && asNode(parent.expression) === node) tested = true;
+      if (parent.kind === "elvis") tested = true;
       if (
-        (variableName(left) === name && isNull(right)) ||
-        (variableName(right) === name && isNull(left))
+        (parent.kind === "property" || parent.kind === "methodCall") &&
+        parent.safe === true &&
+        asNode(parent.object) === node
       )
         tested = true;
     }
-    if ((node.kind === "property" || node.kind === "methodCall") && node.safe === true)
-      if (variableName(node.object) === name) tested = true;
-  });
+    for (const child of children(node)) walk(child, node);
+  };
+  walk(block, null);
   return tested;
 }
 
