@@ -44,3 +44,14 @@ def pulse = { main, speed = 1 ->
 }
 pulse(this, 0.5)
 pulse(this)
+// A call by the name of a closure's parameter calls the value it gets, so its fraction is not the script function's of
+// that name; and a whole default that the function uses as a list position keeps whole, where a call with the script
+// object that passes it a fraction stays a TODO.
+def apply = { action -> action(0.5) }
+def pick = { n = 1 -> show(["zero", "one"][n]) }
+def echo = { n -> show(n) }
+pick()
+apply(echo)
+def card = { main, n = 1 -> main.show(["zero", "one"][n]) }
+card(this)
+if (false) card(this, 0.5)

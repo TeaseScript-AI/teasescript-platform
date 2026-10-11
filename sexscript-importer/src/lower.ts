@@ -78,6 +78,7 @@ import {
   withPassedLocals,
 } from "./captured-locals.ts";
 import {
+  children as astChildren,
   mapChildren as mapAstChildren,
   withListAliasesAsPaths,
   withTupleAssignments,
@@ -10325,17 +10326,146 @@ function fractionalArguments(body: AstNode, context: LowerContext): Map<string, 
       ...(context.compoundValues.get(key) ?? []),
     ].some((value) => gives(value, seen));
   };
-  const result = new Map<string, Set<number>>();
+  // The script's functions by name, to tell which parameters only take part in arithmetic.
+  const functions = new Map<string, AstNode>();
   walkAst(body, (node) => {
-    if (node.kind !== "methodCall" || node.implicitThis !== true) return;
-    const name = constantString(node.method);
-    if (name === null || !context.functions.has(name)) return;
-    nodeArray(asNode(node.arguments)?.items).forEach((argument, position) => {
-      if (gives(argument, new Set()))
-        result.set(name, new Set([...(result.get(name) ?? []), position]));
-    });
+    const value = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    if (value?.kind === "closure" && name !== null && !functions.has(name))
+      functions.set(name, value);
   });
+  const result = new Map<string, Set<number>>();
+  // A call by a name that a closure around it binds, as a parameter or a local, calls that value, not the function.
+  const visit = (node: AstNode, shadowed: ReadonlySet<string>): void => {
+    const inner = node.kind === "closure" ? new Set([...shadowed, ...boundNames(node)]) : shadowed;
+    if (node.kind === "methodCall" && node.implicitThis === true) {
+      const name = constantString(node.method);
+      const closure = name === null ? undefined : functions.get(name);
+      if (name !== null && context.functions.has(name) && !inner.has(name))
+        nodeArray(asNode(node.arguments)?.items).forEach((argument, position) => {
+          const parameter = closure === undefined ? null : closureParameterNode(closure, position);
+          // A whole default widens to a number only where the function uses it in arithmetic alone, where a
+          // fraction gives what it gave in Groovy; a list position, a text position, or a range would not take one.
+          if (parameter !== null && !arithmeticOnly(closure!, String(parameter.name))) return;
+          if (gives(argument, new Set()))
+            result.set(name, new Set([...(result.get(name) ?? []), position]));
+        });
+    }
+    for (const child of astChildren(node)) visit(child, inner);
+  };
+  visit(body, new Set());
   return result;
+}
+
+/** The names a closure binds: its parameters (`it` where it declares none) and the locals it declares. */
+function boundNames(closure: AstNode): string[] {
+  const names = (groovyParameters(closure.parameters) ?? []).map((parameter) => parameter.name);
+  if (names.length === 0 && closure.parameterSpecified !== true) names.push("it");
+  const walk = (node: AstNode): void => {
+    if (node !== closure && node.kind === "closure") return;
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) names.push(name);
+    }
+    for (const child of astChildren(node)) walk(child);
+  };
+  walk(closure);
+  return names;
+}
+
+/** The parameter record of a closure at a position, or null. */
+function closureParameterNode(closure: AstNode, position: number): Record<string, unknown> | null {
+  const parameters = Array.isArray(closure.parameters) ? closure.parameters : [];
+  const parameter: unknown = parameters[position];
+  return isRecord(parameter) && typeof parameter.name === "string" ? parameter : null;
+}
+
+/** Whether an untyped parameter has a whole number written as its default, `n = 1`. */
+function wholeDefault(parameter: Record<string, unknown>): boolean {
+  const type = text(parameter.type);
+  if (type !== null && type !== undefined && type !== "java.lang.Object" && type !== "Object")
+    return false;
+  const initial = parameter.initialExpression ?? parameter.default;
+  const value = isAstNode(initial) ? initial : null;
+  return (
+    value?.kind === "constant" && typeof value.value === "number" && Number.isInteger(value.value)
+  );
+}
+
+/**
+ * Whether a closure reads its parameter only as an operand of arithmetic or a comparison, `n * 2`, `n > 0`, or sets it,
+ * so that a fraction in it gives what it gave in Groovy.
+ */
+function arithmeticOnly(closure: AstNode, name: string): boolean {
+  let only = true;
+  const operators = new Set(["+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!="]);
+  const walk = (node: AstNode, parent: AstNode | null): void => {
+    if (node.kind === "variable" && variableName(node) === name) {
+      const operator = parent?.kind === "binary" ? text(parent.operator) : null;
+      const set =
+        parent !== null &&
+        (parent.kind === "declaration" || ASSIGNMENT_OPERATORS.has(String(parent.operator))) &&
+        asNode(parent.left) === node;
+      const unary = parent?.kind === "unaryMinus" || parent?.kind === "unaryPlus";
+      if (
+        !set &&
+        !unary &&
+        (operator === null || operator === undefined || !operators.has(operator))
+      )
+        only = false;
+    }
+    for (const child of astChildren(node)) walk(child, node);
+  };
+  walk(asNode(closure.body) ?? closure, null);
+  return only;
+}
+
+const ASSIGNMENT_OPERATORS = new Set(["=", "+=", "-=", "*=", "/=", "%="]);
+
+/** The variables the body sets to a fraction written out, a division, or another such variable, by name. */
+function fractionalNames(body: AstNode): Set<string> {
+  const values: Array<[string, AstNode]> = [];
+  walkAst(body, (node) => {
+    const set =
+      node.kind === "declaration" ||
+      (node.kind === "binary" && ASSIGNMENT_OPERATORS.has(String(node.operator)))
+        ? variableName(node.left)
+        : null;
+    const value = asNode(node.right);
+    if (set !== null && value !== null) values.push([set, value]);
+  });
+  const names = new Set<string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, value] of values)
+      if (!names.has(name) && syntacticFraction(value, names)) {
+        names.add(name);
+        changed = true;
+      }
+  }
+  return names;
+}
+
+/** Whether a value may be a fraction by its form: a fractional literal, a division, or a variable of `names`. */
+function syntacticFraction(node: AstNode, names: ReadonlySet<string>): boolean {
+  if (node.kind === "constant")
+    return typeof node.value === "number" && !Number.isInteger(node.value);
+  if (node.kind === "unaryMinus" || node.kind === "unaryPlus") {
+    const value = asNode(node.value);
+    return value !== null && syntacticFraction(value, names);
+  }
+  if (node.kind === "binary") {
+    const operator = text(node.operator) ?? "";
+    if (operator === "/") return true;
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    return (
+      ["+", "-", "*", "%"].includes(operator) &&
+      ((left !== null && syntacticFraction(left, names)) ||
+        (right !== null && syntacticFraction(right, names)))
+    );
+  }
+  return node.kind === "variable" && names.has(variableName(node) ?? "");
 }
 
 /**
@@ -18489,6 +18619,7 @@ function sourceTextOf(node: AstNode, context: LowerContext): string {
  */
 function withHostArguments(body: AstNode): AstNode {
   const positions = new Map<string, number>();
+  const closures = new Map<string, AstNode>();
   walkAst(body, (node) => {
     const closure = node.kind === "declaration" ? asNode(node.right) : null;
     const name = node.kind === "declaration" ? variableName(node.left) : null;
@@ -18497,16 +18628,34 @@ function withHostArguments(body: AstNode): AstNode {
       (parameter) => parameter.name === "main",
     );
     if (position >= 0) positions.set(name, position);
+    closures.set(name, closure);
   });
   if (positions.size === 0) return body;
+  // A call that may pass a fraction for a whole default the function uses other than in arithmetic keeps its script
+  // object, and stays a TODO as before: that parameter keeps its whole type (fractionalArguments).
+  const fractions = fractionalNames(body);
+  const keepsWhole = (closure: AstNode, items: AstNode[], position: number): boolean =>
+    items.some((item, index) => {
+      if (index === position) return false;
+      const parameter = closureParameterNode(closure, index);
+      return (
+        parameter !== null &&
+        wholeDefault(parameter) &&
+        !arithmeticOnly(closure, String(parameter.name)) &&
+        syntacticFraction(item, fractions)
+      );
+    });
   const rewrite = (node: AstNode): AstNode => {
     const changed = mapAstChildren(node, rewrite);
     const call = changed.kind === "methodCall" && changed.implicitThis === true ? changed : null;
-    const position = call === null ? undefined : positions.get(constantString(call.method) ?? "");
+    const name = call === null ? "" : (constantString(call.method) ?? "");
+    const position = call === null ? undefined : positions.get(name);
     const list = call === null ? null : asNode(call.arguments);
     const items = nodeArray(list?.items);
     if (position === undefined || list === null || variableName(items[position]) !== "this")
       return changed;
+    const closure = closures.get(name);
+    if (closure !== undefined && keepsWhole(closure, items, position)) return changed;
     const span = items[position]!.span;
     return {
       ...changed,

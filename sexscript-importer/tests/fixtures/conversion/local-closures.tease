@@ -1,10 +1,14 @@
-// MIGRATION INCOMPLETE: 3 error diagnostics.
+// MIGRATION INCOMPLETE: 4 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
   if action == "again" {
     again(args[0], args[1])
+    return
+  }
+  if action == "echo" {
+    echo(args[0])
     return
   }
   if action == "scriptCallback4" {
@@ -82,4 +86,26 @@ function pulse(main, speed: number = 1) {
 }
 pulse(null, 0.5)
 pulse(null)
+// A call by the name of a closure's parameter calls the value it gets, so its fraction is not the script function's of
+// that name; and a whole default that the function uses as a list position keeps whole, where a call with the script
+// object that passes it a fraction stays a TODO.
+function apply(action) {
+  echo(0.5)
+}
+function pick(n = 1) {
+  say ["zero", "one"][n]
+}
+function echo(n) {
+  say n
+}
+pick()
+apply("echo")
+function card(main, n = 1) {
+  say ["zero", "one"][n]
+}
+card(null)
+// TODO SX_OBJECT_THIS line 57: The legacy script object (this) cannot become a TeaseScript value.
+if false {
+  // | if (false) card(this, 0.5)
+}
 exit
