@@ -19,9 +19,18 @@ function said(events: readonly InterpreterEvent[]): string[] {
   return events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
 
-/** The scene time at which the foreground delay of `source` ends. */
-function delayDeadline(source: string, seed?: number): number | null {
-  const action = runValidSource(source, seed).snapshot.foregroundAction;
+/** The scene time at which the foreground delay of `source`, which has the warnings named, ends. */
+function delayDeadline(
+  source: string,
+  seed?: number,
+  warnings: readonly string[] = [],
+): number | null {
+  const plan = compileValidPlan(source, {}, warnings);
+  const snapshot =
+    seed === undefined
+      ? createImmediatePacingRuntimeSnapshot(plan)
+      : createImmediatePacingRuntimeSnapshot(plan, { seed });
+  const action = run(plan, snapshot).snapshot.foregroundAction;
   assert.equal(action?.kind, "delay", source);
   return action.deadlineMs;
 }
@@ -370,14 +379,16 @@ test("a wait or timer range takes any exact unit and draws whole units of it", (
     ["hours", 3_600_000],
     ["days", 86_400_000],
   ] as const) {
+    // A wait or timer in days gets warning TSV061.
+    const warnings = unit === "days" ? ["TSV061"] : [];
     for (const command of ["wait", "timer"]) {
       const drawn = new Set<number | null>();
       for (let index = 1; index <= 40; index += 1) {
-        const deadline = delayDeadline(`${command} (2..=4) ${unit}\nexit`, seed(index));
+        const deadline = delayDeadline(`${command} (2..=4) ${unit}\nexit`, seed(index), warnings);
         drawn.add(deadline);
         // One draw, as `randomInteger` makes it.
         assert.equal(
-          delayDeadline(`${command} randomInteger(2..=4) ${unit}\nexit`, seed(index)),
+          delayDeadline(`${command} randomInteger(2..=4) ${unit}\nexit`, seed(index), warnings),
           deadline,
           `${command} ${unit}`,
         );
@@ -413,7 +424,7 @@ test("a wait or timer range takes any exact unit and draws whole units of it", (
 
   // Every draw restores from every checkpoint.
   assertRuntimeResumeEquivalent(
-    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (1..=2) days\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
+    'let n = 0\nlet beat = timer(duration: (1..=4) h, async: true, repeat: true) {\n  n += 1\n}\nwait (100..500) ms\nwait (1..3) min\ntimer (1..=4) h\nwait (1..=2) h\ntimer (100..=300) ms\nbeat.stop()\nsay "${n}"\nexit',
   );
 
   // A calendar unit after a range is refused like any calendar duration.
