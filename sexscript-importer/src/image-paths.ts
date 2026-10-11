@@ -10,8 +10,11 @@ type Source = "camera" | "unknown";
 /** The tests scripts made on a picture's path. */
 const PATH_TESTS = new Set(["endsWith", "contains"]);
 const CASES = new Set(["lowercase", "uppercase"]);
-/** The parts every legacy webcam path held, `<folder>/images/captured/<number>.jpeg`. */
-const CAMERA_PARTS = ["/images/captured/", ".jpeg"];
+/**
+ * The parts every legacy webcam path held, `<folder>/images/captured/<number>.jpeg`, between the folder separators of
+ * the player's system: `/`, or `\` on Windows (File.getCanonicalPath()).
+ */
+const CAMERA_PARTS = ["images", "captured", ".jpeg"];
 
 /**
  * Legacy getImage() saved the webcam picture as `<folder>/images/captured/<number>.jpeg` and returned that path
@@ -20,7 +23,7 @@ const CAMERA_PARTS = ["/images/captured/", ".jpeg"];
  * takePhoto() and askImage() give an engine reference instead (V30 askImage), which keeps no such path. Where a
  * variable's every value is a takePhoto() picture, null, the empty start, or a copy of such a variable, a test that
  * every webcam path answers alike reads such a path instead (sexscriptLegacyImagePath): `endsWith` of a text without
- * digits, which only a suffix of `.jpeg` ends, and `contains` of a part of `/images/captured/` or `.jpeg`, also after
+ * digits, which only a suffix of `.jpeg` ends, and `contains` of a part of `images`, `captured`, or `.jpeg`, also after
  * `lowercase()` or `uppercase()`. A missing picture still fails the test. Any other test of a picture's path, as of a
  * chosen file's extension, stays as written, with a note (SX_IMAGE_PATH_TEST). Values that a never-true flag guards,
  * `if testmode { file = "test.jpg" }` with `let testmode = false`, are not values (MandysBlackmail's test mode).

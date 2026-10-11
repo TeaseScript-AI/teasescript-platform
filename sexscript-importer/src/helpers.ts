@@ -1385,28 +1385,66 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Legacy receiveInteger() cast the value it received to Integer and read null where the cast failed (it caught the
-  // ClassCastException), as for the empty text that HumanPaperboard sends: a stored value that is no whole number reads
-  // as a missing key does, null or the value the script used instead (`whenMissing`).
+  // Legacy receiveInteger() was `(Integer) receive(key)`: send() kept the value's text (String.valueOf), receive() read it
+  // back as an Integer where Integer.parseInt() took it, an optional sign and decimal digits within the int range
+  // (ss.PropertiesWorker), and the cast read null for any other value (it caught the ClassCastException), as for the
+  // empty text that HumanPaperboard sends. Such a value reads as a missing key does: null, or the value the script used
+  // instead (`whenMissing`). A stored number keeps no spelling, so a whole number that legacy sent as a decimal, `5.0`,
+  // reads as a whole number here.
   receiveInteger: {
     name: "sexscriptLegacyReceiveInteger",
-    build: () => ({
-      kind: "function",
-      name: "sexscriptLegacyReceiveInteger",
-      parameters: [
-        { name: "key", defaultValue: null },
-        { name: "whenMissing", defaultValue: lit(null) },
-      ],
-      body: [
-        letS("value", { kind: "load", key: v("key") }),
-        ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
-        ifS({ kind: "typeTest", value: v("value"), type: "integer" }, [
-          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("value")], named: {} }),
-        ]),
-        ret(v("whenMissing")),
-      ],
-      span: null,
-    }),
+    build: () => {
+      const missing = ret(v("whenMissing"));
+      const digits = v("digits");
+      return {
+        kind: "function",
+        name: "sexscriptLegacyReceiveInteger",
+        parameters: [
+          { name: "key", defaultValue: null },
+          { name: "whenMissing", defaultValue: lit(null) },
+        ],
+        body: [
+          letS("value", { kind: "load", key: v("key") }),
+          ifS(bin("==", v("value"), lit(null)), [missing]),
+          letS("text", template(v("value"))),
+          letS("digits", v("text")),
+          ifS(
+            bin(
+              "or",
+              call(v("text"), "startsWith", lit("-")),
+              call(v("text"), "startsWith", lit("+")),
+            ),
+            [set(digits, call(v("text"), "substring", lit(1)))],
+          ),
+          ifS(bin("==", digits, lit("")), [missing]),
+          forS("character", call(digits, "split", lit("")), [
+            ifS(not(call(lit("0123456789"), "contains", v("character"))), [missing]),
+          ]),
+          {
+            kind: "while",
+            condition: bin(
+              "and",
+              bin(">", prop(digits, "length"), lit(1)),
+              call(digits, "startsWith", lit("0")),
+            ),
+            body: [set(digits, call(digits, "substring", lit(1)))],
+            span: null,
+          },
+          ifS(bin(">", prop(digits, "length"), lit(10)), [missing]),
+          letS("number", { kind: "call", name: "toInteger", positional: [v("text")], named: {} }),
+          ifS(
+            bin(
+              "or",
+              bin("<", v("number"), lit(-2147483648)),
+              bin(">", v("number"), lit(2147483647)),
+            ),
+            [missing],
+          ),
+          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("number")], named: {} }),
+        ],
+        span: null,
+      };
+    },
   },
   // A script's own read with a whole-number default, `def loadIntegerVal = { key, value -> def stored = loadInteger(key);
   // if (stored == null) return value else return stored }`, reads a whole number where its call passes one: the result

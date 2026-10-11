@@ -681,7 +681,8 @@ Legacy `getImage()` returned the path of the webcam picture it saved, `<folder>/
 references of `takePhoto()` and `askImage()` do not keep. Where a variable's every value is a `takePhoto()` picture, a
 copy of one, null, or the empty start (values that a never-true flag such as `testmode` guards are none), a test that
 every webcam path answers alike reads such a path (`sexscriptLegacyImagePath`): `endsWith` of a text without digits,
-which only a suffix of `.jpeg` ends, and `contains` of a part of `/images/captured/` or `.jpeg`, also after
+which only a suffix of `.jpeg` ends, and `contains` of a part of `images`, `captured`, or `.jpeg` (the folder separator
+was the player's system's), also after
 `lowercase()` or `uppercase()`; a missing picture still fails the test. Any other test of a picture's path, as of a
 chosen or received picture's extension, depends on what the conversion cannot know and stays as written, testing the
 reference (`SX_IMAGE_PATH_TEST`): TeaseScript gives no file name or type for an `askImage()` picture.

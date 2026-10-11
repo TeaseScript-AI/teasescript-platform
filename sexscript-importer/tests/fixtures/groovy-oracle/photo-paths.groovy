@@ -7,6 +7,7 @@ else show("Accepted")
 show("PNG " + photo.endsWith(".png"))
 show("From the webcam " + photo.contains("captured"))
 show("Shouted " + photo.toUpperCase().endsWith("JPEG"))
+show("Folder " + photo.toUpperCase().contains("IMAGES"))
 // A value that a never-true flag guards is none.
 def testmode = false
 def framed = getImage("Again")

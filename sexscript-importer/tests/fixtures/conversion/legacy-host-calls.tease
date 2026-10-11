@@ -9,10 +9,30 @@ function sexscriptLegacyReceiveInteger(key, whenMissing = null) {
   if value == null {
     return whenMissing
   }
-  if value is integer {
-    return sexscriptLegacyValue(value)
+  let text = "${value}"
+  let digits = text
+  if text.startsWith("-") or text.startsWith("+") {
+    digits = text.substring(1)
   }
-  return whenMissing
+  if digits == "" {
+    return whenMissing
+  }
+  for character in digits.split("") {
+    if not "0123456789".contains(character) {
+      return whenMissing
+    }
+  }
+  while digits.length > 1 and digits.startsWith("0") {
+    digits = digits.substring(1)
+  }
+  if digits.length > 10 {
+    return whenMissing
+  }
+  let numberValue = toInteger(text)
+  if numberValue < -2147483648 or numberValue > 2147483647 {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(numberValue)
 }
 function sexscriptLegacySendImage(reference) {
   let codeValue = "image-${randomInteger(0..1000000000)}"
