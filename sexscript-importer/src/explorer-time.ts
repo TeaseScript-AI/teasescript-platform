@@ -15,6 +15,8 @@ import { exactMilliseconds, successors } from "./explorer-analysis.ts";
  */
 
 type Data = Readonly<Record<string, unknown>>;
+/** A value of the plan's data: a record, a list, or a plain value. */
+type PlanField = Data | readonly PlanField[] | string | number | boolean | null | undefined;
 
 function record(value: unknown): Data {
   return isRecord(value) ? value : {};
@@ -109,6 +111,133 @@ export interface ClockModel {
    * state has no value for them yet, such as at the start of a session.
    */
   readonly once: ReadonlyMap<string, Definition>;
+  /** An expression of the plan read at instruction `at`, its variables named as the model names them ({@link scoped}). */
+  readonly scope: (expression: unknown, at: number) => PlanField;
+  /**
+   * Names the plan's variables of different scopes share ({@link scoped}): such a variable is not read from a state's
+   * bindings, which do not say whose activation the code reading it will run in.
+   */
+  readonly shared: ReadonlySet<string>;
+}
+
+/**
+ * The plan's instructions and functions with each variable named by where it is declared, so that variables of the same
+ * name in different functions or files are different variables to the model: a function's own (a parameter, a `let` in
+ * its code, the innermost such function first) as `name\u0001function <id>`; one a file's top level declares, read
+ * there or in a function of that file, as `name\u0001file <index>`; any other, such as a global, by its name alone. A
+ * called function's name is not a variable. {@link bareName} gives the name a state's bindings have.
+ */
+function scoped(plan: Data, instructions: readonly Data[]) {
+  const functions = list(plan.functions);
+  const files = list(plan.files);
+  const fileAt = (index: number) =>
+    files.findIndex(
+      (file) => index >= Number(file.startInstruction) && index < Number(file.endInstruction),
+    );
+  // The innermost function each instruction is in: the larger ranges first, the smaller ones over them.
+  const functionAt = new Array<number | null>(instructions.length).fill(null);
+  const size = (definition: Data) =>
+    Number(definition.endInstruction) - Number(definition.entryInstruction);
+  for (const definition of [...functions].sort((left, right) => size(right) - size(left)))
+    for (
+      let index = Number(definition.entryInstruction);
+      index < Math.min(Number(definition.endInstruction), instructions.length);
+      index += 1
+    )
+      functionAt[index] = Number(definition.id);
+  const declared = new Map<string, Set<string>>();
+  const declare = (scope: string, name: unknown) => {
+    if (typeof name === "string")
+      (declared.get(scope) ?? declared.set(scope, new Set()).get(scope)!).add(name);
+  };
+  const entries = new Map<number, number>();
+  for (const definition of functions) {
+    entries.set(Number(definition.id), Number(definition.entryInstruction));
+    for (const parameter of list(definition.parameters))
+      declare(`function ${String(definition.id)}`, parameter.name);
+  }
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind !== "declareBinding") return;
+    const owner = functionAt[index];
+    declare(owner === null ? `file ${fileAt(index)}` : `function ${owner}`, instruction.name);
+  });
+  // Each variable's names, by the name it has in a state's bindings.
+  const variants = new Map<string, Set<string>>();
+  const resolve = (name: string, index: number): string => {
+    const owner = functionAt[index] ?? null;
+    const file = fileAt(owner === null ? index : (entries.get(owner) ?? index));
+    const scoped =
+      owner !== null && declared.get(`function ${owner}`)?.has(name) === true
+        ? `${name}\u0001function ${owner}`
+        : declared.get(`file ${file}`)?.has(name) === true
+          ? `${name}\u0001file ${file}`
+          : name;
+    (variants.get(name) ?? variants.set(name, new Set()).get(name)!).add(scoped);
+    return scoped;
+  };
+  /** A record of the plan with its variables' names scoped where instruction `index` reads them. */
+  const rename = (value: Data, index: number): Data =>
+    Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        value.kind === "identifier" && key === "name" && typeof item === "string"
+          ? resolve(item, index)
+          : key === "span" ||
+              (key === "callee" && value.kind === "call" && record(item).kind === "identifier")
+            ? item
+            : renameField(item, index),
+      ]),
+    );
+  const renameField = (item: unknown, index: number): PlanField => {
+    if (Array.isArray(item)) return item.map((each) => renameField(each, index));
+    if (isRecord(item)) return rename(item, index);
+    return typeof item === "string" ||
+      typeof item === "number" ||
+      typeof item === "boolean" ||
+      item === null
+      ? item
+      : undefined;
+  };
+  // A declaration's and a loop's variables are named on the instruction itself.
+  const named = new Set(["name", "variable", "valueVariable"]);
+  const renamed = instructions.map((instruction, index) =>
+    Object.fromEntries(
+      Object.entries(rename(instruction, index)).map(([key, item]) => [
+        key,
+        named.has(key) &&
+        typeof item === "string" &&
+        (instruction.kind === "declareBinding" || instruction.kind === "loopStart")
+          ? resolve(item, index)
+          : item,
+      ]),
+    ),
+  );
+  const renamedFunctions = functions.map((definition) =>
+    Object.fromEntries(
+      Object.entries(definition).map(([key, item]) => [
+        key,
+        key === "parameters"
+          ? list(item).map((parameter) =>
+              typeof parameter.name === "string"
+                ? {
+                    ...parameter,
+                    name: resolve(parameter.name, Number(definition.entryInstruction)),
+                  }
+                : parameter,
+            )
+          : item,
+      ]),
+    ),
+  );
+  const scope = (expression: unknown, at: number): PlanField => renameField(expression, at);
+  const shared = new Set([...variants].flatMap(([name, found]) => (found.size > 1 ? [name] : [])));
+  return { instructions: renamed, functions: renamedFunctions, scope, shared };
+}
+
+/** The name a variable the model names has in a state's bindings ({@link scoped}). */
+function bareName(name: string): string {
+  const cut = name.indexOf("\u0001");
+  return cut < 0 ? name : name.slice(0, cut);
 }
 
 /** A definition no variable has, to look up a missing one. */
@@ -333,8 +462,10 @@ export function exactPart(
   expression: unknown,
   model: ClockModel,
   temporaries: ReadonlyMap<number, Data> = new Map(),
+  at?: number,
 ): string | null {
-  const value = record(expression);
+  // An expression of the plan, read at `at`, has its variables named as the model names them.
+  const value = record(at === undefined ? expression : model.scope(expression, at));
   const held = (item: Data) =>
     item.kind === "temporary" && typeof item.temporaryId === "number"
       ? record(temporaries.get(item.temporaryId))
@@ -400,10 +531,19 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
 
 /**
  * The clock comparisons of a plan: in each condition and `while` loop, every comparison (also `in` a range) one of
- * whose sides reads the clock, also through variables and temporaries set from it.
+ * whose sides reads the clock, also through variables and temporaries set from it. With `scopes`, its variables are
+ * named by their scopes ({@link scoped}), and one only ever set to literals and updated from itself is not computed
+ * from the clock; without, a variable is its name, as a state's innermost binding of it has it.
  */
-export function clockModel(plan: Data, instructions: readonly Data[]): ClockModel {
-  const functions = list(plan.functions);
+export function clockModel(plan: Data, original: readonly Data[], scopes = false): ClockModel {
+  const { instructions, functions, scope, shared } = scopes
+    ? scoped(plan, original)
+    : {
+        instructions: original,
+        functions: list(plan.functions),
+        scope: (expression: unknown): PlanField => record(expression),
+        shared: new Set<string>(),
+      };
   const { pure, clock: clockFunctions } = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
@@ -504,6 +644,8 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
     functions,
     instructions,
     once,
+    scope,
+    shared,
   };
   // What each variable is computed from, when every value it is set to but literals is computed from the clock (also
   // through variables computed so), and is not a bare clock read, which is a time kept to measure from. Updates of the
@@ -588,6 +730,8 @@ export function clockModel(plan: Data, instructions: readonly Data[]): ClockMode
         )
       )
         continue;
+      // A variable only ever set to literals and updated from itself is not computed from the clock.
+      if (scopes && values.every(({ value }) => namesOf(value).has(name))) continue;
       const composed = compose(name, values);
       if (composed === null) ambiguous.add(name);
       else definitions.set(name, composed);
@@ -683,9 +827,16 @@ type Value =
   | { readonly kind: "data"; readonly data: Data }
   | undefined;
 
-/** A state to evaluate in: its variables by innermost binding, and its stored values by key. */
+/**
+ * A state to evaluate in: the variables whose name it binds once, by name, and also by the scope that holds them as
+ * the model names them ({@link scoped}) when that scope has one activation: a function's own in that function's
+ * frames, a file's own in that file's frames or a scope it keeps; and its stored values by key.
+ */
 export interface TimeContext {
   readonly bindings: ReadonlyMap<string, unknown>;
+  readonly scoped: ReadonlyMap<string, unknown>;
+  /** The names the state binds anywhere: its frames, its globals, and the scopes it keeps. */
+  readonly named: ReadonlySet<string>;
   readonly storage: ReadonlyMap<string, unknown>;
 }
 
@@ -791,7 +942,15 @@ function valueAt(expression: unknown, reading: Reading): Value {
       if (model.ambiguous.has(node.name) && !within) return undefined;
       const defined = within ? reading.inside.get(node.name) : model.definitions.get(node.name);
       if (defined == null) {
-        if (context.bindings.has(node.name)) return runtimeValue(context.bindings.get(node.name));
+        // A variable takes a binding only when the state binds its name once (a variable named by its scope: in that
+        // scope), and no variable of another scope has its name; when the state binds the name otherwise, whose the
+        // binding is is not known.
+        const bare = bareName(node.name);
+        if (context.named.has(bare)) {
+          if (model.shared.has(bare)) return undefined;
+          const bound = bare === node.name ? context.bindings : context.scoped;
+          return bound.has(node.name) ? runtimeValue(bound.get(node.name)) : undefined;
+        }
         // Not set yet in the state: from the one value it is set to, as the session will set it.
         const set = model.once.get(node.name);
         if (set === undefined || reading.memo.has(set))
@@ -910,7 +1069,10 @@ function runFunction(id: number, args: readonly Data[], reading: Reading): Value
   const frame: Frame = { locals: new Map(), values: new Map(), depth, steps };
   const supplied = new Set<number>();
   for (const argument of args) {
-    const index = parameters.findIndex((parameter) => parameter.name === argument.parameterName);
+    // A call names its function's parameters by their names alone.
+    const index = parameters.findIndex(
+      (parameter) => bareName(String(parameter.name)) === argument.parameterName,
+    );
     if (index < 0) return undefined;
     const value = valueAt(argument.value, caller);
     if (value === undefined) return undefined;
@@ -1186,6 +1348,47 @@ export function flipGap(
 }
 
 /**
+ * Where a comparison of parts of the date or time comes out `wanted` for a session that starts at least `earliest` after
+ * `now`, in a state read as `context` (such as a session's start): for each of its first `count` windows, the runs of
+ * moments between the ones the parts change at ({@link boundaries}) in which it holds `wanted`, the gap to just inside
+ * the window's start and to just before its end, as a condition in front of it may let only one of them through. Null
+ * when it cannot be read at `now`, or reads no part.
+ */
+export function windowEdges(
+  comparison: ClockComparison,
+  model: ClockModel,
+  context: TimeContext,
+  now: number,
+  wanted: boolean,
+  count: number,
+  earliest: number,
+): number[] | null {
+  if (comparison.parts.size === 0 || holdsAt(comparison, model, context, now) === undefined)
+    return null;
+  const moments = [
+    now + earliest,
+    ...boundaries(comparison.parts, now).filter((at) => at > now + earliest),
+  ];
+  const edges: number[] = [];
+  let start: number | null = null;
+  let windows = 0;
+  for (const at of moments) {
+    const holds = holdsAt(comparison, model, context, at) === wanted;
+    if (holds && start === null) {
+      start = at;
+      edges.push(at - now);
+    } else if (!holds && start !== null) {
+      // Just before the change back, which `at` is MARGIN past.
+      edges.push(Math.max(start, at - MARGIN - 2 * MINUTE) - now);
+      start = null;
+      windows += 1;
+      if (windows >= count) break;
+    }
+  }
+  return [...new Set(edges)];
+}
+
+/**
  * The pairs of values whose meeting may change a comparison: its two sides (a range's bounds each with the value), and
  * for a side that a script's function computes from its arguments (also through the temporary that holds its result),
  * each two of those arguments, as `compare(a, b) <= 0` changes only where `a` and `b` meet.
@@ -1243,6 +1446,9 @@ export function storedHolds(
     functions: [],
     instructions: [],
     once: new Map(),
+    // Stored values alone are read here, no expression of the plan at an instruction.
+    scope: () => undefined,
+    shared: new Set(),
   };
   const none = new Map<number, Data>();
   if (!isRecord(condition)) return undefined;
@@ -1255,7 +1461,7 @@ export function storedHolds(
   const value = valueAt(condition, {
     temporaries: none,
     model,
-    context: { bindings, storage },
+    context: { bindings, scoped: new Map(), named: new Set(bindings.keys()), storage },
     now: 0,
     inside: new Map(),
     memo: new Map(),
@@ -1263,16 +1469,71 @@ export function storedHolds(
   return typeof value === "boolean" ? value : undefined;
 }
 
-/** The context of a state's snapshot: its variables, innermost binding first, and its stored values. */
-export function timeContext(snapshot: Data): TimeContext {
-  const bindings = new Map<string, unknown>();
-  for (const binding of list(snapshot.globals))
-    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
-  for (const frame of list(snapshot.frames))
-    for (const binding of list(frame.bindings))
-      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+/**
+ * The context of a state's snapshot: its variables whose name it binds once (with `scopes`, also by their scopes,
+ * {@link TimeContext}; without, every name it binds, by its innermost binding), and its stored values.
+ */
+export function timeContext(snapshot: Data, scopes = false): TimeContext {
   const storage = new Map<string, unknown>();
   for (const entry of list(snapshot.scriptStorage))
     if (typeof entry.key === "string") storage.set(entry.key, entry.value);
-  return { bindings, storage };
+  const bindings = new Map<string, unknown>();
+  if (!scopes) {
+    for (const binding of list(snapshot.globals))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    for (const frame of list(snapshot.frames))
+      for (const binding of list(frame.bindings))
+        if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    return { bindings, scoped: new Map(), named: new Set(bindings.keys()), storage };
+  }
+  // Each binding of a name, with the scope that holds it when that is clear ({@link TimeContext}).
+  const held = new Map<string, { scope: string | null; value: unknown }[]>();
+  const hold = (name: unknown, scope: string | null, value: unknown) => {
+    if (typeof name === "string")
+      (held.get(name) ?? held.set(name, []).get(name)!).push({ scope, value });
+  };
+  for (const binding of list(snapshot.globals)) {
+    if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    hold(binding.name, null, binding.value);
+  }
+  // The scope each frame belongs to: that of the function whose call's frames start at or before it, unless a file's
+  // call started since; else the file of the nearest frame before it that names one (its own code, also in its blocks).
+  // A scope with two activations (a function's recursive call, a file's root and a root it left behind) is not clear:
+  // a name only one of them bound yet may still be bound by the other, which the code reads.
+  const calls = list(snapshot.callFrames);
+  const activations = new Map<string, number>();
+  const activate = (scope: string) => activations.set(scope, (activations.get(scope) ?? 0) + 1);
+  for (const call of calls)
+    if (call.kind === "function") activate(`function ${String(call.functionId)}`);
+  for (const root of [...list(snapshot.frames), ...list(snapshot.retainedScopes)])
+    if (typeof root.file === "number") activate(`file ${root.file}`);
+  const single = (scope: string | null) =>
+    scope !== null && activations.get(scope) === 1 ? scope : null;
+  let owner: string | null = null;
+  let file: string | null = null;
+  list(snapshot.frames).forEach((frame, depth) => {
+    for (const call of calls)
+      if (call.scopeBaseDepth === depth)
+        owner = call.kind === "function" ? `function ${String(call.functionId)}` : null;
+    if (typeof frame.file === "number") file = `file ${frame.file}`;
+    for (const binding of list(frame.bindings)) {
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+      hold(binding.name, single(owner ?? file), binding.value);
+    }
+  });
+  // A scope kept after its code was left (a persistent button's or timer's) binds its names too, but is not read: the
+  // code reading such a name may be its handler's, or a later activation's that has not bound it yet.
+  for (const scope of list(snapshot.retainedScopes))
+    for (const binding of list(scope.bindings)) hold(binding.name, null, binding.value);
+  // A variable is read from the state only where the state binds its name once (one named by its scope: in that
+  // scope): a handler's capture, kept in a scope, is not another frame's binding of its name.
+  const scoped = new Map<string, unknown>();
+  for (const [name, found] of held) {
+    if (found.length !== 1) {
+      bindings.delete(name);
+      continue;
+    }
+    if (found[0]!.scope !== null) scoped.set(`${name}\u0001${found[0]!.scope}`, found[0]!.value);
+  }
+  return { bindings, scoped, named: new Set(held.keys()), storage };
 }

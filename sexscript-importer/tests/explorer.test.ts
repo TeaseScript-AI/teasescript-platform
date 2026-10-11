@@ -2569,9 +2569,15 @@ test(
       const model = clockModel(plan, instructions);
       const [comparison] = [...model.comparisons.values()][0] ?? [];
       assert.ok(comparison !== undefined, span);
+      // As the runtime keeps a file's own variable: in that file's frame.
       const kept = timeContext({
-        globals: [
-          { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+        frames: [
+          {
+            file: 0,
+            bindings: [
+              { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+            ],
+          },
         ],
       });
       return [3600, 40 * 3600].map((seconds) =>
@@ -2950,6 +2956,45 @@ test(
     };
     assert.ok(!answers(false).includes("1000000"), answers(false).join(","));
     assert.ok(answers(true).includes("1000000"), answers(true).join(","));
+  },
+);
+
+test(
+  "a timed button that comes back at one place gets its press after thinking once, without a trap where it is left",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      "let rounds = 0",
+      "while rounds < 3 {",
+      '  let t = toInteger((showButton "OK") / 1 s)',
+      "  if t > 10 {",
+      '    say "Slow."',
+      "  }",
+      "  rounds += 1",
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 5000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const slow = source.split("\n").findIndex((line) => line.includes('say "Slow."')) + 1;
+    assert.ok(
+      !result.coverage.files[0]!.unvisited.some((range) => {
+        const [from, to = from] = range.lines.split("-").map(Number);
+        return slow >= from! && slow <= to!;
+      }),
+    );
+    assert.deepEqual(result.traps, []);
   },
 );
 
@@ -3574,6 +3619,238 @@ test(
     );
     const [equal] = [...orderedModel.comparisons.values()][0]!;
     assert.equal(flipGap(equal!, orderedModel, timeContext({}), EPOCH_MS), 4_321_000);
+  },
+);
+
+test(
+  "with clock scopes, the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name, nor one a variable of another scope shares",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const cases: [string, { path: string; source: string }[], boolean][] = [
+      [
+        "receiver",
+        [
+          {
+            path: "main.tease",
+            source:
+              'let stamp = getAbsoluteDateTime() - 2 h\nshowButton "Check"\nif elapsed(getAbsoluteDateTime() - 1 h) > 5400 {\n' +
+              '  say "Wrong."\n} else {\n  say "Right."\n}\nexit\n',
+          },
+          {
+            path: "helper.tease",
+            source:
+              "global function elapsed(stamp) {\n  return getAbsoluteDateTime().toSeconds() - stamp.toSeconds()\n}\n",
+          },
+        ],
+        false,
+      ],
+      [
+        "another function's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              'function caller {\n  let offset = 100\n  let hour = getDateTime().hour - 1\n  showButton "Check"\n' +
+              "  callee()\n}\ncaller()\nexit\n",
+          },
+          {
+            path: "helper.tease",
+            source:
+              "global function callee {\n  let offset = 0\n  let hour = getDateTime().hour + offset\n" +
+              '  if hour == 12 {\n    say "Right."\n  } else {\n    say "Wrong."\n  }\n}\n',
+          },
+        ],
+        true,
+      ],
+      [
+        // The outer call bound the name; the inner one, which the comparison reads in, has not yet: it loads what the
+        // outer one saved since.
+        "another activation's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              'function visit(rounds) {\n  if rounds > 0 {\n    let wanted = load("wanted", default: 12)\n' +
+              '    save 13 as "wanted"\n    visit(rounds - 1)\n    return\n  }\n  showButton "Check"\n' +
+              '  let wanted = load("wanted", default: 12)\n' +
+              '  if getDateTime().hour == wanted {\n    say "Wrong."\n  } else {\n    say "Right."\n  }\n}\n' +
+              "visit(1)\nexit\n",
+          },
+        ],
+        false,
+      ],
+      [
+        // The call paused in returns, and the next call compares its own parameter; another function's two clock
+        // values of the name do not make the state's binding the comparison's.
+        "a later activation's binding",
+        [
+          {
+            path: "main.tease",
+            source:
+              "function unrelated {\n  let wantedHour = getDateTime().hour\n  wantedHour = getDateTime().hour + 1\n}\n" +
+              'function visit(rounds, wantedHour) {\n  if rounds > 0 {\n    showButton "Check"\n    return\n  }\n' +
+              '  if getDateTime().hour == wantedHour {\n    say "Wrong."\n  } else {\n    say "Right."\n  }\n}\n' +
+              "visit(1, 12)\nvisit(0, 13)\nexit\n",
+          },
+        ],
+        false,
+      ],
+    ];
+    for (const [name, files, expected] of cases) {
+      const { plan } = engine.compileProject(files, { builtins: [] });
+      assert.ok(isRecord(plan), name);
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const session = new Session(engine, plan, 1);
+      const before = session.start();
+      const model = clockModel(plan, instructions, true);
+      const [comparison] = [...model.comparisons.values()].flat();
+      assert.ok(comparison !== undefined, name);
+      // At the state's own clock, the comparison comes out as the runtime then says.
+      const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
+      assert.deepEqual(after?.texts, ["Right."], name);
+      const holds = holdsAt(comparison, model, timeContext(before.snapshot, true), EPOCH_MS);
+      // The receiver is read as the parameter; a name another function or activation binds leaves this one unknown,
+      // never wrong.
+      if (name === "receiver") assert.equal(holds, expected, name);
+      else assert.ok(holds === undefined || holds === expected, name);
+    }
+    // A persistent button's file variable after the file was left, or entered again: never the storage saved since, nor
+    // the other file's or the older scope's binding of that name, for what the runtime then says.
+    const kept = (
+      files: { path: string; source: string }[],
+      expected: boolean,
+      first: "Invoke" | "Check" = "Invoke",
+    ) => {
+      const { plan } = engine.compileProject(files, { builtins: [] });
+      assert.ok(isRecord(plan));
+      const session = new Session(engine, plan, 1);
+      const start = session.start();
+      const enter = session
+        .options(start.runtime)
+        .find((input) => "label" in input && input.label === first);
+      assert.ok(enter !== undefined);
+      const before = session.apply(start.runtime, enter, false);
+      assert.ok(before !== null);
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions, true);
+      const [comparison] = [...model.comparisons.values()].flat();
+      assert.ok(comparison !== undefined);
+      const holds = holdsAt(
+        comparison,
+        model,
+        timeContext(before.snapshot, true),
+        wallClockOf(before.snapshot),
+      );
+      const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
+      assert.deepEqual(after?.texts, [expected ? "True." : "False."]);
+      assert.ok(holds === undefined || holds === expected);
+    };
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'let wantedHour = load("hour", default: 12)\nif wantedHour == 12 {\n' +
+            '  showPermanentButton "Invoke", persist: true {\n    call "main.tease"\n  }\n  save 13 as "hour"\n' +
+            '  goto "main.tease"\n}\nshowButton "Check"\nif getDateTime().hour == wantedHour {\n  say "True."\n' +
+            '} else {\n  say "False."\n}\nexit\n',
+        },
+      ],
+      false,
+    );
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'let wantedHour = load("hour", default: 12)\nshowPermanentButton "Invoke", persist: true {\n' +
+            '  showButton "Check"\n  if getDateTime().hour == wantedHour {\n    say "True."\n  } else {\n' +
+            '    say "False."\n  }\n}\nsave 13 as "hour"\ngoto "other.tease"\n',
+        },
+        { path: "other.tease", source: 'let wantedHour = 13\nshowButton "Outside"\nexit\n' },
+      ],
+      true,
+    );
+    // Entered again, the file's new root has not bound the name yet; the root it left behind has.
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'showButton "Check"\nlet wantedHour = load("hour", default: 12)\nif wantedHour == 12 {\n' +
+            '  showPermanentButton "Invoke", persist: true {\n    say "Old."\n  }\n  save 13 as "hour"\n' +
+            '  goto "main.tease"\n}\nif getDateTime().hour == wantedHour {\n  say "True."\n} else {\n' +
+            '  say "False."\n}\nexit\n',
+        },
+      ],
+      false,
+      "Check",
+    );
+    // A button's capture, kept after its function returned, while another function binds the name.
+    kept(
+      [
+        {
+          path: "main.tease",
+          source:
+            'function arm {\n  let wantedHour = getDateTime().hour\n  showPermanentButton "Invoke" {\n' +
+            '    showButton "Check"\n    if getDateTime().hour == wantedHour {\n      say "True."\n    } else {\n' +
+            '      say "False."\n    }\n  }\n}\nfunction active {\n  let wantedHour = getDateTime().hour + 1\n' +
+            '  showButton "Outside"\n}\narm()\nactive()\nexit\n',
+        },
+      ],
+      true,
+    );
+  },
+);
+
+test(
+  "with clock scopes, a next visit starts within the hours a session-start clock value is compared with, also of a helper's own variable of that name",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // `hour` is the helper's own variable and the file's, computed differently: each is its own. A visit that comes
+    // back after the player went to sleep greets the morning only between 09:00 and 11:59, which no fixed gap from the
+    // first visit's noon lands in.
+    const helper =
+      'global function lateHour {\n  save load("late", default: 0) as "late"\n  let hour = getDateTime().hour\n' +
+      "  if hour < 4 {\n    hour = hour + 24\n  }\n  return hour\n}\n";
+    const source =
+      'let hour = lateHour()\nif load("run", default: "") == "sleep" {\n  switch hour {\n    case 9..=11 {\n' +
+      '      say "Good morning."\n    }\n    default {\n      say "Hello."\n    }\n  }\n}\nshowButton "Sleep"\n' +
+      'save "sleep" as "run"\nexit\n';
+    const files = [
+      { path: "main.tease", source },
+      { path: "clock.tease", source: helper },
+    ];
+    const { plan } = engine.compileProject(files, { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      budgetOps: 5000,
+      maxStates: 5000,
+      sources: new Map(files.map((file) => [file.path, file.source])),
+      diagnostics: [],
+      later: true,
+      clockScopes: true,
+    });
+    const line = source.split("\n").findIndex((text) => text.includes("Good morning.")) + 1;
+    const main = result.coverage.files.find((file) => file.path === "main.tease");
+    assert.ok(main !== undefined);
+    assert.ok(
+      !main.unvisited.some((range) => {
+        const [from = 0, to = from] = range.lines.split("-").map(Number);
+        return line >= from && line <= to;
+      }),
+      JSON.stringify(main.unvisited),
+    );
   },
 );
 
