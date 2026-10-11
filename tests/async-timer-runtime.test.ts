@@ -1083,12 +1083,12 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
   // Scene-time replay makes the complete result independent of observation cadence, not only the output.
-  // The last sets its timer up while the message's pacing still runs, which the wait before it cannot outlast (TSV060).
+  // The last sets its timer up while the message's pacing still runs; the wait after it replaces that pacing.
   const scripts: [string, string[]][] = [
     ...cases.map(([source]): [string, string[]] => [source, []]),
     [
-      'say "a"\nwait 1 s\nlet t = timer async 2 s { say "block" }\nwait 3 s\nsay "b"\nt.stop()\nwait 1 s\nexit',
-      ["TSV060"],
+      'say "a"\nlet t = timer async 2 s { say "block" }\nwait 3 s\nsay "b"\nt.stop()\nwait 1 s\nexit',
+      [],
     ],
   ];
   for (const [source, warnings] of scripts) {
@@ -1183,16 +1183,17 @@ test("pacing consumed or skipped during catch-up and terminal completions keep q
   assert.deepEqual(paced.said(), ["handler"]);
   assert.equal(paced.snapshot.lastSettlement?.settlementKind, "consumedByForegroundInteraction");
 
-  const superseded = new Session(
+  const instant = new Session(
     'timer async 1 s { say "first", 2 s }\ntimer async 3 s { say "second", 0 s }\nwait 10 s\nexit',
     { pacing: true },
   ).at(5_000);
-  assert.deepEqual(superseded.said(), ["first", "second"]);
+  assert.deepEqual(instant.said(), ["first", "second"]);
 
+  // A block's message reads during the wait while a later block becomes due.
   const skipping = new Session(
-    'timer async 1 s { say "handler", 0 s }\nsay "first", 2 s\nwait 10 s\nexit',
+    'timer async 500 ms { say "first", 2 s }\ntimer async 1 s { say "handler", 0 s }\nwait 10 s\nexit',
     { pacing: true },
-  );
+  ).at(500);
   const held = observeTime(skipping.plan, skipping.snapshot, 5_000).snapshot;
   const gate = held.backgroundActions.find((action) => action.kind === "chatPacingGate");
   assert.ok(gate !== undefined);
@@ -1533,10 +1534,13 @@ test("restore rejects a non-string display, and a failed session keeps its pacin
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
   assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);
 
+  // A block's message reads during the wait; the failing block is due at its deadline and runs first.
   const failed = new Session(
-    'timer async 1 ms { let n = 0\nlet x = 1 / n }\nsay "pacing", 0.001 s\nwait 2 ms\nexit',
+    'timer async 1 ms { say "pacing", 1 ms }\ntimer async 2 ms { let n = 0\nlet x = 1 / n }\nwait 3 ms\nexit',
     { pacing: true },
-  ).at(1);
+  )
+    .at(1)
+    .at(2);
   assert.equal(failed.snapshot.status, "failed");
   const gate = failed.snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
   assert.equal(

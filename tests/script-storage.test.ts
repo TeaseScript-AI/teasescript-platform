@@ -389,7 +389,7 @@ test("a due timer block waits for the write and reads the acknowledged value at 
   assert.equal(caughtUp.snapshot.observedSessionTimeMs, 6_000);
 });
 
-test("a final save runs on into exit after acknowledgement even with background chat pacing", () => {
+test("a final save runs on into exit after acknowledgement, during chat pacing too", () => {
   for (const source of ['save 2 as "k"\nexit', 'say "Before"\nsave 2 as "k"\nexit']) {
     const compiled = plan(source);
     const pending = run(
@@ -407,11 +407,19 @@ test("a final save runs on into exit after acknowledgement even with background 
       payload: { kind: "stored" },
     });
     assert.equal(completed.outcome.kind, "completed");
-    const finished = run(compiled, completed.snapshot);
+    let finished = run(compiled, completed.snapshot);
+    const exitEvents = [...completed.events];
+    if (source.startsWith("say")) {
+      // The save ran during the message's reading time; the exit waits for the rest of it.
+      const gate = finished.snapshot.foregroundAction;
+      assert.equal(gate?.kind, "chatPacingGate");
+      exitEvents.push(...finished.events);
+      finished = run(compiled, observeTime(compiled, finished.snapshot, gate!.deadlineMs).snapshot);
+    }
     assert.equal(finished.snapshot.status, "halted");
     assert.deepEqual(finished.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
     assert.deepEqual(
-      [...completed.events, ...finished.events]
+      [...exitEvents, ...finished.events]
         .filter((event) => event.kind === "exit")
         .map(({ kind }) => kind),
       ["exit"],

@@ -229,17 +229,27 @@ test("an append reads the text before its value waits, so a change made meanwhil
   );
 });
 
-test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
+test("a text write waits for the reading time before it and starts none of its own", () => {
   const compiled = plan(
     lines('let line = say "Waiting", 2 s', 'line.text = "Ready"', 'say "Next", 1 s', "exit"),
   );
   const shown = run(compiled, createFreshRuntimeSnapshot(compiled));
-  // The next message still waits for the first one's two seconds.
+  // The change waits for the message's two seconds.
   assert.equal(shown.snapshot.status, "waiting");
-  assert.deepEqual(messageTexts(shown.events), [["Waiting", "Ready"]]);
+  assert.deepEqual(messageTexts(shown.events), [["Waiting"]]);
   const gate = shown.snapshot.foregroundAction;
   assert.ok(gate?.kind === "chatPacingGate");
   assert.equal(gate.deadlineMs, 2_000);
+  assert.equal(gate.preparedOutput, null);
+  // It starts no reading time, so the next message follows it at once.
+  const changed = run(compiled, observeTime(compiled, shown.snapshot, 2_000).snapshot);
+  assert.deepEqual(messageTexts([...shown.events, ...changed.events]), [
+    ["Waiting", "Ready"],
+    ["Next"],
+  ]);
+  const next = changed.snapshot.foregroundAction;
+  assert.ok(next?.kind === "chatPacingGate");
+  assert.equal(next.deadlineMs, 3_000);
 });
 
 test("a say staged behind pacing gives its handle only once its message is shown", () => {
@@ -260,15 +270,25 @@ test("a say staged behind pacing gives its handle only once its message is shown
   const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 1_000).snapshot);
   assert.deepEqual(resumed.events, released.events);
   assert.deepEqual(resumed.snapshot, released.snapshot);
-  assert.deepEqual(messageTexts(released.events), [["Second", "Second!"]]);
+  assert.deepEqual(messageTexts(released.events), [["Second"]]);
+  // The change to the shown message waits for that message's own reading time.
+  const changed = run(compiled, observeTime(compiled, released.snapshot, 3_000).snapshot);
+  assert.deepEqual(messageTexts([...released.events, ...changed.events]), [["Second", "Second!"]]);
 });
 
-test("an instant say that supersedes earlier pacing gives its handle at once", () => {
+test("an instant say behind earlier pacing gives its handle once it is shown", () => {
   const compiled = plan(
     lines('say "First", 1 s', 'let line = say "Now", instant', 'line.text += "!"', "exit"),
   );
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.deepEqual(messageTexts(result.events), [["First"], ["Now", "Now!"]]);
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(messageTexts(waiting.events), [["First"]]);
+  assert.deepEqual(waiting.snapshot.liveMessages, []);
+  const result = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
+  assert.deepEqual(messageTexts([...waiting.events, ...result.events]), [
+    ["First"],
+    ["Now", "Now!"],
+  ]);
+  assert.equal(result.snapshot.status, "halted");
 });
 
 test("message handles resume equivalently at every boundary, through waits, a timer block, and pacing", () => {

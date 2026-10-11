@@ -330,7 +330,7 @@ test("runtime adapter selects the rendered button even when two buttons return t
 
 test("runtime adapter routes pacing skip and explicit time through canonical operations", () => {
   let session = createPlayerRuntimeSession(
-    'say unskippable "First", 10 s\nsay skippable "Second", 10 s\nwait 20 s\nexit',
+    'say unskippable "First", 10 s\nsay skippable "Second", 10 s\nshowButton "Next"\nexit',
   );
   const firstGate = playerRuntimePacingGate(session);
   assert.equal(firstGate?.skippable, false);
@@ -353,10 +353,11 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   );
   assert.equal(playerRuntimePacingGate(session)?.skippable, true);
 
+  // Skipping the second message's pacing shows the button that waited for it.
   const skipped = skipPlayerRuntimePacing(session);
   assert.equal(skipped?.outcome.kind, "completed");
   assert.equal(playerRuntimePacingGate(skipped!.session), null);
-  assert.equal(skipped?.session.state.foregroundAction?.kind, "delay");
+  assert.equal(skipped?.session.state.foregroundAction?.kind, "interaction");
 });
 
 test("runtime checkpoint restore reconstructs presentation without replay or completion", () => {

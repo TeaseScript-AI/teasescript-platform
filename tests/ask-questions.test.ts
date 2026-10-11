@@ -127,20 +127,18 @@ test("a question is text: a list is rejected, and a scalar is shown as text", ()
   );
 });
 
-test("a question whose pacing cannot be scheduled fails without saying or asking anything", () => {
+test("a question has no reading time of its own, so it still asks where no reading time could end", () => {
   const plan = compileValidPlan('wait 9007199254740 s\nlet answer = askText "Name?"\nexit');
   const waiting = run(plan, createFreshRuntimeSnapshot(plan));
   const observed = observeTime(plan, waiting.snapshot, 9_007_199_254_740_000);
   assert.equal(observed.outcome.kind, "observed");
-  const failed = run(plan, observed.snapshot);
-  assert.equal(failed.snapshot.failure?.code, "TSR050");
+  const asked = run(plan, observed.snapshot);
   assert.deepEqual(
-    failed.events.map((event) => event.kind),
-    ["runtimeFailure"],
+    asked.events.map((event) => (event.kind === "say" ? event.text : event.kind)),
+    ["Name?", "actionRequested"],
   );
-  assert.equal(failed.snapshot.foregroundAction, null);
-  assert.deepEqual(failed.snapshot.backgroundActions, []);
-  assert.equal(plan.instructions[failed.snapshot.nextInstruction]?.kind, "say");
+  assert.equal(asked.snapshot.foregroundAction?.kind, "interaction");
+  assert.deepEqual(asked.snapshot.backgroundActions, []);
 });
 
 /**

@@ -21,6 +21,7 @@ import {
 } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
@@ -926,7 +927,7 @@ test("static compact interactions use the default speaker at the instruction bou
       "exit",
     ].join("\n"),
   );
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
   const first = pending.snapshot.speakers.find((speaker) => speaker.identifier === "first");
   assert.equal(pending.snapshot.defaultSpeaker, first?.id);
@@ -1068,7 +1069,10 @@ test("blocking interactions resume through ordinary expression contexts and para
 
 test("interaction results resume through assignment and loop-owned source contexts", () => {
   const assignmentPlan = compiled('let answer = "before"\nanswer = askText\nsay answer\nexit');
-  const assignmentPending = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
+  const assignmentPending = run(
+    assignmentPlan,
+    createImmediatePacingRuntimeSnapshot(assignmentPlan),
+  );
   const assignmentCompleted = completePending(assignmentPlan, assignmentPending.snapshot, "text", {
     kind: "submittedText",
     submittedText: "after",
@@ -1089,7 +1093,7 @@ test("interaction results resume through assignment and loop-owned source contex
       "exit",
     ].join("\n"),
   );
-  const loopPending = run(loopPlan, createFreshRuntimeSnapshot(loopPlan));
+  const loopPending = run(loopPlan, createImmediatePacingRuntimeSnapshot(loopPlan));
   assert.equal(loopPending.snapshot.status, "waiting");
   assert.equal(loopPending.snapshot.loopFrames.length, 1);
   const loopCompleted = completePending(loopPlan, loopPending.snapshot, "text", {
@@ -1126,7 +1130,7 @@ test("interaction expressions preserve function-argument source order across sus
       },
     },
   };
-  const pending = run(plan, createFreshRuntimeSnapshot(plan), capabilities);
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan), capabilities);
   assert.deepEqual(marks, ["before"]);
   assert.equal(pending.snapshot.status, "waiting");
   const completed = completePending(plan, pending.snapshot, "text", {
@@ -1151,7 +1155,7 @@ test("interaction expressions preserve function-argument source order across sus
   );
   const saidTexts = (events: readonly { readonly kind: string; readonly text?: string }[]) =>
     events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
-  const userPending = run(userPlan, createFreshRuntimeSnapshot(userPlan));
+  const userPending = run(userPlan, createImmediatePacingRuntimeSnapshot(userPlan));
   assert.equal(userPending.snapshot.status, "waiting");
   assert.deepEqual(saidTexts(userPending.events), ["foo"]);
   const userCompleted = completePending(userPlan, userPending.snapshot, "text", {
@@ -1169,7 +1173,7 @@ test("real source completes, retries invalid input, records provenance, and resu
   const plan = compiled(
     'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nsay answer\nexit',
   );
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction");
   assert.notEqual(action.speakerId, null);
@@ -1343,7 +1347,7 @@ test("interaction expressions resume through a direct function return", () => {
       "exit",
     ].join("\n"),
   );
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
   const completed = completePending(plan, pending.snapshot, "text", {
     kind: "submittedText",
@@ -1359,7 +1363,7 @@ test("function-owned interaction result survives checkpoint completion and expli
   const plan = compiled(
     "function prompt {\nlet value = askNumber\nreturn value\n}\nlet result = prompt()\nsay result\nexit",
   );
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction");
   assert.notEqual(action.ownerCallFrameId, null);

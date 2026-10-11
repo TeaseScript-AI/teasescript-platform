@@ -183,7 +183,7 @@ test("a debug export candidate is the state when it was asked for, while play co
   context.after(() => scope.stop());
   host.prepare((options) =>
     createPlayerRuntimeSession(
-      'let pick = askImage("Picture")\nlet name = askText "Name"\nsay "After ${name}"\nexit',
+      'let pick = askImage("Picture")\nlet name = askText "Name"\nsay "After ${name}", instant\nexit',
       options,
     ),
   );

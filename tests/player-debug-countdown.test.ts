@@ -71,26 +71,30 @@ test("only a presented showButton with a timeout counts down, until it is presse
 });
 
 test("pacing counts down while nothing else owns the foreground", () => {
-  // Staged output, also unskippable; the second message's gate is consumed by the untimed button.
+  // Staged output, also unskippable; the untimed button then waits for the second message's pacing.
   assert.deepEqual(
     countdowns('say "A", 5 s\nsay "B", 2 s\nshowButton "Go"\nexit', [1_000, 5_000]),
-    [P(5_000), P(5_000), null],
+    [P(5_000), P(5_000), P(7_000)],
   );
   assert.deepEqual(countdowns('say unskippable "A", 5 s\nsay "B", 2 s\nexit', []), [P(5_000)]);
   assert.deepEqual(countdowns('say "A", instant\nshowButton "Go"\nexit', []), [null]);
-  // A wait owns the overlap, then the pacing that remains takes over; a real timer shows nothing meanwhile.
+  // A wait replaces the pacing before it, then the next message's pacing counts down; a real timer shows nothing
+  // meanwhile.
   assert.deepEqual(countdowns('say "A", 5 s\nwait 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
     W(2_000),
     W(2_000),
-    P(5_000),
+    P(4_000),
   ]);
   assert.deepEqual(countdowns('say "A", 5 s\ntimer 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
     null,
     null,
-    P(5_000),
+    P(4_000),
   ]);
-  // A timed button consumes the pacing before it.
-  assert.deepEqual(countdowns('say "A", 5 s\nshowButton "Go", timeout: 4 s\nexit', []), [B(4_000)]);
+  // A timed button waits for the pacing before it, then counts down from when it appears.
+  assert.deepEqual(countdowns('say "A", 5 s\nshowButton "Go", timeout: 4 s\nexit', [5_000]), [
+    P(5_000),
+    B(9_000),
+  ]);
   // A pending save owns progress although its pacing has not settled.
   assert.deepEqual(
     countdowns('say "A", 5 s\nsave 1 as "x"\nshowButton "Go"\nexit', [], {

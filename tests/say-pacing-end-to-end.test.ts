@@ -82,7 +82,16 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
   assert.equal(fourthOutput.snapshot.lastSettlement?.actionId, thirdGate!.actionId);
   assert.equal(validateRuntimeSnapshot(fourthOutput.snapshot, compiled).valid, true);
   assert.doesNotThrow(() => createCheckpoint(compiled, fourthOutput.snapshot));
-  const finalRun = executeInstruction(compiled, fourthOutput.snapshot);
+  // The exit waits for the last message's pacing.
+  const exitWaiting = executeInstruction(compiled, fourthOutput.snapshot);
+  const lastGate = exitWaiting.snapshot.foregroundAction;
+  assert.equal(lastGate?.kind, "chatPacingGate");
+  assert.equal(lastGate?.preparedOutput, null);
+  assert.deepEqual(exitWaiting.events, []);
+  const finalRun = run(
+    compiled,
+    observeTime(compiled, exitWaiting.snapshot, lastGate!.deadlineMs).snapshot,
+  );
   assert.equal(finalRun.snapshot.status, "halted");
   assert.equal(finalRun.snapshot.backgroundActions.length, 0);
 
@@ -122,17 +131,17 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
       'say "four"',
       "exit",
     ].join("\n"),
-    {},
-    ["TSV060"],
   );
+  // The wait replaces the reading time of "one".
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
-  const background = waiting.snapshot.backgroundActions[0];
   assert.equal(delay?.kind, "delay");
-  assert.equal(background?.kind, "chatPacingGate");
+  assert.deepEqual(waiting.snapshot.backgroundActions, []);
   assert.deepEqual(
-    waiting.events.map((event) => event.kind),
-    ["say", "actionRequested", "actionRequested"],
+    waiting.events.map((event) =>
+      event.kind === "actionCompleted" ? event.settlement.settlementKind : event.kind,
+    ),
+    ["say", "actionRequested", "replacedByWait", "actionRequested"],
   );
 
   const delayCompleted = observeTime(compiled, waiting.snapshot, 1_000);
@@ -140,28 +149,36 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
     delayCompleted.events.map((event) => event.kind),
     ["actionCompleted"],
   );
-  assert.equal(delayCompleted.snapshot.backgroundActions[0]?.actionId, background?.actionId);
   assert.equal(delayCompleted.snapshot.foregroundAction, null);
 
-  const promoted = run(compiled, delayCompleted.snapshot);
-  const pacing = promoted.snapshot.foregroundAction;
+  // The button waits for the reading time of "two" without a second request for its gate.
+  const held = run(compiled, delayCompleted.snapshot);
+  assert.deepEqual(
+    held.events.map((event) => event.kind),
+    ["say", "actionRequested"],
+  );
+  const pacing = held.snapshot.foregroundAction;
   assert.equal(pacing?.kind, "chatPacingGate");
-  assert.equal(pacing?.actionId, background?.actionId);
-  assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
+  assert.equal(pacing?.preparedOutput, null);
 
-  const released = observeTime(compiled, promoted.snapshot, pacing!.deadlineMs);
+  const released = observeTime(compiled, held.snapshot, pacing!.deadlineMs);
+  assert.deepEqual(
+    released.events.map((event) =>
+      event.kind === "actionCompleted" ? event.settlement.settlementKind : event.kind,
+    ),
+    ["completed"],
+  );
   const interactionWaiting = run(compiled, released.snapshot);
   assert.deepEqual(
     interactionWaiting.events.map((event) => event.kind),
-    ["say", "actionRequested", "actionCompleted", "actionRequested"],
-  );
-  assert.equal(
-    interactionWaiting.events[2]?.kind === "actionCompleted" &&
-      interactionWaiting.events[2].settlement.settlementKind,
-    "consumedByForegroundInteraction",
+    ["actionRequested"],
   );
   const interaction = interactionWaiting.snapshot.foregroundAction;
   assert.equal(interaction?.kind, "interaction");
+  assert.equal(
+    interaction?.kind === "interaction" ? interaction.createdAtMs : null,
+    pacing!.deadlineMs,
+  );
 
   const interactionCompleted = completeAction(compiled, interactionWaiting.snapshot, {
     actionId: interaction!.actionId,
@@ -173,10 +190,21 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
     interactionCompleted.events.map((event) => event.kind),
     ["playerTranscript", "actionCompleted"],
   );
-  const finalRun = run(compiled, interactionCompleted.snapshot);
+  // "now" follows at once, as no reading time runs; the exit waits for that of "four".
+  const exitWaiting = run(compiled, interactionCompleted.snapshot);
+  assert.deepEqual(
+    exitWaiting.events.map((event) => event.kind),
+    ["say", "say", "actionRequested"],
+  );
+  const lastGate = exitWaiting.snapshot.foregroundAction;
+  assert.equal(lastGate?.kind, "chatPacingGate");
+  const finalRun = run(
+    compiled,
+    observeTime(compiled, exitWaiting.snapshot, lastGate!.deadlineMs).snapshot,
+  );
   assert.deepEqual(
     finalRun.events.map((event) => event.kind),
-    ["say", "say", "actionRequested", "exit"],
+    ["exit"],
   );
   assert.equal(finalRun.snapshot.backgroundActions.length, 0);
   assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);

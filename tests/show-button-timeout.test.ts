@@ -344,21 +344,27 @@ test("a timeout reached during catch-up matches observing every deadline on time
   assert.deepEqual(playerRuntimeDeadlines(playerStateOf(plan, suspended)), [6_000]);
 });
 
-test("a button consumes the pacing gate before it, and its timeout starts when it appears", () => {
+test("a button waits for the reading time before it, and its timeout starts when it appears", () => {
   const plan = compileValidPlan(
     'say "Ready?", 2 s\nlet elapsed = showButton "Go", timeout: 3 s\nsay "Waited ${elapsed}.", instant\nexit',
   );
-  const shown = run(plan, createFreshRuntimeSnapshot(plan));
-  const gate = shown.events.find(
-    (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "chatPacingGate",
+  const held = run(plan, createFreshRuntimeSnapshot(plan));
+  assert.deepEqual(
+    held.events.map((event) => event.kind),
+    ["say", "actionRequested"],
   );
-  assert.equal(gate?.kind, "actionCompleted");
-  assert.equal(gate.settlement.settlementKind, "consumedByForegroundInteraction");
+  const gate = held.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  assert.deepEqual([gate.deadlineMs, gate.preparedOutput], [2_000, null]);
+  const shown = run(plan, observeTime(plan, held.snapshot, 2_000).snapshot);
   const button = shown.snapshot.foregroundAction;
   assert.equal(button?.kind, "interaction");
-  assert.deepEqual([button.createdAtMs, button.timeoutMs], [0, 3_000]);
+  assert.deepEqual([button.createdAtMs, button.timeoutMs], [2_000, 3_000]);
   assert.deepEqual(shown.snapshot.backgroundActions, []);
-  const done = playAt(plan, shown.snapshot, [3_000]);
+  // The timeout counts from when the button appeared, not from the message before it.
+  const early = playAt(plan, shown.snapshot, [3_000]);
+  assert.equal(early.snapshot.foregroundAction?.kind, "interaction");
+  const done = playAt(plan, shown.snapshot, [5_000]);
   assert.deepEqual(binding(done.snapshot, "elapsed"), seconds(3_000));
 });
 

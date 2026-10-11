@@ -206,31 +206,25 @@ test("timer resume equivalence holds at every boundary in loops, calls, and befo
   assert.equal(result.events.at(-1)?.kind, "exit");
 });
 
-test("a timer coexists with an older background pacing gate and settles in deadline order", () => {
+test("a blocking timer replaces the reading time before it, like a wait", () => {
   const compiled = plan('say "hello there"\ntimer 1 s\nsay "after"\nexit');
   const started = run(compiled, createFreshRuntimeSnapshot(compiled));
   const timer = delayAction(started.snapshot);
-  assert.equal(started.snapshot.backgroundActions.length, 1);
-  const gate = started.snapshot.backgroundActions[0];
-  assert.ok(gate?.kind === "chatPacingGate");
-  assert.ok(gate.deadlineMs > timer.deadlineMs, "the pacing gate outlasts the one-second timer");
+  assert.deepEqual(started.snapshot.backgroundActions, []);
+  assert.equal(started.snapshot.lastSettlement?.settlementKind, "replacedByWait");
 
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, started.snapshot)),
   );
   const timerDue = observeTime(restored.plan, restored.snapshot, timer.deadlineMs);
   assert.equal(timerDue.snapshot.lastSettlement?.actionId, timer.actionId);
+  // "after" follows one second after "hello there", whatever the reading time of that message.
   const next = run(restored.plan, timerDue.snapshot);
-  assert.equal(next.snapshot.status, "waiting");
-  assert.equal(next.snapshot.foregroundAction?.kind, "chatPacingGate");
-
-  const gateDue = observeTime(restored.plan, next.snapshot, gate.deadlineMs);
-  const done = run(restored.plan, gateDue.snapshot);
   assert.deepEqual(
-    done.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    next.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["after"],
   );
-  assert.equal(done.events.at(-1)?.kind, "exit");
+  assert.equal(next.snapshot.foregroundAction?.kind, "chatPacingGate");
 });
 
 test("zero timers are immediate and create no action", () => {

@@ -144,13 +144,28 @@ test("restores a promoted block-string fragment without repeating evaluation or 
     ["bold"],
   );
   const preparedRngState = waiting.snapshot.rng.state;
+  // The instant message waits for the block string's reading time, which this skips too.
+  const skipNext = (plan: typeof compiled, result: ReturnType<typeof run>) => {
+    const next = result.snapshot.foregroundAction;
+    assert.equal(next?.kind, "chatPacingGate");
+    const released = completeAction(plan, result.snapshot, {
+      actionId: next!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    });
+    const ran = run(plan, released.snapshot);
+    return {
+      events: [...result.events, ...released.events, ...ran.events],
+      snapshot: ran.snapshot,
+    };
+  };
 
   const uninterruptedRelease = completeAction(compiled, waiting.snapshot, {
     actionId: gate.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const uninterrupted = run(compiled, uninterruptedRelease.snapshot);
+  const uninterrupted = skipNext(compiled, run(compiled, uninterruptedRelease.snapshot));
 
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
@@ -163,7 +178,7 @@ test("restores a promoted block-string fragment without repeating evaluation or 
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const resumed = run(restored.plan, restoredRelease.snapshot);
+  const resumed = skipNext(restored.plan, run(restored.plan, restoredRelease.snapshot));
 
   assert.deepEqual(
     [...restoredRelease.events, ...resumed.events],

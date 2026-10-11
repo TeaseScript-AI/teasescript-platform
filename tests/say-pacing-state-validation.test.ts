@@ -10,6 +10,7 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
@@ -17,6 +18,7 @@ import {
   type RuntimeTemporarySnapshot,
 } from "../src/runtime/state.js";
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
+import { blockMessageDuringWait, heldGate } from "./helpers/pacing-states.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
 import { functionFrames } from "./helpers/runtime-equivalence.js";
@@ -97,24 +99,23 @@ function checkpointWithSnapshot(
   return checkpoint;
 }
 
-test("older pacing gate promotes after a newer delay settlement and resumes prepared output once", () => {
-  const compiled = plan('say "first"\nwait 1 s\nsay "second"\nexit', {}, ["TSV060"]);
-  const initial = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const pacing = initial.snapshot.backgroundActions[0];
-  const delay = initial.snapshot.foregroundAction;
-  assert.equal(pacing?.kind, "chatPacingGate");
-  assert.equal(delay?.kind, "delay");
-  assert.ok(pacing!.actionId < delay!.actionId);
+test("a pacing gate promotes after a newer delay settlement and resumes prepared output once", () => {
+  const {
+    compiled,
+    waiting: initial,
+    delay,
+    gate: pacing,
+  } = blockMessageDuringWait("wait 1 s", 'say "first", 5 s', 100, 'say "second"\nexit');
 
-  const delaySettled = observeTime(compiled, initial.snapshot, delay!.deadlineMs);
-  assert.equal(delaySettled.snapshot.lastSettlement?.actionId, delay!.actionId);
-  assert.equal(delaySettled.snapshot.backgroundActions[0]?.actionId, pacing!.actionId);
+  const delaySettled = observeTime(compiled, initial.snapshot, delay.deadlineMs);
+  assert.equal(delaySettled.snapshot.lastSettlement?.actionId, delay.actionId);
+  assert.equal(delaySettled.snapshot.backgroundActions[0]?.actionId, pacing.actionId);
 
   const promoted = run(compiled, delaySettled.snapshot);
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  assert.equal(gate?.actionId, pacing!.actionId);
-  assert.equal(gate?.deadlineMs, pacing?.deadlineMs);
+  assert.equal(gate?.actionId, pacing.actionId);
+  assert.equal(gate?.deadlineMs, pacing.deadlineMs);
   assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
   assert.equal(validateRuntimeSnapshot(promoted.snapshot, compiled).valid, true);
 
@@ -135,8 +136,12 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
 });
 
 test("explicit exit cleans released pacing lineage without admitting forged pacing work", () => {
-  const compiled = plan('say "first", 5 s\nsay "second", 5 s\nexit');
-  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
+  // In a block, exit does not wait, so it ends the session while the released message's own gate runs.
+  const compiled = plan(
+    'timer async 1 ms {\n    say "first", 5 s\n    say "second", 5 s\n    exit\n}\nwait 1 min\nexit',
+  );
+  const started = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const promoted = run(compiled, observeTime(compiled, started.snapshot, 1).snapshot);
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
   const released = completeAction(compiled, promoted.snapshot, {
@@ -183,7 +188,14 @@ test("branch-local and nested explicit exits reject forged retained pacing work"
     const created = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
     const pacing = created.snapshot.backgroundActions[0];
     assert.equal(pacing?.kind, "chatPacingGate");
-    const exited = run(compiled, created.snapshot);
+    // The exit waits for the message's pacing, then ends the session.
+    const exitWaiting = run(compiled, created.snapshot);
+    assert.equal(exitWaiting.snapshot.foregroundAction?.actionId, pacing!.actionId);
+    assert.equal(validateRuntimeSnapshot(exitWaiting.snapshot, compiled).valid, true);
+    const exited = run(
+      compiled,
+      observeTime(compiled, exitWaiting.snapshot, pacing!.deadlineMs).snapshot,
+    );
     assert.equal(exited.snapshot.status, "halted");
     assert.notEqual(exited.snapshot.nextInstruction, compiled.files[0]!.rootEndInstruction);
     assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
@@ -648,7 +660,7 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 
   delete corrupted.snapshot.foregroundAction.preparedOutput.speaker.extra;
-  corrupted.snapshot.foregroundAction.preparedOutput.durationMs = 0;
+  corrupted.snapshot.foregroundAction.preparedOutput.durationMs = -1;
   assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 
@@ -662,9 +674,12 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
 });
 
 test("snapshot and checkpoint reject representative malformed pacing action state", () => {
-  // The wait keeps the session waiting, not runnable, while the say's pacing is in the background.
-  const backgroundPlan = plan('say "first"\nwait 10 s\nexit');
-  const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
+  // The wait keeps the session waiting, not runnable, while a block's message has its pacing in the background.
+  const { compiled: backgroundPlan, waiting: background } = blockMessageDuringWait(
+    "wait 10 s",
+    'say "first"',
+    100,
+  );
   const foregroundPlan = plan('say "first"\nsay "second"\nexit');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   const foregroundGate = foreground.snapshot.foregroundAction;
@@ -908,26 +923,58 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   assert.equal(background.snapshot.status, "running");
   assert.equal(background.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
 
-  const waitPlan = plan('say "first"\nwait 10 s\nexit');
-  const withWait = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
-  const waitGate = withWait.snapshot.backgroundActions[0];
-  assert.equal(waitGate?.kind, "chatPacingGate");
+  const {
+    compiled: waitPlan,
+    waiting: withWait,
+    gate: waitGate,
+  } = blockMessageDuringWait("wait 10 s", 'say "first"', 100);
   const backgroundSkipped = completeAction(waitPlan, withWait.snapshot, {
-    actionId: waitGate!.actionId,
+    actionId: waitGate.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const backgroundTimed = observeTime(waitPlan, withWait.snapshot, 1_800);
+  const backgroundTimed = observeTime(waitPlan, withWait.snapshot, waitGate.deadlineMs);
 
-  const shortWaitPlan = plan('say "first"\nwait 1 s\nexit', {}, ["TSV060"]);
-  const shortWait = run(shortWaitPlan, createFreshRuntimeSnapshot(shortWaitPlan));
-  const delaySettled = observeTime(shortWaitPlan, shortWait.snapshot, 1_000);
+  const replacingPlan = plan('say "first"\nwait 1 s\nexit');
+  const replaced = run(replacingPlan, createFreshRuntimeSnapshot(replacingPlan));
+  assert.equal(replaced.snapshot.lastSettlement?.settlementKind, "replacedByWait");
+  const delaySettled = observeTime(replacingPlan, replaced.snapshot, 1_000);
 
   const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const shownInteraction = run(
+    interactionPlan,
+    observeTime(interactionPlan, interaction.snapshot, heldGate(interaction.snapshot).deadlineMs)
+      .snapshot,
+  );
 
   const instantPlan = plan('say "first"\nsay "now", instant\nexit');
   const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
+  const instantReleased = observeTime(
+    instantPlan,
+    instant.snapshot,
+    heldGate(instant.snapshot).deadlineMs,
+  );
+  const instantShown = runUntilExit(instantPlan, instantReleased.snapshot);
+
+  const heldPlan = plan(
+    [
+      'let line = say "first", instant',
+      'say "second"',
+      'line.text = "changed"',
+      'say "third"',
+      'showPermanentButton "Stop" {',
+      "    exit",
+      "}",
+      'say "fourth"',
+      "exit",
+    ].join("\n"),
+  );
+  const textHeld = run(heldPlan, createFreshRuntimeSnapshot(heldPlan));
+  const holdAgain = (snapshot: RuntimeSnapshot) =>
+    run(heldPlan, observeTime(heldPlan, snapshot, heldGate(snapshot).deadlineMs).snapshot);
+  const buttonHeld = holdAgain(textHeld.snapshot);
+  const exitHeld = holdAgain(buttonHeld.snapshot);
 
   const promotionPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
@@ -956,16 +1003,19 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
 
   const states: Array<[string, ReturnType<typeof plan>, RuntimeSnapshot]> = [
     ["initial background gate", positive, background.snapshot],
-    ["background gate with foreground wait", waitPlan, withWait.snapshot],
+    ["block gate with foreground wait", waitPlan, withWait.snapshot],
     ["background skip while wait remains", waitPlan, backgroundSkipped.snapshot],
     ["background time settlement while wait remains", waitPlan, backgroundTimed.snapshot],
-    [
-      "foreground delay settlement with older background gate",
-      shortWaitPlan,
-      delaySettled.snapshot,
-    ],
-    ["interaction consumption", interactionPlan, interaction.snapshot],
-    ["instant supersession", instantPlan, instant.snapshot],
+    ["wait replacement", replacingPlan, replaced.snapshot],
+    ["delay settlement after replacement", replacingPlan, delaySettled.snapshot],
+    ["held interaction", interactionPlan, interaction.snapshot],
+    ["interaction shown after its reading time", interactionPlan, shownInteraction.snapshot],
+    ["held instant say", instantPlan, instant.snapshot],
+    ["released instant say", instantPlan, instantReleased.snapshot],
+    ["shown instant say", instantPlan, instantShown.snapshot],
+    ["held message text write", heldPlan, textHeld.snapshot],
+    ["held permanent button", heldPlan, buttonHeld.snapshot],
+    ["held exit", heldPlan, exitHeld.snapshot],
     ["later say promotion", promotionPlan, promoted.snapshot],
     ["foreground pacing time release", promotionPlan, releasedByTime.snapshot],
     ["foreground pacing skip release", promotionPlan, releasedBySkip.snapshot],
@@ -981,12 +1031,13 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
 });
 
 test("pacing state validation rejects relational identity, property, duration, and prepared-output corruption", () => {
-  const waitPlan = plan('say "first"\nwait 10 s\nexit');
-  const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
-  const gate = waiting.snapshot.backgroundActions[0];
-  assert.equal(gate?.kind, "chatPacingGate");
+  const {
+    compiled: waitPlan,
+    waiting,
+    gate,
+  } = blockMessageDuringWait("wait 10 s", 'say "first"', 100);
   const retained = completeAction(waitPlan, waiting.snapshot, {
-    actionId: gate!.actionId,
+    actionId: gate.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
@@ -1131,8 +1182,7 @@ test("pacing state validation rejects relational identity, property, duration, a
 });
 
 test("cross-field pacing snapshot corruption rejects at direct and checkpoint boundaries", () => {
-  const waitPlan = plan('say "first"\nwait 10 s\nexit');
-  const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const { compiled: waitPlan, waiting } = blockMessageDuringWait("wait 10 s", 'say "first"', 100);
   const promotedPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
   const promotedGate = promoted.snapshot.foregroundAction;
@@ -1140,7 +1190,15 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
   const speakerPlan = plan("speaker vera { defaultSaySkippable: true }\nexit");
   const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
   const interactionPlan = plan('say "first"\nshowButton "Continue"\nwait 10 s\nexit');
-  const interactionWaiting = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const interactionHeld = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const interactionWaiting = run(
+    interactionPlan,
+    observeTime(
+      interactionPlan,
+      interactionHeld.snapshot,
+      heldGate(interactionHeld.snapshot).deadlineMs,
+    ).snapshot,
+  );
   const interaction = interactionWaiting.snapshot.foregroundAction;
   assert.equal(interaction?.kind, "interaction");
   const interactionSettled = completeAction(interactionPlan, interactionWaiting.snapshot, {
@@ -1232,12 +1290,11 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
 });
 
 test("active pacing locations allow only runtime-produced foreground and background compositions", () => {
-  const waitPlan = plan('say "first"\nwait 10 s\nexit');
-  const waitState = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
-  const backgroundPacing = waitState.snapshot.backgroundActions[0];
-  const foregroundDelay = waitState.snapshot.foregroundAction;
-  assert.equal(backgroundPacing?.kind, "chatPacingGate");
-  assert.equal(foregroundDelay?.kind, "delay");
+  const { compiled: waitPlan, waiting: waitState } = blockMessageDuringWait(
+    "wait 10 s",
+    'say "first"',
+    100,
+  );
   assert.equal(validateRuntimeSnapshot(waitState.snapshot, waitPlan).valid, true);
   assert.doesNotThrow(() =>
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(waitPlan, waitState.snapshot))),
@@ -1256,13 +1313,22 @@ test("active pacing locations allow only runtime-produced foreground and backgro
   assert.equal(afterFirst.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(validateRuntimeSnapshot(afterFirst.snapshot, interactionPlan).valid, true);
 
-  const interactionState = run(interactionPlan, afterFirst.snapshot);
+  // The button waits for the gate in the foreground, then appears without it.
+  const interactionHeld = run(interactionPlan, afterFirst.snapshot);
+  assert.equal(interactionHeld.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(interactionHeld.snapshot.backgroundActions.length, 0);
+  assert.equal(validateRuntimeSnapshot(interactionHeld.snapshot, interactionPlan).valid, true);
+  const interactionState = run(
+    interactionPlan,
+    observeTime(
+      interactionPlan,
+      interactionHeld.snapshot,
+      heldGate(interactionHeld.snapshot).deadlineMs,
+    ).snapshot,
+  );
   assert.equal(interactionState.snapshot.foregroundAction?.kind, "interaction");
   assert.equal(interactionState.snapshot.backgroundActions.length, 0);
-  assert.equal(
-    interactionState.snapshot.lastSettlement?.settlementKind,
-    "consumedByForegroundInteraction",
-  );
+  assert.equal(interactionState.snapshot.lastSettlement?.settlementKind, "completed");
   assert.equal(validateRuntimeSnapshot(interactionState.snapshot, interactionPlan).valid, true);
   assert.doesNotThrow(() =>
     deserializeCheckpoint(
@@ -1334,21 +1400,29 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const backgroundGate = background.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
   // Time completes a background gate only while the script waits; a runnable script continues first.
-  const waitingPlan = plan('say "first"\nwait 10 s\nexit');
-  const waiting = run(waitingPlan, createFreshRuntimeSnapshot(waitingPlan));
-  const waitingGate = waiting.snapshot.backgroundActions[0];
-  assert.equal(waitingGate?.kind, "chatPacingGate");
-  const backgroundCompleted = observeTime(waitingPlan, waiting.snapshot, waitingGate!.deadlineMs);
+  const {
+    compiled: waitingPlan,
+    waiting,
+    gate: waitingGate,
+  } = blockMessageDuringWait("wait 10 s", 'say "first"', 100);
+  const backgroundCompleted = observeTime(waitingPlan, waiting.snapshot, waitingGate.deadlineMs);
   const backgroundSkipped = completeAction(backgroundPlan, background.snapshot, {
     actionId: backgroundGate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
 
-  const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
-  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
-  const instantPlan = plan('say "first"\nsay "second", instant\nexit');
-  const superseded = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
+  // A button block's message ends when the block returns to the question it interrupted.
+  const interactionPlan = plan(
+    'showPermanentButton "Hint" {\n    say "A hint."\n}\nshowButton "Continue"\nexit',
+  );
+  const asking = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const pressed = pressPermanentButton(interactionPlan, asking.snapshot, 1);
+  assert.equal(pressed.outcome.kind, "pressed");
+  const interaction = run(interactionPlan, pressed.snapshot);
+  assert.equal(interaction.snapshot.foregroundAction?.kind, "interaction");
+  const replacingPlan = plan('say "first"\nwait 1 s\nexit');
+  const replaced = run(replacingPlan, createFreshRuntimeSnapshot(replacingPlan));
 
   const promotionPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
@@ -1383,7 +1457,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       hasPreparedOutput: false,
     },
     {
-      name: "interaction consumes background pacing",
+      name: "a returning block's question consumes its background pacing",
       compiled: interactionPlan,
       snapshot: interaction.snapshot,
       kind: "consumedByForegroundInteraction",
@@ -1391,10 +1465,10 @@ test("pacing settlement release provenance and chronology accept only canonical 
       hasPreparedOutput: false,
     },
     {
-      name: "instant output supersedes background pacing",
-      compiled: instantPlan,
-      snapshot: superseded.snapshot,
-      kind: "supersededByInstantOutput",
+      name: "a wait replaces background pacing",
+      compiled: replacingPlan,
+      snapshot: replaced.snapshot,
+      kind: "replacedByWait",
       releasedPreparedOutputInstruction: null,
       hasPreparedOutput: false,
     },
@@ -1466,9 +1540,9 @@ test("pacing settlement release provenance and chronology accept only canonical 
       }),
     },
     {
-      name: "supersession cannot claim prepared-output release",
-      compiled: instantPlan,
-      checkpoint: mutateCheckpoint(instantPlan, superseded.snapshot, (snapshot) => {
+      name: "replacement cannot claim prepared-output release",
+      compiled: replacingPlan,
+      checkpoint: mutateCheckpoint(replacingPlan, replaced.snapshot, (snapshot) => {
         snapshot.lastSettlement.releasedPreparedOutputInstruction = 1;
       }),
     },
@@ -1637,8 +1711,11 @@ test("pacing settlements retain exact prepared-output lineage through release an
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
+  // The wait replaces the released message's own gate, which ends the release lineage.
   const replacementWithWait = run(waitPlan, waitReleased.snapshot);
-  assert.equal(replacementWithWait.snapshot.backgroundActions[0]?.owningInstruction, 1);
+  assert.deepEqual(replacementWithWait.snapshot.backgroundActions, []);
+  assert.equal(replacementWithWait.snapshot.lastSettlement?.owningInstruction, 1);
+  assert.equal(replacementWithWait.snapshot.lastSettlement?.settlementKind, "replacedByWait");
   assert.equal(replacementWithWait.snapshot.foregroundAction?.kind, "delay");
   assert.equal(validateRuntimeSnapshot(replacementWithWait.snapshot, waitPlan).valid, true);
   assert.doesNotThrow(() =>

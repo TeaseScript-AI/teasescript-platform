@@ -310,7 +310,7 @@ test("session text shows what the player saw; values that were never said need t
       'let pick = choose [{ text: "Pick", value: secret }]',
       'let typed = askText("Name", prefill: secret)',
       'save "kept" as secret',
-      'say "Done"',
+      'say "Done", instant',
       "exit",
     ].join("\n"),
     { recorder, persistentScriptStorage: true, scriptStorage: [{ key: "private", value: hidden }] },

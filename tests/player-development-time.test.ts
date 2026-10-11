@@ -441,7 +441,12 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
   await time.advanceBy(10_000);
   session = player.session.value!;
   assert.deepEqual(said(session), ["First", "Second"]);
-  assert.deepEqual(logged, ["⏩ 10 s skipped", "⏩ 10 s skipped"]);
+  // The button waits for the second message's pacing, which a further jump passes.
+  assert.equal(session.state.foregroundAction?.kind, "chatPacingGate");
+  await time.advanceBy(10_000);
+  session = player.session.value!;
+  assert.equal(session.state.foregroundAction?.kind, "interaction");
+  assert.deepEqual(logged, ["⏩ 10 s skipped", "⏩ 10 s skipped", "⏩ 10 s skipped"]);
   player.update(activatePlayerRuntimeButton(session)!.session);
   assert.equal(player.session.value!.state.status, "halted");
   assert.equal(time.canAdvance.value, false);

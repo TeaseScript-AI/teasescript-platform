@@ -23,14 +23,30 @@ import {
 } from "../src/index.js";
 import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js";
 
+/**
+ * A wait replaces the reading time before it, so a block's message reads while the long wait keeps the session
+ * waiting: its pacing gate is background work.
+ */
+function blockMessageDuringLongWait(message: string) {
+  const compiled = compileWorkspaceSource(`timer async 1 ms { ${message} }\nwait 2000 s\nexit`);
+  assert.ok(compiled.plan && compiled.snapshot);
+  const started = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
+  assert.ok(started.snapshot);
+  const reached = observeWorkspaceTime(compiled.plan, started.snapshot, 1);
+  const running = executeValidatedWorkspaceSnapshot(compiled.plan, reached.snapshot, "run");
+  assert.ok(running.snapshot);
+  return { plan: compiled.plan, snapshot: running.snapshot };
+}
+
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"\nexit');
   assert.ok(compiled.plan);
   const result = executeWorkspaceSource('say "Hello"\nexit');
-  assert.equal(result.status, "halted");
+  // The exit waits for the message's reading time.
+  assert.equal(result.status, "waiting");
   assert.deepEqual(
     result.events.map((event) => event.kind),
-    ["say", "actionRequested", "exit"],
+    ["say", "actionRequested"],
   );
   const [say, requested] = result.events;
   assert.equal(say?.kind === "say" ? say.text : null, "Hello");
@@ -73,7 +89,7 @@ test("workspace helper stops blocking waits in waiting with action events", () =
 });
 
 test("validated workspace execution does not mutate the caller snapshot", () => {
-  const compiled = compileWorkspaceSource('say "Hello"\nexit');
+  const compiled = compileWorkspaceSource('say "Hello", instant\nexit');
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
@@ -197,12 +213,8 @@ test("a control rendered for an earlier interaction cannot answer a later one", 
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
-  // The long wait keeps the session running while the message's pacing gate is in the background.
-  const compiled = compileWorkspaceSource('say "paced"\nwait 2000 s\nexit');
-  assert.ok(compiled.plan && compiled.snapshot);
-  const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
-  assert.ok(running.snapshot);
-  const runningSnapshot = running.snapshot;
+  const compiled = blockMessageDuringLongWait('say "paced"');
+  const runningSnapshot = compiled.snapshot;
   const before = JSON.stringify(runningSnapshot);
   const presentation = inspectWorkspacePlayerPresentation(runningSnapshot);
   const gate = presentation.pacingGate;
@@ -314,22 +326,16 @@ test("composer text for a choice remains engine-owned and rejects ambiguous visi
 });
 
 test("workspace controls preserve engine pacing and completion rejection outcomes", () => {
-  // Each long wait keeps the session running while the message's pacing gate is in the background.
-  const unskippable = compileWorkspaceSource('say unskippable "paced"\nwait 2000 s\nexit');
-  assert.ok(unskippable.plan && unskippable.snapshot);
-  const waiting = executeValidatedWorkspaceSnapshot(unskippable.plan, unskippable.snapshot, "run");
-  assert.ok(waiting.snapshot);
+  const unskippable = blockMessageDuringLongWait('say unskippable "paced"');
+  const waiting = unskippable;
   const before = JSON.stringify(waiting.snapshot);
   const rejectedSkip = skipWorkspacePacing(unskippable.plan, waiting.snapshot);
   assert.equal(rejectedSkip.outcome.kind, "invalidPayload");
   assert.deepEqual(rejectedSkip.events, []);
   assert.equal(JSON.stringify(rejectedSkip.snapshot), before);
 
-  const skippable = compileWorkspaceSource('say "paced"\nwait 2000 s\nexit');
-  assert.ok(skippable.plan && skippable.snapshot);
-  const running = executeValidatedWorkspaceSnapshot(skippable.plan, skippable.snapshot, "run");
-  assert.ok(running.snapshot);
-  const completed = skipWorkspacePacing(skippable.plan, running.snapshot);
+  const skippable = blockMessageDuringLongWait('say "paced"');
+  const completed = skipWorkspacePacing(skippable.plan, skippable.snapshot);
   const duplicate = skipWorkspacePacing(skippable.plan, completed.snapshot);
   assert.equal(duplicate.outcome.kind, "localRejection");
   assert.deepEqual(duplicate.events, []);

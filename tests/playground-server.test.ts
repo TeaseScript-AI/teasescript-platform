@@ -159,10 +159,10 @@ test("workspace automation stores revisions and returns compile and run results"
   assert.equal(initial.status, 200);
   const initialRevision = view(initial).sourceRevision;
 
-  const uploaded = await call("PUT", "/api/workspace/source", 'say "automation"\nexit');
+  const uploaded = await call("PUT", "/api/workspace/source", 'say "automation", instant\nexit');
   assert.equal(uploaded.status, 200);
   const workspace = view(uploaded);
-  assert.equal(workspace.source, 'say "automation"\nexit');
+  assert.equal(workspace.source, 'say "automation", instant\nexit');
   assert.equal(workspace.sourceRevision, initialRevision + 1);
   assert.equal(workspace.stale, true);
   const compiled = await call("POST", "/api/workspace/compile");
