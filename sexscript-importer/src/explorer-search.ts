@@ -19,8 +19,10 @@ import {
   keyMatcher,
   loadDefaultCheck,
   callsClock,
+  callsRandom,
   successors,
   unreachableInstructions,
+  savedFirstChecks,
   type AtomValue,
   type Goal,
   type LoadAlias,
@@ -516,6 +518,16 @@ export interface UnvisitedBranch {
    * saved game also restores ({@link DataFlow.setInPlay}).
    */
   setInPlay?: true;
+  /**
+   * The condition, or the subject of its `switch`, has a random draw in its code: a call of one of the language's random
+   * functions, or a draw play made there.
+   */
+  drawsAtRandom?: true;
+  /**
+   * The stored key a null test reads, where the missed way is its null way and every way to the read has saved the key
+   * before or found it saved: the way runs only when a save of the key failed ({@link savedFirstChecks}).
+   */
+  savedFirst?: string;
   /**
    * Coverable lines that no explored state ran and that the missed way leads to without passing code a state ran:
    * how much code waits behind it.
@@ -1760,6 +1772,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     );
   /** With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there. */
   const randomTried = new Set<string>();
+  /** The places of the random draws play made (the runtime's sites, `path:line:column`). */
+  const drawnSites = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
   const chosenSteps: { node: number; input: ExplorerInput }[] = [];
   /**
@@ -1769,6 +1783,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const partialDraws: { node: number; input: ExplorerInput; draw: Data; support: number }[] = [];
   const partialKeys = new Set<string>();
   let chosenAt = 0;
+  /** States a step from which made random draws whose other outcomes are not offered. */
+  const drawsLeft = new Set<number>();
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
     number,
@@ -2387,6 +2403,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     if (first)
       candidates.push({ parent: parent?.id ?? null, input, start: startIndex, items: stepItems });
+    for (const draw of step.draws) if (typeof draw.site === "string") drawnSites.add(draw.site);
     if (parent !== null && input !== null) offerChoices(parent, input, step);
     for (const way of step.ways) {
       const instruction = way >> 1;
@@ -2635,6 +2652,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * before is replaced. A draw whose outcomes were not all offered is kept for {@link widenDraws}.
    */
   const offerChoices = (node: Node, input: ExplorerInput, next: Step): void => {
+    // A draw whose other outcomes are not offered leaves the state's future open (see `findTraps`).
+    if (
+      next.draws.length > (chooses ? RANDOM_DRAWS_PER_STEP : 0) ||
+      next.draws.some((draw) => typeof draw.drawId !== "number" || typeof draw.site !== "string")
+    )
+      drawsLeft.add(node.id);
     if (!chooses) return;
     const { random: _, ...plain } = input;
     const context = `${node.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
@@ -4460,6 +4483,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     session.randomChoices,
     (subject) => (times === null ? null : exactPart(subject, times)),
     (condition, at) => flow.readsSetInPlay(condition, at),
+    savedFirstChecks(plan, instructions, constants, flow),
+    drawnSites,
   );
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
@@ -4542,7 +4567,16 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     else counts.notFirst += 1;
     linesBySession.files.set(file, counts);
   });
-  const traps = findTraps(nodes, instructions, files, (node) => reproOf(node, null, node.start));
+  // A state with other outcomes of its draws not tried yet has a future not explored.
+  for (const job of chosenSteps.slice(chosenAt)) drawsLeft.add(job.node);
+  for (const entry of partialDraws) drawsLeft.add(entry.node);
+  const traps = findTraps(
+    nodes,
+    instructions,
+    files,
+    (node) => reproOf(node, null, node.start),
+    (node) => drawsLeft.has(node.id),
+  );
 
   /**
    * The corpus to keep: the paths to crashes and traps, then, by greedy set cover, paths of steps that covered a line or
@@ -5268,6 +5302,8 @@ function lineCoverage(
   randomChoices: boolean,
   clockPartOf: (subject: unknown) => string | null,
   setInPlay: (condition: unknown, at: number) => boolean,
+  savedFirst: ReadonlyMap<number, { key: string; way: boolean }>,
+  drawnSites: ReadonlySet<string>,
 ): Omit<ExploreResult["coverage"], "bySession"> {
   // An instruction that ran but is statically unreachable shows the analysis missed a way: then claim nothing.
   let contradictions = 0;
@@ -5406,6 +5442,31 @@ function lineCoverage(
    * A condition the script wrote as a `switch` case: its form, and what the switch compares, from where the switch
    * stored it, the nearest store of its temporary before the case (with its text, and the part of the clock it is).
    */
+  // The draws play made, by file: their lines and columns.
+  const drawnIn = new Map<string, [number, number][]>();
+  for (const site of drawnSites) {
+    const found = /^(.*):(\d+):(\d+)$/u.exec(site);
+    if (found === null) continue;
+    const places = drawnIn.get(found[1]!) ?? [];
+    places.push([Number(found[2]), Number(found[3])]);
+    drawnIn.set(found[1]!, places);
+  }
+  /**
+   * Whether an expression of `file` has a random draw in its code: a call of one of the language's random functions, or
+   * a draw play made there (a pick from a list, which only a list's `random` makes).
+   */
+  const drawnWithin = (expression: unknown, file: string): boolean => {
+    if (callsRandom(expression)) return true;
+    const span = compactSpan(record(expression).span);
+    if (span === null) return false;
+    const before = (line: number, column: number, otherLine: number, otherColumn: number) =>
+      line < otherLine || (line === otherLine && column <= otherColumn);
+    return (drawnIn.get(file) ?? []).some(
+      ([line, column]) =>
+        before(span.line, span.column, line, column) &&
+        before(line, column, span.endLine, span.endColumn),
+    );
+  };
   const caseAt = (index: number, condition: unknown): Partial<UnvisitedBranch> => {
     const form = caseForm(condition);
     const span = compactSpan(record(condition).span);
@@ -5419,6 +5480,7 @@ function lineCoverage(
       const part = clockPartOf(stored.value);
       return {
         case: form.kind,
+        ...(drawnWithin(stored.value, files[at]!) ? { drawsAtRandom: true as const } : {}),
         ...(subject === null || files[at] !== files[index]
           ? {}
           : { subject: short(source.slice(subject.start, subject.end)) }),
@@ -5510,6 +5572,7 @@ function lineCoverage(
     const missedTarget = way === 1;
     const constant = constants.get(index);
     const storage = fixed.get(index);
+    const saved = savedFirst.get(index);
     const directed = targets.get(index * 2 + way);
     const label: Exclude<Reach, "play" | "chosen"> =
       (clock & (way === 0 ? 1 : 2)) !== 0
@@ -5545,6 +5608,7 @@ function lineCoverage(
       line: lineOf[index] ?? 0,
       condition: conditionText(instruction, files[index]!, sources),
       missed: wayName(instruction, way),
+      ...(drawnWithin(condition, files[index]!) ? { drawsAtRandom: true as const } : {}),
       ...(instruction.kind === "jumpIfFalse" ? caseAt(index, condition) : {}),
       targetInstruction: missedTarget ? target : index + 1,
       targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
@@ -5554,6 +5618,10 @@ function lineCoverage(
       attempts: directed?.attempts ?? 0,
       dependsOn: [...new Set((directed?.goals ?? []).map((goal) => sourceText(goal.source)))],
       ...(setInPlay(condition, index) ? { setInPlay: true as const } : {}),
+      // The way taken when the test comes out true is the next instruction's.
+      ...(label === "unknown" && saved !== undefined && saved.way === !missedTarget
+        ? { savedFirst: saved.key }
+        : {}),
       behindLines: (regions[unvisitedBranches.length] = behind(missedTarget ? target : index + 1))
         .size,
       ownLines: 0,
@@ -5655,8 +5723,11 @@ function directedSummary(
 /**
  * Traps: loops the player cannot leave. Explored states are grouped by loop key (the state without clock, random
  * state, and settled handles), with an edge wherever an explored input leads from one group to another. A group
- * escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
- * future is unknown; so does every group with an edge to an escaping group. The remaining groups form the trapped
+ * escapes when one of its states ended (completed or failed), or when its future is unknown: none of its states was
+ * fully expanded, or a step from one made random draws whose other outcomes were not all tried at its place
+ * (`randomOpen`), as a state that comes back to the same place with another random state may draw its way out; so
+ * does every group with an edge to an escaping group. Its states that differ only in time or settled handles are taken
+ * to go on as an expanded one does. The remaining groups form the trapped
  * part: every explored input from them leads back into it. Each strongly connected part of it that no explored input
  * leaves is one trap; trapped groups outside such a part lead into one and are counted as its feeders. A state where
  * the player can do nothing and nothing will happen is a `stuck` trap of its own.
@@ -5669,6 +5740,7 @@ function findTraps(
   instructions: readonly Data[],
   files: readonly string[],
   reproOf: (node: Node) => Repro,
+  randomOpen: (node: Node) => boolean,
 ): { report: TrapReport; entry: number }[] {
   const groups = new Map<string, Node[]>();
   for (const node of nodes) {
@@ -5687,7 +5759,7 @@ function findTraps(
   for (const [loop, members] of groups) {
     const ended = members.some((node) => node.status === "completed" || node.status === "failed");
     const explored = members.some((node) => node.status === "expanded" || node.status === "stuck");
-    if (ended || !explored) escaping.add(loop);
+    if (ended || !explored || members.some(randomOpen)) escaping.add(loop);
   }
   const predecessors = new Map<string, string[]>();
   for (const [loop, next] of successors) {

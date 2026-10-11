@@ -646,10 +646,17 @@ as an intro, and the lines no first session ran, by the smallest session number 
 observed, so a line first run in a later session may still be reachable in a first one. `summary.md` shows both.
 Next to each unit's report, `<unit>.report.md` is a playtest report for the script's creator (`--no-report` leaves it
 out; `tools/explore-report.ts` writes one from an existing report): the crashes and loops with no way out with the
-player's steps to each, the missed ways grouped by what they would need (a random draw, a saved value, another time, a
-typed answer, a count, a value the script sets: a condition on a variable the script also sets in play, such as a
-game's state a saved game restores, `setInPlay` in the report, goes with these), why play stopped, and the code that
-can never run. Each line not reached counts once,
+player's steps to each, the missed ways grouped by what their conditions depend on (a random draw, saved values, the
+time or date, a typed answer, a count, a value the script sets: a condition on a variable the script also sets in play,
+such as a game's state a saved game restores, `setInPlay` in the report, goes with these), why play stopped, and the
+code that can never run. A missed way is one the analysis could not prove can never run, which does not make it
+reachable (game logic such as an item the game never gives stays unproven), so the report says what its condition
+depends on and not that more play reaches it. A test of a saved value for null whose missed way is the null one, where
+every way to the read has saved the key before (with a value that is never null) or found it saved, and nothing deletes
+the key or may save null to it, is grouped as running only if a save failed (`savedFirst`, the key): a save to
+persistent storage can fail and the script then goes on, so such a way is no code that can never run. A missed way is
+grouped behind a random draw when its condition, or the subject of its `switch`, calls one of the language's random
+functions or play made a draw there (`drawsAtRandom`). Each line not reached counts once,
 under the missed way with the most code behind it (`ownLines`), so the groups add up to the lines not reached;
 conditions and keys are as the script writes them. A needed comparison with a saved value (`needs score > 7`) is a
 static reading of the code, shown where the analysis finds that the condition compares the saved value itself: it can
@@ -667,8 +674,13 @@ the input, and the report counts these under `search.engineErrors` with the path
 (a refused state by restoring the state the path reaches).
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
-escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
-future is unknown. A group that leads to an escaping group escapes too. Each strongly connected part of the
+escapes when one of its states ended (completed or failed), or when its future is unknown: none of its states was fully
+expanded, or a step from one made random draws whose other outcomes were not all tried at its place (without random
+choices, any draw), as a state that comes back to the same place with another random state may draw its way out. A
+group that leads to an escaping group escapes too. The jewell trap loops that measurements earlier in this README count
+(`cumEdging.tease:32`, `trainEnema.tease:65`, `trainPuppyLevelTwo.tease:843`, in the effect-ranking and depth-phase
+results) were of that kind, each loop's only way out a draw (a chance of 5/6, 2/3, and 1/2 per round), and are no
+longer reported; the decisions those counts informed rest on them. Each strongly connected part of the
 remaining groups that no explored input leaves is one trap. A state where the player can do nothing and nothing
 happens is a `stuck` trap. A loop that waits for a word or number the candidates miss, or for a clock time, is also
 reported as a trap.

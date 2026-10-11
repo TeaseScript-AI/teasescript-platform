@@ -1582,6 +1582,202 @@ test(
 );
 
 test(
+  "a null test of a key every way saves first or finds saved runs only if a save failed, not when the key may be deleted or saved as null",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      'let first: integer? = load "fx.pack", default: null',
+      "if first == null {",
+      '  save 0 as "fx.pack"',
+      "}",
+      'save 1 as "fx.gone"',
+      "let one = 1",
+      'save one as "fx.maybe"',
+      "function later {",
+      '  let again: integer? = load "fx.pack", default: null',
+      "  if again == null {",
+      '    say "Lost the pack."',
+      "  }",
+      '  if load("fx.pack", default: null) == null {',
+      '    say "Lost it again."',
+      "  }",
+      '  let gone: integer? = load "fx.gone", default: null',
+      "  if gone == null {",
+      '    say "Gone."',
+      "  }",
+      '  let maybe: integer? = load "fx.maybe", default: null',
+      "  if maybe == null {",
+      '    say "Maybe."',
+      "  }",
+      "}",
+      "later()",
+      'showButton "Next"',
+      'if load("fx.never", default: false) == true {',
+      '  delete "fx.gone"',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      later: true,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const branch = (text: string) =>
+      result.coverage.unvisitedBranches.find((entry) => entry.condition?.text === text);
+    assert.deepEqual(
+      [
+        "again == null",
+        'load("fx.pack", default: null) == null',
+        "gone == null",
+        "maybe == null",
+      ].map((text) => [branch(text)?.reach, branch(text)?.savedFirst]),
+      [
+        ["unknown", "fx.pack"],
+        ["unknown", "fx.pack"],
+        ["unknown", undefined],
+        ["unknown", undefined],
+      ],
+    );
+    const report = playtestReport(
+      JSON.parse(JSON.stringify({ unit: "pack", compile: { ok: true }, ...result })),
+    );
+    const failed = /### Runs only if a save failed[^#]*/u.exec(report)?.[0] ?? "";
+    assert.match(
+      failed,
+      /`again == null` being true, 1 line behind it; every way here saves fx\.pack first/u,
+    );
+    assert.doesNotMatch(failed, /fx\.gone|fx\.maybe/u);
+    // A template's pattern is no key, also where a literal key has the same text.
+    const nul = [
+      'let suffix = choose "\u0000", ""',
+      'save [1] as "fx.${suffix}"',
+      'let items: integer[]? = load "fx.\u0000", default: null',
+      "if items == null {",
+      '  say "No such key."',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const nulPlan = engine.compileProject([{ path: "main.tease", source: nul }], {
+      builtins: [],
+    }).plan;
+    assert.ok(isRecord(nulPlan));
+    const nulBranch = explore(engine, nulPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 3,
+      maxStates: 100_000,
+      later: false,
+      sources: new Map([["main.tease", nul]]),
+      diagnostics: [],
+    }).coverage.unvisitedBranches.find((entry) => entry.condition?.text === "items == null");
+    assert.deepEqual([nulBranch?.reach, nulBranch?.savedFirst], ["unknown", undefined]);
+  },
+);
+
+test("the creator report says what a stored-value entry depends on, also for a key that must be missing or a value a visit had", () => {
+  const entry = (line: number, extra: Record<string, unknown>) => ({
+    kind: "if",
+    path: "main.tease",
+    line,
+    condition: { text: `cell${line} == null` },
+    missed: "true",
+    reach: "unknown",
+    sources: ["storage"],
+    dependsOn: [`stored cell${line}`],
+    behindLines: 1,
+    ownLines: 1,
+    parts: [],
+    ...extra,
+  });
+  const report = playtestReport({
+    unit: "cells",
+    compile: { ok: true },
+    search: { operations: 20, sessions: 2, stoppedBy: "operations" },
+    crashes: [],
+    traps: [],
+    coverage: {
+      coverableLines: 4,
+      visitedLines: 2,
+      percent: 50,
+      reach: { play: 2, unknown: 2, unreachable: 0 },
+      files: [],
+      unvisitedBranches: [
+        entry(3, {
+          reason:
+            "needs cell3 = nothing stored; a session from storage that has it did not reach the condition",
+        }),
+        entry(7, { best: { needs: "stored cell7 != 0", value: "1", distance: 0, session: 2 } }),
+      ],
+    },
+  });
+  const stored = /### Depends on saved values[^#]*/u.exec(report)?.[0] ?? "";
+  assert.match(
+    stored,
+    /`main\.tease:3`.*a visit that started from saved data that meets this did not get back/u,
+  );
+  assert.match(stored, /`main\.tease:7`.*a visit had it \(1\) but did not get back to this point/u);
+  assert.doesNotMatch(report, /needed value saved|another saved value|earlier visit/u);
+});
+
+test(
+  "the creator report groups a condition as a random draw only where play drew in its code",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      "function randomConstant {",
+      "  return 0",
+      "}",
+      "if randomConstant() == 7 {",
+      '  say "Never seven."',
+      "}",
+      'let shown = "randomInteger("',
+      'if shown == "randomInteger(7" {',
+      '  say "Never text."',
+      "}",
+      "if randomInteger(1..=3) == 9 {",
+      '  say "Never nine."',
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 2000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const drawn = result.coverage.unvisitedBranches
+      .filter((entry) => entry.drawsAtRandom === true)
+      .map((entry) => entry.condition?.text);
+    assert.deepEqual(drawn, ["randomInteger(1..=3) == 9"]);
+    const random =
+      /### Behind a random draw[^#]*/u.exec(
+        playtestReport(
+          JSON.parse(JSON.stringify({ unit: "draws", compile: { ok: true }, ...result })),
+        ),
+      )?.[0] ?? "";
+    assert.match(random, /randomInteger\(1\.\.=3\) == 9/u);
+    assert.doesNotMatch(random, /randomConstant|shown ==/u);
+  },
+);
+
+test(
   "the creator report names why play stopped, groups a value set in play with values the script sets also when a saved game restores it, and lists a function nothing calls whole as code that can never run",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
@@ -1619,10 +1815,17 @@ test(
       ),
     );
     assert.match(report, /stopped at its limit of 20,003 kept game states/u);
-    const setsSection = report.split("### Needs a value the script sets")[1]?.split("###")[0] ?? "";
+    // A missed way is only not proven unreachable: the report does not present it as reachable.
+    assert.match(
+      report,
+      /could not prove that this code can never run, which does not make it reachable/u,
+    );
+    assert.doesNotMatch(report, /more play may reach|lines that can run/u);
+    const setsSection =
+      report.split("### Depends on a value the script sets")[1]?.split("###")[0] ?? "";
     assert.match(setsSection, /`health < -50`/u, report);
     assert.doesNotMatch(
-      report.split("### Needs something saved on an earlier visit")[1]?.split("###")[0] ?? "",
+      report.split("### Depends on saved values")[1]?.split("###")[0] ?? "",
       /health/u,
     );
     assert.match(report, /lines 5-9/u);
@@ -2043,6 +2246,33 @@ test(
       'let n = askInteger "Number?", prefill: 0\nif n * n == 1522756 { say "Hit." }\nexit\n',
     );
     assert.deepEqual([hidden.stoppedBy, hidden.audit?.result], ["exhausted", "stalled"]);
+  },
+);
+
+test(
+  "a loop whose only way out is a random draw is not reported as a trap while its states or their other outcomes are not all explored",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Each round leaves the loop with a chance of one in a thousand: a player gets out, though the outcomes the
+    // explorer tried may all stay inside.
+    const source =
+      'say "Start."\nlet going = true\nwhile going {\n  showButton "Again"\n' +
+      '  if randomInteger(1..1000) == 1 {\n    going = false\n  }\n}\nsay "Out."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 5000,
+      maxStates: 50,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      cells: true,
+      randomChoices: true,
+    });
+    assert.deepEqual(result.traps, []);
   },
 );
 
