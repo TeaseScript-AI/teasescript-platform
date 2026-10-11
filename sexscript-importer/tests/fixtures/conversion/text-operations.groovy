@@ -51,3 +51,6 @@ def countdownText = { String pattern, int seconds -> String.format(pattern, (int
 show(countdownText("Wait %d:%02d", 75))
 def shockPattern = "Shock time %.1f seconds, %d%% done"
 show(String.format(shockPattern, 2.25f, 50))
+// Java's 0 flag fills after a minus sign.
+def paddedPattern = "Score %05d"
+show(String.format(paddedPattern, -7))

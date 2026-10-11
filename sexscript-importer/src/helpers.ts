@@ -758,8 +758,30 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
                   named: {},
                 }),
               ]),
+              // Java's 0 flag fills after a minus sign: %05d of -7 is -0007.
               ifS(bin(">", v("width"), lit(0)), [
-                text(call(v("text"), "padStart", v("width"), v("fill"))),
+                ifS(
+                  bin(
+                    "and",
+                    bin("==", v("fill"), lit("0")),
+                    call(v("text"), "startsWith", lit("-")),
+                  ),
+                  [
+                    text(
+                      bin(
+                        "+",
+                        lit("-"),
+                        call(
+                          call(v("text"), "substring", lit(1)),
+                          "padStart",
+                          bin("-", v("width"), lit(1)),
+                          lit("0"),
+                        ),
+                      ),
+                    ),
+                  ],
+                  [text(call(v("text"), "padStart", v("width"), v("fill")))],
+                ),
               ]),
               set(v("result"), v("text"), "+="),
             ],

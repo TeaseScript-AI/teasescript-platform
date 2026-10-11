@@ -58,7 +58,11 @@ function sexscriptLegacyFormat(pattern, values) {
       text = sexscriptLegacyFixed(toNumber(text), digits, pow(10, digits))
     }
     if width > 0 {
-      text = text.padStart(width, fill)
+      if fill == "0" and text.startsWith("-") {
+        text = "-" + text.substring(1).padStart(width - 1, "0")
+      } else {
+        text = text.padStart(width, fill)
+      }
     }
     result += text
   }
@@ -170,4 +174,8 @@ say countdownText("Wait %d:%02d", 75)
 let shockPattern = "Shock time %.1f seconds, %d%% done"
 // NOTE SX_FORMAT_RUNTIME line 53: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
 say sexscriptLegacyFormat(shockPattern, ["${2.25}", "${50}"])
+// Java's 0 flag fills after a minus sign.
+let paddedPattern = "Score %05d"
+// NOTE SX_FORMAT_RUNTIME line 56: Java String.format() wrote these values by a pattern known only at runtime; a helper writes its %s, %d, and %f with a 0 flag, a width, and a precision as Java did, and shows other conversions as written.
+say sexscriptLegacyFormat(paddedPattern, ["${-7}"])
 exit
