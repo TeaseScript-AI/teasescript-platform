@@ -1346,10 +1346,10 @@ export function clearPlayerRuntimeFormField(
   return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
 }
 
-/** The forms that can still be answered: the presented one and one that a running block suspended. */
-export function playerRuntimeFormActionIds(state: PlayerRuntimeState): readonly number[] {
+/** The questions that can still be answered: the presented one and one that a running block suspended. */
+export function playerRuntimeInteractionActionIds(state: PlayerRuntimeState): readonly number[] {
   return [state.foregroundAction, state.suspendedAction].flatMap((action) =>
-    action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
+    action?.kind === "interaction" ? [action.actionId] : [],
   );
 }
 

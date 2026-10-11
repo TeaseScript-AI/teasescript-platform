@@ -17,7 +17,7 @@ import {
   clearPlayerRuntimeFormField,
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
-  playerRuntimeFormActionIds,
+  playerRuntimeInteractionActionIds,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
@@ -111,7 +111,7 @@ const form = computed(() => (props.session ? playerRuntimeForm(props.session) : 
 /**
  * The composer's latest text for each field being edited, by action and field, for this session, so a form shows it
  * again when it resumes after a block interrupted it, also before the text reached the form, and also when that block
- * opened a form of its own.
+ * opened a form of its own. A question that is not a form keeps its text under the field ID `""` in the same way.
  */
 let typed: {
   readonly plan: PlayerRuntimeSession["plan"];
@@ -153,17 +153,13 @@ function ownsPresentedEditor(): boolean {
     form.value.editor?.fieldId === composerOwner.fieldId
   );
 }
-// Only the forms that can still be answered keep their text, so a script that asks again and again keeps no more.
-watch(
-  () => form.value?.actionId,
-  () => {
-    const texts = typedTexts();
-    if (!texts || !props.session) return;
-    const pending = new Set(playerRuntimeFormActionIds(props.session.state));
-    for (const key of texts.keys())
-      if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
-  },
-);
+// Only the questions that can still be answered keep their text, so a script that asks again and again keeps no more.
+watch(actionId, () => {
+  const texts = typedTexts();
+  if (!texts || !props.session) return;
+  const pending = new Set(playerRuntimeInteractionActionIds(props.session.state));
+  for (const key of texts.keys()) if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
+});
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -297,6 +293,8 @@ watch(
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 watch(draft, (text) => {
   clearTimeout(draftTimer);
+  if (actionId.value !== undefined && form.value === null)
+    typedTexts()?.set(typedKey(actionId.value, ""), text);
   if (!ownsPresentedEditor() || !props.session) return;
   const target = composerOwner!;
   const { plan } = props.session;
@@ -356,12 +354,18 @@ watch(
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
     // A prefill starts in the composer; the player submits it unchanged or edits it first.
     const presentedInput = foreground.value;
-    // A form field being edited, also one that resumes after an interruption, keeps the text typed for it.
+    // A form field being edited, and a question, also one that resumes after an interruption, keeps the text typed
+    // for it.
+    const typedHere =
+      actionId.value !== undefined && form.value === null
+        ? typedTexts()?.get(typedKey(actionId.value, ""))
+        : undefined;
     if (!loadFormEditor(form.value))
       draft.value =
-        presentedInput !== null && "prefill" in presentedInput
+        typedHere ??
+        (presentedInput !== null && "prefill" in presentedInput
           ? (presentedInput.prefill ?? "")
-          : "";
+          : "");
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
