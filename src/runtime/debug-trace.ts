@@ -1149,7 +1149,8 @@ export class TraceStore {
 
   image(value: SerializableRuntimeValue): void {
     const id = this.write("image", null, "Stage image", value);
-    if (id !== null) this.#stageImageId = id;
+    // A record larger than the budget is dropped at once, so the image has none.
+    if (id !== null) this.#stageImageId = this.#find(id) === undefined ? null : id;
     this.#stageImageSet = true;
   }
 

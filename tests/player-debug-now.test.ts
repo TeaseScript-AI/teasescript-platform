@@ -222,6 +222,10 @@ test("the Stage image names the statement that set it, or why the trace does not
     "Bo",
   );
   assert.equal(origin(small), "Expired: older history was dropped");
+  // So did a byte budget smaller than that record alone.
+  const tiny = new RuntimeDebugContext({ maxAccountedBytes: 128 });
+  createPlayerRuntimeSession(source, { debugTrace: tiny });
+  assert.equal(origin(tiny), "Expired: older history was dropped");
 });
 
 test("Now lists each active sound with the statement that started it", () => {
