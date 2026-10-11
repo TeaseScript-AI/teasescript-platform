@@ -23,9 +23,10 @@ export function withParsedLoads(
     if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
       const missing = (side: IrExpression): boolean =>
         side.kind === "literal" && side.value === null;
+      // A received whole number that failed legacy's Integer cast read null too, so its test keeps the helper.
       const raw = (side: IrExpression): IrExpression => {
-        if (side.kind !== "load") return parse(side);
-        const { integer: _integer, number: _number, ...load } = side;
+        if (side.kind !== "load" || side.received === true) return parse(side);
+        const { integer: _integer, number: _number, received: _received, ...load } = side;
         return { ...load, key: parse(load.key) };
       };
       if (missing(value.right)) return { ...value, left: raw(value.left) };
@@ -34,7 +35,8 @@ export function withParsedLoads(
     const next = mapChildren(value, parse);
     if (next.kind !== "load" || (next.integer !== true && next.number !== true)) return next;
     const { integer, defaultValue, key } = next;
-    const helper = integer === true ? "loadInteger" : "loadFloat";
+    const helper =
+      integer !== true ? "loadFloat" : next.received === true ? "receiveInteger" : "loadInteger";
     if (
       defaultValue === undefined ||
       (defaultValue.kind === "literal" && defaultValue.value === null)
@@ -52,7 +54,7 @@ export function withParsedLoads(
     // something, read twice so, is computed once before its statement (keyed); a read elsewhere, which no legacy
     // read-then-default code gives, gets the value.
     if (!repeatable(key)) return helperCall(helper, [key, defaultValue]);
-    const { integer: _integer, number: _number, ...raw } = next;
+    const { integer: _integer, number: _number, received: _received, ...raw } = next;
     return helperCall(helper, [key, raw]);
   };
   // A key's variable takes a name that nothing in the file uses.

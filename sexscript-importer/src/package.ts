@@ -161,6 +161,56 @@ function launchKey(sourceName: string): string {
   return name.replaceAll("/", ".");
 }
 
+const INTRO_FIRST_START = "intro.launch.firsttime";
+
+/**
+ * SexScripts' own intro script, which the legacy player ran at its first start, saved `intro.launch.firsttime` through
+ * the launch markers every script got (ss/FullScript.groovytemplate), and scripts read it as the time the player first
+ * started SexScripts, an identifier of the player (HumanPaperboard's keys). A package has no such script, so where the
+ * package reads that key, each script saves its own first start under it, once, as the intro did.
+ */
+function withIntroStart(program: MigrationProgram, texts: ReadonlySet<string>): MigrationProgram {
+  if (!texts.has(INTRO_FIRST_START)) return program;
+  const key: IrExpression = { kind: "literal", value: INTRO_FIRST_START };
+  const now: IrExpression = {
+    kind: "methodCall",
+    target: { kind: "call", name: "getAbsoluteDateTime", positional: [], named: {} },
+    name: "toSeconds",
+    arguments: [],
+  };
+  const message = `SexScripts' intro script saved "${INTRO_FIRST_START}" at the player's first start of SexScripts, which this package reads; the package saves its own first start under that key instead.`;
+  const marker: IrStatement[] = [
+    {
+      kind: "comment",
+      text: `// NOTE SX_INTRO_FIRST_START: ${message}`,
+      trailing: false,
+      span: null,
+    },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: { kind: "load", key },
+        right: { kind: "literal", value: null },
+      },
+      then: [{ kind: "save", key, value: now, span: null }],
+      else: [],
+      span: null,
+    },
+  ];
+  const leading = program.statements.findIndex((statement) => statement.kind !== "comment");
+  const at = leading < 0 ? program.statements.length : leading;
+  return {
+    ...program,
+    statements: [...program.statements.slice(0, at), ...marker, ...program.statements.slice(at)],
+    diagnostics: [
+      ...program.diagnostics,
+      { code: "SX_INTRO_FIRST_START", severity: "warning", message, span: null },
+    ],
+  };
+}
+
 /**
  * The legacy player saved `<key>.launch.firsttime`, `.lasttime` (Unix seconds), and `.nb` (the number of starts) when
  * a script started. Where the package reads one of them, the script saves them first, after its leading comments. The
@@ -1021,17 +1071,20 @@ export function lowerPackage(
     if (program.module !== undefined)
       return { ...program, statements: withReturnTypes(program.statements, scriptResults) };
     if (files[index]?.root?.kind !== "scriptBody") return program;
-    const script = withLaunchMarkers(
-      composeProgram(
-        withLoadedModules(
-          program,
-          lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
-          separateModules,
+    const script = withIntroStart(
+      withLaunchMarkers(
+        composeProgram(
+          withLoadedModules(
+            program,
+            lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
+            separateModules,
+          ),
+          functionCatalog,
+          classFunctions,
         ),
-        functionCatalog,
-        classFunctions,
+        launchKey(files[index]!.sourceName),
+        texts,
       ),
-      launchKey(files[index]!.sourceName),
       texts,
     );
     uncalled[index] = uncalledDiagnostics(script, legacyUnreferencedFunctions(groups[index]!));

@@ -66,6 +66,7 @@ import {
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
+import { withLegacyImagePaths } from "./image-paths.ts";
 import {
   type CapturedLocal,
   liftableCaptures,
@@ -2350,6 +2351,7 @@ function lowerFileOnce(
     shared,
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
+  texts = withLegacyImagePaths(texts, context.syntheticHelpers);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -13299,7 +13301,15 @@ function readThenDefault(
     ) ||
     // A dict's default has its value type, as for `?:` (dictDefaultFits).
     (dictLookupParts(read, context) !== null &&
-      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context))
+      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context)) ||
+    // A received value that failed legacy's Integer cast read null too, so its default also replaces that, which only
+    // a default the read's helper can take as a value does: a constant or a variable (sexscriptLegacyReceiveInteger).
+    (legacyApiCall(read, context)?.name === "receiveInteger" &&
+      !(
+        fallback.kind === "constant" ||
+        fallback.kind === "variable" ||
+        (fallback.kind === "unaryMinus" && asNode(fallback.value)?.kind === "constant")
+      ))
   )
     return null;
   const merged: AstNode = { kind: "readDefault", span: read.span, read, fallback };
@@ -17923,8 +17933,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     }
     const key = lowerExpression(call.arguments[0]!, context);
     if (key === null) return null;
-    if (call.name === "loadInteger" || call.name === "receiveInteger")
-      return { kind: "load", key, integer: true };
+    if (call.name === "loadInteger") return { kind: "load", key, integer: true };
+    if (call.name === "receiveInteger") return { kind: "load", key, integer: true, received: true };
     if (call.name === "loadFloat") return { kind: "load", key, number: true };
     const shape = storageKeyShape(call.arguments[0]!);
     if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {

@@ -676,11 +676,23 @@ Legacy `getFile(title)` was used for a photo of the player, so it becomes `askIm
 with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05; a cancelled chooser gave null, which
 askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
+Legacy `getImage()` returned the path of the webcam picture it saved, `<folder>/images/captured/<number>.jpeg`, and
+`getFile()` the chosen file's path; scripts tested them (`endsWith(".jpg")`, `contains("captured")`), which the opaque
+references of `takePhoto()` and `askImage()` do not keep. Where a variable's every value is a `takePhoto()` picture, a
+copy of one, null, or the empty start (values that a never-true flag such as `testmode` guards are none), a test that
+every webcam path answers alike reads such a path (`sexscriptLegacyImagePath`): `endsWith` of a text without digits,
+which only a suffix of `.jpeg` ends, and `contains` of a part of `/images/captured/` or `.jpeg`, also after
+`lowercase()` or `uppercase()`; a missing picture still fails the test. Any other test of a picture's path, as of a
+chosen or received picture's extension, depends on what the conversion cannot know and stays as written, testing the
+reference (`SX_IMAGE_PATH_TEST`): TeaseScript gives no file name or type for an `askImage()` picture.
+
 ### Universal conversions decided by the owner (2026-10-05)
 
 - The legacy online service: `send(key, value)` and `receive*(key)` keep values in the package's storage, and
   `isConnected()` is true (`SX_ONLINE_STORAGE`); `sendImage(reference)` saves the photo reference under a generated code
-  that it returns, and `receiveImage(code)` loads it.
+  that it returns, and `receiveImage(code)` loads it. `receiveInteger(key)` cast the received value to Integer and read
+  null where that failed, as for a saved empty text (`sexscriptLegacyReceiveInteger`); `loadInteger` parsed the text and
+  failed on it.
 - Files: `new File(path).exists()` reads the package's files at conversion time, a literal path as `true` or `false` and
   a computed one as a lookup in the package files below its fixed beginning; a program (`.exe`) never exists, and
   `getDataFolder()` is the package root (`SX_FILE_EXISTS`, `SX_DATA_FOLDER`). Deleting the file of a photo the script
@@ -750,7 +762,10 @@ instant)` as a value), whose in-place updates keep its presentation. The system 
   dropped and 159 shortened in 39 units, no animation (updatable messages take them: 22 in 11 units, and 34 counters
   in 14), and 5 across a chain in 4.
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
-  (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
+  (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`). The
+  intro script that SexScripts ran at its first start saved `intro.launch.firsttime`, which scripts read as an
+  identifier of the player; where a package reads it, its scripts save their own first start under it, once
+  (`SX_INTRO_FIRST_START`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
   `padStart`, and a fixed-decimals helper (`SX_FORMAT`); a pattern known only at runtime, such as a text a function
   gets (PainStacks' and ShockJack's countdowns), goes to a helper that writes the same conversions from the values as

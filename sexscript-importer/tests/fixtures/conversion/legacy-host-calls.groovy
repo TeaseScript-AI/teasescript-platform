@@ -7,6 +7,9 @@ def code = sendImage(photo)
 send("game.photo", code)
 def back = receiveImage(receiveString("game.photo"))
 if (back != null) setImage(back)
+// A chosen or received picture keeps no file path, so a test of its path stays as written, with a note.
+if (!photo.toLowerCase().endsWith(".jpg")) show("Not a JPEG")
+if (back != null && back.contains("captured")) show("From the webcam")
 // useFile() plays an audio file; a program cannot start from a package.
 useFile("sounds/bell.mp3")
 useFile("tools/device.exe")

@@ -16,6 +16,16 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
+function sexscriptLegacyReceiveInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  if value is integer {
+    return sexscriptLegacyValue(value)
+  }
+  return whenMissing
+}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -73,7 +83,7 @@ if sexscriptLegacyCompare(rank(), 2) >= 0 {
 }
 // A read from the legacy online service, too.
 // NOTE SX_ONLINE_STORAGE line 22: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let record = sexscriptLegacyLoadInteger("training.record")
+let record = sexscriptLegacyReceiveInteger("training.record")
 if sexscriptLegacyCompare(record, 10) >= 0 {
   say prose "A new record", instant
 }
@@ -99,7 +109,7 @@ if "${load("training.version", default: sexscriptLegacyValue(""))}" == "2" {
 }
 // An online read with a default for a missing value reads with that default.
 // NOTE SX_ONLINE_STORAGE line 38: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let best = load "training.best", default: 0
+let best = sexscriptLegacyReceiveInteger("training.best", 0)
 // NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say prose "Best ${best + 1}", instant
 // Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a

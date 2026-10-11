@@ -2544,7 +2544,11 @@ function onlyComparedElements(statements: readonly IrStatement[], name: string):
 }
 
 /** The legacy stored-number reads, which give null for a missing key where the call has no default. */
-const NULLABLE_LOADS = new Set(["sexscriptLegacyLoadInteger", "sexscriptLegacyLoadFloat"]);
+const NULLABLE_LOADS = new Set([
+  "sexscriptLegacyLoadInteger",
+  "sexscriptLegacyReceiveInteger",
+  "sexscriptLegacyLoadFloat",
+]);
 
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
 const HELPER_RESULTS = new Map<string, TeaseType>([

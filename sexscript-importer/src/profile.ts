@@ -385,7 +385,9 @@ function collectKeys(value: unknown, reads: Set<string>, saves: Set<string>): vo
   // A legacy loadInteger() or loadFloat() read without a default is a helper call (withParsedLoads).
   if (
     value.kind === "call" &&
-    (value.name === "sexscriptLegacyLoadInteger" || value.name === "sexscriptLegacyLoadFloat")
+    (value.name === "sexscriptLegacyLoadInteger" ||
+      value.name === "sexscriptLegacyReceiveInteger" ||
+      value.name === "sexscriptLegacyLoadFloat")
   ) {
     const key = Array.isArray(value.positional) ? literalKey(value.positional[0]) : null;
     if (key !== null) reads.add(key);

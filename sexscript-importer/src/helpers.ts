@@ -192,6 +192,8 @@ export type HelperName =
   | "button"
   | "value"
   | "loadInteger"
+  | "receiveInteger"
+  | "imagePath"
   | "loadIntegerOr"
   | "loadFloat"
   | "storedSave"
@@ -258,6 +260,8 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("times")) needed.add("repeatList");
   if (
     needed.has("loadInteger") ||
+    needed.has("receiveInteger") ||
+    needed.has("imagePath") ||
     needed.has("loadFloat") ||
     needed.has("slice") ||
     needed.has("times") ||
@@ -280,6 +284,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "loadFirstTrue",
   "value",
   "loadInteger",
+  "receiveInteger",
+  "imagePath",
   "loadIntegerOr",
   "loadFloat",
   "storedSave",
@@ -1360,6 +1366,47 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   loadInteger: {
     name: "sexscriptLegacyLoadInteger",
     build: () => parsedLoad("sexscriptLegacyLoadInteger", "toInteger"),
+  },
+  // A path like the one legacy getImage() returned for the webcam picture it saved, `<folder>/images/captured/<number>.jpeg`,
+  // for the tests that every such path answers alike (image-paths.ts). For a missing picture the null goes through
+  // `value`, whose open type lets the test fail where it runs, as Groovy's did.
+  imagePath: {
+    name: "sexscriptLegacyImagePath",
+    build: () =>
+      fn(
+        "sexscriptLegacyImagePath",
+        ["reference"],
+        [
+          ifS(bin("==", v("reference"), lit(null)), [
+            ret({ kind: "call", name: "sexscriptLegacyValue", positional: [lit(null)], named: {} }),
+          ]),
+          ifS(bin("==", v("reference"), lit("")), [ret(lit(""))]),
+          ret(lit("images/captured/0.jpeg")),
+        ],
+      ),
+  },
+  // Legacy receiveInteger() cast the value it received to Integer and read null where the cast failed (it caught the
+  // ClassCastException), as for the empty text that HumanPaperboard sends: a stored value that is no whole number reads
+  // as a missing key does, null or the value the script used instead (`whenMissing`).
+  receiveInteger: {
+    name: "sexscriptLegacyReceiveInteger",
+    build: () => ({
+      kind: "function",
+      name: "sexscriptLegacyReceiveInteger",
+      parameters: [
+        { name: "key", defaultValue: null },
+        { name: "whenMissing", defaultValue: lit(null) },
+      ],
+      body: [
+        letS("value", { kind: "load", key: v("key") }),
+        ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
+        ifS({ kind: "typeTest", value: v("value"), type: "integer" }, [
+          ret({ kind: "call", name: "sexscriptLegacyValue", positional: [v("value")], named: {} }),
+        ]),
+        ret(v("whenMissing")),
+      ],
+      span: null,
+    }),
   },
   // A script's own read with a whole-number default, `def loadIntegerVal = { key, value -> def stored = loadInteger(key);
   // if (stored == null) return value else return stored }`, reads a whole number where its call passes one: the result

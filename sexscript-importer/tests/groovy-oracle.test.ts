@@ -3,8 +3,9 @@
 // regression would change what the player reads without any diagnostic: closure captures, shared lists, list growth and
 // positions, comparisons, defaults, and formatting. Real Groovy parsing, importer lowering, and the repository build's
 // compiler and runtime, with seed 1. `WAIT n` lines count only where the fixture's own preamble prints them. A fixture
-// that asks gets its `<name>.answers` in turn on both sides, and must use them all. No camera is configured, so
-// takePhoto() gives null, as a fixture's preamble has getImage give.
+// that asks gets its `<name>.answers` in turn on both sides, and must use them all; an image request takes one stored
+// image for its answer, as a chosen file. A camera capture takes a `PHOTO` answer as a photo of that image; without one
+// there is no camera, so takePhoto() gives null, as a fixture's preamble has getImage give.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -27,6 +28,7 @@ interface OracleSnapshot {
     kind?: string;
     actionId?: number;
     interactionKind?: string;
+    ui?: { kind?: string };
     createdAtMs?: number;
     deadlineMs?: number;
   } | null;
@@ -44,8 +46,12 @@ interface OracleRuntime {
     plan: unknown,
     snapshot: OracleSnapshot,
     request: unknown,
+    options?: { capturedMedia?: { holds: (reference: string) => boolean } },
   ): OracleStep & { outcome: { kind?: string } };
 }
+
+/** The stored image an image request is answered with. */
+const ORACLE_IMAGE = "oracle-image";
 
 const unavailable = ((): string | false => {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0)
@@ -81,12 +87,22 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
   for (let turn = 0; turn < 500 && step.snapshot.status === "waiting"; turn += 1) {
     const action = step.snapshot.foregroundAction;
     if (action?.kind === "capture") {
-      const completed = completeAction(plan, step.snapshot, {
-        actionId: action.actionId,
-        actionKind: "capture",
-        payload: { kind: "unavailable", reason: "unconfigured" },
-      });
-      assert.equal(completed.outcome.kind, "completed", `${name} refuses the missing camera`);
+      // A `PHOTO` answer is a photo the camera takes; otherwise there is no camera.
+      const photo = answers[0] === "PHOTO";
+      if (photo) answers.shift();
+      const completed = completeAction(
+        plan,
+        step.snapshot,
+        {
+          actionId: action.actionId,
+          actionKind: "capture",
+          payload: photo
+            ? { kind: "captured", media: { kind: "image", reference: ORACLE_IMAGE } }
+            : { kind: "unavailable", reason: "unconfigured" },
+        },
+        { capturedMedia: { holds: (reference) => reference === ORACLE_IMAGE } },
+      );
+      assert.equal(completed.outcome.kind, "completed", `${name} refuses the camera's answer`);
       note(completed.events);
       step = run(plan, completed.snapshot);
       note(step.events);
@@ -96,16 +112,18 @@ async function converted(name: string, waits: boolean): Promise<string[]> {
       const answer = answers.shift();
       assert.ok(answer !== undefined, `${name} asks more often than its answers`);
       const payload =
-        action.interactionKind === "choice"
-          ? { kind: "selectedOption", optionIndex: Number(answer) }
-          : { kind: "submittedText", submittedText: answer };
+        action.ui?.kind === "image"
+          ? { kind: "image", reference: ORACLE_IMAGE }
+          : action.interactionKind === "choice"
+            ? { kind: "selectedOption", optionIndex: Number(answer) }
+            : { kind: "submittedText", submittedText: answer };
       const { actionId, interactionKind } = action;
-      const completed = completeAction(plan, step.snapshot, {
-        actionId,
-        actionKind: "interaction",
-        interactionKind,
-        payload,
-      });
+      const completed = completeAction(
+        plan,
+        step.snapshot,
+        { actionId, actionKind: "interaction", interactionKind, payload },
+        { capturedMedia: { holds: (reference) => reference === ORACLE_IMAGE } },
+      );
       assert.equal(completed.outcome.kind, "completed", `${name} refuses the answer ${answer}`);
       note(completed.events);
       step = run(plan, completed.snapshot);

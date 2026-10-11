@@ -296,6 +296,8 @@ export type IrExpression =
       defaultValue?: IrExpression;
       integer?: true;
       number?: true;
+      /** An online read, receiveInteger(), which read null where the received value was no whole number. */
+      received?: true;
       read?: "string" | "boolean";
       fill?: true;
       /** A read whose variable the script fills in later and uses as a value, which keeps an open null. */

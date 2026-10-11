@@ -247,6 +247,7 @@ function localNames(function_: Caller): Set<string> {
 /** The generated typed reads whose first argument is the key (helpers.ts parsedLoad). */
 const LOAD_HELPERS = new Set([
   "sexscriptLegacyLoadInteger",
+  "sexscriptLegacyReceiveInteger",
   "sexscriptLegacyLoadIntegerOr",
   "sexscriptLegacyLoadFloat",
 ]);
