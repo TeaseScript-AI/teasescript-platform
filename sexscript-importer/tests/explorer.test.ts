@@ -3584,7 +3584,7 @@ test(
 );
 
 test(
-  "the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name, nor one a variable of another scope shares",
+  "with clock scopes, the time model reads a variable named by its scope as the runtime does: a method's receiver as the parameter, and no other function's or activation's binding of the name, nor one a variable of another scope shares",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -3667,13 +3667,13 @@ test(
         : [];
       const session = new Session(engine, plan, 1);
       const before = session.start();
-      const model = clockModel(plan, instructions);
+      const model = clockModel(plan, instructions, true);
       const [comparison] = [...model.comparisons.values()].flat();
       assert.ok(comparison !== undefined, name);
       // At the state's own clock, the comparison comes out as the runtime then says.
       const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
       assert.deepEqual(after?.texts, ["Right."], name);
-      const holds = holdsAt(comparison, model, timeContext(before.snapshot), EPOCH_MS);
+      const holds = holdsAt(comparison, model, timeContext(before.snapshot, true), EPOCH_MS);
       // The receiver is read as the parameter; a name another function or activation binds leaves this one unknown,
       // never wrong.
       if (name === "receiver") assert.equal(holds, expected, name);
@@ -3699,13 +3699,13 @@ test(
       const instructions = Array.isArray(plan.instructions)
         ? plan.instructions.filter(isRecord)
         : [];
-      const model = clockModel(plan, instructions);
+      const model = clockModel(plan, instructions, true);
       const [comparison] = [...model.comparisons.values()].flat();
       assert.ok(comparison !== undefined);
       const holds = holdsAt(
         comparison,
         model,
-        timeContext(before.snapshot),
+        timeContext(before.snapshot, true),
         wallClockOf(before.snapshot),
       );
       const after = session.apply(before.runtime, { kind: "button", label: "Check" }, false);
@@ -3771,7 +3771,7 @@ test(
 );
 
 test(
-  "a next visit starts within the hours a session-start clock value is compared with, also of a helper's own variable of that name",
+  "with clock scopes, a next visit starts within the hours a session-start clock value is compared with, also of a helper's own variable of that name",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -3800,6 +3800,7 @@ test(
       sources: new Map(files.map((file) => [file.path, file.source])),
       diagnostics: [],
       later: true,
+      clockScopes: true,
     });
     const line = source.split("\n").findIndex((text) => text.includes("Good morning.")) + 1;
     const main = result.coverage.files.find((file) => file.path === "main.tease");

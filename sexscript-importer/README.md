@@ -528,9 +528,10 @@ reached: what a player hits only with a particular run of luck.
 
 With forward time (on by default; `--no-later` switches it off), time only goes forward and is play, as for a player
 who comes back later. The explorer reads each comparison in a condition that reads the clock (`hour >= 18`,
-`getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way (a
-variable by where it is declared: a function's own and a file's own are other variables than one of the same name
-elsewhere; one only ever set to literals and updated from itself is not computed from the clock), helpers
+`getTimestamp().toSeconds() - lastVisit > day`), also through variables computed from the clock in one way (with
+`--clock-scopes`, opt-in, a variable by where it is declared: a function's own and a file's own are other variables
+than one of the same name elsewhere, read from a state only where it binds the name once; and one only ever set to
+literals and updated from itself is not computed from the clock), helpers
 that return one part of the date or time (exactly when they only return it; a helper that adjusts it is an
 approximation), and functions that only compute a value (they bind, assign, branch, load, call such functions, and
 return; at most 500 instructions and four calls deep), with no function singled out by name, and evaluates it in a state
@@ -554,8 +555,8 @@ variable, against a constant or another value) gets no forward time: think times
 reach it, and coming back later changes nothing. For a clock condition the explorer cannot read in full, or reads
 only through an approximate helper, it also tries a fixed ladder: continuing an hour, an evening, a night, a morning,
 a day, two or three days, a week, 40 days, or 400 days later just before the step that read it, or starting that
-session that much later; a session that the condition reads as it starts, whose condition is one comparison of parts
-of the date or time the explorer can read there, starts instead at the edges of the first two windows in which that
+session that much later; with `--clock-scopes`, a session that the condition reads as it starts, whose condition is
+one comparison of parts of the date or time the explorer can read there, starts instead at the edges of the first two windows in which that
 comparison comes out the missed way (just inside each start and just before each end, as a condition in front of it
 may let only one of them through). All these steps are play, and a path records them: its `later` inputs and each session's
 start clock. A gap must be positive. Only a session that does not start after the clock where the state it continues

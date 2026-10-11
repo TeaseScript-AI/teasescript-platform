@@ -8,7 +8,8 @@
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
  *          [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]
- *          [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds] [--no-report]
+ *          [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds]
+ *          [--[no-]clock-scopes] [--no-report]
  *          <unit-dir>... --out <dir>
  *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
@@ -29,8 +30,9 @@
  * `--no-progress-leads`, `--no-compared-answers`, `--no-realign`, `--no-conjunctive`, `--no-random-choices` switch them
  * off). `--guidance` leads states toward the largest region of code not reached yet, `--depth-phases` lets play work
  * go to session numbers by their gain per operation, `--stored-leads` lets play go on with a lead from the state that
- * stored a value a condition needs, `--session-seeds` gives each later session a random seed of its own, and
- * `--large-answers` also answers typed numbers with 1,000,000, to
+ * stored a value a condition needs, `--session-seeds` gives each later session a random seed of its own,
+ * `--clock-scopes` reads clock variables by the scope that declares them and starts next visits within the windows a
+ * date or time comparison needs, and `--large-answers` also answers typed numbers with 1,000,000, to
  * probe a script's ranges (see `src/explorer-search.ts` and the README).
  *
  * With `--corpus`, a run starts where earlier runs ended: it replays `<dir>/<unit>.json` first and writes it back
@@ -102,6 +104,7 @@ const STRATEGIES = [
   "storedLeads",
   "largeAnswers",
   "sessionSeeds",
+  "clockScopes",
 ] as const;
 
 /** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
@@ -176,6 +179,7 @@ async function main(args: string[]): Promise<void> {
       "stored-leads": { type: "boolean", default: false },
       "large-answers": { type: "boolean", default: false },
       "session-seeds": { type: "boolean", default: false },
+      "clock-scopes": { type: "boolean", default: false },
       "until-stalled": { type: "boolean", default: false },
     },
   });
@@ -234,7 +238,8 @@ async function main(args: string[]): Promise<void> {
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
         "         [--[no-]random-choices] [--[no-]quit-anywhere] [--[no-]depth-phases] [--[no-]effect-ranking]\n" +
-        "         [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds] [--no-report]\n" +
+        "         [--[no-]follow-chains] [--[no-]stored-leads] [--[no-]large-answers] [--[no-]session-seeds]\n" +
+        "         [--[no-]clock-scopes] [--no-report]\n" +
         "         <unit-dir>... --out <dir>\n" +
         "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
@@ -288,6 +293,7 @@ async function main(args: string[]): Promise<void> {
             storedLeads: values["stored-leads"],
             largeAnswers: values["large-answers"],
             sessionSeeds: values["session-seeds"],
+            clockScopes: values["clock-scopes"],
           },
         },
         out,
@@ -344,6 +350,7 @@ interface RunSettings {
     storedLeads: boolean;
     largeAnswers: boolean;
     sessionSeeds: boolean;
+    clockScopes: boolean;
   };
 }
 

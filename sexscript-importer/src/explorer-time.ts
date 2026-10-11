@@ -531,10 +531,19 @@ function namesOf(expression: unknown, names: Set<string> = new Set()): Set<strin
 
 /**
  * The clock comparisons of a plan: in each condition and `while` loop, every comparison (also `in` a range) one of
- * whose sides reads the clock, also through variables and temporaries set from it.
+ * whose sides reads the clock, also through variables and temporaries set from it. With `scopes`, its variables are
+ * named by their scopes ({@link scoped}), and one only ever set to literals and updated from itself is not computed
+ * from the clock; without, a variable is its name, as a state's innermost binding of it has it.
  */
-export function clockModel(plan: Data, original: readonly Data[]): ClockModel {
-  const { instructions, functions, scope, shared } = scoped(plan, original);
+export function clockModel(plan: Data, original: readonly Data[], scopes = false): ClockModel {
+  const { instructions, functions, scope, shared } = scopes
+    ? scoped(plan, original)
+    : {
+        instructions: original,
+        functions: list(plan.functions),
+        scope: (expression: unknown): PlanField => record(expression),
+        shared: new Set<string>(),
+      };
   const { pure, clock: clockFunctions } = pureFunctions(functions, instructions);
   // The instructions that produce each temporary, in order: a stored value, or a call's result.
   const producers = new Map<number, number[]>();
@@ -722,7 +731,7 @@ export function clockModel(plan: Data, original: readonly Data[]): ClockModel {
       )
         continue;
       // A variable only ever set to literals and updated from itself is not computed from the clock.
-      if (values.every(({ value }) => namesOf(value).has(name))) continue;
+      if (scopes && values.every(({ value }) => namesOf(value).has(name))) continue;
       const composed = compose(name, values);
       if (composed === null) ambiguous.add(name);
       else definitions.set(name, composed);
@@ -1460,9 +1469,23 @@ export function storedHolds(
   return typeof value === "boolean" ? value : undefined;
 }
 
-/** The context of a state's snapshot: its variables whose name it binds once, and its stored values. */
-export function timeContext(snapshot: Data): TimeContext {
+/**
+ * The context of a state's snapshot: its variables whose name it binds once (with `scopes`, also by their scopes,
+ * {@link TimeContext}; without, every name it binds, by its innermost binding), and its stored values.
+ */
+export function timeContext(snapshot: Data, scopes = false): TimeContext {
+  const storage = new Map<string, unknown>();
+  for (const entry of list(snapshot.scriptStorage))
+    if (typeof entry.key === "string") storage.set(entry.key, entry.value);
   const bindings = new Map<string, unknown>();
+  if (!scopes) {
+    for (const binding of list(snapshot.globals))
+      if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    for (const frame of list(snapshot.frames))
+      for (const binding of list(frame.bindings))
+        if (typeof binding.name === "string") bindings.set(binding.name, binding.value);
+    return { bindings, scoped: new Map(), named: new Set(bindings.keys()), storage };
+  }
   // Each binding of a name, with the scope that holds it when that is clear ({@link TimeContext}).
   const held = new Map<string, { scope: string | null; value: unknown }[]>();
   const hold = (name: unknown, scope: string | null, value: unknown) => {
@@ -1512,8 +1535,5 @@ export function timeContext(snapshot: Data): TimeContext {
     }
     if (found[0]!.scope !== null) scoped.set(`${name}\u0001${found[0]!.scope}`, found[0]!.value);
   }
-  const storage = new Map<string, unknown>();
-  for (const entry of list(snapshot.scriptStorage))
-    if (typeof entry.key === "string") storage.set(entry.key, entry.value);
   return { bindings, scoped, named: new Set(held.keys()), storage };
 }

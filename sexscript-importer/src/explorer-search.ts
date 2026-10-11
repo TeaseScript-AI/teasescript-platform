@@ -348,6 +348,13 @@ export interface ExploreOptions {
   /** Session seeds: a later session draws with a seed of its own (see `Session.sessionSeeds`). Off by default. */
   readonly sessionSeeds?: boolean;
   /**
+   * Clock scopes: the time model names each variable by the scope that declares it and reads one from a state only
+   * where the state binds its name once (see `clockModel` and `timeContext`), and a next visit for a missed way that
+   * one comparison of parts of the date or time decides starts within the windows where it comes out that way, instead
+   * of after {@link LATER_GAPS}. Off by default.
+   */
+  readonly clockScopes?: boolean;
+  /**
    * Quit-anywhere next visits: a player can quit at any moment, and what was saved so far stays, so next sessions also
    * start from the storage of explored states a session did not complete (at most {@link MAX_QUIT_SESSIONS}, within the
    * next visits' share, once per storage): first the one with the most stored cells no next visit started from had,
@@ -1905,6 +1912,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const putBack = new Map<number, number>();
   const starts: Start[] = [{ origin: null, storage: [], wallClockMs: EPOCH_MS, session: 1 }];
   const later = options.later === true;
+  const clockScopes = options.clockScopes === true;
   /** With forward time: the wall clock where each state stands, by ID. */
   const wallEnd: number[] = [];
   /**
@@ -1914,14 +1922,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /**
    * For a missed way whose condition is one comparison of parts of the date or time, read as a session from `start`'s
    * storage starts: the gaps to the edges of the first two windows in which it comes out that way ({@link
-   * windowEdges}), for whole sessions to start at instead of {@link LATER_GAPS}; null for another condition.
+   * windowEdges}), for whole sessions to start at instead of {@link LATER_GAPS}; null for another condition, or without
+   * clock scopes ({@link ExploreOptions.clockScopes}).
    */
   const sessionWindows = (
     target: Target,
     comparisons: readonly ClockComparison[],
     start: Start,
   ): number[] | null => {
-    if (times === null || comparisons.length !== 1) return null;
+    if (!clockScopes || times === null || comparisons.length !== 1) return null;
     const comparison = comparisons[0]!;
     // The condition itself is the comparison: no other part decides the way.
     let condition = record(
@@ -1937,7 +1946,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return windowEdges(
       comparison,
       times,
-      timeContext({ scriptStorage: start.storage }),
+      timeContext({ scriptStorage: start.storage }, clockScopes),
       now,
       target.way === 0,
       2,
@@ -2036,14 +2045,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * conditions. A state that waits there gets time steps ({@link timeSteps}), and the comparisons' outcomes at its wall
    * clock are part of its cell.
    */
-  const times = later ? clockModel(plan, instructions) : null;
+  const times = later ? clockModel(plan, instructions, clockScopes) : null;
   const clockAfter = new Map<string, Set<number>>();
   const clockKey = (waitsAt: unknown) => (typeof waitsAt === "number" ? String(waitsAt) : "start");
   /** The outcomes of the clock comparisons read after where a state waits, at a wall clock: `1`, `0`, or `?`. */
   const outcomes = (snapshot: Data, waitsAt: unknown, now: number): [string, string][] => {
     const after = times === null ? undefined : clockAfter.get(clockKey(waitsAt));
     if (times === null || after === undefined) return [];
-    const context = timeContext(snapshot);
+    const context = timeContext(snapshot, clockScopes);
     return [...after].flatMap((instruction) =>
       times.comparisons.get(instruction)!.map((comparison, index): [string, string] => {
         const holds = holdsAt(comparison, times, context, now);
@@ -2066,7 +2075,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const timeSteps = (snapshot: Data, waitsAt: unknown, now: number, from: string): number[] => {
     const after = times === null ? undefined : clockAfter.get(clockKey(waitsAt));
     if (times === null || after === undefined) return [];
-    const context = timeContext(snapshot);
+    const context = timeContext(snapshot, clockScopes);
     const gaps = new Set<number>();
     for (const instruction of after)
       for (const comparison of times.comparisons.get(instruction)!) {
@@ -2092,7 +2101,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    */
   const sessionGaps = (snapshot: Data, now: number, from: string): number[] => {
     if (times === null) return [];
-    const context = timeContext(snapshot);
+    const context = timeContext(snapshot, clockScopes);
     const read = [...new Set([...clockAfter.values()].flatMap((after) => [...after]))].flatMap(
       (instruction) => times.comparisons.get(instruction)!,
     );
@@ -3911,7 +3920,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         const comparisons = times?.comparisons.get(target.instruction) ?? [];
         const before = witnessNode === null ? null : snapshotOf(witnessNode);
         const context =
-          times === null ? null : timeContext(before ?? { scriptStorage: witnessStart.storage });
+          times === null
+            ? null
+            : timeContext(before ?? { scriptStorage: witnessStart.storage }, clockScopes);
         const at = witnessNode === null ? witnessStart.wallClockMs : wallEnd[witnessNode.id]!;
         if (
           context !== null &&
