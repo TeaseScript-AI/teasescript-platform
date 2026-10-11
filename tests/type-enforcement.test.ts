@@ -1184,6 +1184,13 @@ test("a return of a variable that held only null decides no result type, also wh
     ),
     [["TSV041", "info(1)"]],
   );
+  // A value the compiler cannot know that reached one of them is still checked where the result is stored.
+  const unknownA = (value: string) =>
+    info(
+      `function assign(value) {\n    kindA = value\n}\nassign(${value})\nlet r: integer[]? = info(0)\nsay "\${r}"`,
+    );
+  assert.equal(runValidSource(unknownA('"s"')).snapshot.failure?.code, "TSR058");
+  assert.deepEqual(sayTexts(unknownA("[2]")), ["2"]);
   // A value of another type is compared with the return that decided the type, not with one that held only null.
   assert.deepEqual(
     mismatches(info("", 'if type == 1 {\n        return [1]\n    }\n    return "x"')),

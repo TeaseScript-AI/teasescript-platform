@@ -685,6 +685,10 @@ function* settleTask(
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     target.order = nextDecision();
+    // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
+    // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
+    if (target.heldUnknown !== undefined && decidedValue(value).kind === "never")
+      yield* compileChild(heldUnknownTask(value, target.heldUnknown));
     return;
   }
   if (target.kind === "union") {
