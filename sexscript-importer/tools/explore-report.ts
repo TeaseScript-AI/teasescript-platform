@@ -351,6 +351,8 @@ function stopShown(search: Fields): string {
       return ` It was cut off at its limit of ${count(search.states).toLocaleString("en")} kept game states.`;
     case "budget":
       return " It was cut off at its time budget.";
+    case "memory":
+      return " It was cut off at its memory limit.";
     default:
       return " It was cut off at its step budget.";
   }

@@ -2236,6 +2236,24 @@ test(
     const counter = run(`${loop}  if count >= 1000000 {\n    say "Done."\n  }\n}\n`, 100_000);
     assert.deepEqual([counter.stoppedBy, counter.audit?.result], ["plateau", "spiral"]);
     assert.ok((counter.audit?.progress.closer ?? 0) > 1000);
+    // The heap cap, read every thousand new states, cuts the run off too.
+    const { plan: counterPlan } = engine.compileProject(
+      [{ path: "main.tease", source: `${loop}}\n` }],
+      { builtins: [] },
+    );
+    assert.ok(isRecord(counterPlan));
+    const heavy = explore(engine, counterPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      maxStates: Number.MAX_SAFE_INTEGER,
+      maxHeapBytes: 1,
+      sources: new Map(),
+      diagnostics: [],
+      untilStalled: true,
+    }).search;
+    assert.equal(heavy.stoppedBy, "memory");
+    assert.ok(heavy.states >= 1000 && heavy.states < 1010);
+    assert.ok(cutOff(heavy.stoppedBy));
     // A work budget smaller than the plateau window cuts the run off.
     const capped = run(`${loop}}\n`, 5000);
     assert.deepEqual([capped.stoppedBy, capped.audit?.result], ["operations", "capped"]);

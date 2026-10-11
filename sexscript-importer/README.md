@@ -291,7 +291,7 @@ top: on the server with `serve-catalog --pins`, else in `localStorage`; the serv
 
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
-node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--store-mb N] [--seed 1] [--workers 1|2] \
+node tools/explore.ts [--budget-seconds 60] [--budget-ops N] [--max-states 20000] [--store-mb N] [--max-heap-mb N] [--seed 1] [--workers 1|2] \
   [--until-stalled] [--corpus <corpus-dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers] \
   [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance] [--[no-]random-choices] \
   [--[no-]quit-anywhere] <unit-dir>... --out <dir>
@@ -337,10 +337,9 @@ something late keeps looking as long again. Steps that come closer to a comparis
 variable's closest state, or a stored value's session chain, below) and new cells (below) are counted but do not hold
 a run up: counters keep coming closer and make new cells long after anything else is new. Directed search looks again
 every quarter window, and the window starts after a corpus replay. Its caps are for safety only: a time cap (two hours
-unless `--budget-seconds` is given) and a state cap (unless `--max-states` is given) of as many states as three
-quarters of the heap hold at about 3 KB each (1.1 million with Node's default heap of 4.5 GB; the snapshot store lies
-outside the heap). `search.stoppedBy` says whether the run finished, `exhausted` or `plateau`, or a cap cut it off,
-`budget`, `operations`, or `maxStates`: a cut-off is a warning to look into, which the summary line, the playtest
+unless `--budget-seconds` is given), no state cap unless `--max-states` is given, and the heap cap every run has
+(below). `search.stoppedBy` says whether the run finished, `exhausted` or `plateau`, or a cap cut it off, `budget`,
+`operations`, `maxStates`, or `memory`: a cut-off is a warning to look into, which the summary line, the playtest
 report, and the catalog say (`stalled`, in reports from before, was a plateau). `search.audit` says how the run ended: `complete` (nothing left to try, and
 no line or missed way of unknown reach), `stalled` (a plateau, or nothing left to try with code of unknown reach),
 `spiral` (a plateau in which one place took at least half of the expansions since the last progress: the place and
@@ -370,7 +369,11 @@ counts the slots, cells, values, and changes found. Waiting states keep their ta
 exact bytes packed with zstd level 1, after the first eight with a dictionary made of those, and the tag (up to an
 eighth of the memory, from 256 MiB to 4 GiB, or `--store-mb N`; a state whose snapshot was dropped is replayed from an
 ancestor; `search.store` has the limit, the peak, and the drops). The search stops
-when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget.
+when every state is expanded and directed search has nothing left to try, or at the time, work, or state budget, or at
+the heap cap: once the heap in use passes `--max-heap-mb` (60% of the V8 heap by default, read every 1,000 new states),
+so that the coverage, traps, and report computed after the search have the rest; garbage not collected yet counts too,
+so where it stops varies a little between runs. A run's heap grows with its states, 2 to 4 KB each (more where a
+script keeps large values in its state); the snapshot store lies outside the heap.
 `--budget-ops N` is a work budget of N runtime operations per unit (fresh sessions, runs, inputs, and automatic
 answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
 by the operations of its last step. With it the time budget applies only when `--budget-seconds` is given, and directed

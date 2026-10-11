@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { totalmem } from "node:os";
+import { getHeapStatistics } from "node:v8";
 import { constants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { isRecord } from "./ast.ts";
 import {
@@ -137,6 +138,10 @@ const RANDOM_DRAWS_PER_STEP = 4;
 const RANDOM_WIDE_SUPPORT = 1024;
 /** The draws whose outcomes were not all offered kept for then, at most. */
 const MAX_PARTIAL_DRAWS = 256;
+/** How many new states the search makes between two readings of the heap in use ({@link ExploreOptions.maxHeapBytes}). */
+const HEAP_CHECK_STATES = 1000;
+/** With random choices: the chosen steps taken that are let go at once (see the search loop). */
+const RELEASED_CHOSEN = 4096;
 /**
  * With random choices: the share of all runtime operations that steps with a chosen random outcome and the expansions
  * of states after one may take while play states are open. Such steps can cost much more than others.
@@ -239,7 +244,7 @@ interface Node {
   readonly parent: number | null;
   readonly input: ExplorerInput | null;
   readonly depth: number;
-  readonly loop: string;
+  readonly loop: bigint;
   /** The index of the {@link Start} of its session. */
   readonly start: number;
   /** Whether its session started at another wall clock, or its path set the clock. */
@@ -405,6 +410,12 @@ export interface ExploreOptions {
   readonly untilStalled?: boolean;
   /** The snapshot store's limit in bytes; an eighth of the memory by default, from 256 MiB to 4 GiB. */
   readonly storeBytes?: number;
+  /**
+   * A safety cap on the heap the search uses: it stops (`memory`) once the heap in use passes this, read every
+   * {@link HEAP_CHECK_STATES} new states, so that what is computed after it (coverage, traps, the report) has the rest of
+   * the heap. None when absent. Garbage not collected yet counts too, so where it stops varies a little between runs.
+   */
+  readonly maxHeapBytes?: number;
 }
 
 /**
@@ -733,9 +744,9 @@ export interface ExploreResult {
      * Why the search stopped. It finished: `exhausted`, nothing left to try, or `plateau`, with `untilStalled`, no new
      * code or condition way for the stall window, the second half of the run ({@link stallWindow}). A cap cut it off, a
      * warning to look into ({@link cutOff}): `budget`, the time budget; `operations`, the work budget;
-     * `maxStates`, the state cap.
+     * `maxStates`, the state cap; `memory`, the heap cap ({@link ExploreOptions.maxHeapBytes}).
      */
-    stoppedBy: "exhausted" | "plateau" | "budget" | "operations" | "maxStates";
+    stoppedBy: "exhausted" | "plateau" | "budget" | "operations" | "maxStates" | "memory";
     /** With `untilStalled`: how the run ended, and its progress. */
     audit?: Audit;
     /** Runtime operations the run called: the work that `budgetOps` limits. */
@@ -1520,6 +1531,14 @@ interface Watch {
   } | null;
 }
 
+/** The copy of `value` that `copies` keeps under `key`, which is `value` itself the first time. */
+function shared<T>(copies: Map<string, T>, key: string, value: T): T {
+  const known = copies.get(key);
+  if (known !== undefined) return known;
+  copies.set(key, value);
+  return value;
+}
+
 /** A storage's identity: a hash of its entries as JSON, so that the storages kept do not hold their JSON twice. */
 function storageKey(entries: readonly StorageEntry[]): string {
   return createHash("sha1").update(JSON.stringify(entries)).digest("base64");
@@ -1890,13 +1909,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   const store = new SnapshotStore(options.storeBytes);
   const nodes: Node[] = [];
-  const byState = new Map<string, number>();
-  const loopSeen = new Map<string, number>();
+  /** The states by state key, play's and those after a chosen random outcome apart; and how often each loop key was seen. */
+  const byState = new Map<bigint, number>();
+  const byChosenState = new Map<bigint, number>();
+  const loopSeen = new Map<bigint, number>();
   /**
    * With random choices, the loop keys and cell expansions of states after a chosen random outcome are counted apart, so
    * that they do not move play states back.
    */
-  const chosenLoopSeen = new Map<string, number>();
+  const chosenLoopSeen = new Map<bigint, number>();
+  /**
+   * The said texts and prompts states keep, one copy of each: many states show the same ones, and a run keeps them for
+   * every state (see {@link shared}).
+   */
+  const sharedTexts = new Map<string, readonly string[]>();
+  const sharedPrompts = new Map<string, Prompt>();
   const chosenExpansions: number[] = [];
   /** A play cell's place in the order: its expansions, or with effect ranking their operations per productive one. */
   const playRank = (cell: number): number =>
@@ -2533,8 +2560,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     else if (newWay) progressed("ways");
     else if (place?.novel === true || place?.fresh === true) progressed("cells");
     const keys = stateKeys(step.snapshot);
-    const stateKey = chosen ? `chosen ${keys.state}` : keys.state;
-    const known = byState.get(stateKey);
+    const states = chosen ? byChosenState : byState;
+    const known = states.get(keys.state);
     const moved = input?.kind === "later" || input?.kind === "clock";
     if (known !== undefined) {
       const node = nodes[known]!;
@@ -2567,15 +2594,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       items: stepItems,
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
       edges: [],
-      texts: step.texts,
-      prompt: session.prompt(step.snapshot),
+      texts: shared(sharedTexts, step.texts.join("\u0000"), step.texts),
+      prompt: ((prompt) => shared(sharedPrompts, `${prompt.instruction} ${prompt.text}`, prompt))(
+        session.prompt(step.snapshot),
+      ),
       waitsAt: typeof waitsAt === "number" ? waitsAt : null,
     };
     nodes.push(node);
     // The runtime operations from the session's start to this state, as the steps that reached it took them.
     costOf[node.id] = (parent === null ? 0 : costOf[parent.id]!) + step.operations;
     if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
-    byState.set(stateKey, node.id);
+    states.set(keys.state, node.id);
     if (moved) movedOn.add(node.id);
     if (watched.size > 0) watch(step.snapshot, start.session);
     if (parent !== null) parent.edges.push(node.id);
@@ -4290,6 +4319,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
   const coverageAtStart = items === null ? null : coverageCount(items.lineIds, items.lines);
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
+  let heapCheckAt = HEAP_CHECK_STATES;
   let sinceAnalysis = 0;
   let analyzedAt = started;
   let analyzedOps = 0;
@@ -4307,6 +4337,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (nodes.length >= options.maxStates) {
       stoppedBy = "maxStates";
       break;
+    }
+    if (nodes.length >= heapCheckAt) {
+      heapCheckAt = nodes.length + HEAP_CHECK_STATES;
+      if (getHeapStatistics().used_heap_size >= (options.maxHeapBytes ?? Infinity)) {
+        stoppedBy = "memory";
+        break;
+      }
     }
     // A tenth of the budget: of the work budget when there is one, so that a run it limits stays deterministic.
     // Until stalled, a quarter of the stall window, so that directed search looks again before the run stops.
@@ -4347,6 +4384,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (chosenAt < chosenSteps.length && (frontier.size === 0 || withinChosenShare())) {
       runChosen(chosenSteps[chosenAt]!);
       chosenAt += 1;
+      // The steps taken are let go, in batches, as a run queues millions of them.
+      if (chosenAt >= RELEASED_CHOSEN && chosenAt * 2 >= chosenSteps.length) {
+        chosenSteps.splice(0, chosenAt);
+        chosenAt = 0;
+      }
       continue;
     }
     // With depth phases, the states with a lead first, then those after a chosen outcome in their turn, then the depth
@@ -5890,26 +5932,26 @@ function findTraps(
   reproOf: (node: Node) => Repro,
   open: (node: Node) => boolean,
 ): { report: TrapReport; entry: number }[] {
-  const groups = new Map<string, Node[]>();
+  const groups = new Map<bigint, Node[]>();
   for (const node of nodes) {
     const members = groups.get(node.loop);
     if (members === undefined) groups.set(node.loop, [node]);
     else members.push(node);
   }
-  const successors = new Map<string, Set<string>>();
+  const successors = new Map<bigint, Set<bigint>>();
   for (const [loop, members] of groups) {
     successors.set(
       loop,
       new Set(members.flatMap((member) => member.edges.map((edge) => nodes[edge]!.loop))),
     );
   }
-  const escaping = new Set<string>();
+  const escaping = new Set<bigint>();
   for (const [loop, members] of groups) {
     const ended = members.some((node) => node.status === "completed" || node.status === "failed");
     const explored = members.some((node) => node.status === "expanded" || node.status === "stuck");
     if (ended || !explored || members.some(open)) escaping.add(loop);
   }
-  const predecessors = new Map<string, string[]>();
+  const predecessors = new Map<bigint, bigint[]>();
   for (const [loop, next] of successors) {
     for (const target of next) {
       const previous = predecessors.get(target);
@@ -5928,7 +5970,7 @@ function findTraps(
   }
   const trapped = [...groups.keys()].filter((loop) => !escaping.has(loop));
   const components = stronglyConnected(trapped, (loop) => [...successors.get(loop)!]);
-  const componentOf = new Map<string, number>();
+  const componentOf = new Map<bigint, number>();
   components.forEach((component, index) => {
     for (const loop of component) componentOf.set(loop, index);
   });
@@ -5942,8 +5984,8 @@ function findTraps(
   // Feeders: trapped groups outside the bottom components, each counted for the first one a backward search from the
   // bottom components reaches it from.
   const feeders = new Map<number, number>();
-  const owner = new Map<string, number>();
-  const pending: string[] = [];
+  const owner = new Map<bigint, number>();
+  const pending: bigint[] = [];
   for (const { component, index } of bottom) {
     for (const loop of component) {
       owner.set(loop, index);
@@ -6016,21 +6058,18 @@ function findTraps(
 }
 
 /** Tarjan's strongly connected components, iteratively. */
-function stronglyConnected(
-  vertices: readonly string[],
-  next: (vertex: string) => string[],
-): string[][] {
+function stronglyConnected<T>(vertices: readonly T[], next: (vertex: T) => T[]): T[][] {
   const inside = new Set(vertices);
-  const index = new Map<string, number>();
-  const low = new Map<string, number>();
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const components: string[][] = [];
+  const index = new Map<T, number>();
+  const low = new Map<T, number>();
+  const stack: T[] = [];
+  const onStack = new Set<T>();
+  const components: T[][] = [];
   let counter = 0;
   for (const root of vertices) {
     if (index.has(root)) continue;
-    const work: { vertex: string; edges: string[]; position: number }[] = [];
-    const open = (vertex: string) => {
+    const work: { vertex: T; edges: T[]; position: number }[] = [];
+    const open = (vertex: T) => {
       index.set(vertex, counter);
       low.set(vertex, counter);
       counter += 1;
@@ -6057,8 +6096,8 @@ function stronglyConnected(
       if (parent !== undefined)
         low.set(parent.vertex, Math.min(low.get(parent.vertex)!, low.get(frame.vertex)!));
       if (low.get(frame.vertex) === index.get(frame.vertex)) {
-        const component: string[] = [];
-        for (let vertex: string | undefined; vertex !== frame.vertex;) {
+        const component: T[] = [];
+        for (let vertex: T | undefined; vertex !== frame.vertex;) {
           vertex = stack.pop()!;
           onStack.delete(vertex);
           component.push(vertex);
