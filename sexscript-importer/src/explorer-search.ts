@@ -1779,8 +1779,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         part.inputs.some((input) => input.random !== undefined),
       ),
     );
-  /** With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there. */
-  const randomTried = new Set<string>();
+  /**
+   * With random choices: the outcomes tried of each draw site, by place and input, so that each is tried once there,
+   * each with the state it was tried from.
+   */
+  const randomTried = new Map<string, number>();
   /** The places of the random draws play made (the runtime's sites, `path:line:column`). */
   const drawnSites = new Set<string>();
   /** With random choices: the steps with another random outcome not taken yet, from `chosenAt` on. */
@@ -1793,8 +1796,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const partialKeys = new Set<string>();
   let chosenAt = 0;
   /**
-   * States a step from which made random draws whose other outcomes are not offered, and states whose press after thinking
-   * first was left to another state at their place: what they leave open is no trap's end.
+   * States a step from which made random draws whose other outcomes are not offered (also ones tried at their place
+   * from a state of another loop group), and states whose press after thinking first was left to another state at
+   * their place: what they leave open is no trap's end.
    */
   const drawsLeft = new Set<number>();
   /** States a step that moved the wall clock on (a time step or a clock attempt) reached, also ones known before. */
@@ -2757,8 +2761,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (taken === limit) break;
       seen += 1;
       const tried = `${context} ${String(draw.site)} ${JSON.stringify(outcome)}`;
-      if (randomTried.has(tried)) continue;
-      randomTried.add(tried);
+      const from = randomTried.get(tried);
+      if (from !== undefined) {
+        // Tried from a state of the same loop group, its way is that state's edge, which the group has. From another
+        // group, what tells the groups apart may decide where it goes from here: the state's future is unknown.
+        if (nodes[from]!.loop !== node.loop) drawsLeft.add(node.id);
+        continue;
+      }
+      randomTried.set(tried, node.id);
       taken += 1;
       const others = (input.random ?? []).filter((choice) => choice.drawId !== draw.drawId);
       chosenSteps.push({
@@ -5798,8 +5808,9 @@ function directedSummary(
  * Traps: loops the player cannot leave. Explored states are grouped by loop key (the state without clock, random
  * state, and settled handles), with an edge wherever an explored input leads from one group to another. A group
  * escapes when one of its states ended (completed or failed), or when its future is unknown (`open`): none of its
- * states was fully expanded, a step from one made random draws whose other outcomes were not all tried at its place, as
- * a state that comes back to the same place with another random state may draw its way out, or one that a step moving
+ * states was fully expanded, a step from one made random draws whose other outcomes were not all tried at its place
+ * from a state of its group (an outcome tried from another group may go elsewhere from here), as a state that comes
+ * back to the same place with another random state may draw its way out, or one that a step moving
  * the wall clock on (a time step or a clock attempt) reached was not expanded, as the clock may decide otherwise there
  * (a loop that only the elapsed time ends); so does every group with an edge to an escaping group. Its other states that differ only in time or settled
  * handles are taken to go on as an expanded one does. The remaining groups form the trapped

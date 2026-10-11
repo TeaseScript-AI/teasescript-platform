@@ -2322,6 +2322,43 @@ test(
 );
 
 test(
+  "a loop whose way out is a random outcome tried from another state at its place is not a trap, and one that every outcome keeps in is",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Each round leaves the loop with a chance of two in three. The first state at the button tries every outcome; the
+    // other player's state there, in another loop group, whose own draws stayed in, leaves those outcomes to it, so
+    // where they lead from it is not known.
+    const loop = (out: string) =>
+      'let mode = choose red: "Red", blue: "Blue"\nlet block = "mix2"\nwhile block != "out" {\n' +
+      '  if block == "mix2" {\n    showButton "Thank you"\n    if randomInteger(0..3) == 0 {\n' +
+      `      block = "mix3"\n    } else {\n      ${out}\n    }\n` +
+      '  } else {\n    wait 6 s\n    block = "mix2"\n  }\n}\nsay "Out."\nexit\n';
+    const run = (source: string, maxStates: number) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: Infinity,
+        budgetOps: 20_000,
+        maxStates,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        cells: true,
+        randomChoices: true,
+      });
+    };
+    assert.deepEqual(run(loop('block = "out"'), 8).traps, []);
+    // Every outcome staying in is still a loop the player cannot leave.
+    assert.deepEqual(
+      run(loop('block = "mix3"'), 100_000).traps.map((trap) => trap.kind),
+      ["loop"],
+    );
+  },
+);
+
+test(
   "a long run of waits with nothing else to do takes one cell however far it goes, so its passes do not look new, and an endless one is still a trap",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
