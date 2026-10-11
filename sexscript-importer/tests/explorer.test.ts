@@ -26,6 +26,7 @@ import {
   wallClockOf,
   type Data,
   type Engine,
+  type ExplorerInput,
   type Runtime,
 } from "../src/explorer.ts";
 
@@ -2292,17 +2293,31 @@ test(
       'say "Over."\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));
-    const result = explore(engine, plan, {
+    const options = {
       seed: 1,
       budgetMs: Infinity,
       budgetOps: 100_000,
-      maxStates: 6,
       sources: new Map([["main.tease", source]]),
       diagnostics: [],
       later: true,
-    });
+    };
+    const result = explore(engine, plan, { ...options, maxStates: 6 });
     assert.ok(result.search.time !== undefined && result.search.time.steps > 0);
     assert.deepEqual(result.traps, []);
+    // Also when the state a time step reaches was reached first by a clock attempt to the same moment.
+    const stay: ExplorerInput = { kind: "option", index: 0, label: "Shocks" };
+    const press: ExplorerInput = { kind: "press", buttonId: 1, label: "Estim: STOPPED" };
+    const corpus: CorpusEntry[] = [
+      {
+        seed: 1,
+        reason: "coverage",
+        inputs: [stay, { kind: "clock", wallClockMs: EPOCH_MS + 60_000 }, press],
+      },
+      { seed: 1, reason: "coverage", inputs: [stay, { kind: "later", afterMs: 60_000 }, press] },
+    ];
+    const replayed = explore(engine, plan, { ...options, maxStates: 4, corpus });
+    assert.equal(replayed.corpus?.stale, 0);
+    assert.deepEqual(replayed.traps, []);
   },
 );
 

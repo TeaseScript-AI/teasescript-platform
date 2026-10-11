@@ -683,9 +683,9 @@ A trap is a loop the player cannot leave by the inputs tried. Explored states ar
 escapes when one of its states ended (completed or failed), or when its future is unknown: none of its states was fully
 expanded, or a step from one made random draws whose other outcomes were not all tried at its place (without random
 choices, any draw), as a state that comes back to the same place with another random state may draw its way out, or
-a state a time step reached was not expanded, as a clock condition read next comes out otherwise there (a loop that only
-the elapsed time ends, such as StripJackNaked's `while now - start < n { playAudio ... }`). A group that leads to an
-escaping group escapes too. The jewell trap loops that measurements earlier in this README count
+a state that a step moving the wall clock on (a time step or a clock attempt) reached was not expanded, as the clock may
+decide otherwise there (a loop that only the elapsed time ends, such as StripJackNaked's `while now - start < n {
+playAudio ... }`). A group that leads to an escaping group escapes too. The jewell trap loops that measurements earlier in this README count
 (`cumEdging.tease:32`, `trainEnema.tease:65`, `trainPuppyLevelTwo.tease:843`, in the effect-ranking and depth-phase
 results) were of that kind, each loop's only way out a draw (a chance of 5/6, 2/3, and 1/2 per round), and are no
 longer reported; the decisions those counts informed rest on them. Each strongly connected part of the

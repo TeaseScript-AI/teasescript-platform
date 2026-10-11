@@ -1797,6 +1797,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * first was left to another state at their place: what they leave open is no trap's end.
    */
   const drawsLeft = new Set<number>();
+  /** States a step that moved the wall clock on (a time step or a clock attempt) reached, also ones known before. */
+  const movedOn = new Set<number>();
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
     number,
@@ -2515,9 +2517,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const keys = stateKeys(step.snapshot);
     const stateKey = chosen ? `chosen ${keys.state}` : keys.state;
     const known = byState.get(stateKey);
+    const moved = input?.kind === "later" || input?.kind === "clock";
     if (known !== undefined) {
       const node = nodes[known]!;
       if (parent !== null && !parent.edges.includes(node.id)) parent.edges.push(node.id);
+      if (moved) movedOn.add(node.id);
       return node;
     }
     const status = step.snapshot.status;
@@ -2554,6 +2558,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     costOf[node.id] = (parent === null ? 0 : costOf[parent.id]!) + step.operations;
     if (later) wallEnd[node.id] = wallClockOf(step.snapshot);
     byState.set(stateKey, node.id);
+    if (moved) movedOn.add(node.id);
     if (watched.size > 0) watch(step.snapshot, start.session);
     if (parent !== null) parent.edges.push(node.id);
     if (!clock && !chosen) remember(step.snapshot, node);
@@ -4636,10 +4641,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     instructions,
     files,
     (node) => reproOf(node, null, node.start),
-    // So has one a time step reached that was not expanded: a clock condition read next comes out otherwise there.
+    // So has one not expanded that a step moving the wall clock on reached: the clock may decide otherwise there.
     (node) =>
       drawsLeft.has(node.id) ||
-      (node.input?.kind === "later" && (node.status === "open" || node.status === "partial")),
+      (movedOn.has(node.id) && (node.status === "open" || node.status === "partial")),
   );
 
   /**
@@ -5789,9 +5794,9 @@ function directedSummary(
  * state, and settled handles), with an edge wherever an explored input leads from one group to another. A group
  * escapes when one of its states ended (completed or failed), or when its future is unknown (`open`): none of its
  * states was fully expanded, a step from one made random draws whose other outcomes were not all tried at its place, as
- * a state that comes back to the same place with another random state may draw its way out, or one that a time step
- * reached was not expanded, as a clock condition read next comes out otherwise there (a loop that only the elapsed time
- * ends); so does every group with an edge to an escaping group. Its other states that differ only in time or settled
+ * a state that comes back to the same place with another random state may draw its way out, or one that a step moving
+ * the wall clock on (a time step or a clock attempt) reached was not expanded, as the clock may decide otherwise there
+ * (a loop that only the elapsed time ends); so does every group with an edge to an escaping group. Its other states that differ only in time or settled
  * handles are taken to go on as an expanded one does. The remaining groups form the trapped
  * part: every explored input from them leads back into it. Each strongly connected part of it that no explored input
  * leaves is one trap; trapped groups outside such a part lead into one and are counted as its feeders. A state where
