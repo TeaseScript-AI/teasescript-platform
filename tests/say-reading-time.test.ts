@@ -12,6 +12,7 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
+import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -87,7 +88,7 @@ class Story {
     return this.snapshot.foregroundAction?.kind === "chatPacingGate";
   }
 
-  binding(name: string): unknown {
+  binding(name: string): SerializableRuntimeValue | undefined {
     return this.snapshot.frames[0]?.bindings.find((binding) => binding.name === name)?.value;
   }
 }
