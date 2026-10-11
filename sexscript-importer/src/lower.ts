@@ -13142,9 +13142,18 @@ function readThenDefault(
     expression !== null &&
     (expression.kind === "declaration" ||
       (expression.kind === "binary" && expression.operator === "="));
-  const name = assigns ? variableName(expression.left) : null;
+  const left = assigns ? asNode(expression.left) : null;
+  // Also an element at a fixed position, `views[i] = receiveInteger(k)` then `if (views[i] == null) views[i] = 0`
+  // (stripordie's view counts), where a typed list cannot hold the null in between.
+  const element = left === null ? null : fixedElement(left);
+  const name = assigns ? (variableName(left) ?? element?.list ?? null) : null;
   const read = assigns ? asNode(expression.right) : null;
   const otherwise = next === undefined ? null : asNode(next.else);
+  const sameTarget = (node: AstNode | null | undefined): boolean => {
+    if (element === null) return variableName(node) === name;
+    const other = node === null || node === undefined ? null : fixedElement(node);
+    return other !== null && other.list === element.list && other.position === element.position;
+  };
   if (
     name === null ||
     read === null ||
@@ -13166,13 +13175,17 @@ function readThenDefault(
   const fallback = fill?.kind === "binary" && fill.operator === "=" ? asNode(fill.right) : null;
   if (
     others.length > 0 ||
-    variableName(tested) !== name ||
-    variableName(fill?.left) !== name ||
+    !sameTarget(tested) ||
+    !sameTarget(asNode(fill?.left)) ||
     fallback === null ||
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
-    // The default runs after the read stored null in the variable.
-    mayReadDestination(fallback, asNode(expression!.left)!, context) ||
+    // The default runs after the read stored null in the variable (or in the element's list).
+    mayReadDestination(
+      fallback,
+      element === null ? asNode(expression!.left)! : asNode(asNode(expression!.left)!.left)!,
+      context,
+    ) ||
     !(
       dictLookupParts(read, context) !== null ||
       TYPED_STORAGE_LOADS.has(legacyApiCall(read, context)?.name ?? "") ||
@@ -13191,6 +13204,17 @@ function readThenDefault(
       ? statement.span
       : { ...statement.span, endLine: next.span.endLine, endColumn: next.span.endColumn };
   return { ...statement, span, expression: { ...expression!, right: merged } };
+}
+
+/** A list element at a position that a variable or a number gives, `list[i]`, by the list's name and the position. */
+function fixedElement(node: AstNode): { list: string; position: string } | null {
+  if (node.kind !== "binary" || node.operator !== "[") return null;
+  const list = variableName(asNode(node.left));
+  const index = asNode(node.right);
+  const constant = index === null ? undefined : constantValue(index);
+  const position =
+    typeof constant === "number" ? `#${constant}` : index === null ? null : variableName(index);
+  return list === null || position === null ? null : { list, position };
 }
 
 /**
