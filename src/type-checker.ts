@@ -38,7 +38,6 @@ import {
 } from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { shortWaitWarnings } from "./short-waits.js";
 import {
   askOperands,
   expressionChildren,
@@ -368,11 +367,7 @@ export function checkTypes(
       return Object.freeze({
         diagnostics: Object.freeze(
           checker.fileDiagnostics.map((diagnostics, file) =>
-            Object.freeze([
-              ...diagnostics,
-              ...closedLoops[file]!,
-              ...shortWaitWarnings(programs[file]!, checker.unreachable),
-            ]),
+            Object.freeze([...diagnostics, ...closedLoops[file]!]),
           ),
         ),
         runtimeChecks: checker.runtimeChecks(),
