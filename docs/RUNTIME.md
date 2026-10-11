@@ -339,7 +339,8 @@ A question and its controls therefore appear together: its `say` waits before it
 the question rather than between it and its controls, and nothing that waits comes between the question and its
 interaction. The interaction requests its action, and starts any `showButton` timeout or form time limit, only once it is
 shown. An asynchronous timer that may be shown starts its countdown, and its clock, when it appears; a hidden one starts
-at once, and a blocking `timer` replaces the reading time like `wait`. A computed display counts as shown. A transfer
+at once, and a blocking `timer` replaces the reading time like `wait`. A computed display counts as shown. Operations
+on a running timer, such as `stop()` or a `remaining` write, are timing control and act at once. A transfer
 whose cleanup the player cannot see, and a `call`, continue at once. Permanent buttons that are shown stay shown and
 accept clicks; a click's block starts once no gate holds the chat, under [Timers and scene
 time](#timers-and-scene-time). When a block returns to the interaction it interrupted, the interaction was shown

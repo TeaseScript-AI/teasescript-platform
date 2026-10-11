@@ -386,6 +386,34 @@ test("a countdown appears, and starts, once the reading time before it ends, and
   assert.equal(shown.snapshot.foregroundAction?.kind, "interaction");
 });
 
+test("an operation on a running countdown is timing control and acts at once, so a stop after a message holds", () => {
+  const compiled = plan(
+    [
+      "let t = timer async 3 s {",
+      '    say "Too late", instant',
+      "}",
+      'say "Correct!", 5 s',
+      "t.stop()",
+      'showButton "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  const held = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.equal(heldGate(held.snapshot).deadlineMs, 5_000);
+  assert.equal(
+    held.snapshot.backgroundActions.some((action) => action.kind === "timer"),
+    false,
+  );
+  const shown = run(compiled, observeTime(compiled, held.snapshot, 5_000).snapshot);
+  assert.deepEqual(
+    [...held.events, ...shown.events].flatMap((event) =>
+      event.kind === "say" ? [event.text] : [],
+    ),
+    ["Correct!"],
+  );
+  assert.equal(shown.snapshot.foregroundAction?.kind, "interaction");
+});
+
 test("a goto that removes a shown permanent button waits for the reading time, and one that removes nothing goes on", () => {
   assert.deepEqual(
     timeline(
@@ -502,7 +530,7 @@ test("a skip ends the reading time and shows the output it held back at once", (
   );
 });
 
-test("in a block, messages and questions wait for a reading time, and other output keeps the block's timing", () => {
+test("in a block, messages and questions wait for a reading time, and media keep the block's timing", () => {
   assert.deepEqual(
     timeline(
       [
