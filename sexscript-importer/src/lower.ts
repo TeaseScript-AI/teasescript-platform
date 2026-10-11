@@ -9222,6 +9222,30 @@ function lowerCollectionStatement(
         },
       ];
     }
+    // Of an argument whose type only the running script shows, Groovy chose by that type as it ran: a whole number
+    // removed that position, any other value the first equal element (DungeonTrials' `backPack.remove(backPack[i])`).
+    const blocked = parameterWrite();
+    if (blocked !== null) return blocked;
+    const value = lowerExpression(argument, context);
+    if (value === null) return null;
+    const repeatable = isRepeatableExpression(argument);
+    const name = repeatable ? null : freshName("removed", context);
+    const removed: IrExpression = name === null ? value : { kind: "variable", name };
+    const removal = (method: string): IrStatement => ({
+      kind: "expression",
+      expression: { kind: "methodCall", target: list, name: method, arguments: [removed] },
+      span,
+    });
+    return [
+      ...(name === null ? [] : [{ kind: "let" as const, name, value, span }]),
+      {
+        kind: "if",
+        condition: { kind: "typeTest", value: removed, type: "integer" },
+        then: [removal("removeAt")],
+        else: [removal("remove")],
+        span,
+      },
+    ];
   }
   if (call.name === "clear" && call.arguments.length === 0) {
     return (
