@@ -398,8 +398,12 @@ export interface RuntimeInteractionActionSettlementSnapshot {
 export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "chatPacingGate";
+  /**
+   * Time or a skip ends the reading time; a block's message ends when the block returns to the question it
+   * interrupted; a `wait` that starts during it replaces it.
+   */
   readonly settlementKind:
-    "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput";
+    "completed" | "skipped" | "consumedByForegroundInteraction" | "replacedByWait";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly requestEventSequence: number;

@@ -94,9 +94,9 @@ export function startTimerHandler(
 
 /**
  * A normal return from an expiry block resumes the interrupted path. A still-pending interaction or delay becomes the
- * foreground action again with its original identity; a background pacing gate created by the block is consumed
- * before an interaction, as when an interaction is first requested. A delay settled meanwhile continues at its
- * continuation, which the frame already records.
+ * foreground action again with its original identity. An interaction was shown already, so it comes back at once and
+ * consumes a background pacing gate created by the block; a delay started before that gate, so it keeps it. A delay
+ * settled meanwhile continues at its continuation, which the frame already records.
  */
 export function returnFromTimerHandler(
   plan: InstructionPlan,

@@ -717,16 +717,24 @@ function validPacingGateAction(
   if (!validPacingGateTiming(action, snapshot)) return false;
   if (!validPacingGateCreationProvenance(action, snapshot, plan)) return false;
   if (!foreground) return action.preparedOutput === null;
-  // A pacing barrier promotes the gate without prepared output and waits at the barrier instruction.
+  // Held output promotes the gate without prepared output and waits at the instruction that runs again.
   if (action.preparedOutput === null) {
     return (
       plan === undefined ||
       (nonNegativeSafeInteger(snapshot.nextInstruction) &&
-        plan.instructions[snapshot.nextInstruction]?.kind === "pacingBarrier")
+        PACING_HOLD_INSTRUCTIONS.has(plan.instructions[snapshot.nextInstruction]?.kind ?? ""))
     );
   }
   return validPreparedSayOutput(action.preparedOutput, snapshot, plan);
 }
+
+/** Instructions that hold their output behind an active pacing gate and run again once it settles. */
+const PACING_HOLD_INSTRUCTIONS: ReadonlySet<string> = new Set([
+  "pacingBarrier",
+  "interaction",
+  "showPermanentButton",
+  "exit",
+]);
 
 function isPacingGateShape(action: unknown): action is Record<string, unknown> {
   return (
@@ -872,11 +880,12 @@ function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
   );
 }
 
+/** An instant message waits for an earlier one as well, with a duration of zero. */
 function validPreparedSayDuration(value: unknown): value is number {
   return (
     typeof value === "number" &&
     Number.isFinite(value) &&
-    value > 0 &&
+    value >= 0 &&
     value <= MAX_RUNTIME_SESSION_TIME_MS
   );
 }
@@ -2270,7 +2279,7 @@ function validPacingSettlementKind(
     value === "completed" ||
     value === "skipped" ||
     value === "consumedByForegroundInteraction" ||
-    value === "supersededByInstantOutput"
+    value === "replacedByWait"
   );
 }
 
@@ -2303,7 +2312,7 @@ function validNonTimePacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  // A skip, consumption or supersession happens at scene time no later than the deadline.
+  // A skip, consumption, or replacement happens at scene time no later than the deadline.
   return (
     validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&

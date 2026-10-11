@@ -2,6 +2,7 @@ import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeChatPacingGateActionSnapshot,
+  RuntimeChatPacingGateSettlementSnapshot,
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import type { RuntimeSnapshot } from "../state.js";
@@ -11,8 +12,7 @@ export function settleBackgroundPacingGate(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   action: RuntimeChatPacingGateActionSnapshot,
-  settlementKind:
-    "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput",
+  settlementKind: RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
   assertEventSequenceCapacity(snapshot, 1);

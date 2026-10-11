@@ -463,7 +463,8 @@ export class InstructionCompiler {
       }
       case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
-        // The target object is already prepared once; the barrier waits when it holds a media handle or camera view.
+        // The target object is already prepared once; the barrier waits when it holds a media handle, camera view, or
+        // message handle.
         if (target.plan.kind === "property" && PACED_HANDLE_PROPERTIES.has(target.plan.name)) {
           this.#emitPacingBarrier(target.plan.object, statement.span);
         }
@@ -515,6 +516,14 @@ export class InstructionCompiler {
           MEDIA_CONTROL_METHODS.has(method.property.name)
         ) {
           this.#barrierCall = call;
+        }
+        // Removing a permanent button waits for the previous message's pacing, before its argument is evaluated.
+        if (
+          call.kind === "callExpression" &&
+          method.kind === "identifier" &&
+          method.name === "removePermanentButton"
+        ) {
+          this.#emitPacingBarrier(null, statement.span);
         }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
@@ -1149,8 +1158,9 @@ export class InstructionCompiler {
   }
 
   /**
-   * Main-story media presentation waits for the previous message's pacing. A handle operation passes its already
-   * evaluated receiver; the barrier then waits only for a media handle or a camera view.
+   * Main-story media, camera, message-text, and permanent-button removal output waits for the previous message's
+   * pacing. A handle operation passes its already evaluated receiver; the barrier then waits only for a media handle,
+   * a camera view, or a message handle.
    */
   #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
     this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
@@ -1708,7 +1718,8 @@ export class InstructionCompiler {
    * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
    * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
    * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
-   * any operand.
+   * any operand. It is said `instant`: it waits for earlier paced output, and its controls appear with it, without a
+   * reading time of its own (owner decision, 2026-10-11).
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -1738,7 +1749,7 @@ export class InstructionCompiler {
             span: copySpan(expression.question!.span),
           },
           skipPolicy: null,
-          pacing: "smart",
+          pacing: "instant",
           span: copySpan(expression.span),
         });
       }
@@ -1796,7 +1807,7 @@ export class InstructionCompiler {
           ...sayTemporaries,
           textTemporary,
           skipPolicy: null,
-          pacing: "smart",
+          pacing: "instant",
           span: copySpan(expression.span),
         };
         questionTemporaryIds = [
@@ -2078,7 +2089,7 @@ export class InstructionCompiler {
         ...sayTemporaries,
         textTemporary,
         skipPolicy: null,
-        pacing: "smart",
+        pacing: "instant",
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
@@ -2154,7 +2165,7 @@ export class InstructionCompiler {
         ...sayTemporaries,
         textTemporary,
         skipPolicy: null,
-        pacing: "smart",
+        pacing: "instant",
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
@@ -2975,12 +2986,16 @@ function copySpan(span: SourceSpan): PlanSourceLocation {
 }
 
 const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-/** Handle properties whose write waits for the previous message's pacing: media playback and camera placement. */
+/**
+ * Handle properties whose write waits for the previous message's pacing: media playback, camera placement, and a
+ * message's text.
+ */
 const PACED_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
   "position",
   "remaining",
   "volume",
   "placement",
+  "text",
 ]);
 
 function assembleExpression(
