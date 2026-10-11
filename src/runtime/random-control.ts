@@ -441,8 +441,6 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
         ...(typeof instruction.display === "object" ? [instruction.display] : []),
         ...(instruction.label === null ? [] : [instruction.label]),
       ];
-    case "pacingBarrier":
-      return instruction.receiver === null ? [] : [instruction.receiver];
     case "showPermanentButton":
       return [instruction.text];
     case "showImage":

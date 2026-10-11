@@ -19,7 +19,6 @@ import {
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isCanonicalTagList } from "../tags.js";
-import { isMessagePresentation } from "../message-presentation.js";
 import {
   type Instruction,
   type InteractionChoiceOption,
@@ -36,13 +35,6 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
-import {
-  cloneMessageMarkup,
-  isMessageMarkup,
-  parseMessageMarkup,
-  type MessageMarkup,
-} from "../message-markup.js";
-import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
 import {
@@ -148,7 +140,7 @@ export function validatePendingActionState(
       "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while execution can continue.",
     );
   }
-  if (!validBackgroundPacingActions(value, plan)) {
+  if (!validBackgroundActions(value, plan)) {
     errors.push("Runtime backgroundActions are malformed.");
   }
   if (!positiveSafeInteger(value.nextActionId))
@@ -166,9 +158,6 @@ export function validatePendingActionState(
       "Runtime active action identities are inconsistent with each other or the retained settlement.",
     );
   }
-  if (!validActiveActionLocationCoherence(value)) {
-    errors.push("Runtime foreground and background action locations are incoherent.");
-  }
   if (!validActiveActionCompletionCapacity(value)) {
     errors.push("Runtime active actions cannot reserve their required completion events.");
   }
@@ -176,7 +165,7 @@ export function validatePendingActionState(
 
 /**
  * Active actions reserve their unavoidable future events. This is aggregate:
- * a foreground delay and a background pacing gate may complete in one time
+ * a foreground delay and a background timer may complete in one time
  * observation and must both remain representable.
  */
 function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>): boolean {
@@ -191,14 +180,14 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
   return hasEventSequenceCapacity(snapshot.nextEventSequence, requiredCompletionEvents);
 }
 
-function validBackgroundPacingActions(
+/** Background work is timers, media, and permanent buttons; a reading time is always the foreground action. */
+function validBackgroundActions(
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
   if (!isCanonicalJsonArray(actions)) return false;
 
-  let pacingGates = 0;
   let previousActionId = 0;
   for (let index = 0; index < actions.length; index += 1) {
     const action = actions[index];
@@ -209,10 +198,7 @@ function validBackgroundPacingActions(
       if (!validMediaAction(action, snapshot, plan)) return false;
     } else if (action.kind === "permanentButton") {
       if (!validPermanentButtonAction(action, snapshot, plan)) return false;
-    } else {
-      pacingGates += 1;
-      if (pacingGates > 1 || !validPacingGateAction(action, snapshot, plan, false)) return false;
-    }
+    } else return false;
     // Background work is kept in creation order.
     if (!positiveSafeInteger(action.actionId) || action.actionId <= previousActionId) return false;
     previousActionId = action.actionId;
@@ -243,7 +229,7 @@ function validForegroundActionKind(
   }
   if (action.kind === "chatPacingGate") {
     return (
-      validPacingGateAction(action, snapshot, plan, true) &&
+      validPacingGateAction(action, snapshot, plan) &&
       hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
     );
   }
@@ -507,7 +493,6 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
     snapshot.callFrames.some(
       (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
     ) ||
-    snapshot.preparedSayOutput !== null ||
     snapshot.interactionResultHandoff !== null
   )
     return false;
@@ -531,38 +516,6 @@ function suspendedActions(snapshot: Record<string, unknown>): Record<string, unk
       ? [frame.timerInterruption.suspendedAction]
       : [],
   );
-}
-
-function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): boolean {
-  const backgroundActions = snapshot.backgroundActions;
-  if (!Array.isArray(backgroundActions)) return false;
-
-  const backgroundPacingActions: Record<string, unknown>[] = [];
-  for (let index = 0; index < backgroundActions.length; index += 1) {
-    if (!Object.hasOwn(backgroundActions, index)) continue;
-    const action = backgroundActions[index];
-    if (isPlainRecord(action) && action.kind === "chatPacingGate") {
-      backgroundPacingActions.push(action);
-    }
-  }
-  const foregroundAction = isPlainRecord(snapshot.foregroundAction)
-    ? snapshot.foregroundAction
-    : null;
-  const foregroundPacingGateCount = foregroundAction?.kind === "chatPacingGate" ? 1 : 0;
-  const activePacingGateCount = backgroundPacingActions.length + foregroundPacingGateCount;
-
-  if (activePacingGateCount > 1) {
-    return false;
-  }
-  if (foregroundAction?.kind === "interaction") {
-    return backgroundPacingActions.length === 0;
-  }
-  if (foregroundAction?.kind !== "delay") return true;
-  if (backgroundPacingActions.length === 0) return true;
-
-  // After an expiry block returns to a delay, its own paced output may have left a newer background gate, so the gate
-  // and the delay have no required age order.
-  return true;
 }
 
 function validActiveActionEventIdentity(
@@ -596,24 +549,6 @@ function validActiveActionEventIdentity(
     retainedEventSequences.add(settlement.transcriptEventSequence);
   }
   return !retainedEventSequences.has(requestEventSequence);
-}
-
-function validActionCreatedAfterSettlement(
-  action: Record<string, unknown>,
-  settlement: Record<string, unknown>,
-): boolean {
-  const actionId = action.actionId;
-  const requestEventSequence = action.requestEventSequence;
-  const settlementActionId = settlement.actionId;
-  const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return (
-    positiveSafeInteger(actionId) &&
-    positiveSafeInteger(requestEventSequence) &&
-    positiveSafeInteger(settlementActionId) &&
-    positiveSafeInteger(settlementCompletionEventSequence) &&
-    actionId > settlementActionId &&
-    requestEventSequence > settlementCompletionEventSequence
-  );
 }
 
 /** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
@@ -696,7 +631,6 @@ function validForegroundActionBase(
   )
     return false;
 
-  if (action.kind === "chatPacingGate") return true;
   return (
     (action.ownerCallFrameId === null ||
       (positiveSafeInteger(action.ownerCallFrameId) &&
@@ -710,22 +644,13 @@ function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
-  foreground: boolean,
 ): boolean {
-  if (!isPacingGateShape(action)) return false;
-  if (!validPacingGateIdentity(action, snapshot)) return false;
-  if (!validPacingGateTiming(action, snapshot)) return false;
-  if (!validPacingGateCreationProvenance(action, snapshot, plan)) return false;
-  if (!foreground) return action.preparedOutput === null;
-  // A pacing barrier promotes the gate without prepared output and waits at the barrier instruction.
-  if (action.preparedOutput === null) {
-    return (
-      plan === undefined ||
-      (nonNegativeSafeInteger(snapshot.nextInstruction) &&
-        plan.instructions[snapshot.nextInstruction]?.kind === "pacingBarrier")
-    );
-  }
-  return validPreparedSayOutput(action.preparedOutput, snapshot, plan);
+  return (
+    isPacingGateShape(action) &&
+    validPacingGateIdentity(action, snapshot) &&
+    validPacingGateTiming(action, snapshot) &&
+    validPacingGateCreationProvenance(action, snapshot, plan)
+  );
 }
 
 function isPacingGateShape(action: unknown): action is Record<string, unknown> {
@@ -743,7 +668,6 @@ function isPacingGateShape(action: unknown): action is Record<string, unknown> {
       "deadlineMs",
       "skippable",
       "requestEventSequence",
-      "preparedOutput",
     ]) &&
     action.kind === "chatPacingGate" &&
     nonNegativeSafeInteger(action.owningInstruction) &&
@@ -808,170 +732,6 @@ function validPacingGateCreationProvenance(
   )
     return false;
   return ownerFitsInstruction(plan, snapshot, action.ownerCallFrameId, owningInstruction);
-}
-
-export function validPreparedSayOutput(
-  value: unknown,
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
-  if (!isPreparedSayOutputShape(value)) return false;
-  if (!validPreparedSayOutputDomain(value)) return false;
-  if (!validPreparedSaySpeaker(value.speaker)) return false;
-  const owningInstruction = value.owningInstruction;
-  if (!nonNegativeSafeInteger(owningInstruction)) return false;
-  if (plan !== undefined) {
-    const owner = plan.instructions[owningInstruction];
-    if (owner?.kind !== "say") return false;
-    // A result-bearing say keeps the source its content was parsed from, for the handle it gives once it is shown.
-    if ((owner.destinationTemporary !== undefined) !== (value.sourceText !== undefined))
-      return false;
-    if (
-      typeof value.sourceText === "string" &&
-      isMessageMarkup(value.content) &&
-      !sameMessageMarkup(parseMessageMarkup(value.sourceText), value.content)
-    )
-      return false;
-  }
-  return snapshot.nextInstruction === owningInstruction;
-}
-
-function sameMessageMarkup(left: MessageMarkup, right: MessageMarkup): boolean {
-  return JSON.stringify(cloneMessageMarkup(left)) === JSON.stringify(cloneMessageMarkup(right));
-}
-
-function isPreparedSayOutputShape(value: unknown): value is Record<string, unknown> {
-  const keys = [
-    "owningInstruction",
-    "continuationInstruction",
-    "presentation",
-    "speaker",
-    "content",
-    "text",
-    "durationMs",
-    "skippable",
-  ];
-  return (
-    isPlainRecord(value) &&
-    hasExactKeys(value, "sourceText" in value ? [...keys, "sourceText"] : keys)
-  );
-}
-
-function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
-  return (
-    nonNegativeSafeInteger(value.owningInstruction) &&
-    nonNegativeSafeInteger(value.continuationInstruction) &&
-    value.continuationInstruction === value.owningInstruction + 1 &&
-    isMessageMarkup(value.content) &&
-    isMessagePresentation(value.presentation) &&
-    typeof value.text === "string" &&
-    value.content.visibleText === value.text &&
-    (value.sourceText === undefined || typeof value.sourceText === "string") &&
-    validPreparedSayDuration(value.durationMs) &&
-    typeof value.skippable === "boolean"
-  );
-}
-
-function validPreparedSayDuration(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    value > 0 &&
-    value <= MAX_RUNTIME_SESSION_TIME_MS
-  );
-}
-
-function validPreparedSaySpeaker(value: unknown): boolean {
-  return (
-    value === null ||
-    (isPlainRecord(value) &&
-      hasExactKeys(value, ["identifier", "displayName", "color", "font", "avatar"]) &&
-      typeof value.identifier === "string" &&
-      typeof value.displayName === "string" &&
-      (value.color === null || typeof value.color === "string") &&
-      (value.font === null || typeof value.font === "string") &&
-      (value.avatar === null || typeof value.avatar === "string"))
-  );
-}
-
-export function validTopLevelPreparedSayOutputRelationship(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
-  const settlement = snapshot.lastSettlement;
-  if (snapshot.preparedSayOutput === null) {
-    return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement, plan);
-  }
-  return (
-    isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
-    (snapshot.status === "running" || snapshot.status === "failed") &&
-    snapshot.foregroundAction === null &&
-    Array.isArray(snapshot.backgroundActions) &&
-    !snapshot.backgroundActions.some(
-      (action) => isPlainRecord(action) && action.kind === "chatPacingGate",
-    ) &&
-    validPacingSettlementReleaseLineage(settlement, plan) &&
-    settlement.releasedPreparedOutputInstruction === snapshot.preparedSayOutput.owningInstruction
-  );
-}
-
-export function hasActivePacingGate(snapshot: Record<string, unknown>): boolean {
-  const foregroundIsPacingGate =
-    isPlainRecord(snapshot.foregroundAction) && snapshot.foregroundAction.kind === "chatPacingGate";
-  const backgroundHasPacingGate =
-    Array.isArray(snapshot.backgroundActions) &&
-    snapshot.backgroundActions.some(
-      (action) => isPlainRecord(action) && action.kind === "chatPacingGate",
-    );
-  return foregroundIsPacingGate || backgroundHasPacingGate;
-}
-
-export function hasPacingExecutionHistory(settlement: unknown): boolean {
-  return isPlainRecord(settlement) && settlement.actionKind === "chatPacingGate";
-}
-
-function validReleasedPacingSettlementAfterPreparedOutputConsumption(
-  snapshot: Record<string, unknown>,
-  settlement: unknown,
-  plan: InstructionPlan | undefined,
-): boolean {
-  if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
-  const releasedInstruction = settlement.releasedPreparedOutputInstruction;
-  if (releasedInstruction === null) return true;
-  if (!nonNegativeSafeInteger(releasedInstruction)) return false;
-
-  if (isExplicitExitHaltState(snapshot, plan)) return false;
-
-  return activePacingActions(snapshot).some(
-    (action) =>
-      action.owningInstruction === releasedInstruction &&
-      validActionCreatedAfterSettlement(action, settlement),
-  );
-}
-
-export function isExplicitExitHaltState(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
-  if (
-    plan === undefined ||
-    snapshot.status !== "halted" ||
-    !nonNegativeSafeInteger(snapshot.nextInstruction) ||
-    snapshot.nextInstruction === 0
-  )
-    return false;
-  return plan.instructions[snapshot.nextInstruction - 1]?.kind === "exit";
-}
-
-function activePacingActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
-  const actions = [
-    snapshot.foregroundAction,
-    ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : []),
-  ];
-  return actions.filter(
-    (action): action is Record<string, unknown> =>
-      isPlainRecord(action) && action.kind === "chatPacingGate",
-  );
 }
 
 export function validateInteractionResultHandoffState(
@@ -1881,7 +1641,7 @@ function validSettlementKindData(
   plan: InstructionPlan | undefined,
 ): boolean {
   if (settlement.actionKind === "chatPacingGate")
-    return validPacingGateSettlement(settlement, snapshot, plan);
+    return validPacingGateSettlement(settlement, snapshot);
   if (settlement.actionKind === "delay") {
     return (
       hasExactKeys(settlement, [
@@ -2238,7 +1998,6 @@ function buttonsFitWrittenValues(
 function validPacingGateSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan?: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -2251,59 +2010,22 @@ function validPacingGateSettlement(
       "completionEventSequence",
       "deadlineMs",
       "completedAtMs",
-      "releasedPreparedOutputInstruction",
     ])
   )
     return false;
-  if (!validPacingSettlementKind(settlement.settlementKind)) return false;
-  if (!validPacingSettlementReleaseLineage(settlement, plan)) return false;
-  if (settlement.settlementKind === "completed") {
+  if (settlement.settlementKind === "completed")
     return validSettlementChronology(settlement, snapshot);
-  }
-  return validNonTimePacingSettlementChronology(settlement, snapshot);
-}
-
-function validPacingSettlementKind(
-  value: unknown,
-): value is RuntimeChatPacingGateSettlementSnapshot["settlementKind"] {
   return (
-    value === "completed" ||
-    value === "skipped" ||
-    value === "consumedByForegroundInteraction" ||
-    value === "supersededByInstantOutput"
+    settlement.settlementKind === "skipped" &&
+    validSkipPacingSettlementChronology(settlement, snapshot)
   );
 }
 
-function pacingSettlementCanReleasePreparedOutput(
-  settlementKind: RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
-): boolean {
-  return settlementKind === "completed" || settlementKind === "skipped";
-}
-
-function validPacingSettlementReleaseLineage(
-  settlement: unknown,
-  plan: InstructionPlan | undefined,
-): settlement is Record<string, unknown> & {
-  readonly releasedPreparedOutputInstruction: number | null;
-} {
-  if (!isPlainRecord(settlement)) return false;
-  const releasedInstruction = settlement.releasedPreparedOutputInstruction;
-  if (releasedInstruction === null) return true;
-  return (
-    pacingSettlementCanReleasePreparedOutput(
-      // EVIDENCE: validation: this helper only compares completed/skipped strings; other values return false.
-      settlement.settlementKind as RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
-    ) &&
-    nonNegativeSafeInteger(releasedInstruction) &&
-    (plan === undefined || plan.instructions[releasedInstruction]?.kind === "say")
-  );
-}
-
-function validNonTimePacingSettlementChronology(
+function validSkipPacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  // A skip, consumption or supersession happens at scene time no later than the deadline.
+  // A skip happens at scene time no later than the deadline.
   return (
     validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&
@@ -2401,14 +2123,6 @@ function validForegroundActionOwnership(
 ): boolean {
   const owningInstruction = action.owningInstruction;
   const continuationInstruction = action.continuationInstruction;
-  if (action.kind === "chatPacingGate") {
-    return (
-      nonNegativeSafeInteger(owningInstruction) &&
-      nonNegativeSafeInteger(continuationInstruction) &&
-      owningInstruction < plan.instructions.length &&
-      plan.instructions[owningInstruction]?.kind === "say"
-    );
-  }
   if (
     !nonNegativeSafeInteger(owningInstruction) ||
     !nonNegativeSafeInteger(continuationInstruction) ||
@@ -2430,6 +2144,7 @@ function validForegroundActionOwnership(
     return false;
   }
   if (
+    (action.kind === "chatPacingGate") !== (owner?.kind === "say") ||
     (action.kind === "mediaPlayback") !== (owner?.kind === "playMedia") ||
     (action.kind === "storageWrite") !== (owner?.kind === "storageWrite") ||
     (owner?.kind === "playMedia" && (action.until === "loaded") !== owner.async)

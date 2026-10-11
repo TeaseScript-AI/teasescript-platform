@@ -389,18 +389,21 @@ test("a due timer block waits for the write and reads the acknowledged value at 
   assert.equal(caughtUp.snapshot.observedSessionTimeMs, 6_000);
 });
 
-test("a final save runs on into exit after acknowledgement even with background chat pacing", () => {
+test("a final save runs on into exit after acknowledgement, also after a reading time", () => {
   for (const source of ['save 2 as "k"\nexit', 'say "Before"\nsave 2 as "k"\nexit']) {
     const compiled = plan(source);
-    const pending = run(
+    let pending = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
     );
     assert.equal(pending.snapshot.status, "waiting");
-    const action = storageWrite(pending.snapshot);
     if (source.startsWith("say")) {
-      assert.ok(pending.snapshot.backgroundActions.some((item) => item.kind === "chatPacingGate"));
+      // The save starts only when the message's reading time ends.
+      const gate = pending.snapshot.foregroundAction;
+      assert.equal(gate?.kind, "chatPacingGate");
+      pending = run(compiled, observeTime(compiled, pending.snapshot, gate!.deadlineMs).snapshot);
     }
+    const action = storageWrite(pending.snapshot);
     const completed = completeAction(compiled, pending.snapshot, {
       actionId: action.actionId,
       actionKind: "storageWrite",

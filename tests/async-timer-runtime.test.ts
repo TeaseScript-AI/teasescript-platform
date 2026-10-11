@@ -724,7 +724,7 @@ test("an expiry block interrupting a function keeps caller scopes, loops, and te
   assert.deepEqual(session.said(), ["total 4 ticks 6"]);
 });
 
-test("paced output from an expiry block does not break the restored prompt or wait", () => {
+test("paced output from an expiry block holds the block for its reading time before the prompt or wait returns", () => {
   const ask = new Session(
     [
       'let t = timer async 2 s { say "Think faster, please." }',
@@ -735,6 +735,12 @@ test("paced output from an expiry block does not break the restored prompt or wa
     { pacing: true },
   );
   ask.at(2_000);
+  // The field comes back once the block's message has been read.
+  const reading = ask.snapshot.foregroundAction;
+  assert.equal(reading?.kind, "chatPacingGate");
+  ask.at(reading!.deadlineMs - 1);
+  assert.equal(ask.snapshot.foregroundAction?.kind, "chatPacingGate");
+  ask.at(reading!.deadlineMs);
   assert.equal(ask.snapshot.foregroundAction?.kind, "interaction");
   assert.equal(ask.answer("Bo"), "completed");
   assert.deepEqual(ask.said(), ["Name?", "Think faster, please.", "Hello Bo"]);
@@ -1083,12 +1089,12 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
   // Scene-time replay makes the complete result independent of observation cadence, not only the output.
-  // The last sets its timer up while the message's pacing still runs, which the wait before it cannot outlast (TSV060).
+  // The last sets its timer up after a message's reading time and the wait after it.
   const scripts: [string, string[]][] = [
     ...cases.map(([source]): [string, string[]] => [source, []]),
     [
       'say "a"\nwait 1 s\nlet t = timer async 2 s { say "block" }\nwait 3 s\nsay "b"\nt.stop()\nwait 1 s\nexit',
-      ["TSV060"],
+      [],
     ],
   ];
   for (const [source, warnings] of scripts) {
@@ -1175,34 +1181,56 @@ test("catch-up holds for a queued block behind a commit window and timer settlem
   assert.equal(settled.settlement.completedAtMs, 1_000);
 });
 
-test("pacing consumed or skipped during catch-up and terminal completions keep queued blocks valid", () => {
+test("reading times in blocks, skips while a block is queued, and terminal completions keep queued blocks valid", () => {
   const paced = new Session(
     'timer async 1 s { say "handler", 2 s }\nlet name = askText hint: "Name"\nexit',
     { pacing: true },
   ).at(5_000);
   assert.deepEqual(paced.said(), ["handler"]);
-  assert.equal(paced.snapshot.lastSettlement?.settlementKind, "consumedByForegroundInteraction");
+  // The block held for its message's two seconds, then the field came back.
+  assert.equal(paced.snapshot.foregroundAction?.kind, "interaction");
+  assert.equal(paced.snapshot.foregroundAction?.createdAtMs, 0);
+  const settlement = paced.snapshot.lastSettlement;
+  assert.equal(settlement?.actionKind, "chatPacingGate");
+  assert.deepEqual(
+    settlement?.actionKind === "chatPacingGate"
+      ? [settlement.settlementKind, settlement.completedAtMs]
+      : null,
+    ["completed", 3_000],
+  );
 
-  const superseded = new Session(
+  const queued = new Session(
     'timer async 1 s { say "first", 2 s }\ntimer async 3 s { say "second", 0 s }\nwait 10 s\nexit',
     { pacing: true },
   ).at(5_000);
-  assert.deepEqual(superseded.said(), ["first", "second"]);
+  assert.deepEqual(queued.said(), ["first", "second"]);
 
+  // A block due during a reading time waits for it; a skip ends the reading time and the block runs first.
   const skipping = new Session(
     'timer async 1 s { say "handler", 0 s }\nsay "first", 2 s\nwait 10 s\nexit',
     { pacing: true },
   );
-  const held = observeTime(skipping.plan, skipping.snapshot, 5_000).snapshot;
-  const gate = held.backgroundActions.find((action) => action.kind === "chatPacingGate");
-  assert.ok(gate !== undefined);
+  const held = observeTime(skipping.plan, skipping.snapshot, 1_500).snapshot;
+  assert.equal(held.pendingTimerHandlers.length, 1);
+  const gate = held.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
   const skipped = completeAction(skipping.plan, held, {
-    actionId: gate.actionId,
+    actionId: gate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(skipped.outcome.kind, "executionPending");
-  assert.deepEqual(skipped.snapshot, held);
+  assert.equal(skipped.outcome.kind, "completed");
+  const resumed = run(skipping.plan, skipped.snapshot);
+  assert.deepEqual(
+    resumed.events.flatMap((event) =>
+      event.kind === "say"
+        ? [event.text]
+        : event.kind === "actionRequested"
+          ? [event.action.kind]
+          : [],
+    ),
+    ["handler", "delay"],
+  );
 
   const button = new Session('timer async 1 s { say "handler", 0 s }\nshowButton "Continue"\nexit');
   const due = observeTime(button.plan, button.snapshot, 5_000).snapshot;
@@ -1262,19 +1290,24 @@ test("work due exactly at the observed time settles once execution waits or ends
 });
 
 test("a failed session accepts no host input and schedules no further observation", () => {
-  const failed = new Session('say "first", 10 s\nlet zero = 0\nlet x = 1 / zero\nexit', {
-    pacing: true,
-  });
+  const failed = new Session(
+    'let t = timer async 60 s { }\nsay "first", 10 s\nlet zero = 0\nlet x = 1 / zero\nexit',
+    { pacing: true },
+  );
+  const gate = failed.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  failed.at(10_000);
   assert.equal(failed.snapshot.status, "failed");
-  const observed = observeTime(failed.plan, failed.snapshot, 5_000).snapshot;
-  const gate = observed.backgroundActions.find((action) => action.kind === "chatPacingGate");
-  assert.ok(gate !== undefined);
+  // The timer is still active, but a failed session settles nothing further.
+  assert.equal(failed.snapshot.backgroundActions[0]?.kind, "timer");
+  const observed = observeTime(failed.plan, failed.snapshot, 70_000).snapshot;
+  assert.deepEqual(observed.pendingTimerHandlers, []);
   const skipped = completeAction(failed.plan, observed, {
-    actionId: gate.actionId,
+    actionId: gate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(skipped.outcome.kind, "invalidPayload");
+  assert.notEqual(skipped.outcome.kind, "completed");
   assert.deepEqual(skipped.snapshot, observed);
   assert.deepEqual(playerRuntimeDeadlines(playerStateOf(failed.plan, observed)), []);
   assert.equal(activePlayerRuntimePacingGate(observed), null);
@@ -1528,7 +1561,7 @@ test("plateaued rounds terminate, a failed catch-up settles nothing further, and
   assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
 });
 
-test("restore rejects a non-string display, and a failed session keeps its pacing gate at scene time", () => {
+test("restore rejects a non-string display, and a failed session settles nothing at later observations", () => {
   const session = new Session("let t = timer async 5 s\nwait 10 s\nexit");
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
   assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);
@@ -1538,11 +1571,8 @@ test("restore rejects a non-string display, and a failed session keeps its pacin
     { pacing: true },
   ).at(1);
   assert.equal(failed.snapshot.status, "failed");
-  const gate = failed.snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
-  assert.equal(
-    gate?.kind === "chatPacingGate" && gate.deadlineMs,
-    failed.snapshot.currentSessionTimeMs,
-  );
+  // The block, due during the reading time, failed when it ended.
+  assert.equal(failed.snapshot.currentSessionTimeMs, 1);
   const observed = observeTime(failed.plan, failed.snapshot, 5);
   assert.deepEqual(observed.events, []);
   assert.equal(observed.snapshot.observedSessionTimeMs, 5);

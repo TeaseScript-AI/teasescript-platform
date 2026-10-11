@@ -118,7 +118,6 @@ export {
   type RuntimeActionInspection,
   type RuntimeInspectionError,
   type RuntimeInspectionResult,
-  type RuntimePreparedSayInspection,
   type RuntimeSettlementInspection,
   type RuntimeStateInspection,
 } from "./runtime/inspection.js";
@@ -310,7 +309,6 @@ export type {
   RuntimeDelayActionSettlementSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
-  RuntimePreparedSayOutputSnapshot,
   RuntimeStorageWriteActionSnapshot,
   RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";

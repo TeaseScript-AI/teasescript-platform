@@ -921,7 +921,7 @@ test("static compact interactions use the default speaker at the instruction bou
       "speaker first {}",
       "speaker second {}",
       "speaker first",
-      'say as second "Context"',
+      'say as second "Context", instant',
       'showButton "Continue"',
       "exit",
     ].join("\n"),
@@ -1067,7 +1067,9 @@ test("blocking interactions resume through ordinary expression contexts and para
 });
 
 test("interaction results resume through assignment and loop-owned source contexts", () => {
-  const assignmentPlan = compiled('let answer = "before"\nanswer = askText\nsay answer\nexit');
+  const assignmentPlan = compiled(
+    'let answer = "before"\nanswer = askText\nsay answer, instant\nexit',
+  );
   const assignmentPending = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
   const assignmentCompleted = completePending(assignmentPlan, assignmentPending.snapshot, "text", {
     kind: "submittedText",
@@ -1085,7 +1087,7 @@ test("interaction results resume through assignment and loop-owned source contex
       "  say answer, instant",
       "  count = count + 1",
       "}",
-      "say count",
+      "say count, instant",
       "exit",
     ].join("\n"),
   );
@@ -1109,7 +1111,7 @@ test("interaction expressions preserve function-argument source order across sus
     [
       "function middle(first, second, third) { return second }",
       'let answer = middle(mark("before"), "received ${askText}", mark("after"))',
-      "say answer",
+      "say answer, instant",
       "exit",
     ].join("\n"),
     { builtins: ["mark"] },
@@ -1167,7 +1169,7 @@ test("interaction expressions preserve function-argument source order across sus
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {
   const plan = compiled(
-    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nsay answer\nexit',
+    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nsay answer, instant\nexit',
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
@@ -1339,7 +1341,7 @@ test("interaction expressions resume through a direct function return", () => {
       "return askText",
       "}",
       "let result = prompt()",
-      "say result",
+      "say result, instant",
       "exit",
     ].join("\n"),
   );
@@ -1357,7 +1359,7 @@ test("interaction expressions resume through a direct function return", () => {
 
 test("function-owned interaction result survives checkpoint completion and explicit call-frame resume", () => {
   const plan = compiled(
-    "function prompt {\nlet value = askNumber\nreturn value\n}\nlet result = prompt()\nsay result\nexit",
+    "function prompt {\nlet value = askNumber\nreturn value\n}\nlet result = prompt()\nsay result, instant\nexit",
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;

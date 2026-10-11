@@ -8,12 +8,9 @@ import {
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   isMessageMarkup,
-  parseMessageMarkup,
   run,
   serializeCheckpoint,
   stepToEvent,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
 } from "../src/index.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
@@ -70,24 +67,19 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
   }
 });
 
-test("paces, prepares, checkpoints, and emits one parsed authored message", () => {
+test("a parsed authored message shows once the reading time before it ends, also after a restore", () => {
   const compiled = compileValidPlan('say "first"\nsay "[u]**second**[/u]"\nexit');
-  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const gate = promoted.snapshot.foregroundAction;
+  const reading = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const gate = reading.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  if (gate?.kind !== "chatPacingGate" || gate.preparedOutput === null)
-    throw new Error("Expected promoted prepared say output.");
-  assert.equal(gate.preparedOutput.text, "second");
-  assert.equal(gate.preparedOutput.content.visibleText, "second");
+  if (gate?.kind !== "chatPacingGate") throw new Error("Expected a reading time.");
   assert.deepEqual(
-    gate.preparedOutput.content.blocks[0]?.kind === "paragraph"
-      ? gate.preparedOutput.content.blocks[0].lines[0]?.spans.map((span) => span.kind)
-      : [],
-    ["underline", "bold"],
+    reading.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["first"],
   );
 
   const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, promoted.snapshot)),
+    serializeCheckpoint(createCheckpoint(compiled, reading.snapshot)),
   );
   assert.deepEqual(restored.snapshot.foregroundAction, gate);
   const released = completeAction(restored.plan, restored.snapshot, {
@@ -99,18 +91,24 @@ test("paces, prepares, checkpoints, and emits one parsed authored message", () =
   const output = resumed.events.find((event) => event.kind === "say");
   assert.equal(output?.kind, "say");
   if (output?.kind !== "say") throw new Error("Expected resumed say output.");
-  assert.deepEqual(output.content, gate.preparedOutput.content);
-  assert.equal(output.text, gate.preparedOutput.text);
+  assert.equal(output.text, "second");
+  assert.equal(output.content.visibleText, "second");
+  assert.deepEqual(
+    output.content.blocks[0]?.kind === "paragraph"
+      ? output.content.blocks[0].lines[0]?.spans.map((span) => span.kind)
+      : [],
+    ["underline", "bold"],
+  );
 
   const pacingPlan = compileValidPlan('say "[color=#ff3344]x[/color]"\nexit');
-  // Exit stops the pacing, so the gate is observed right after the say.
+  // The gate counts the visible text only.
   const paced = stepToEvent(pacingPlan, createFreshRuntimeSnapshot(pacingPlan));
   assert.equal(paced.events[0]?.kind, "say");
-  assert.equal(paced.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  assert.equal(paced.snapshot.backgroundActions[0]?.deadlineMs, 1_800);
+  assert.equal(paced.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(paced.snapshot.foregroundAction?.deadlineMs, 1_800);
 });
 
-test("restores a promoted block-string fragment without repeating evaluation or selection", () => {
+test("a block-string fragment shown before a restored reading time is not evaluated or selected again", () => {
   const compiled = compileValidPlan(
     [
       "let evaluations = 0",
@@ -118,7 +116,7 @@ test("restores a promoted block-string fragment without repeating evaluation or 
       "  evaluations = evaluations + 1",
       '  return ["**Alpha**", "**Beta**"]',
       "}",
-      'say "first"',
+      'say "first", instant',
       'say """',
       "  # Selected",
       "  ${fragment()}",
@@ -130,20 +128,22 @@ test("restores a promoted block-string fragment without repeating evaluation or 
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 0x2468_ace1 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  if (gate?.kind !== "chatPacingGate" || gate.preparedOutput === null)
-    throw new Error("Expected promoted block-string output.");
-  assert.match(gate.preparedOutput.text, /^Selected\n(?:Alpha|Beta)$/u);
+  if (gate?.kind !== "chatPacingGate") throw new Error("Expected the block string's reading time.");
+  const shown = waiting.events.filter((event) => event.kind === "say");
+  assert.equal(shown.length, 2);
+  const block = shown[1]!;
+  assert.match(block.text, /^Selected\n(?:Alpha|Beta)$/u);
   assert.deepEqual(
-    gate.preparedOutput.content.blocks.map((block) => block.kind),
+    block.content.blocks.map((part) => part.kind),
     ["heading", "paragraph"],
   );
   assert.deepEqual(
-    gate.preparedOutput.content.blocks[1]?.kind === "paragraph"
-      ? gate.preparedOutput.content.blocks[1].lines[0]?.spans.map((span) => span.kind)
+    block.content.blocks[1]?.kind === "paragraph"
+      ? block.content.blocks[1].lines[0]?.spans.map((span) => span.kind)
       : [],
     ["bold"],
   );
-  const preparedRngState = waiting.snapshot.rng.state;
+  const shownRngState = waiting.snapshot.rng.state;
 
   const uninterruptedRelease = completeAction(compiled, waiting.snapshot, {
     actionId: gate.actionId,
@@ -155,11 +155,8 @@ test("restores a promoted block-string fragment without repeating evaluation or 
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
   );
-  const restoredGate = restored.snapshot.foregroundAction;
-  assert.deepEqual(restoredGate, gate);
-  if (restoredGate?.kind !== "chatPacingGate") throw new Error("Expected restored pacing gate.");
   const restoredRelease = completeAction(restored.plan, restored.snapshot, {
-    actionId: restoredGate.actionId,
+    actionId: gate.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
@@ -170,13 +167,11 @@ test("restores a promoted block-string fragment without repeating evaluation or 
     [...uninterruptedRelease.events, ...uninterrupted.events],
   );
   assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
-  const sayEvents = resumed.events.filter((event) => event.kind === "say");
   assert.deepEqual(
-    sayEvents.map((event) => event.text),
-    [gate.preparedOutput.text, "evaluations=1"],
+    resumed.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["evaluations=1"],
   );
-  assert.deepEqual(sayEvents[0]?.content, gate.preparedOutput.content);
-  assert.equal(resumed.snapshot.rng.state, preparedRngState);
+  assert.equal(resumed.snapshot.rng.state, shownRngState);
 });
 
 test("preserves message markup through every instruction checkpoint boundary", () => {
@@ -194,40 +189,4 @@ test("preserves message markup through every instruction checkpoint boundary", (
     assert.equal(output.text, "Heading\nReusable format and **dynamic**");
     assert.equal(isMessageMarkup(output.content), true);
   }
-});
-
-test("validates and restores wide parser-produced prepared markup iteratively", () => {
-  const compiled = compileValidPlan('say "first"\nsay "second"\nexit');
-  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while producing the mutable test fixture.
-  const snapshot = structuredClone(promoted.snapshot) as RuntimeSnapshot;
-  assert.equal(snapshot.foregroundAction?.kind, "chatPacingGate");
-  if (
-    snapshot.foregroundAction?.kind !== "chatPacingGate" ||
-    snapshot.foregroundAction.preparedOutput === null
-  )
-    throw new Error("Expected prepared say output.");
-  const content = parseMessageMarkup(`${"line\n".repeat(20_000)}end`);
-  // EVIDENCE: the fixture starts from runtime-produced pacing state and replaces only the canonical prepared message pair.
-  const preparedOutput = snapshot.foregroundAction.preparedOutput as {
-    content: typeof content;
-    text: string;
-  };
-  preparedOutput.content = content;
-  preparedOutput.text = content.visibleText;
-  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.deepEqual(restored.snapshot.foregroundAction, snapshot.foregroundAction);
-
-  // EVIDENCE: structuredClone preserves the validated snapshot shape before one field is deliberately corrupted.
-  const malformed = structuredClone(snapshot) as RuntimeSnapshot;
-  if (
-    malformed.foregroundAction?.kind !== "chatPacingGate" ||
-    malformed.foregroundAction.preparedOutput === null
-  )
-    throw new Error("Expected cloned prepared say output.");
-  // EVIDENCE: the guards above establish a non-null prepared output whose text field is the corruption target.
-  (malformed.foregroundAction.preparedOutput as { text: string }).text = "mismatch";
-  assert.equal(validateRuntimeSnapshot(malformed, compiled).valid, false);
-  assert.throws(() => createCheckpoint(compiled, malformed));
 });

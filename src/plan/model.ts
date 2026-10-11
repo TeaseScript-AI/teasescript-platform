@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 79;
+export const INSTRUCTION_PLAN_VERSION = 80;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -154,7 +154,6 @@ export type Instruction =
   | SayInstruction
   | WaitInstruction
   | StartTimerInstruction
-  | PacingBarrierInstruction
   | ShowImageInstruction
   | ShowCameraInstruction
   | HideCameraInstruction
@@ -459,15 +458,6 @@ export interface StartTimerInstruction extends InstructionBase {
   readonly captures: HandlerCaptures;
   /** Receives the handle when the timer is used as a value. */
   readonly destinationTemporary: number | null;
-}
-
-/**
- * Waits for the previous message's pacing before main-story media presentation. With a `receiver`, it waits only
- * when that side-effect-free expression evaluates to a media handle or a camera view.
- */
-export interface PacingBarrierInstruction extends InstructionBase {
-  readonly kind: "pacingBarrier";
-  readonly receiver: ExpressionPlan | null;
 }
 
 /** `showImage <image>`, or `hideImage` when `image` is `null`. */

@@ -271,7 +271,7 @@ export function releaseMediaWait(
     const suspended = frame.timerInterruption?.suspendedAction;
     if (suspended?.kind !== "mediaPlayback" || !releases(suspended)) return;
     // Like a suspended delay: the continuation runs once the interrupt block returns normally, and the settlement is
-    // not retained so released prepared output of the running block keeps its provenance.
+    // not retained.
     const settlement = mediaWaitSettlement(snapshot, suspended, outcomeFor(suspended));
     frame.returnInstruction = suspended.continuationInstruction;
     frame.timerInterruption = { ...frame.timerInterruption!, suspendedAction: null };

@@ -23,9 +23,8 @@ import {
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
 /**
- * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for single-instruction commit
- * windows (a released prepared `say` or an interaction result handoff), for a
- * foreground pacing gate, whose prepared output owns the one Standard chat target, and for a pending storage write.
+ * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for an interaction result handoff,
+ * for a message's reading time (a foreground pacing gate), and for a pending storage write.
  */
 export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   if (!timerHandlerQueuedAndUnblocked(snapshot)) return false;
@@ -55,7 +54,7 @@ function timerHandlerQueuedAndUnblocked(snapshot: RuntimeSnapshot): boolean {
   if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
     return false;
   if (interruptRunning(snapshot)) return false;
-  return snapshot.preparedSayOutput === null && snapshot.interactionResultHandoff === null;
+  return snapshot.interactionResultHandoff === null;
 }
 
 /** Finds the active background action of a handle's timer, if it is still running or paused. */
@@ -176,8 +175,8 @@ export function stopTimerAction(
 }
 
 /**
- * Script end and `exit` stop every timer and drop queued expiry blocks. Like the pacing gate at `exit`, this is
- * cleanup of the ended session rather than a sequence of individual settlements, so no events are emitted.
+ * Script end and `exit` stop every timer and drop queued expiry blocks. This is cleanup of the ended session rather
+ * than a sequence of individual settlements, so no events are emitted.
  */
 export function stopAllTimersForSessionEnd(snapshot: RuntimeSnapshot): void {
   for (let index = snapshot.backgroundActions.length - 1; index >= 0; index -= 1) {

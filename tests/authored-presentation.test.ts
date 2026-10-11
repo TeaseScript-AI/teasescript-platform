@@ -4,7 +4,7 @@ import { isMessagePresentation } from "../src/message-presentation.js";
 import { compileSource } from "../src/compiler.js";
 import { normalizeColor, isNormalizedColor } from "../src/color.js";
 import { run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import {
   createCheckpoint,
   serializeCheckpoint,
@@ -195,31 +195,28 @@ exit
   );
 });
 
-test("captures presentation in paced output and validates restored presentation data", () => {
+test("a message after a restored reading time shows its presentation", () => {
   const plan = compileValidPlan(
     'say "first"\nsay prose(background: "ivory", align: "left") "letter"\nexit',
   );
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const gate = result.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  if (gate?.kind !== "chatPacingGate" || gate.preparedOutput === null)
-    throw new Error("Missing prepared output.");
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
   );
   const released = completeAction(restored.plan, restored.snapshot, {
     actionKind: "chatPacingGate",
-    actionId: gate.actionId,
+    actionId: gate!.actionId,
     payload: { kind: "skip" },
   });
   const resumed = run(restored.plan, released.snapshot);
-  assert.deepEqual(
-    resumed.events.find((event) => event.kind === "say")?.presentation,
-    gate.preparedOutput.presentation,
-  );
-  const malformed = JSON.parse(serializeCheckpoint(createCheckpoint(plan, result.snapshot)));
-  malformed.snapshot.foregroundAction.preparedOutput.presentation.align = "diagonal";
-  assert.equal(validateRuntimeSnapshot(malformed.snapshot, plan).valid, false);
+  const letter = resumed.events.find((event) => event.kind === "say");
+  assert.equal(letter?.kind === "say" ? letter.text : null, "letter");
+  const presentation = letter?.kind === "say" ? letter.presentation : null;
+  assert.equal(presentation?.kind, "prose");
+  assert.equal(presentation?.background, normalizeColor("ivory"));
+  assert.equal(presentation?.align, "left");
 });
 
 test("a user-provided colour survives an input checkpoint and invalid input uses the default", () => {
@@ -510,23 +507,6 @@ exit
     const invalid = run(nullPlan, createFreshRuntimeSnapshot(nullPlan));
     assert.equal(invalid.snapshot.status, "failed");
     assert.equal(invalid.snapshot.failure?.code, "TSR050");
-  }
-});
-
-test("checkpoint validation rejects authored placement on prepared bubble output", () => {
-  const plan = compileValidPlan('say "first"\nsay bubble "second"\nexit');
-  const waiting = run(plan, createFreshRuntimeSnapshot(plan));
-  const checkpointJson = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
-  assert.doesNotThrow(() => deserializeCheckpoint(checkpointJson));
-  for (const option of ["position", "align"]) {
-    const malformed = JSON.parse(checkpointJson);
-    const presentation = malformed.snapshot.foregroundAction.preparedOutput.presentation;
-    assert.equal(presentation.kind, "bubble");
-    assert.equal(presentation[option], null);
-    presentation[option] = "right";
-    assert.equal(isMessagePresentation(presentation), false);
-    assert.equal(validateRuntimeSnapshot(malformed.snapshot, plan).valid, false);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(malformed)));
   }
 });
 

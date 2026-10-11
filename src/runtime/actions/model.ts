@@ -1,4 +1,3 @@
-import type { MessagePresentation } from "../../message-presentation.js";
 import type {
   DelayDisplay,
   InteractionChoiceValue,
@@ -7,7 +6,6 @@ import type {
   InteractionUiPayload,
   PlanTag,
 } from "../../plan/model.js";
-import type { MessageMarkup } from "../../message-markup.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type { RuntimeMediaSnapshot } from "../media.js";
 import type { RuntimePermanentButtonSnapshot } from "../permanent-buttons.js";
@@ -91,19 +89,10 @@ export function interactionDeadlineMs(action: RuntimeInteractionActionSnapshot):
   return action.timeoutMs === null ? null : action.createdAtMs + action.timeoutMs;
 }
 
-export interface RuntimePreparedSayOutputSnapshot {
-  readonly presentation: MessagePresentation;
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-  readonly speaker: import("../events.js").OutputSpeaker | null;
-  readonly content: MessageMarkup;
-  readonly text: string;
-  /** The markup source of `content`, kept only for a `say` whose result is a message handle. */
-  readonly sourceText?: string;
-  readonly durationMs: number;
-  readonly skippable: boolean;
-}
-
+/**
+ * The reading time of a paced message, which the script waits for at its `say` as at a `wait`, until it is up or the
+ * player skips it.
+ */
 export interface RuntimeChatPacingGateActionSnapshot {
   readonly kind: "chatPacingGate";
   readonly actionId: number;
@@ -116,7 +105,6 @@ export interface RuntimeChatPacingGateActionSnapshot {
   readonly deadlineMs: number;
   readonly skippable: boolean;
   readonly requestEventSequence: number;
-  readonly preparedOutput: RuntimePreparedSayOutputSnapshot | null;
 }
 
 /**
@@ -398,16 +386,14 @@ export interface RuntimeInteractionActionSettlementSnapshot {
 export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "chatPacingGate";
-  readonly settlementKind:
-    "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput";
+  /** A reading time ends when its time is up or when the player skips it. */
+  readonly settlementKind: "completed" | "skipped";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly requestEventSequence: number;
   readonly completionEventSequence: number;
   readonly deadlineMs: number;
   readonly completedAtMs: number;
-  /** The owning say instruction released by this foreground settlement, if any. */
-  readonly releasedPreparedOutputInstruction: number | null;
 }
 
 /** A settled capture, retained so a repeated Player completion replays instead of capturing twice. */

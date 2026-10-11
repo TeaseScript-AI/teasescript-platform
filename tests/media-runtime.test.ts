@@ -545,7 +545,7 @@ test("a cue block may control its own media inside a function and interrupts a b
   assert.equal(session.mediaSettlement(2)?.settlementKind, "stopped");
 });
 
-test("main-story media waits for message pacing, but not inside interrupt blocks", () => {
+test("media waits for the reading time before it, on the story path and inside a block", () => {
   const session = new Session(
     [
       'say "This is my room."',
@@ -573,6 +573,12 @@ test("main-story media waits for message pacing, but not inside interrupt blocks
     { pacing: true },
   );
   interrupt.at(1_000);
+  assert.deepEqual(interrupt.said(), ["Now."]);
+  assert.equal(interrupt.snapshot.stageImage, null);
+  // One word: 1500 + max(1 * 300, 4 * 30) ms after the block started.
+  interrupt.at(2_799);
+  assert.equal(interrupt.snapshot.stageImage, null);
+  interrupt.at(2_800);
   assert.equal(interrupt.snapshot.stageImage, "images/now.jpg");
 });
 
@@ -862,7 +868,7 @@ test("restore validation rejects malformed media state", () => {
   }
 });
 
-test("a media control uses the receiver it had before the pacing wait", () => {
+test("a block due during a reading time runs before the statement after it, which sees its change", () => {
   const session = new Session(
     [
       'let a = playAudio async "a.mp3"',
@@ -879,8 +885,8 @@ test("a media control uses the receiver it had before the pacing wait", () => {
     { pacing: true },
   );
   session.load(1, 60_000).load(2, 60_000).at(2_000);
-  assert.equal(session.media(1)?.state, "paused");
-  assert.equal(session.media(2)?.state, "running");
+  assert.equal(session.media(1)?.state, "running");
+  assert.equal(session.media(2)?.state, "paused");
 });
 
 test("an async play whose loaded source leaves no range continues as a failed load", () => {
@@ -1166,7 +1172,7 @@ test("stopAudio in a timer block ends a blocking play, which continues when the 
   assert.equal(session.snapshot.status, "halted");
 });
 
-test("stopAudio waits for message pacing on the story path, but not inside a timer block", () => {
+test("stopAudio waits for the reading time before it, on the story path and inside a timer block", () => {
   const story = new Session(
     [
       'let m = playAudio async "m.mp3"',
@@ -1196,6 +1202,8 @@ test("stopAudio waits for message pacing on the story path, but not inside a tim
     { pacing: true },
   );
   interrupt.load(1, 60_000).at(1_000, [1, 1_000]);
+  assert.equal(interrupt.media(1)?.state, "running");
+  interrupt.at(2_800, [1, 2_800]);
   assert.equal(interrupt.media(1)?.state, "stopped");
 });
 

@@ -32,7 +32,6 @@ import { resolveInteractionCompletion } from "../actions/interaction.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
-import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import {
   closeDebugTrace,
   openDebugTrace,
@@ -208,11 +207,6 @@ function completePacingGate(
       message: "This pacing gate is not skippable.",
     });
   }
-  if (current.backgroundActions.includes(action)) {
-    const events: InterpreterEvent[] = [];
-    const settlement = settleBackgroundPacingGate(plan, current, action, "skipped", events);
-    return pendingResult(current, events, { kind: "completed", settlement });
-  }
   assertEventSequenceCapacity(current, 1);
   const completionEventSequence = takeSequence(current, 1);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
@@ -225,16 +219,11 @@ function completePacingGate(
     completionEventSequence,
     deadlineMs: action.deadlineMs,
     completedAtMs: current.currentSessionTimeMs,
-    releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
   current.status = "running";
-  // A gate promoted by a pacing barrier carries no prepared output; the barrier runs again and then advances.
-  if (action.preparedOutput !== null) {
-    current.preparedSayOutput = action.preparedOutput;
-    current.nextInstruction = action.preparedOutput.owningInstruction;
-  }
+  current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",

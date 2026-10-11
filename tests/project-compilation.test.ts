@@ -303,15 +303,10 @@ test("a checkpoint runs code of a file only in an activation of that file", () =
   const offset = says.files[1]!.startInstruction;
   const moved = mutableCopy(pacing);
   moved.nextInstruction += offset;
-  for (const action of [moved.foregroundAction, ...moved.backgroundActions]) {
-    if (action?.kind !== "chatPacingGate") continue;
-    action.owningInstruction += offset;
-    action.continuationInstruction += offset;
-    if (action.preparedOutput !== null) {
-      action.preparedOutput.owningInstruction += offset;
-      action.preparedOutput.continuationInstruction += offset;
-    }
-  }
+  const gate = moved.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  gate!.owningInstruction += offset;
+  gate!.continuationInstruction += offset;
   assert.equal(validateRuntimeSnapshot(moved, says).valid, false);
 });
 

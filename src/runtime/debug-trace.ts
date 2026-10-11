@@ -390,7 +390,6 @@ interface Stage {
   readonly nextId: number;
   readonly decisionSerial: number;
   readonly draws: number;
-  readonly pendingOutput: TraceStore["pendingOutput"];
   readonly pendingStorage: TraceStore["pendingStorage"];
   readonly stageImageId: number | null;
   readonly stageImageSet: boolean;
@@ -419,7 +418,6 @@ export class TraceStore {
   #outputs = new Map<number, number>();
   #stageImageId: number | null = null;
   #stageImageSet = false;
-  pendingOutput: { readonly instruction: number; readonly deps: DebugDependencies } | null = null;
   pendingStorage: {
     readonly actionId: number;
     readonly key: string;
@@ -510,7 +508,6 @@ export class TraceStore {
     this.#outputs = new Map();
     this.#stageImageId = null;
     this.#stageImageSet = false;
-    this.pendingOutput = null;
     this.pendingStorage = null;
     this.#lastRandom = null;
     this.#stage = null;
@@ -1127,26 +1124,6 @@ export class TraceStore {
     this.#stage?.outputs.push(eventSequence);
   }
 
-  /** A `say` whose text waits behind pacing; it is emitted by a later operation. */
-  holdOutput(instruction: number, deps: DebugDependencies): void {
-    if (this.#failure !== null) return;
-    this.pendingOutput = { instruction, deps: copyDependencies(deps) };
-  }
-
-  /** Emits held output, or, when the trace did not see it prepared, output whose causes are unavailable. */
-  releaseOutput(eventSequence: number, instruction: number, text: string): void {
-    if (this.#failure !== null) return;
-    const pending = this.pendingOutput;
-    this.pendingOutput = null;
-    let deps: DebugDependencies;
-    if (pending?.instruction === instruction) deps = pending.deps;
-    else {
-      deps = emptyDependencies();
-      this.#readKey(deps, null, null, text);
-    }
-    this.output(eventSequence, text, deps);
-  }
-
   image(value: SerializableRuntimeValue): void {
     const id = this.write("image", null, "Stage image", value);
     // A record larger than the budget is dropped at once, so the image has none.
@@ -1164,7 +1141,6 @@ export class TraceStore {
       nextId: this.#nextId,
       decisionSerial: this.#decisionSerial,
       draws: this.#draws,
-      pendingOutput: this.pendingOutput,
       pendingStorage: this.pendingStorage,
       stageImageId: this.#stageImageId,
       stageImageSet: this.#stageImageSet,
@@ -1216,7 +1192,6 @@ export class TraceStore {
       for (const decision of this.#decisions)
         if (decision.id !== null && decision.id >= stage.nextId) decision.id = null;
       this.#draws = stage.draws;
-      this.pendingOutput = stage.pendingOutput;
       this.pendingStorage = stage.pendingStorage;
       this.#stageImageId =
         stage.stageImageId !== null && this.#find(stage.stageImageId) !== undefined

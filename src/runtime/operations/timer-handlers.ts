@@ -7,7 +7,6 @@ import { processDueWork } from "./observe-time.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 
 export { timerHandlerDispatchable };
-import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { assertCounterCanAdvance, copySpan } from "./support.js";
 import type { TraceStore } from "../debug-trace.js";
 
@@ -94,9 +93,8 @@ export function startTimerHandler(
 
 /**
  * A normal return from an expiry block resumes the interrupted path. A still-pending interaction or delay becomes the
- * foreground action again with its original identity; a background pacing gate created by the block is consumed
- * before an interaction, as when an interaction is first requested. A delay settled meanwhile continues at its
- * continuation, which the frame already records.
+ * foreground action again with its original identity. A delay settled meanwhile continues at its continuation, which
+ * the frame already records.
  */
 export function returnFromTimerHandler(
   plan: InstructionPlan,
@@ -114,25 +112,14 @@ export function returnFromTimerHandler(
   snapshot.temporaries.length = 0;
   for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   snapshot.nextInstruction = frame.returnInstruction;
-  restoreSuspendedAction(plan, snapshot, frame, events);
+  restoreSuspendedAction(snapshot, frame);
   // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.
   processDueWork(plan, snapshot, events, trace, control);
 }
 
-function restoreSuspendedAction(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  frame: RuntimeCallFrameSnapshot,
-  events: InterpreterEvent[],
-): void {
+function restoreSuspendedAction(snapshot: RuntimeSnapshot, frame: RuntimeCallFrameSnapshot): void {
   const suspended = frame.timerInterruption!.suspendedAction;
   if (suspended === null) return;
-  if (suspended.kind === "interaction") {
-    const gate = snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
-    if (gate?.kind === "chatPacingGate") {
-      settleBackgroundPacingGate(plan, snapshot, gate, "consumedByForegroundInteraction", events);
-    }
-  }
   snapshot.foregroundAction = suspended;
   snapshot.status = "waiting";
 }

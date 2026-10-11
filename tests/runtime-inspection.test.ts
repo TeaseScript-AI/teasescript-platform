@@ -58,7 +58,7 @@ test("runtime inspection exposes foreground interaction provenance without mutat
   if (action.ui.kind === "text") assert.equal(action.ui.hint, "Type here");
 });
 
-test("runtime inspection exposes pacing settings, deadline, skip policy, and prepared output", () => {
+test("runtime inspection exposes pacing settings, deadline, skip policy, and the waiting say", () => {
   const source =
     'speaker guide { displayName: "Guide" }\nsay unskippable "hello there"\nsay as guide "one two three"\nexit';
   const settings = { baseDelayMs: 1000, delayPerWordMs: 200, delayPerCharacterMs: 10 };
@@ -79,39 +79,33 @@ test("runtime inspection exposes pacing settings, deadline, skip policy, and pre
   // First say: 100 + 1000 + max(2 words * 200, 11 characters * 10).
   assert.equal(gate.deadlineMs, 1500);
   assert.equal(gate.skippable, false);
-
-  const prepared = gate.preparedOutput;
-  assert.equal(prepared?.text, "one two three");
-  assert.deepEqual(
-    [prepared?.speaker?.identifier, prepared?.speaker?.displayName],
-    ["guide", "Guide"],
-  );
-  // Second say: 1000 + max(3 words * 200, 13 characters * 10); the platform default is skippable.
-  assert.equal(prepared?.durationMs, 1600);
-  assert.equal(prepared?.skippable, true);
-  const secondSay = 'say as guide "one two three"';
-  assert.equal(prepared?.owningInstruction, inspection.nextInstruction);
+  // The script waits at the first say, whose source the inspection locates.
+  const firstSay = 'say unskippable "hello there"';
+  assert.equal(gate.owningInstruction, inspection.nextInstruction);
   assert.deepEqual(
     [
-      inspection.nextInstructionSourceSpan?.start.offset,
-      inspection.nextInstructionSourceSpan?.end.offset,
+      inspection.foregroundAction?.sourceSpan?.start.offset,
+      inspection.foregroundAction?.sourceSpan?.end.offset,
     ],
-    [source.indexOf(secondSay), source.indexOf(secondSay) + secondSay.length],
+    [source.indexOf(firstSay), source.indexOf(firstSay) + firstSay.length],
   );
 
-  // After the gate expires, the held prepared output keeps the second say's own source span.
-  const released = inspectRuntimeState(
+  // After the reading time, the second say waits for its own: 1000 + max(3 words * 200, 13 characters * 10).
+  const second = inspectRuntimeState(
     plan,
-    observeTime(plan, pending.snapshot, gate.deadlineMs).snapshot,
+    run(plan, observeTime(plan, pending.snapshot, gate.deadlineMs).snapshot).snapshot,
   );
-  assert.equal(released.valid, true);
-  if (!released.valid) return;
-  assert.deepEqual(released.preparedSayOutput?.output, prepared);
+  assert.equal(second.valid, true);
+  if (!second.valid) return;
+  const secondGate = second.foregroundAction?.action;
+  assert.equal(secondGate?.kind, "chatPacingGate");
+  if (secondGate?.kind !== "chatPacingGate") return;
+  assert.equal(secondGate.deadlineMs - secondGate.createdAtMs, 1600);
+  // The platform default is skippable.
+  assert.equal(secondGate.skippable, true);
+  const secondSay = 'say as guide "one two three"';
   assert.deepEqual(
-    [
-      released.preparedSayOutput?.sourceSpan?.start.offset,
-      released.preparedSayOutput?.sourceSpan?.end.offset,
-    ],
+    [second.nextInstructionSourceSpan?.start.offset, second.nextInstructionSourceSpan?.end.offset],
     [source.indexOf(secondSay), source.indexOf(secondSay) + secondSay.length],
   );
 });
