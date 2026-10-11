@@ -378,7 +378,7 @@ script keeps large values in its state); the snapshot store lies outside the hea
 answers, the corpus replay's included), checked before each step: a step that started finishes, so a run can go over N
 by the operations of its last step. With it the time budget applies only when `--budget-seconds` is given, and directed
 search looks again every tenth of the work budget instead of every tenth of the time; without an explicit time budget,
-a run's length and result then do not depend on the machine's load.
+a run's length and result then do not depend on the machine's load, unless it reaches the heap cap (below).
 
 Directed search looks at each condition that a step reached but left only one way. A flow-insensitive data flow over
 the plan's names finds what the condition reads: an ask's answer (also through helper functions and stored answers), a

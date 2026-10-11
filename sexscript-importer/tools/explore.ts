@@ -18,7 +18,7 @@
  * `tools/explore-report.ts`; `--no-report` leaves it out), and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
- * given. `--until-stalled` runs each unit until it is done instead: exhausted, or on a plateau, no new code or condition
+ * given or the run reaches the heap cap. `--until-stalled` runs each unit until it is done instead: exhausted, or on a plateau, no new code or condition
  * way in the second half of the run (see `ExploreOptions.untilStalled`), with safety caps only: two hours, unless
  * `--budget-seconds` is given, and the heap cap. Every run stops when the search's heap passes `--max-heap-mb` (by
  * default 60% of the V8 heap, the rest left for what is computed after the search). `search.stoppedBy` says whether the

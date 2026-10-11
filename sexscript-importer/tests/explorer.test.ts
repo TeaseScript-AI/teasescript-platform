@@ -2254,6 +2254,29 @@ test(
     assert.equal(heavy.stoppedBy, "memory");
     assert.ok(heavy.states >= 1000 && heavy.states < 1010);
     assert.ok(cutOff(heavy.stoppedBy));
+    // Also while a corpus is replayed.
+    const replayedHeavy = explore(engine, counterPlan, {
+      seed: 1,
+      budgetMs: Infinity,
+      maxStates: Number.MAX_SAFE_INTEGER,
+      maxHeapBytes: 1,
+      sources: new Map(),
+      diagnostics: [],
+      untilStalled: true,
+      corpus: [
+        {
+          seed: 1,
+          reason: "coverage",
+          inputs: Array.from({ length: 2500 }, () => ({
+            kind: "option" as const,
+            index: 0,
+            label: "Again",
+          })),
+        },
+      ],
+    }).search;
+    assert.equal(replayedHeavy.stoppedBy, "memory");
+    assert.ok(replayedHeavy.states < 1010);
     // A work budget smaller than the plateau window cuts the run off.
     const capped = run(`${loop}}\n`, 5000);
     assert.deepEqual([capped.stoppedBy, capped.audit?.result], ["operations", "capped"]);

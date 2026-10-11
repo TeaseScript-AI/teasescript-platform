@@ -2594,7 +2594,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       items: stepItems,
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
       edges: [],
-      texts: shared(sharedTexts, step.texts.join("\u0000"), step.texts),
+      texts: shared(sharedTexts, JSON.stringify(step.texts), step.texts),
       prompt: ((prompt) => shared(sharedPrompts, `${prompt.instruction} ${prompt.text}`, prompt))(
         session.prompt(step.snapshot),
       ),
@@ -4134,7 +4134,17 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           ? "plateau"
           : null;
   const outOfBudget = () => spent() !== null;
-  const full = () => outOfBudget() || nodes.length >= options.maxStates;
+  let heapCheckAt = HEAP_CHECK_STATES;
+  let heapPassed = false;
+  /** Whether the heap in use passed its cap: read every {@link HEAP_CHECK_STATES} new states, and then for good. */
+  const heapFull = (): boolean => {
+    if (!heapPassed && nodes.length >= heapCheckAt) {
+      heapCheckAt = nodes.length + HEAP_CHECK_STATES;
+      heapPassed = getHeapStatistics().used_heap_size >= (options.maxHeapBytes ?? Infinity);
+    }
+    return heapPassed;
+  };
+  const full = () => outOfBudget() || nodes.length >= options.maxStates || heapFull();
 
   /**
    * Replays the corpus entries of this run's seed, each session from the storage the one before it left, through the
@@ -4319,7 +4329,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
   const coverageAtStart = items === null ? null : coverageCount(items.lineIds, items.lines);
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
-  let heapCheckAt = HEAP_CHECK_STATES;
   let sinceAnalysis = 0;
   let analyzedAt = started;
   let analyzedOps = 0;
@@ -4338,12 +4347,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       stoppedBy = "maxStates";
       break;
     }
-    if (nodes.length >= heapCheckAt) {
-      heapCheckAt = nodes.length + HEAP_CHECK_STATES;
-      if (getHeapStatistics().used_heap_size >= (options.maxHeapBytes ?? Infinity)) {
-        stoppedBy = "memory";
-        break;
-      }
+    if (heapFull()) {
+      stoppedBy = "memory";
+      break;
     }
     // A tenth of the budget: of the work budget when there is one, so that a run it limits stays deterministic.
     // Until stalled, a quarter of the stall window, so that directed search looks again before the run stops.
@@ -6002,7 +6008,11 @@ function findTraps(
       pending.push(previous);
     }
   }
-  const traps = bottom.map(({ component, index }) => {
+  // Later sessions meet the same loop with other storage: one trap per kind and place, by its shortest way in. A trap's
+  // path is made only to compare it with the one kept, so that only the kept ones' paths stay in memory: the paths of
+  // many such traps can take more than the search left.
+  const merged = new Map<string, { report: TrapReport; entry: number }>();
+  for (const { component, index } of bottom) {
     const members = component.flatMap((loop) => groups.get(loop)!);
     const cyclic = component.length > 1 || successors.get(component[0]!)!.has(component[0]!);
     // The shortest way in, a play one when there is.
@@ -6018,7 +6028,7 @@ function findTraps(
       const span = at === null ? null : compactSpan(instructions[at]?.span);
       if (at !== null && span !== null) locations.add(`${files[at]}:${span.line}`);
     }
-    const report: TrapReport = {
+    const trap: TrapReport = {
       kind: cyclic ? "loop" : "stuck",
       states: members.length,
       feederStates: feeders.get(index) ?? 0,
@@ -6030,15 +6040,10 @@ function findTraps(
       clock: entry.clock,
       ...reproOf(entry),
     };
-    return { report, entry: entry.id };
-  });
-  // Later sessions meet the same loop with other storage: one trap per kind and place, by its shortest way in.
-  const merged = new Map<string, { report: TrapReport; entry: number }>();
-  for (const { report: trap, entry } of traps) {
     const key = `${trap.kind}@${trap.locations.join("|")}`;
     const known = merged.get(key)?.report;
     if (known === undefined) {
-      merged.set(key, { report: trap, entry });
+      merged.set(key, { report: trap, entry: entry.id });
       continue;
     }
     known.states += trap.states;
@@ -6051,7 +6056,7 @@ function findTraps(
     if (shorter)
       merged.set(key, {
         report: { ...trap, states: known.states, feederStates: known.feederStates },
-        entry,
+        entry: entry.id,
       });
   }
   return [...merged.values()];
