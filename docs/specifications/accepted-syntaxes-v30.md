@@ -827,10 +827,10 @@ until that reading time has passed or the player skips it: a later `say`, also `
 reading time of its own; a question with its buttons or fields, which appear together, and whose timeout counts from
 then; Stage, sound, video, and camera changes; a change of a message's text; showing or removing a permanent button,
 also by a `goto` or `end` that removes one; a new countdown, which starts when it appears; and `exit`. Other code, also
-a `hidden` timer, runs on until such output, and the code after it runs once it has appeared. A `wait` or blocking timer
-that starts during a reading time replaces it, so only the wait counts. In a timer, media, or button block, Stage,
-sound, video, and camera changes keep the block's timing ([§22](#22-stage-image-audio-and-video)). Permanent buttons
-already shown stay usable.
+a `hidden` timer and operations on a running timer, runs on until such output, and the code after it runs once it has
+appeared. A `wait` or blocking timer that starts during a reading time replaces it, so only the wait counts. In a timer,
+media, or button block, Stage, sound, video, and camera changes keep the block's timing
+([§22](#22-stage-image-audio-and-video)). Permanent buttons already shown stay usable.
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
