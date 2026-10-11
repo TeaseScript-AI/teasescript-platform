@@ -1049,6 +1049,8 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         else if (onlyOf(type, BOOLEAN | NULL) && (type & BOOLEAN) !== 0)
           uses.emptyStarts.set(key, false);
       }
+      // Nothing shows one that the script sets before every read before its first value.
+      if (key !== null && setOnlyFirst(key) && !readElsewhere(key)) uses.shownEarly.delete(key);
     });
   }
   for (const [name, keys] of removed) {
