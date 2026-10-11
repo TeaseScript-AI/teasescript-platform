@@ -129,10 +129,12 @@ test("a FONT that names a FACE is an editor's text format, whose size is no emph
 });
 
 test("a text fragment keeps its surrounding whitespace, apart from what a tag at its start introduced", () => {
-  const fragment = (value: string): string =>
-    legacyHtmlToMarkup(text(value), { fragment: true })
+  const fragment = (value: string, continues = false): string =>
+    legacyHtmlToMarkup(text(value), { fragment: true, continues })
       .parts.map((part) => ("text" in part ? part.text : "${…}"))
       .join("");
   assert.equal(fragment("<h1 style='font-size:140%;'>Title</h1>\n\n"), "# Title\n\n");
   assert.equal(fragment(" and <b>more</b> "), " and **more** ");
+  // Appended to a text, `text += "<li>..."`, it keeps that whitespace too: the item starts its own line.
+  assert.equal(fragment("<li>You could cut.</li>", true), "\n- You could cut.");
 });

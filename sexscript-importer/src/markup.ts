@@ -64,10 +64,12 @@ export function fontSize(tag: string): string | null {
 /**
  * `fragment` is for text that may become part of a longer text, such as a title that the script puts before a
  * message: it keeps its own surrounding whitespace, and only drops whitespace that a tag at its start introduced.
+ * `continues` is for a fragment appended to a text, `text += "<li>..."`, which keeps that whitespace too: the line
+ * break of a list item, paragraph, or `<br>` separates it from the text before.
  */
 export function legacyHtmlToMarkup(
   parts: readonly TextPart[],
-  options: { fragment?: boolean } = {},
+  options: { fragment?: boolean; continues?: boolean } = {},
 ): MarkupResult {
   const values = parts.flatMap((part) => ("value" in part ? [part.value] : []));
   const source = parts.map((part) => ("value" in part ? VALUE : part.text)).join("");
@@ -142,7 +144,7 @@ export function legacyHtmlToMarkup(
   text =
     options.fragment !== true
       ? text.replace(/^\s+|\s+$/gu, "")
-      : /^\s/u.test(source)
+      : /^\s/u.test(source) || options.continues === true
         ? text
         : text.replace(/^\s+/u, "");
   // Values return in order where their markers stand.

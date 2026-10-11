@@ -2428,6 +2428,7 @@ function withLegacyMarkup(
     value: IrExpression,
     any: boolean,
     constants: ReadonlyMap<string, string>,
+    continues = false,
   ): IrExpression => {
     const given: TextPart[] | null =
       value.kind === "literal" && typeof value.value === "string"
@@ -2442,20 +2443,41 @@ function withLegacyMarkup(
     )
       return value;
     const parts = withFoldedSpanValues(given, constants, folded);
-    const result = legacyHtmlToMarkup(parts, { fragment: !any });
+    const result = legacyHtmlToMarkup(parts, { fragment: !any, continues });
     if (!result.changed) return value;
     if (result.dropped) dropped += 1;
     return templateOrLiteral(result.parts);
+  };
+  // The variables of the blocks around the statement being converted, innermost last, with whether a text declares
+  // them (`let message = "..."`); a function's parameters are no texts.
+  const scopes: Map<string, boolean>[] = [];
+  const declaredText = (name: string): boolean => {
+    for (let index = scopes.length - 1; index >= 0; index -= 1) {
+      const text = scopes[index]!.get(name);
+      if (text !== undefined) return text;
+    }
+    return false;
   };
   // Every text of a statement, inner values first; a say's own text also has its entities decoded.
   const convert = (items: IrStatement[], constants: ReadonlyMap<string, string>): IrStatement[] => {
     const deep = (value: IrExpression): IrExpression =>
       markup(mapChildren(value, deep), false, constants);
-    return items.map((statement) => {
+    const scope = new Map<string, boolean>();
+    scopes.push(scope);
+    const result = items.map((statement) => {
+      if (statement.kind === "let")
+        scope.set(
+          statement.name,
+          (statement.type === undefined || statement.type === "string") &&
+            (statement.value.kind === "template" ||
+              (statement.value.kind === "literal" && typeof statement.value.value === "string")),
+        );
       if (statement.kind === "function") {
         const own = constantTexts(statement, fileVariables);
         folded = new Set();
+        scopes.push(new Map(statement.parameters.map((parameter) => [parameter.name, false])));
         const converted = convert(statement.body, own);
+        scopes.pop();
         const body = withoutNestedSpans(
           withoutUnreadLets(converted, folded),
           statement,
@@ -2466,8 +2488,21 @@ function withLegacyMarkup(
       const nested = withNestedStatements(statement, (body) => convert(body, constants));
       if (nested.kind === "say")
         return { ...nested, value: markup(mapChildren(nested.value, deep), true, constants) };
+      // Text appended to a text variable continues it, so a list item's line break stays.
+      if (
+        nested.kind === "assign" &&
+        nested.operator === "+=" &&
+        nested.target.kind === "variable" &&
+        declaredText(nested.target.name)
+      )
+        return {
+          ...nested,
+          value: markup(mapChildren(nested.value, deep), false, constants, true),
+        };
       return mapOwnExpressions(nested, deep);
     });
+    scopes.pop();
+    return result;
   };
   const converted = convert(statements, new Map());
   if (dropped === 0) return converted;
