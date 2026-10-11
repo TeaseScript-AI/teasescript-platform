@@ -11990,64 +11990,6 @@ function instanceTest(node: AstNode, context: LowerContext): IrExpression | null
 }
 
 /**
- * Groovy `x.class == ArrayList` or `x.getClass() != String`, a value's class compared with a class that `instanceof`
- * tests too (INSTANCE_TYPES), as a type test, `x is list` (ShockYourself's stats panel, which drew a bar for a pair of
- * values); undefined for any other comparison. The class may be written with its package, `java.util.ArrayList`.
- */
-function classTest(node: AstNode, context: LowerContext): IrExpression | null | undefined {
-  const classOf = (side: AstNode | null): AstNode | null => {
-    if (side?.kind === "property" && constantString(side.property) === "class")
-      return asNode(side.object);
-    if (
-      side?.kind === "methodCall" &&
-      constantString(side.method) === "getClass" &&
-      nodeArray(asNode(side.arguments)?.items).length === 0
-    )
-      return asNode(side.object);
-    return null;
-  };
-  const className = (side: AstNode | null): string | null => {
-    if (side === null) return null;
-    if (side.kind === "classExpression") return text(side.type);
-    if (side.kind === "variable") {
-      const name = variableName(side);
-      return name !== null &&
-        !context.types.variables.has(name) &&
-        !isVisibleLocal(name, side, context)
-        ? name
-        : null;
-    }
-    if (side.kind === "property") {
-      const owner = className(asNode(side.object));
-      const property = constantString(side.property);
-      return owner === null || property === null ? null : `${owner}.${property}`;
-    }
-    return null;
-  };
-  const left = asNode(node.left);
-  const right = asNode(node.right);
-  const value = classOf(left) ?? classOf(right);
-  const name = className(classOf(left) === null ? left : right);
-  const types =
-    name === null
-      ? undefined
-      : INSTANCE_TYPES.get(name.replace(/^java\.(?:lang|util|math)\./u, ""));
-  if (value === null || types === undefined) return undefined;
-  if (types.length > 1 && !isRepeatableExpression(value)) return undefined;
-  const lowered = lowerExpression(value, context);
-  if (lowered === null) return null;
-  const test = types
-    .map((type): IrExpression => ({ kind: "typeTest", value: lowered, type }))
-    .reduce((first, second): IrExpression => ({
-      kind: "binary",
-      operator: "or",
-      left: first,
-      right: second,
-    }));
-  return node.operator === "!=" ? { kind: "unary", operator: "not", value: test } : test;
-}
-
-/**
  * Groovy `text * n` and `list * n`: the text, or the list's elements, `n` times over, with a fractional count cut to
  * whole times as Groovy did. Undefined for other operands.
  */
@@ -12110,10 +12052,6 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   if (operator === "instanceof") {
     const test = instanceTest(node, context);
-    if (test !== undefined) return test;
-  }
-  if (operator === "==" || operator === "!=") {
-    const test = classTest(node, context);
     if (test !== undefined) return test;
   }
   if (operator === "==" || operator === "!=") {

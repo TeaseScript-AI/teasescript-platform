@@ -98,12 +98,4 @@ if leashed {
 } else {
   showImage "free.jpg"
 }
-// A value's class compared with such a class is a type test too, also with its package (ShockYourself's stats panel).
-let entry: (string | integer[])[] = ["Shocks", [2, 5]]
-if entry[1] is list {
-  say "A bar"
-}
-if not entry[0] is string {
-  say "Not a text"
-}
 exit
