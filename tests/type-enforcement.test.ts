@@ -1200,11 +1200,18 @@ test("a return of a variable that held only null decides no result type, also wh
       '"x"',
     ],
   ]);
-  // The returns the compiler knows still agree beside one that a value it cannot know reached, with one such
-  // variable or several.
-  const assigned = info('function assign(value) {\n    kindA = value\n}\nassign("s")', mixed);
-  assert.deepEqual(codes(assigned), [["TSV044", '"x"']]);
-  assert.deepEqual(codes(assigned.replace("typeout = kindB", "typeout = kindA")), [
+  // The returns the compiler knows still agree beside one that a value it cannot know reached (V30 §17), also inside
+  // a list or an object, and with one such variable or several.
+  const assign = 'function assign(value) {\n    kindA = value\n}\nassign("s")';
+  for (const wrap of ["%", "[%]", "{ t: % }"]) {
+    const wrapped = (value: string) => wrap.replace("%", value);
+    const source = info(
+      assign,
+      `if type == 1 {\n        return ${wrapped("1")}\n    }\n    return ${wrapped('"x"')}`,
+    ).replace("return typeout", `return ${wrapped("typeout")}`);
+    assert.deepEqual(codes(source), [["TSV044", wrapped('"x"')]], wrap);
+  }
+  assert.deepEqual(codes(info(assign, mixed).replace("typeout = kindB", "typeout = kindA")), [
     ["TSV044", '"x"'],
   ]);
 });

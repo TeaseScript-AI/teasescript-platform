@@ -3127,27 +3127,25 @@ class TypeChecker {
 
   /**
    * One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. A
-   * return value of unknown type makes the result unknown, but the known values must still agree. So does a place that
-   * held a value the compiler cannot know: it makes the result unknown where it meets a known value, and only the
-   * known part of what it returns is compared.
+   * return value of unknown type makes the result unknown, but the known values must still agree, also beside a value
+   * the compiler cannot know inside a return or a place such a value reached.
    */
   #inferredResult(context: FunctionContext): StaticType {
     const join = new TypeJoin();
-    const known = new TypeJoin();
+    const known = new TypeJoin(true);
     // A return that holds only null decides no type, so a value of another type is compared with the first that does.
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
       join.add(returned.type);
-      const value = knownPart(returned.type);
-      if (!known.add(value))
+      if (!known.add(returned.type))
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(value)} here, but ${describeValue(first!.type)} on line ${first!.span.start.line + 1}.${returnUnionFix(context.fn.declaration, known.type, value)}`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first!.type)} on line ${first!.span.start.line + 1}.${returnUnionFix(context.fn.declaration, known.type, returned.type)}`,
           returned.span,
         );
-      else if (first === undefined && decidedValue(value).kind !== "never")
-        first = { type: value, span: returned.span };
+      else if (first === undefined && decidedValue(returned.type).kind !== "never")
+        first = returned;
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
@@ -8981,13 +8979,6 @@ function sourceText(expression: Expression): string | null {
   if (literal.kind === "numberLiteral") return literal.raw;
   if (literal.kind === "booleanLiteral") return String(literal.value);
   return null;
-}
-
-/** A type without the undecided places that a value the compiler cannot know reached, since they may hold any value. */
-function knownPart(type: StaticType): StaticType {
-  return union(
-    members(type).filter((member) => member.kind !== "open" || member.heldUnknown === undefined),
-  );
 }
 
 /**

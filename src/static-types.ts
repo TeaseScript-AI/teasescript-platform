@@ -1272,6 +1272,17 @@ export class TypeJoin {
   readonly #owned = new Set<PropertyTable>();
   #type: StaticType = NEVER_TYPE;
 
+  /**
+   * With `known`, the join compares only what the compiler knows: a value it cannot know, and a place such a value
+   * reached, agree with any other value at every depth instead of making the type unknown, so the known values must
+   * still agree with each other (V30 §17).
+   */
+  readonly #known: boolean;
+
+  constructor(known = false) {
+    this.#known = known;
+  }
+
   get type(): StaticType {
     return this.#type;
   }
@@ -1279,7 +1290,7 @@ export class TypeJoin {
   /** Joins a value into the type, or returns false and keeps the type when the value mixes types with it. */
   add(type: StaticType): boolean {
     const changes: JoinChange[] = [];
-    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes));
+    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes, this.#known));
     if (joined !== undefined) {
       this.#type = joined;
       return true;
@@ -1297,18 +1308,21 @@ function* joinTask(
   rightType: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   const left = canonical(leftType);
   const right = canonical(rightType);
-  if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
+  if (left.kind === "unknown" || right.kind === "unknown")
+    return known ? (left.kind === "unknown" ? right : left) : UNKNOWN_TYPE;
   const leftValue = decidedValue(left);
   const rightValue = decidedValue(right);
   // A slot that a value the compiler cannot know reached may hold any value, so with a known value it joins as unknown.
   const reachedUnknown = (type: StaticType): boolean =>
     members(type).some((member) => member.kind === "open" && member.heldUnknown !== undefined);
   if (
-    (reachedUnknown(left) && rightValue.kind !== "never") ||
-    (reachedUnknown(right) && leftValue.kind !== "never")
+    !known &&
+    ((reachedUnknown(left) && rightValue.kind !== "never") ||
+      (reachedUnknown(right) && leftValue.kind !== "never"))
   )
     return UNKNOWN_TYPE;
   const nullable = holdsNull(left) || holdsNull(right);
@@ -1329,7 +1343,7 @@ function* joinTask(
       ? rightValue
       : rightValue.kind === "never"
         ? leftValue
-        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes));
+        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes, known));
   if (value === undefined) return undefined;
   return nullable ? optional(value) : value;
 }
@@ -1339,6 +1353,7 @@ function* joinValuesTask(
   right: StaticType,
   owned: Set<PropertyTable>,
   changes: JoinChange[],
+  known: boolean,
 ): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
@@ -1349,7 +1364,9 @@ function* joinValuesTask(
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
       const joined =
-        kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned, changes));
+        kept === undefined
+          ? type
+          : yield* compileChild(joinTask(kept, type, owned, changes, known));
       if (joined === undefined) return undefined;
       changes.push({ properties, name, replaced: kept });
       properties.set(name, joined);
@@ -1357,7 +1374,9 @@ function* joinValuesTask(
     return { kind: "object", properties };
   }
   if (isCollection(left) && right.kind === left.kind) {
-    const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
+    const element = yield* compileChild(
+      joinTask(left.element, right.element, owned, changes, known),
+    );
     return element === undefined ? undefined : { kind: left.kind, element };
   }
   if (sameFamily(left, right)) return mergeScalars(left, right);
