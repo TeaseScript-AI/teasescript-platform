@@ -3479,11 +3479,10 @@ including on another device, the gap does not consume timer time and the timer c
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
-A `wait` or timer whose length is written in days or weeks gets warning `TSV061` (owner decision, 2026-10-10) on that
-length, as such a length almost always means real time. That is a day or week unit (`d`, `day`, `days`, `w`, `week`, or
-`weeks`) after the length, as in `timer (1..3) days`, or on a duration written in it, also within arithmetic, as in
-`wait 1 day + 2 h`, but not one within a count before another unit, as in `wait (elapsed / 1 day) s`. A length held in a
-variable, read from a list or object, or returned by a call is not checked:
+A `wait` or timer whose length is written in days or weeks gets warning `TSV061` on that length (owner decision,
+2026-10-10), because such a length almost always means real time. This covers the units `d`, `day`, `days`, `w`, `week`
+and `weeks`, also in a range or a sum, as in `timer (1..3) days` and `wait 1 day + 2 h`. A length held in a variable,
+read from a list or object, or returned by a call is not checked:
 
 ```text
 wait 2 days     // TSV061: 'wait 2 days' counts only time while the Player is open, so closing the Player pauses it.
