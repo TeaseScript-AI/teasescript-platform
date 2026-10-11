@@ -324,8 +324,10 @@ script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after 
 compared number of seconds or duration (60 s without one), or of the value in the state that the time is compared with
 (`(showButton …) / 1 s > count`). So can any button between two clock reads whose difference a condition compares
 with a constant (`took = getTimestamp().toSeconds() - start` after it, then `took < 5`), just past that constant. Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
-each shown permanent button, are options too. Media loads succeed with one second per pass, `takePhoto` finds no
-camera, `askImage` gets one stored image, pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
+each shown permanent button, are options too. Media loads succeed with one second per pass, and `askImage` gets one
+stored image. A camera request (`takePhoto`) finds no camera; a step that answered one so goes again with a photo, that
+stored image, the first time at the request's place (once, as a picture taken at every question would double every
+state after it; a camera request in a session's first step, before any input, gets none). Pacing is instant, and the clock starts at 2026-10-02 12:00 UTC. The first
 session starts with empty storage. A later session starts from the storage an explored state left, as the player's
 next session would after playing to that point: a few from completed sessions, and chains toward stored values that
 conditions need (below). The explorer never makes up a stored value.

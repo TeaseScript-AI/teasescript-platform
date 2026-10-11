@@ -2278,6 +2278,33 @@ test(
 );
 
 test(
+  "a step that answered a camera request with no camera goes again with a photo, which a replay takes too",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source =
+      'showButton "Ready"\nlet file = takePhoto()\nif file == null {\n  say "No photo."\n  exit\n}\n' +
+      'showImage file\nsay "Nice photo."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 10_000,
+      maxStates: 100,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    assert.equal(result.coverage.percent, 100);
+    assert.equal(result.endStates.completed, 2);
+    const replayed = replay(engine, plan, 1, [{ kind: "button", label: "Ready", photo: true }]);
+    assert.equal(replayed.error, null);
+    assert.ok(replayed.steps.some((step) => step.texts.includes("Nice photo.")));
+  },
+);
+
+test(
   "a loop that only the elapsed time ends is not reported as a trap while a state a time step reached is not explored",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

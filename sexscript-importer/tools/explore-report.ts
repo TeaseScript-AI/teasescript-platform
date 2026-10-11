@@ -76,11 +76,12 @@ function duration(milliseconds: number): string {
 function playerStep(input: Fields): string {
   const random = records(input.random);
   const luck =
-    random.length === 0
+    (input.photo === true ? " (taking a photo)" : "") +
+    (random.length === 0
       ? ""
       : ` (with ${random.length === 1 ? "a random draw" : "random draws"} coming out a particular way, at ${random
           .map((choice) => `\`${text(choice.site)}\``)
-          .join(", ")})`;
+          .join(", ")})`);
   switch (input.kind) {
     case "option":
       return `choose "${text(input.label)}"${luck}`;

@@ -11,8 +11,8 @@ import { repositoryBuildUrl } from "./repository-build.ts";
  * Each pending action is a branch point; its options are the buttons and choice options, typed answers
  * ({@link interactionOptions}), form answers, thinking before a timed button, permanent buttons, and letting time
  * pass to the next deadline. Directed search adds answers per ask, and the player continuing at another wall clock
- * time. A session can start from the storage an explored session left, as the player's next session would. Media loads succeed with one second per pass, `takePhoto` finds no camera, and
- * `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does it
+ * time. A session can start from the storage an explored session left, as the player's next session would. Media loads succeed with one second per pass, `takePhoto` finds no camera unless the
+ * input asks for a photo, and `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does it
  * as part of the previous step (at most {@link MAX_AUTO_WAITS} times in a row).
  *
  * Execution is deterministic: a state is reproduced by the seed, its earlier sessions, its start clock, and its input
@@ -227,9 +227,13 @@ export interface RandomChoice {
 
 /**
  * One input of a path from the start; `label` fields only explain the input to a reader. `random` chooses outcomes of
- * random draws the step after the input makes; every other draw takes its natural outcome.
+ * random draws the step after the input makes; every other draw takes its natural outcome. `photo`: the camera
+ * requests (`takePhoto()`) the step makes get a photo, the stored image `askImage` gets too; without it, no camera.
  */
-export type ExplorerInput = InputKind & { readonly random?: readonly RandomChoice[] };
+export type ExplorerInput = InputKind & {
+  readonly random?: readonly RandomChoice[];
+  readonly photo?: true;
+};
 
 type InputKind =
   | { readonly kind: "option"; readonly index: number; readonly label: string }
@@ -339,7 +343,7 @@ type InteractionPayload =
 
 /** Duration of one pass of every media file. */
 const MEDIA_PASS_MS = 1000;
-/** The stored image that answers `askImage`. */
+/** The stored image that answers `askImage`, and a photo when an input asks for one. */
 const EXPLORER_IMAGE = "explorer-image";
 /** The product's instruction budget per `run` (the runtime's default). */
 const INSTRUCTION_BUDGET = 1_000_000;
@@ -383,6 +387,8 @@ export interface Step {
   readonly ways: readonly number[];
   /** With random choices: the random draws the step made that the explorer may choose (`RANDOM_KINDS`), in order. */
   readonly draws: readonly Data[];
+  /** The places (instructions) of the camera requests the step answered, in order. */
+  readonly captures: readonly number[];
   /**
    * The step stopped only because it had let time pass {@link MAX_AUTO_WAITS} times in a row: the state it reached waits
    * with nothing to do but wait, as the ones before it did.
@@ -484,6 +490,9 @@ export class Session {
   /** While an input with chosen outcomes is applied: the coverage marks it set, undone when it does not fit. */
   #marks: { array: Uint8Array; index: number; value: number }[] | null = null;
   #draws: Data[] = [];
+  /** Whether the step being settled answers camera requests with a photo, and the places of those it answered. */
+  #photo = false;
+  #captures: number[] = [];
   /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
   readonly directedAnswers = new Map<number, string[]>();
   /**
@@ -577,6 +586,8 @@ export class Session {
       ),
     );
     this.#draws = [];
+    this.#photo = false;
+    this.#captures = [];
     return this.#reached(
       runtime,
       this.#settle(runtime, setup.clock ?? setup.wallClockMs !== EPOCH_MS, chosen),
@@ -726,6 +737,8 @@ export class Session {
     this.#taken.clear();
     this.#marks = input.random === undefined ? null : [];
     this.#draws = [];
+    this.#photo = input.photo === true;
+    this.#captures = [];
     try {
       const settled = this.#input(runtime, runtime.view(), input)
         ? this.#settle(
@@ -892,12 +905,20 @@ export class Session {
       if (view.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(view.foregroundAction);
       if (action.kind === "capture") {
-        const result = runtime.call("completeAction", {
-          actionId: action.actionId,
-          actionKind: "capture",
-          payload: { kind: "unavailable", reason: "unconfigured" },
-        });
+        const result = runtime.call(
+          "completeAction",
+          {
+            actionId: action.actionId,
+            actionKind: "capture",
+            payload: this.#photo
+              ? { kind: "captured", media: { kind: "image", reference: EXPLORER_IMAGE } }
+              : { kind: "unavailable", reason: "unconfigured" },
+          },
+          { capturedMedia: { holds: (reference: string) => reference === EXPLORER_IMAGE } },
+        );
         if (record(result.outcome).kind !== "completed") break;
+        if (typeof action.owningInstruction === "number")
+          this.#captures.push(action.owningInstruction);
         view = runtime.view();
         continue;
       }
@@ -929,6 +950,7 @@ export class Session {
       texts: texts.slice(-KEPT_TEXTS),
       ways: [...ways],
       draws: this.#draws,
+      captures: this.#captures,
       forced,
     };
   }

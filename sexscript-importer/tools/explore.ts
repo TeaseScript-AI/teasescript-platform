@@ -107,11 +107,21 @@ const STRATEGIES = [
   "clockScopes",
 ] as const;
 
-/** Strategies as one text, each on or off: one a corpus does not record (from before it existed) was off. */
+/**
+ * Which inputs a run offers, as a number raised when they change (2: a step again with a photo for its camera
+ * requests): a corpus that a run exhausted with other inputs does not skip a new run.
+ */
+const INPUTS = 2;
+
+/**
+ * Strategies as one text, each on or off, and the {@link INPUTS} a run offered: one a corpus does not record (from
+ * before it existed) was off, and inputs 1.
+ */
 function strategiesKey(strategies: Readonly<Record<string, unknown>>): string {
-  return JSON.stringify(
-    Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
-  );
+  return JSON.stringify({
+    ...Object.fromEntries(STRATEGIES.map((name) => [name, strategies[name] === true])),
+    inputs: typeof strategies.inputs === "number" ? strategies.inputs : 1,
+  });
 }
 
 /** What identifies a unit's report, and its compilation; the report of a compiled unit adds an {@link ExploreResult}. */
@@ -429,7 +439,13 @@ async function exploreUnits(
       const { entries, ...counts } = result.corpus;
       const written = corpusFile(corpus, dir);
       const exhausted = result.search.stoppedBy === "exhausted";
-      const bytes = await writeCorpus(written, header, exhausted, settings.strategies, entries);
+      const bytes = await writeCorpus(
+        written,
+        header,
+        exhausted,
+        { ...settings.strategies, inputs: INPUTS },
+        entries,
+      );
       corpusReport = { ...counts, file: written, bytes, exhausted };
     }
     const report = {
@@ -505,7 +521,7 @@ async function exploreUnit(
     stored?.exhausted === true &&
     stored.contentHash === unit.contentHash &&
     stored.seed === settings.seed &&
-    stored.strategies === strategiesKey(settings.strategies)
+    stored.strategies === strategiesKey({ ...settings.strategies, inputs: INPUTS })
   )
     return null;
   const header: ReportHeader = {
@@ -619,7 +635,7 @@ async function writeCorpus(
   file: string,
   header: ReportHeader,
   exhausted: boolean,
-  strategies: RunSettings["strategies"],
+  strategies: Readonly<Record<string, boolean | number>>,
   entries: readonly CorpusEntry[],
 ): Promise<number> {
   const { unit, contentHash, explorer, seed } = header;
@@ -1204,8 +1220,12 @@ function parseInputs(value: unknown): ExplorerInput[] | null {
 }
 
 function parseInput(value: unknown): ExplorerInput | null {
-  const input = parseInputKind(value);
-  if (input === null || !isRecord(value) || value.random === undefined) return input;
+  const kind = parseInputKind(value);
+  if (kind === null || !isRecord(value)) return kind;
+  // A step whose camera requests get a photo.
+  if (value.photo !== undefined && value.photo !== true) return null;
+  const input: ExplorerInput = value.photo === true ? { ...kind, photo: true } : kind;
+  if (value.random === undefined) return input;
   // The random outcomes the explorer chose during the input, one per draw; the runtime checks each outcome against its
   // draw, and an input whose outcomes are not all taken does not fit.
   if (!Array.isArray(value.random) || value.random.length === 0) return null;
@@ -1403,9 +1423,8 @@ function describeInput(input: ExplorerInput): string {
   const chosen = (input.random ?? []).map(
     (choice) => `${choice.site} ${JSON.stringify(choice.outcome)}`,
   );
-  return chosen.length === 0
-    ? describeInputKind(input)
-    : `${describeInputKind(input)} (random chosen: ${chosen.join(", ")})`;
+  const described = `${describeInputKind(input)}${input.photo === true ? " (taking a photo)" : ""}`;
+  return chosen.length === 0 ? described : `${described} (random chosen: ${chosen.join(", ")})`;
 }
 
 function describeInputKind(input: ExplorerInput): string {

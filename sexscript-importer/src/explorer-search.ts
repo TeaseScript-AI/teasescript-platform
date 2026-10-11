@@ -1797,8 +1797,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let chosenAt = 0;
   /**
    * States a step from which made random draws whose other outcomes are not offered (also ones tried at their place
-   * from a state of another loop group), and states whose press after thinking first was left to another state at
-   * their place: what they leave open is no trap's end.
+   * from a state of another loop group), and states whose press after thinking first or photo was left to another
+   * state at their place: what they leave open is no trap's end.
    */
   const drawsLeft = new Set<number>();
   /** States a step that moved the wall clock on (a time step or a clock attempt) reached, also ones known before. */
@@ -2073,6 +2073,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const timeStepsTried = new Set<string>();
   /** The presses after thinking first tried, by place, button, and time (see the expansion of a state). */
   const thinksTried = new Set<string>();
+  /** The places of the camera requests a step went again for with a photo (see the expansion of a state). */
+  const photoTried = new Set<number>();
   /** The first state of each session start, by the start's index; and the state of one that ended in its first step. */
   const firstNodeOf = new Map<number, number>([[0, 0]]);
   const startSnapshots = new Map<number, Data>();
@@ -4437,6 +4439,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     // inputs it has not tried.
     let ran = 0;
     let cut = false;
+    // The state's own runtime goes to its last input, unless a step with a photo came after it (see below).
+    let baseUsed = false;
     for (const [index, input] of inputs.entries()) {
       const stop = spent();
       if (stop !== null) {
@@ -4459,10 +4463,25 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       ran += 1;
       if (node.chosen) (node.tried ??= new Set()).add(tried);
       const work = session.operations;
-      const next = step(node, index === inputs.length - 1 ? base : base.fork(), input);
+      const runtime: Runtime | null = baseUsed
+        ? runtimeOf(node)
+        : index === inputs.length - 1
+          ? base
+          : base.fork();
+      if (runtime === null) continue;
+      if (runtime === base) baseUsed = true;
+      const next = step(node, runtime, input);
       if (leading) directedWork += session.operations - work;
       if (node.chosen) chosenWork += session.operations - work;
       if (next === null) continue;
+      // A step that answered a camera request with no camera goes again with a photo, the first time at the request's
+      // place (as a picture taken at every question would double every state after it); a later one leaves it open.
+      if (input.photo !== true && next.captures.length > 0) {
+        if (next.captures.some((place) => !photoTried.has(place))) {
+          for (const place of next.captures) photoTried.add(place);
+          inputs.push({ ...input, photo: true });
+        } else drawsLeft.add(node.id);
+      }
       // A step that brings a variable closer to a comparison a target needs shares that target's lead.
       const after = closeness.length === 0 ? [] : distances(next.snapshot);
       measured(after);
