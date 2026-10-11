@@ -3726,6 +3726,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Makes targets of the condition ways left one way, schedules their attempts, and goes on with session chains. */
   const analyze = (): boolean => {
     storageMaps.clear();
+    guardDistances.clear();
     releaseDistances();
     let scheduled = false;
     instructions.forEach((instruction, index) => {
@@ -4505,6 +4506,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   }
 
   storageMaps.clear();
+  guardDistances.clear();
   /**
    * A route as its first inputs read and where its session ended, and how many inputs its replay takes; once per route,
    * as targets share them.
@@ -5022,8 +5024,11 @@ function guardDistance(entries: readonly StorageEntry[], guard: Guard): number {
   return found;
 }
 
-/** The distances of guards from storages measured so far, by storage. */
-const guardDistances = new WeakMap<readonly StorageEntry[], Map<Guard, number>>();
+/**
+ * The distances of guards from storages measured in an analysis pass, by storage; kept no longer, as the storages a
+ * run keeps times the guards grow without bound (millions of entries in a few hundred thousand operations).
+ */
+const guardDistances = new Map<readonly StorageEntry[], Map<Guard, number>>();
 
 function measureGuard(entries: readonly StorageEntry[], guard: Guard): number {
   const storage = storageMap(entries);
