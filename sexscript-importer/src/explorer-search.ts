@@ -1792,7 +1792,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const partialDraws: { node: number; input: ExplorerInput; draw: Data; support: number }[] = [];
   const partialKeys = new Set<string>();
   let chosenAt = 0;
-  /** States a step from which made random draws whose other outcomes are not offered. */
+  /**
+   * States a step from which made random draws whose other outcomes are not offered, and states whose press after thinking
+   * first was left to another state at their place: what they leave open is no trap's end.
+   */
   const drawsLeft = new Set<number>();
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
   const chosenWays = new Map<
@@ -2062,6 +2065,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
   /** Time steps tried, from a cell (or a session start's storage) to the outcomes they lead to. */
   const timeStepsTried = new Set<string>();
+  /** The presses after thinking first tried, by place, button, and time (see the expansion of a state). */
+  const thinksTried = new Set<string>();
   /** The first state of each session start, by the start's index; and the state of one that ended in its first step. */
   const firstNodeOf = new Map<number, number>([[0, 0]]);
   const startSnapshots = new Map<number, Data>();
@@ -4349,11 +4354,21 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       node.status = "expanded";
       continue;
     }
-    const inputs = session.options(
-      base,
-      base.view(),
-      () => storedSnapshot() ?? base.exportTrustedSnapshot(),
-    );
+    // A press after thinking first is tried once per place, button, and time (as a timed popup that comes back many
+    // times): its slow way is found there once, without doubling every state that waits at the place.
+    const inputs = session
+      .options(base, base.view(), () => storedSnapshot() ?? base.exportTrustedSnapshot())
+      .filter((input) => {
+        if (input.kind !== "button" || input.afterMs === undefined) return true;
+        const key = `${node.waitsAt ?? "-"} ${input.label} ${input.afterMs}`;
+        if (thinksTried.has(key)) {
+          // The press is left open here: no trap is reported where it would leave.
+          drawsLeft.add(node.id);
+          return false;
+        }
+        thinksTried.add(key);
+        return true;
+      });
     // With forward time, a state that waits where a clock condition is read next can also continue later.
     if (times !== null && clockAfter.has(clockKey(node.waitsAt)))
       for (const gap of timeSteps(

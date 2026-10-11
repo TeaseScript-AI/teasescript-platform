@@ -2960,6 +2960,45 @@ test(
 );
 
 test(
+  "a timed button that comes back at one place gets its press after thinking once, without a trap where it is left",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const source = [
+      "let rounds = 0",
+      "while rounds < 3 {",
+      '  let t = toInteger((showButton "OK") / 1 s)',
+      "  if t > 10 {",
+      '    say "Slow."',
+      "  }",
+      "  rounds += 1",
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 5000,
+      maxStates: 100_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    const slow = source.split("\n").findIndex((line) => line.includes('say "Slow."')) + 1;
+    assert.ok(
+      !result.coverage.files[0]!.unvisited.some((range) => {
+        const [from, to = from] = range.lines.split("-").map(Number);
+        return slow >= from! && slow <= to!;
+      }),
+    );
+    assert.deepEqual(result.traps, []);
+  },
+);
+
+test(
   "code without comparisons added near an ask leaves its typed answers as they were: the constants compared nearby, and the expressions compared with the answer, in the same order",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
