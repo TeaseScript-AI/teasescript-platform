@@ -9857,6 +9857,28 @@ function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
   if (menuForm !== null) return menuForm;
   const conditionNode = asNode(node.condition);
   const body = asNode(node.body);
+  if (conditionNode !== null && body !== null && holdsConditional(conditionNode, context)) {
+    // TeaseScript has no conditional expression, and Groovy computed the condition before every test: `while (true) {
+    // if (!(condition)) break; body }`, whose if statement computes its conditional part first
+    // (lowerConditionalStatement). A `continue` in the body tests again, as before.
+    const span = node.span ?? null;
+    const test: AstNode = {
+      kind: "if",
+      span,
+      condition: { kind: "not", span, value: conditionNode },
+      then: { kind: "block", span, statements: [{ kind: "break", span, label: null }] },
+      else: { kind: "empty", span },
+    };
+    const statements = body.kind === "block" ? nodeArray(body.statements) : [body];
+    return lowerStatement(
+      {
+        ...node,
+        condition: { kind: "constant", span, value: true },
+        body: { kind: "block", span, statements: [test, ...statements] },
+      },
+      context,
+    );
+  }
   const always: IrExpression = { kind: "literal", value: true };
   const effect = conditionNode?.kind === "binary" ? asNode(conditionNode.left) : null;
   if (
@@ -9905,6 +9927,19 @@ function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
     ];
   }
   return [{ kind: "while", condition, body: lowerBranch(body, context), span: node.span }];
+}
+
+/** Whether a condition holds a ternary or Elvis expression outside closures, which needs a statement of its own. */
+function holdsConditional(condition: AstNode, context: LowerContext): boolean {
+  let found = false;
+  const visit = (node: AstNode): void => {
+    if (found || node.kind === "closure") return;
+    if ((node.kind === "ternary" || node.kind === "elvis") && dictDefault(node, context) === null)
+      found = true;
+    for (const child of nodeChildren(node)) visit(child);
+  };
+  visit(condition);
+  return found;
 }
 
 function breakUnless(condition: IrExpression): IrStatement {
