@@ -2277,6 +2277,36 @@ test(
 );
 
 test(
+  "a loop that only the elapsed time ends is not reported as a trap while a state a time step reached is not explored",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // A minute of waiting, with a permanent button the player may press meanwhile: each pass is a step of its own, and
+    // a time step past the minute leaves the loop, though the states it reached are cut off here.
+    const source =
+      'let device = showPermanentButton "Estim: STOPPED", persist: true {\n}\n' +
+      'let pick = choose stay: "Shocks", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+      "let start = getAbsoluteDateTime().toSeconds()\n" +
+      "while getAbsoluteDateTime().toSeconds() - start < 60 {\n  wait 1 s\n}\n" +
+      'say "Over."\nexit\n';
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: Infinity,
+      budgetOps: 100_000,
+      maxStates: 6,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      later: true,
+    });
+    assert.ok(result.search.time !== undefined && result.search.time.steps > 0);
+    assert.deepEqual(result.traps, []);
+  },
+);
+
+test(
   "a long run of waits with nothing else to do takes one cell however far it goes, so its passes do not look new, and an endless one is still a trap",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

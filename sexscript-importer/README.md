@@ -682,14 +682,16 @@ the input, and the report counts these under `search.engineErrors` with the path
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when its future is unknown: none of its states was fully
 expanded, or a step from one made random draws whose other outcomes were not all tried at its place (without random
-choices, any draw), as a state that comes back to the same place with another random state may draw its way out. A
-group that leads to an escaping group escapes too. The jewell trap loops that measurements earlier in this README count
+choices, any draw), as a state that comes back to the same place with another random state may draw its way out, or
+a state a time step reached was not expanded, as a clock condition read next comes out otherwise there (a loop that only
+the elapsed time ends, such as StripJackNaked's `while now - start < n { playAudio ... }`). A group that leads to an
+escaping group escapes too. The jewell trap loops that measurements earlier in this README count
 (`cumEdging.tease:32`, `trainEnema.tease:65`, `trainPuppyLevelTwo.tease:843`, in the effect-ranking and depth-phase
 results) were of that kind, each loop's only way out a draw (a chance of 5/6, 2/3, and 1/2 per round), and are no
 longer reported; the decisions those counts informed rest on them. Each strongly connected part of the
 remaining groups that no explored input leaves is one trap. A state where the player can do nothing and nothing
-happens is a `stuck` trap. A loop that waits for a word or number the candidates miss, or for a clock time, is also
-reported as a trap.
+happens is a `stuck` trap. A loop that waits for a word or number the candidates miss, or for a clock time the explorer
+cannot read, is also reported as a trap.
 
 With `--corpus`, a run starts where earlier runs ended. `<corpus-dir>/<unit>.json` holds input lists only: each entry
 is a seed and a path from the start, with its earlier sessions. The run first replays the entries of its seed through
