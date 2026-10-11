@@ -1543,10 +1543,12 @@ function analyse(
   }
   // So does a list written out with elements of one type, `ids = [0, 0, 0]`, where a stored number read without a
   // default writes a missing key's null and the code compares its elements with null (stripordie's player IDs, whose
-  // null marks a free slot); where nothing tests for that null, the element keeps the value type it is used as.
+  // null marks a free slot); where nothing tests for that null, the element keeps the value type it is used as. Only a
+  // list that its name alone tells apart, and whose elements the code only compares or shows, where an optional element
+  // is valid (onlyComparedElements).
   const testedLists = nullComparedLists(statements);
   for (const list of missingReads) {
-    if (!testedLists.has(list.name)) continue;
+    if (!testedLists.has(list.name) || !onlyComparedElements(statements, list.name)) continue;
     if (list.declaration === null || list.fixed !== undefined || list.union !== undefined) continue;
     const type = bindingType(list);
     const collection = type === undefined ? undefined : nonNull(type);
@@ -2487,6 +2489,57 @@ function nullComparedLists(statements: readonly IrStatement[]): Set<string> {
   };
   visit(statements);
   return names;
+}
+
+/**
+ * Whether `name` is one list in the program, declared once (no other variable, parameter, or loop variable has the
+ * name), that the code only sets, sets elements of, and reads elements of straight into `==`, `!=`, or a text.
+ */
+function onlyComparedElements(statements: readonly IrStatement[], name: string): boolean {
+  let declarations = 0;
+  let valid = true;
+  // The records above the value being visited, innermost last, also parts of a text that are not expressions.
+  const records: Record<string, unknown>[] = [];
+  const compares = (value: Record<string, unknown> | undefined, operand: unknown): boolean =>
+    value?.kind === "binary" &&
+    (value.operator === "==" || value.operator === "!=") &&
+    (value.left === operand || value.right === operand);
+  const allowed = (variable: Record<string, unknown>): boolean => {
+    const [parent, outer, outermost] = [records.at(-1), records.at(-2), records.at(-3)];
+    if (parent?.kind === "assign" && parent.target === variable) return true;
+    if (
+      parent?.kind === "call" &&
+      parent.name === "sexscriptLegacyItemAt" &&
+      Array.isArray(parent.positional) &&
+      parent.positional[0] === variable
+    )
+      return compares(outer, parent);
+    if (parent?.kind !== "index" || parent.target !== variable) return false;
+    if (outer?.kind === "assign") return outer.target === parent && outer.operator === "=";
+    if (outer !== undefined && outer.kind === undefined && outer.value === parent)
+      return outermost?.kind === "template";
+    return compares(outer, parent);
+  };
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if ((value.kind === "let" || value.kind === "function") && value.name === name)
+      declarations += 1;
+    if (value.kind === "for" && (value.variable === name || value.valueVariable === name))
+      declarations += 1;
+    if (value.kind === "function" && Array.isArray(value.parameters))
+      for (const parameter of value.parameters)
+        if (isRecord(parameter) && parameter.name === name) declarations += 1;
+    if (value.kind === "variable" && value.name === name && !allowed(value)) valid = false;
+    records.push(value);
+    for (const child of Object.values(value)) visit(child);
+    records.pop();
+  };
+  visit(statements);
+  return valid && declarations === 1;
 }
 
 /** The legacy stored-number reads, which give null for a missing key where the call has no default. */

@@ -268,7 +268,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   that a computed save may name (by its shape, or a variable that only ever holds texts), or that a text or flag read
   reads too, keeps the helper, and so does a read without a default, whose null the helper keeps of an open type. A
   list written out with numbers that gets such a read, and whose elements the code compares with null, takes optional
-  elements (`let ids: integer?[] = [0, 0, 0]`), as stripordie's player IDs, whose null marks a free slot.
+  elements (`let ids: integer?[] = [0, 0, 0]`), as stripordie's player IDs, whose null marks a free slot; only where
+  no other variable has the list's name and the code only sets its elements, compares them, or shows them.
 - Groovy's null-aware ordering (`sexscriptLegacyCompare`) and truth (`sexscriptLegacyTruth`) stay helpers only where
   typing cannot rule out null or tell the type: two sides proven numbers or texts compare plainly (`visits < 2`), and
   a value of a known scalar type or a list tests plainly (`count != 0`, `items.length > 0`). A number variable that
@@ -379,7 +380,8 @@ default: 3`, also inside an expression as `askInteger("How many?", default: 3)`,
   `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
   collide with generated helpers; a closure parameter declared `int` does not truncate later stores, as a typed local
   does (the corpus's one typed parameter is never reassigned); `remove(x)` with a fractional number removed by value
-  in Groovy, while the conversion removes by position (no corpus site); and a text default whose value is a list only
+  in Groovy, while the conversion removes by position (no corpus site), and one that may be a number or another value
+  stays unconverted; and a text default whose value is a list only
   at runtime shows one element (`"${value}"`).
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.

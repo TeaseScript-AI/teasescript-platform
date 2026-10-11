@@ -994,6 +994,25 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
       !key.includes("@") && namesRead.some((names, other) => other !== index && names.has(key));
     const values = assignedValues(body, keys);
     const setFirst = setBeforeReads(body, keys);
+    const startless = (value: AstNode): boolean =>
+      isNullConstant(value) || isEmptyGroovyExpression(value);
+    // A value of a known type, never null; an input the player answers gives a value.
+    const neverNull = (value: AstNode): boolean =>
+      (inferType(value, types) & NULL) === 0 ||
+      (value.kind === "methodCall" &&
+        value.implicitThis === true &&
+        /^get[A-Z]/u.test(constantString(value.method) ?? "") &&
+        types.localFunctions?.has(constantString(value.method) ?? "") !== true);
+    // One that the script sets before every read never shows its start, where its only null is the start and every
+    // value set later is never null.
+    const setOnlyFirst = (key: string): boolean => {
+      const assigned = values.get(key) ?? [];
+      return (
+        setFirst.has(key) &&
+        assigned.filter(startless).length <= 1 &&
+        assigned.every((value) => startless(value) || neverNull(value))
+      );
+    };
     walkAst(body, (node) => {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
@@ -1009,32 +1028,22 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         key !== null &&
         (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
         !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
-        (!uses.nullTested.has(key) || setFirst.has(key)) &&
+        (!uses.nullTested.has(key) || setOnlyFirst(key)) &&
         onlyOf(type, NUMBER | NULL) &&
         (type & NUMBER) !== 0
       )
         uses.zeroStartNumbers.add(key);
       // A text or a flag that starts as null, as a placeholder, and that the script uses only where it is: Groovy truth
-      // treats null like the empty text and false. One that the script sets before every read never shows its start.
+      // treats null like the empty text and false.
       else if (
         key !== null &&
-        (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
+        startless(right!) &&
         !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
-        (setFirst.has(key) || (!uses.nullTested.has(key) && !passed.has(key))) &&
+        (setOnlyFirst(key) || (!uses.nullTested.has(key) && !passed.has(key))) &&
         !readElsewhere(key) &&
-        // Every value set later is one of a known type, never null; an input the player answers gives a value.
-        (values.get(key) ?? []).every(
-          (value) =>
-            // The start itself, also a declaration without a value; a null set later passes the variable on
-            // (passedOnValues).
-            isNullConstant(value) ||
-            isEmptyGroovyExpression(value) ||
-            (inferType(value, types) & NULL) === 0 ||
-            (value.kind === "methodCall" &&
-              value.implicitThis === true &&
-              /^get[A-Z]/u.test(constantString(value.method) ?? "") &&
-              types.localFunctions?.has(constantString(value.method) ?? "") !== true),
-        )
+        // Every value set later is never null: the start itself, also a declaration without a value, is; a null set
+        // later passes the variable on (passedOnValues).
+        (values.get(key) ?? []).every((value) => startless(value) || neverNull(value))
       ) {
         if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) uses.emptyStarts.set(key, "");
         else if (onlyOf(type, BOOLEAN | NULL) && (type & BOOLEAN) !== 0)
@@ -5096,6 +5105,9 @@ function isHoistable(
       guardedChildren.add(node.false);
     } else if (node.kind === "elvis") {
       guardedChildren.add(node.false);
+    } else if (node.kind === "case") {
+      // A switch tests its cases in turn and stops at the first that matches.
+      guardedChildren.add(node.expression);
     }
     // A plain assignment target is written after the value is computed, not read before it.
     const assignsVariable =
@@ -9281,7 +9293,9 @@ function lowerCollectionStatement(
     const argument = call.arguments[0]!;
     const argumentType = inferType(argument, context.types);
     const byPosition = onlyOf(argumentType, NUMBER);
-    if (byPosition || onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) {
+    // Groovy chose remove(Object) for null too. An argument that may be a number or another value stays unconverted:
+    // a converted whole number does not tell Groovy's Integer, which removed a position, from a Long or a decimal.
+    if (byPosition || onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT | NULL)) {
       const blocked = parameterWrite();
       if (blocked !== null) return blocked;
       const value = lowerExpression(argument, context);
@@ -9295,30 +9309,6 @@ function lowerCollectionStatement(
         },
       ];
     }
-    // Of an argument whose type only the running script shows, Groovy chose by that type as it ran: a whole number
-    // removed that position, any other value the first equal element (DungeonTrials' `backPack.remove(backPack[i])`).
-    const blocked = parameterWrite();
-    if (blocked !== null) return blocked;
-    const value = lowerExpression(argument, context);
-    if (value === null) return null;
-    const repeatable = isRepeatableExpression(argument);
-    const name = repeatable ? null : freshName("removed", context);
-    const removed: IrExpression = name === null ? value : { kind: "variable", name };
-    const removal = (method: string): IrStatement => ({
-      kind: "expression",
-      expression: { kind: "methodCall", target: list, name: method, arguments: [removed] },
-      span,
-    });
-    return [
-      ...(name === null ? [] : [{ kind: "let" as const, name, value, span }]),
-      {
-        kind: "if",
-        condition: { kind: "typeTest", value: removed, type: "integer" },
-        then: [removal("removeAt")],
-        else: [removal("remove")],
-        span,
-      },
-    ];
   }
   if (call.name === "clear" && call.arguments.length === 0) {
     return (
