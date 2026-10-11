@@ -54,6 +54,9 @@ function sexscriptLegacyFormat(pattern, values) {
     if conversion == "d" {
       text = toString(toInteger(text))
     }
+    if conversion != "s" and conversion != "d" and conversion != "f" {
+      text = "%" + conversion
+    }
     if conversion == "f" {
       text = sexscriptLegacyFixed(toNumber(text), digits, pow(10, digits))
     }

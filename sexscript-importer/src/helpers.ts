@@ -670,7 +670,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   // Java's String.format() of a pattern known only at runtime, for the values written as text: %s, %d, and %f, with a 0
-  // flag, a width, and a precision for %f (sexscriptLegacyFixed), and %% for a percent sign; a missing value is empty.
+  // flag, a width, and a precision for %f (sexscriptLegacyFixed), and %% for a percent sign; a missing value is empty,
+  // and another conversion shows as written, taking its value.
   format: {
     name: "sexscriptLegacyFormat",
     build: () => {
@@ -746,6 +747,19 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
                   named: {},
                 }),
               ]),
+              // Another conversion, such as %b or %x, shows as written, where Java wrote its value another way.
+              ifS(
+                bin(
+                  "and",
+                  bin("!=", v("conversion"), lit("s")),
+                  bin(
+                    "and",
+                    bin("!=", v("conversion"), lit("d")),
+                    bin("!=", v("conversion"), lit("f")),
+                  ),
+                ),
+                [text(bin("+", lit("%"), v("conversion")))],
+              ),
               ifS(bin("==", v("conversion"), lit("f")), [
                 text({
                   kind: "call",
