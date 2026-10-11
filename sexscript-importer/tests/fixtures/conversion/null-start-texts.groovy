@@ -14,10 +14,10 @@ mood = "calm"
 report()
 // A text whose value the code passes on, or that a switch matches against null, keeps its null start.
 def toy = null
-toy = "paddle"
+if (getBoolean("A toy?")) toy = "paddle"
 def chosen = toy
 def room = null
-room = "hall"
+if (getBoolean("Inside?")) room = "hall"
 switch (room) {
 	case null: show("Nowhere"); break
 	default: show("In the ${room}")
@@ -36,3 +36,11 @@ def hint = null
 def remind = { text = hint -> show("Hint: ${text}") }
 hint = "Look up"
 remind()
+// One that the script sets before every read, in the block that reads it or one around it, never shows its start, so it
+// starts empty also where the code passes it on or tests it for null.
+def gag = null
+if (getBoolean("A gag?")) {
+	gag = "ball"
+	def worn = gag
+	if (gag != null) show("Wearing the ${worn}")
+}

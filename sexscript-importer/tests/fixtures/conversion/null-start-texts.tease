@@ -31,10 +31,14 @@ mood = "calm"
 report()
 // A text whose value the code passes on, or that a switch matches against null, keeps its null start.
 let toy: string? = null
-toy = "paddle"
+if askBoolean "A toy?" {
+  toy = "paddle"
+}
 let chosen: string? = toy
 let room: string? = null
-room = "hall"
+if askBoolean "Inside?" {
+  room = "hall"
+}
 if room == null {
   say "Nowhere"
 } else {
@@ -60,4 +64,14 @@ function remind(text = hint) {
 }
 hint = "Look up"
 remind()
+// One that the script sets before every read, in the block that reads it or one around it, never shows its start, so it
+// starts empty also where the code passes it on or tests it for null.
+let gag = ""
+if askBoolean "A gag?" {
+  gag = "ball"
+  let worn = gag
+  if gag != null {
+    say "Wearing the ${worn}"
+  }
+}
 exit

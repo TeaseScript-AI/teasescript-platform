@@ -785,6 +785,74 @@ const SHOWING_API_CALLS = new Set([
  * that only shows the value or asks the player with it does not pass it on, and neither does a comparison with a text
  * that is not empty, a number, or true, where null and the empty value give the same result.
  */
+/**
+ * Variables declared without a value, or as null, that the script sets before every read: each read follows a statement
+ * `name = value` of the block that reads it or of a block around it, after the declaration and not across a closure, so
+ * Groovy's null start is never read. A read inside that statement, or after a set in a branch, a loop's condition, or
+ * another case, does not count as set.
+ */
+function setBeforeReads(body: AstNode, keys: BindingKeys): Set<string> {
+  type Frame = { block: AstNode; set: Set<string> } | "closure";
+  const declared = new Map<string, AstNode>();
+  const readUnset = new Set<string>();
+  const frames: Frame[] = [];
+  const isSet = (key: string): boolean => {
+    for (let index = frames.length - 1; index >= 0; index -= 1) {
+      const frame = frames[index]!;
+      if (frame === "closure") return false;
+      if (frame.set.has(key)) return true;
+      if (frame.block === declared.get(key)) return false;
+    }
+    return false;
+  };
+  // Every value below a node, also in parts that are not nodes, such as a closure's parameters and their defaults.
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    if (!isAstNode(value)) {
+      for (const child of Object.values(value)) visit(child);
+      return;
+    }
+    const node = value;
+    if (node.kind === "block") {
+      const frame = { block: node, set: new Set<string>() };
+      frames.push(frame);
+      for (const statement of nodeArray(node.statements)) {
+        visit(statement);
+        const expression =
+          statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+        const left = asNode(expression?.left);
+        const key = left?.kind === "variable" ? bindingKey(left, keys) : null;
+        const right = asNode(expression?.right);
+        if (key === null || right === null) continue;
+        if (expression!.kind === "binary" && expression!.operator === "=") frame.set.add(key);
+        else if (
+          expression!.kind === "declaration" &&
+          (isEmptyGroovyExpression(right) || isNullConstant(right))
+        )
+          declared.set(key, node);
+      }
+      frames.pop();
+      return;
+    }
+    if (node.kind === "closure") frames.push("closure");
+    const key = node.kind === "variable" ? bindingKey(node, keys) : null;
+    if (key !== null && declared.has(key) && !isSet(key)) readUnset.add(key);
+    // A plain assignment's or a declaration's variable is written, not read.
+    const assigns =
+      (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) &&
+      asNode(node.left)?.kind === "variable";
+    for (const [name, child] of Object.entries(node))
+      if (name !== "span" && !(name === "left" && assigns)) visit(child);
+    if (node.kind === "closure") frames.pop();
+  };
+  visit(body);
+  return new Set([...declared.keys()].filter((key) => !readUnset.has(key)));
+}
+
 function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment): Set<string> {
   const passed = new Set<string>();
   const pass = (value: AstNode | null): void => {
@@ -925,6 +993,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     const readElsewhere = (key: string): boolean =>
       !key.includes("@") && namesRead.some((names, other) => other !== index && names.has(key));
     const values = assignedValues(body, keys);
+    const setFirst = setBeforeReads(body, keys);
     walkAst(body, (node) => {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
@@ -940,19 +1009,18 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
         key !== null &&
         (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
         !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
-        !uses.nullTested.has(key) &&
+        (!uses.nullTested.has(key) || setFirst.has(key)) &&
         onlyOf(type, NUMBER | NULL) &&
         (type & NUMBER) !== 0
       )
         uses.zeroStartNumbers.add(key);
       // A text or a flag that starts as null, as a placeholder, and that the script uses only where it is: Groovy truth
-      // treats null like the empty text and false.
+      // treats null like the empty text and false. One that the script sets before every read never shows its start.
       else if (
         key !== null &&
         (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
         !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
-        !uses.nullTested.has(key) &&
-        !passed.has(key) &&
+        (setFirst.has(key) || (!uses.nullTested.has(key) && !passed.has(key))) &&
         !readElsewhere(key) &&
         // Every value set later is one of a known type, never null; an input the player answers gives a value.
         (values.get(key) ?? []).every(
