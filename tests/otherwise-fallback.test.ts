@@ -233,6 +233,17 @@ test("&&, ||, !, and ?? each give one error that names the word, and parsing goe
       `${HIDE}let a: string? = hide(null)\nlet b: string? = a ?? "x"\nsay a != b\nexit`,
       [otherwise],
     ],
+    // Wherever the word may stand: a command's operand, a negated type test, and a line continued after the symbol.
+    ["let answer = askText !true\nsay !answer\nexit", [not, not]],
+    ['let value = 1\nif value is !string { say "whole" }\nexit', [not]],
+    [
+      'let value: integer | string = 1\nswitch value {\n    case is !string { say "whole" }\n    default { say "text" }\n}\nexit',
+      [not],
+    ],
+    [
+      'playAudio "song.mp3" {\n    at null ??\n        1 s { say "cue" }\n    at 1 s &&\n        2 s { say "cue" }\n}\nexit',
+      [otherwise, and],
+    ],
   ] as const)
     assert.deepEqual(diagnostics(source), expected, source);
 });

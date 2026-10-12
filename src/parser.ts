@@ -2310,12 +2310,12 @@ class Parser {
     )
       return false;
     let depth = 0;
-    let previous: TokenKind = token.kind;
+    let previous = this.#current;
     for (let index = this.#current + 1; index < this.tokens.length; index += 1) {
       const kind = this.tokens[index]!.kind;
       if (kind === TokenKind.EndOfFile) return false;
-      if (kind === TokenKind.Newline && continuesExpression(previous)) continue;
-      previous = kind;
+      if (kind === TokenKind.Newline && this.#continuesAfter(previous)) continue;
+      previous = index;
       if (depth === 0) {
         if (kind === TokenKind.LeftBrace && index > this.#current + 1) return true;
         if (
@@ -2780,7 +2780,7 @@ class Parser {
   *#parseCaseTypeTestTask(): ParseTask<SwitchTypeTest | null> {
     const keyword = this.#advance();
     this.#skipContinuationNewlines();
-    const negated = this.#match(TokenKind.KeywordNot);
+    const negated = this.#matchNot();
     this.#skipContinuationNewlines();
     if (this.#atComparedValue()) {
       this.#reportToken(
@@ -3285,10 +3285,7 @@ class Parser {
 
   *#parseNot(): ParseTask<Expression | null> {
     const operators: Token[] = [];
-    while (
-      this.#match(TokenKind.KeywordNot) ||
-      this.#matchSymbol(TokenKind.Bang, "one", "not", "if not a { ... }") !== null
-    ) {
+    while (this.#matchNot()) {
       operators.push(this.#previous());
       this.#skipContinuationNewlines();
     }
@@ -3352,7 +3349,7 @@ class Parser {
   *#parseTypeTestTask(value: Expression): ParseTask<Expression> {
     this.#advance();
     this.#skipContinuationNewlines();
-    const negated = this.#match(TokenKind.KeywordNot);
+    const negated = this.#matchNot();
     this.#skipContinuationNewlines();
     const first = this.#peek();
     if (this.#atComparedValue()) {
@@ -5150,6 +5147,14 @@ class Parser {
     return this.#match(kind) ? this.#previous().span : null;
   }
 
+  /** `not`, or `!`, which is reported and read as `not` (V30 §39). */
+  #matchNot(): boolean {
+    return (
+      this.#match(TokenKind.KeywordNot) ||
+      this.#matchSymbol(TokenKind.Bang, "one", "not", "if not a { ... }") !== null
+    );
+  }
+
   /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
   #matchSymbolicOr(): SourceSpan | null {
     if (!this.#check(TokenKind.Pipe)) return null;
@@ -5191,6 +5196,21 @@ class Parser {
       span,
     );
     return span;
+  }
+
+  /**
+   * Whether the expression parser skips a newline after the token at `index`: a binary operator, the comma of a compact
+   * choice, or a symbol that it reads as a word operator, such as `&&` or the second `?` of `??`.
+   */
+  #continuesAfter(index: number): boolean {
+    const token = this.tokens[index]!;
+    const before = this.tokens[index - 1];
+    return (
+      continuesExpression(token.kind) ||
+      (token.kind === TokenKind.Question &&
+        before?.kind === TokenKind.Question &&
+        before.span.end.offset === token.span.start.offset)
+    );
   }
 
   #checkIdentifier(name: string): boolean {
@@ -5356,6 +5376,8 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.KeywordNull ||
     token.kind === TokenKind.KeywordSet ||
     token.kind === TokenKind.KeywordNot ||
+    // `!`, which the parser reads as `not` once it reported it.
+    token.kind === TokenKind.Bang ||
     token.kind === TokenKind.LeftParenthesis ||
     token.kind === TokenKind.LeftBracket ||
     token.kind === TokenKind.LeftBrace ||
@@ -5389,7 +5411,10 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
   );
 }
 
-/** Tokens after which the expression parser skips newlines: binary operators and the comma of a compact choice. */
+/**
+ * Tokens after which the expression parser skips newlines: binary operators, the comma of a compact choice, and the
+ * symbols it reads as `or`, `and`, and `not`.
+ */
 function continuesExpression(kind: TokenKind): boolean {
   return (
     isComparisonKind(kind) ||
@@ -5399,6 +5424,9 @@ function continuesExpression(kind: TokenKind): boolean {
     kind === TokenKind.KeywordAnd ||
     kind === TokenKind.KeywordNot ||
     kind === TokenKind.KeywordOtherwise ||
+    kind === TokenKind.Pipe ||
+    kind === TokenKind.Ampersand ||
+    kind === TokenKind.Bang ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||
