@@ -5251,25 +5251,29 @@ class TypeChecker {
       if (method === "get" && defaultArgument !== undefined) {
         // The result may be the default itself, so it is a copy that later stores to either cannot share.
         fallback = this.#capture(defaultArgument.value);
-        // The default is a value the dict could hold: it must fit, and it decides an undecided value type. A default
-        // the compiler cannot know is checked when the script runs.
-        const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
-        yield* compileChild(
-          this.#storeElementTask(
-            collection,
-            callee.object,
-            defaultArgument.value,
+        // The default may be of any type, and the result joins it with the value type (V30 §40). Only a value type that
+        // no value decided yet, such as that of `dict{}`, takes a default the compiler knows as a first stored value
+        // would, so that `counts.get(key, default: 0) + 1` counts; parts of it that the compiler cannot know are
+        // checked when the script runs. A default of unknown type decides nothing and makes the result unknown.
+        if (undecidedValues(value) && isKnown(fallback)) {
+          const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
+          yield* compileChild(
+            this.#storeElementTask(
+              collection,
+              callee.object,
+              defaultArgument.value,
+              fallback,
+              scope,
+              "default to",
+            ),
+          );
+          this.#recordRuntimeCheck(
+            expression,
+            elementStoreType(collection) ?? UNKNOWN_TYPE,
+            elementLabel(expressionLabel(callee.object), "dict"),
             fallback,
-            scope,
-            "default to",
-          ),
-        );
-        this.#recordRuntimeCheck(
-          expression,
-          elementStoreType(collection) ?? UNKNOWN_TYPE,
-          elementLabel(expressionLabel(callee.object), "dict"),
-          fallback,
-        );
+          );
+        }
       }
     } else if (
       (method === "contains" || method === "remove") &&
@@ -5312,7 +5316,11 @@ class TypeChecker {
                 typeOf,
               ),
             );
-          return results[index]!;
+          // A dict gives the value or the default, so their types join. A default of unknown type makes the result
+          // unknown, so a place checks it when the script runs.
+          return fallback === undefined
+            ? results[index]!
+            : union([results[index]!, plainType(fallback)]);
         });
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
@@ -5326,9 +5334,7 @@ class TypeChecker {
             : `${method}() takes no arguments.`,
           callee.property.span,
         );
-      const result = all.length === 1 ? results[0]! : union(results.map((result) => result!));
-      // A value of unknown type as the default makes the result unknown, so a place checks it when the script runs.
-      return fallback === undefined ? result : union([result, plainType(fallback)]);
+      return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
@@ -7472,6 +7478,19 @@ function hasUndecidedElements(type: StaticType): boolean {
     const value = resolved(member);
     return isCollection(value) && resolved(value.element).kind === "open";
   });
+}
+
+/**
+ * Whether no value decided the value type of a dict receiver yet, as for `dict{}` or `dict{ a: null }`, so that a first
+ * value decides it.
+ */
+function undecidedValues(type: StaticType): boolean {
+  const shared = elementStoreType(type);
+  const parts = shared === undefined ? [] : members(shared).map(resolved);
+  return (
+    parts.some((part) => part.kind === "open") &&
+    parts.every((part) => part.kind === "open" || part.kind === "null")
+  );
 }
 
 /** The methods of a dict. */
