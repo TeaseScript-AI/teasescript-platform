@@ -57,30 +57,37 @@ test("a block that takes longer than its period, or exactly as long, reports TSW
   }
 });
 
-test("a block exactly as long as a period in fractional milliseconds reports it too", () => {
-  const source = [
-    "let n = 0",
-    "wait 1 s",
-    "let t = timer(duration: (2 / 3) s, async: true, repeat: true) {",
-    "  n += 1",
-    "  wait (2 / 3) s",
-    "  if n == 2 {",
-    "    t.stop()",
-    "  }",
-    "}",
-    "wait 1 s",
-    'say "Done after ${n} blocks", instant',
-    "exit",
-  ].join("\n");
-  // The first block starts as the first round ends, at 1 s plus a period, and returns as the second round ends: the
-  // return time less the start is a little shorter than the period in floating point, but the block is as long.
-  const { events } = assertRuntimeResumeEquivalent(source, { scenarioName: "fractional period" });
-  assert.deepEqual(
-    warnings(events).map(({ code, line }) => ({ code, line })),
-    [{ code: "TSW018", line: 3 }],
-  );
-  // One late observation gives the same.
-  assert.deepEqual(warnings(new Story(source).at(10_000).events), warnings(events));
+test("a block exactly as long as a period in fractional milliseconds reports it too, in one wait or several", () => {
+  // After 1 s, the return time less the block's start can round to a little less than the period, or two waits can add
+  // up to a little less than one, although the block is as long as a round in the source.
+  for (const [period, body] of [
+    ["(2 / 3) s", ["wait (2 / 3) s"]],
+    ["0.1 ms", ["wait 0.05 ms", "wait 0.05 ms"]],
+    ["0.3 ms", ["wait 0.15 ms", "wait 0.15 ms"]],
+  ] as const) {
+    const source = [
+      "let n = 0",
+      "wait 1 s",
+      `let t = timer(duration: ${period}, async: true, repeat: true) {`,
+      "  n += 1",
+      ...body.map((line) => `  ${line}`),
+      "  if n == 4 {",
+      "    t.stop()",
+      "  }",
+      "}",
+      "wait 1 s",
+      'say "Done after ${n} blocks", instant',
+      "exit",
+    ].join("\n");
+    const { events } = assertRuntimeResumeEquivalent(source, { scenarioName: period });
+    assert.deepEqual(
+      warnings(events).map(({ code, line }) => ({ code, line })),
+      [{ code: "TSW018", line: 3 }],
+      period,
+    );
+    // One late observation gives the same.
+    assert.deepEqual(warnings(new Story(source).at(10_000).events), warnings(events), period);
+  }
 });
 
 test("a shorter block, a timer that does not repeat, and a block that leaves by goto or exit report nothing", () => {
@@ -97,7 +104,7 @@ test("a shorter block, a timer that does not repeat, and a block that leaves by 
   }
 });
 
-test("rounds that another block held back do not count, but a held-back block as long as its period does", () => {
+test("rounds that another block held back, and the round running as a held-back block starts, do not count", () => {
   // The 2-second timer's blocks take no time until the 5-second timer's block holds its rounds due at 6 to 14 s back
   // until 15 s.
   const heldBack = (body: string) =>
@@ -119,15 +126,15 @@ test("rounds that another block held back do not count, but a held-back block as
   const instant = play(heldBack('say "X", instant'), 60_000);
   assert.deepEqual(warnings(instant.events), []);
   assert.equal(instant.said().at(-1), "Done");
-  // Its first waiting block starts mid-round at 15 s and takes 2 s, as long as the round that ends during it at 16 s.
-  // Five rounds then stay queued, as one round ends during each block.
-  const asLong = play(heldBack("if slow {\n    wait 2 s\n  }"), 20_000);
-  assert.deepEqual(warnings(asLong.events), [
-    { code: "TSW018", line: 6, message: overrun(6, "2 seconds") },
-  ]);
-  // A block shorter than the period does not, although a round ends during it, and the queue empties.
+  // Its first waiting block starts mid-round at 15 s and takes 1.5 s: the round that ends during it at 16 s began
+  // before it.
   const shorter = play(heldBack("if slow {\n    wait 1500 ms\n  }"), 30_000);
   assert.deepEqual(warnings(shorter.events), []);
+  // One that takes 4.5 s holds the round from 16 to 18 s whole.
+  const longer = play(heldBack("if slow {\n    wait 4500 ms\n  }"), 30_000);
+  assert.deepEqual(warnings(longer.events), [
+    { code: "TSW018", line: 6, message: overrun(6, "2 seconds") },
+  ]);
 });
 
 test("a repeating range names the round that ran out during the block", () => {
@@ -186,9 +193,11 @@ test("restore refuses a malformed overrun record", () => {
   // The repeating timer's first block runs from 2 s, and the round that started with it ran out at 4 s.
   const frame = story.snapshot.callFrames.at(-1);
   const interruption = frame?.kind === "function" ? frame.timerInterruption : null;
-  assert.equal(
-    interruption !== null && "timerId" in interruption ? interruption.endedRoundMs : null,
-    2_000,
+  assert.deepEqual(
+    interruption !== null && "timerId" in interruption
+      ? [interruption.currentRoundInBlock, interruption.endedRoundMs]
+      : null,
+    [true, 2_000],
   );
   assert.equal(validateRuntimeSnapshot(story.snapshot, story.plan).valid, true);
   type Mutable = {
@@ -202,6 +211,10 @@ test("restore refuses a malformed overrun record", () => {
       (snapshot) => (snapshot.callFrames[0]!.timerInterruption.endedRoundMs = "2 s"),
     ],
     ["missing round", (snapshot) => delete snapshot.callFrames[0]!.timerInterruption.endedRoundMs],
+    [
+      "inside as text",
+      (snapshot) => (snapshot.callFrames[0]!.timerInterruption.currentRoundInBlock = "yes"),
+    ],
     ["mark as text", (snapshot) => (snapshot.backgroundActions[1]!.timer.overrunReported = "yes")],
     [
       "mark on a timer that does not repeat",

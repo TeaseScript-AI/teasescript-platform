@@ -126,8 +126,8 @@ function settleTimerAction(
 }
 
 /**
- * Ends the current round at `endedAtMs`: the scheduled deadline for natural expiry, or the current scene time for
- * an explicit `remaining` of zero. Queues the expiry block once and settles a timer that does not repeat.
+ * Ends the current round at `endedAtMs`: the scheduled deadline for natural expiry (`ranOut`), or the current scene time
+ * for an explicit `remaining` of zero. Queues the expiry block once and settles a timer that does not repeat.
  */
 export function expireTimerAction(
   snapshot: RuntimeSnapshot,
@@ -137,11 +137,15 @@ export function expireTimerAction(
   events: InterpreterEvent[],
   trace: TraceStore | null = null,
   control: RandomControl | null = null,
+  ranOut = false,
 ): void {
   const timer = action.timer;
+  const roundMs = timer.roundDurationMs;
   expireTimerRound(timer, endedAtMs, (range) =>
     drawWholeUnits(snapshot, action.owningInstruction, range, trace, control),
   );
+  // After the draw: a paused draw throws before this, and undoing its unit does not undo the frame.
+  noteRoundEndInBlock(snapshot, timer.timerId, ranOut ? roundMs : null);
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
   // shorter than the deadline's resolution may end at the same time without looping.
@@ -166,24 +170,27 @@ export function expireTimerAction(
 }
 
 /**
- * Records on the running block of `timerId` the length of that timer's round that just ran out at its deadline. A round
- * that a script ends early does not count, and neither do rounds that ran out before the block started.
+ * A round of `timerId` ended while that timer's own block runs. A round that began inside the block and ran out at its
+ * deadline (`ranOutMs`, its length) lay wholly inside it, so the block takes at least as long: the block keeps that
+ * length for `TSW018`. The round running as the block starts counts as inside only when the block's own expiry began
+ * it, and a round that a script ends early does not count. Either way the next round begins inside the block. Engine
+ * order and stored times decide this, without arithmetic, so floating-point rounding cannot change it.
  */
-export function noteRoundEndedDuringBlock(
+function noteRoundEndInBlock(
   snapshot: RuntimeSnapshot,
   timerId: number,
-  roundMs: number,
+  ranOutMs: number | null,
 ): void {
   const interruption = interruptFrame(snapshot)?.timerInterruption;
-  if (interruption && "timerId" in interruption && interruption.timerId === timerId) {
-    interruption.endedRoundMs = roundMs;
-  }
+  if (!interruption || !("timerId" in interruption) || interruption.timerId !== timerId) return;
+  if (ranOutMs !== null && interruption.currentRoundInBlock) interruption.endedRoundMs = ranOutMs;
+  interruption.currentRoundInBlock = true;
 }
 
 /**
- * Developer warning `TSW018` as a timer's block returns normally, once per timer: a round of the timer ran out while the
- * block ran, and the block took at least as long as that round. Blocks never interrupt each other, so while this
- * repeats, the next round is due at every return and the path the blocks interrupt cannot continue.
+ * Developer warning `TSW018` as a timer's block returns normally, once per timer: a whole round of the timer ran out
+ * inside the block. Blocks never interrupt each other, so while this repeats, the next round is due at every return and
+ * the path the blocks interrupt cannot continue.
  */
 export function reportBlockOverrun(
   plan: InstructionPlan,
@@ -193,9 +200,7 @@ export function reportBlockOverrun(
 ): void {
   if (!("timerId" in interruption)) return;
   const roundMs = interruption.endedRoundMs;
-  // Added, not subtracted, as a wait's deadline is: a block exactly as long as the round then compares equal.
-  if (roundMs === null || snapshot.currentSessionTimeMs < interruption.startedAtMs + roundMs)
-    return;
+  if (roundMs === null) return;
   // A stopped timer repeats no more.
   const action = activeTimerAction(snapshot, interruption.timerId);
   if (action === undefined || action.timer.overrunReported) return;

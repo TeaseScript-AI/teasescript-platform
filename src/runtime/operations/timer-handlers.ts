@@ -68,6 +68,8 @@ export function startTimerHandler(
               dueAtMs: invocation.dueAtMs,
               startedAtMs,
               suspendedAction,
+              // The expiry that queued this block began its timer's current round, unless another block held it back.
+              currentRoundInBlock: invocation.dueAtMs === startedAtMs,
               endedRoundMs: null,
             },
     callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
