@@ -244,9 +244,10 @@ test("instruction budget stops an infinite while loop and blames only a loop of 
     ),
     ["TSR037", blamesScript("50"), 0],
   );
-  // Waits that catch-up settles within the invocation leave the loop running, so the failure is still at the loop.
+  // Waits of no time, which catch-up settles within the run, keep the count and leave the loop running, so the failure
+  // is still at the loop.
   assert.deepEqual(
-    failure("let stop = false\nwhile true {\n  wait 1 ms\n  if stop { exit }\n}", 20, 100),
+    failure("let stop = false\nwhile true {\n  wait 0 s\n  if stop { exit }\n}", 20),
     ["TSR037", blamesLoop("20"), 1],
   );
   // Timer blocks that catch up while the loop waits do not run the loop, so the failure is not at it.

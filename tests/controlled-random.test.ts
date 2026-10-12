@@ -953,26 +953,29 @@ test("a late run restored from checkpoints at its paused draws keeps the budget 
   );
   const budget = { instructionBudget: 500 };
   const plain = createFreshRuntimeSession(plan, {});
-  plain.run(budget);
-  plain.observeTime(1000);
-  assert.ok(plain.run(budget).instructionsExecuted > budget.instructionBudget);
+  const plainEvents = [...plain.run(budget).events, ...plain.observeTime(1000).events];
+  const caughtUp = plain.run(budget);
+  plainEvents.push(...caughtUp.events);
+  assert.ok(caughtUp.instructionsExecuted > budget.instructionBudget);
   assert.equal(plain.view().status, "halted");
 
   let paused = createFreshRuntimeSession(plan, {}, { randomControl: {} });
-  const settle = (): void => {
+  const pausedEvents: InterpreterEvent[] = [];
+  const settle = (operation: { readonly events: readonly InterpreterEvent[] }): void => {
+    pausedEvents.push(...operation.events);
     for (let draw = paused.view().randomDraw; draw !== null; draw = paused.view().randomDraw) {
       paused = deserializeRuntimeSession(serializeCheckpoint(paused.exportCheckpoint()), {
         randomControl: {},
       });
-      paused.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" });
+      pausedEvents.push(
+        ...paused.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" }).events,
+      );
     }
   };
-  paused.run(budget);
-  settle();
-  paused.observeTime(1000);
-  settle();
-  paused.run(budget);
-  settle();
+  settle(paused.run(budget));
+  settle(paused.observeTime(1000));
+  settle(paused.run(budget));
+  assert.deepEqual(pausedEvents, plainEvents);
   assert.equal(JSON.stringify(paused.exportSnapshot()), JSON.stringify(plain.exportSnapshot()));
 });
 
