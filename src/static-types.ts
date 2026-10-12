@@ -855,12 +855,14 @@ export interface PropertyRead {
 type Holders = ReadonlyMap<PropertyTable, readonly (readonly [PropertyTable, string])[]>;
 
 /**
- * The properties from the objects of a place down to the objects a read reads: `head` and then `tail`, or none. One
- * object stands for each path, so a path is extended, shortened, and compared in constant time.
+ * The properties from the objects of a place down to the objects a read reads: `head` and then `tail`, or none, which
+ * are `depth` properties. One object stands for each path, so a path is extended, shortened, and compared in constant
+ * time.
  */
 interface PropertyPath {
   readonly head: string | undefined;
   readonly tail: PropertyPath | undefined;
+  readonly depth: number;
 }
 
 /**
@@ -888,12 +890,12 @@ export function missingPropertyReads(
           held.push([table, name]);
           holders.set(part.properties, held);
         }
-  const root: PropertyPath = { head: undefined, tail: undefined };
+  const root: PropertyPath = { head: undefined, tail: undefined, depth: 0 };
   const longer = new Map<PropertyPath, Map<string, PropertyPath>>();
   const extend = (head: string, tail: PropertyPath): PropertyPath => {
     const heads = longer.get(tail) ?? new Map<string, PropertyPath>();
     longer.set(tail, heads);
-    const path = heads.get(head) ?? { head, tail };
+    const path = heads.get(head) ?? { head, tail, depth: tail.depth + 1 };
     heads.set(head, path);
     return path;
   };
@@ -945,15 +947,28 @@ class PropertyPlaces {
     const places = this.#places;
     // The places this read adds are numbered from `first` on.
     const first = places.length;
-    const paths = new Map<PropertyTable, Set<PropertyPath>>();
+    // For each table, the paths this read reached it at, and the fewest properties of any of them.
+    const reached = new Map<
+      PropertyTable,
+      { readonly paths: Set<PropertyPath>; shallowest: number }
+    >();
     const place = (table: PropertyTable, path: PropertyPath): number | undefined => {
       const known = this.#ids.get(table)?.get(path);
       if (known !== undefined) return known;
-      const reached = paths.get(table) ?? new Set<PropertyPath>();
-      for (let tail = path.tail; reached.size > 0 && tail !== undefined; tail = tail.tail)
-        if (reached.has(tail)) return undefined;
-      reached.add(path);
-      paths.set(table, reached);
+      const earlier = reached.get(table);
+      if (earlier === undefined)
+        reached.set(table, { paths: new Set([path]), shallowest: path.depth });
+      else {
+        // Only a path with fewer properties can be one that `path` extends.
+        for (
+          let tail = path.tail;
+          tail !== undefined && tail.depth >= earlier.shallowest;
+          tail = tail.tail
+        )
+          if (earlier.paths.has(tail)) return undefined;
+        earlier.paths.add(path);
+        earlier.shallowest = Math.min(earlier.shallowest, path.depth);
+      }
       const ids = this.#ids.get(table) ?? new Map<PropertyPath, number>();
       ids.set(path, places.length);
       this.#ids.set(table, ids);
