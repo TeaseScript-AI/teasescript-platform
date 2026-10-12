@@ -1809,10 +1809,11 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 `get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an
 `index` that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
 `items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
-`default:` is required and may be of any type. The result's type joins the element type and the default's type, so a
-default of another type makes it optional or a union ([§18](#18-null-and-optional-values)). Like any argument, the
-default is evaluated before the lookup. The compiler checks the index as for `items[index]`, except that a negative
-index gives the default: an index that it can see is not a whole number, such as `0.5`, or may be `null`, is an error.
+`default:` is required and may be of any type. The result's type joins the element type and the default's type: for a
+`string[]`, `default: null` gives a `string?` ([§18](#18-null-and-optional-values)), and `default: 0` a
+`string | integer`. Like any argument, the default is evaluated before the lookup. The compiler checks the index as for
+`items[index]`, except that a negative index gives the default: an index that it can see is not a whole number, such as
+`0.5`, or may be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]
