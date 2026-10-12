@@ -625,16 +625,19 @@ test("get decides the element type of an empty list from its default, as a first
       '"x"',
     ],
   ]);
-  // Parts of a deciding default that the compiler cannot know are checked against the type when the script runs.
-  assert.deepEqual(
-    failure(
-      `${DYNAMIC}let v = null\nv = dynamic("y")\nlet xs = []\nsay xs.get(0, default: [v])\nxs.add([1])\nexit`,
-    ),
-    [
-      "TSR058",
-      `An element of 'xs' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
-    ],
-  );
+  // Parts of a deciding default that the compiler cannot know are checked against the type when the script runs, also
+  // where a read or a copy saw the list undecided before.
+  for (const before of ["", "say xs.get(0, default: null)\n", "let copy = xs\n"])
+    assert.deepEqual(
+      failure(
+        `${DYNAMIC}let v = null\nv = dynamic("y")\nlet xs = []\n${before}say xs.get(0, default: [v])\nxs.add([1])\nexit`,
+      ),
+      [
+        "TSR058",
+        `An element of 'xs' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
+      ],
+      before,
+    );
 });
 
 test("get with a null default gives the element type or null for lists of values, lists, and objects", () => {

@@ -2894,7 +2894,8 @@ class TypeChecker {
    * stored value would (V30 §16, §40), so that `counts.get(key, default: 0) + 1` counts. A default of unknown type
    * decides nothing, and neither does a null default, so the type never starts as only null for a collection that holds
    * no null (#831). Parts of the default that the compiler cannot know are checked when the script runs. A test may
-   * narrow a variable whose own type is still undecided, which the default then decides.
+   * narrow a variable whose own type is still undecided, which the default then decides. Where a read saw the type
+   * undecided before, a later check starts with the type this default decided, and the default stays its first value.
    */
   *#defaultDecidesTask(
     call: CallExpression,
@@ -2908,7 +2909,14 @@ class TypeChecker {
     const node = unwrap(collectionExpression);
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
     const own = entry?.kind === "variable" ? entry.variable.type : receiver;
-    if (!undecidedValues(receiver) && !undecidedValues(own)) return;
+    const decides = (type: StaticType): boolean => {
+      const shared = elementStoreType(type);
+      return (
+        undecidedValues(type) ||
+        (shared !== undefined && findDecidedSlot(shared) === defaultExpression.span)
+      );
+    };
+    if (!decides(receiver) && !decides(own)) return;
     if (!isKnown(fallback) || decidedValue(fallback).kind === "never") return;
     const collection = this.#elementReceiver(collectionExpression, scope, receiver, fallback);
     yield* compileChild(
