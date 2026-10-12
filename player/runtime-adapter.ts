@@ -137,6 +137,8 @@ type PlayerRuntimePublication = Pick<PlayerRuntimeSession, "revision" | "recorde
  * of the latest publication from the calls the session's debug recorder logged, so the session continues where the
  * Player showed it, as it did before the call. Without a recorder, or when its log does not reach that publication, the
  * original error is thrown again. A call cannot start while another runs, such as from a random decision it reaches.
+ * A late observation may catch up on a copy of the runner, which the session adopts as its runner or drops; any use of
+ * the session's own runner drops it.
  */
 export class PlayerRuntimeEngine {
   #runtime: RuntimeSession;
@@ -149,6 +151,15 @@ export class PlayerRuntimeEngine {
   #randomControl: RandomControlOptions | null = null;
   /** Whether a call runs; the runner is busy then, so a call it reaches would only throw and end it. */
   #calling = false;
+  /**
+   * A copy of the runner that a late observation catches up on (`beginPlayerRuntimeCatchUp`), the state it copied, and
+   * the recorder that logs its calls; `null` without one. Any use of the session's own runner drops it.
+   */
+  #copy: {
+    readonly runtime: RuntimeSession;
+    readonly from: number;
+    readonly recorder: DebugRecorder | null;
+  } | null = null;
 
   public constructor(runtime: RuntimeSession, revision: number) {
     this.#runtime = runtime;
@@ -189,6 +200,7 @@ export class PlayerRuntimeEngine {
       throw new RuntimeSessionError(
         "A Player session call cannot start while another call of the same session runs.",
       );
+    this.#dropCopy();
     const runtime = this.runtimeAt(at);
     this.#calling = true;
     try {
@@ -221,6 +233,7 @@ export class PlayerRuntimeEngine {
     from: PlayerRuntimePublication,
     changed = true,
   ): { readonly revision: number; readonly state: PlayerRuntimeState } {
+    this.#dropCopy();
     const runtime = this.runtimeAt(from);
     this.#revision += 1;
     if (changed) this.#current = this.#revision;
@@ -255,6 +268,7 @@ export class PlayerRuntimeEngine {
 
   /** Changes which random draws the host decides or pauses at, for publication `at`'s runner and any rebuilt later. */
   setRandomControl(at: PlayerRuntimePublication, randomControl: RandomControlOptions | null): void {
+    this.#dropCopy();
     this.runtimeAt(at).setRandomControl(randomControl);
     this.#randomControl = randomControl;
   }
@@ -265,6 +279,7 @@ export class PlayerRuntimeEngine {
     plan: InstructionPlan,
     recorder: DebugRecorder,
   ): void {
+    this.#dropCopy();
     recorder.begin(
       plan,
       this.exportSnapshot(at),
@@ -272,6 +287,93 @@ export class PlayerRuntimeEngine {
       this,
       this.#revision,
     );
+  }
+
+  /**
+   * A copy of publication `at`'s runner for a late observation to catch up on; the session's own runner stays as it is.
+   * The recorder logs the copy's calls as the session's until the session adopts the copy or drops it.
+   */
+  copy(at: PlayerRuntimePublication): RuntimeSession {
+    const runtime = this.runtimeAt(at).fork();
+    this.#dropCopy();
+    this.#copy = { runtime, from: this.#current, recorder: at.recorder };
+    at.recorder?.stage(this, () => runtime.exportSnapshot());
+    return runtime;
+  }
+
+  /**
+   * Makes one engine call on copy `runtime`, logged as a call of the session; `null` once the copy was dropped. A call
+   * that throws drops the copy, and the session stays as it was.
+   */
+  callCopy<R extends RuntimeSessionResult & { readonly outcome?: { readonly kind: string } }>(
+    runtime: RuntimeSession,
+    kind: Parameters<DebugRecorder["call"]>[1],
+    args: readonly unknown[],
+    invoke: (runtime: RuntimeSession) => R,
+    continuation = false,
+  ): R | null {
+    const copy = this.#copy;
+    if (copy?.runtime !== runtime) return null;
+    if (this.#calling)
+      throw new RuntimeSessionError(
+        "A Player session call cannot start while another call of the same session runs.",
+      );
+    this.#calling = true;
+    try {
+      if (copy.recorder === null) return invoke(runtime);
+      return copy.recorder.call(
+        this,
+        kind,
+        () => runtime.exportSnapshot(),
+        args,
+        () => {
+          const result = invoke(runtime);
+          const view = runtime.view();
+          return { ...result, status: view.status, pausedAt: view.randomDraw?.drawId ?? null };
+        },
+        continuation,
+      );
+    } catch (error) {
+      this.#dropCopy();
+      throw error;
+    } finally {
+      this.#calling = false;
+    }
+  }
+
+  /** What copy `runtime` shows now, or `null` once it was dropped. */
+  copyView(runtime: RuntimeSession): RuntimeSessionView | null {
+    return this.#copy?.runtime === runtime ? runtime.view() : null;
+  }
+
+  /**
+   * Makes copy `runtime` the session's runner after publication `at`, if nothing used the session's own runner since it
+   * was copied; its logged calls become the session's. `false` when the copy was dropped.
+   */
+  adopt(at: PlayerRuntimePublication, runtime: RuntimeSession): boolean {
+    const copy = this.#copy;
+    if (copy?.runtime !== runtime) return false;
+    if (this.#current !== copy.from) {
+      this.#dropCopy();
+      return false;
+    }
+    this.runtimeAt(at);
+    this.#copy = null;
+    this.#runtime = runtime;
+    copy.recorder?.commit(this);
+    return true;
+  }
+
+  /** Drops copy `runtime`, if it is still the session's copy. */
+  drop(runtime: RuntimeSession): void {
+    if (this.#copy?.runtime === runtime) this.#dropCopy();
+  }
+
+  #dropCopy(): void {
+    const copy = this.#copy;
+    if (copy === null) return;
+    this.#copy = null;
+    copy.recorder?.rollback(this);
   }
 }
 
@@ -712,7 +814,7 @@ export function playerRuntimeDeadlines(state: PlayerRuntimeState): readonly numb
 }
 
 function timedDeadlines(
-  state: PlayerRuntimeState,
+  state: RuntimeSessionView,
   timerCounts: (timer: RuntimeTimerSnapshot) => boolean,
 ): number[] {
   const deadlines: number[] = [];
@@ -1497,7 +1599,7 @@ export function observePlayerRuntimeTime(
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
 export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
-  const times = timedDeadlines(state, (timer) => !timer.repeat || timer.handlerFunctionId !== null);
+  const times = timedDeadlines(state, timerEvent);
   if (state.status !== "failed") {
     for (const action of state.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
@@ -1508,6 +1610,11 @@ export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | nu
   const nextMs = Math.min(...times);
   const observedMs = state.observedSessionTimeMs;
   return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
+}
+
+/** Whether a timer's deadline is an event: a round of a repeating timer without an expiry block runs nothing. */
+function timerEvent(timer: RuntimeTimerSnapshot): boolean {
+  return !timer.repeat || timer.handlerFunctionId !== null;
 }
 
 /** When the next event of media playing at 1× is due; a departure needs progress after the sample it leaves. */
@@ -1524,7 +1631,7 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
  * `save`, `delete` or `takePhoto()` waits for the host, or the session is paused at a random draw.
  */
-export function playerRuntimeAwaitsHost(state: PlayerRuntimeState): boolean {
+export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
   const pending = state.foregroundAction?.kind;
   return (
     state.randomDraw !== null ||
@@ -1566,6 +1673,111 @@ export function advancePlayerRuntimeTime(
     next = stepPlayerRuntimeTime(current, targetMs);
   }
   return current;
+}
+
+/**
+ * A late observation of scene time `targetMs`, caught up in steps on a copy of a session's runner: the session itself
+ * stays as it is and publishes nothing of the catch-up until it adopts the copy (`adoptPlayerRuntimeCatchUp`). Any
+ * operation on the session meanwhile, such as input, drops the copy. The copy is the session's engine's.
+ */
+export interface PlayerRuntimeCatchUp {
+  readonly targetMs: number;
+  /** The copy, which only this adapter's functions operate. */
+  readonly runtime: RuntimeSession;
+  readonly engine: PlayerRuntimeEngine;
+  /** The events of its steps, which the session shows once it adopts the copy. */
+  readonly events: InterpreterEvent[];
+}
+
+/**
+ * Where a catch-up of `state` would step first: the next timed event after its observed time, or `null` when nothing
+ * is due to step to or time waits for the host. A silent round of a repeating timer counts only when it draws its
+ * successor's length from a range: catch-up settles such rounds one by one, not in one arithmetic skip.
+ */
+export function nextPlayerRuntimeCatchUpStepMs(state: RuntimeSessionView): number | null {
+  if (playerRuntimeAwaitsHost(state)) return null;
+  let nextMs: number | null = null;
+  for (const atMs of timedDeadlines(state, (timer) => timerEvent(timer) || timer.range !== null)) {
+    if (atMs > state.observedSessionTimeMs && (nextMs === null || atMs < nextMs)) nextMs = atMs;
+  }
+  return nextMs;
+}
+
+/** Starts catching up `session` to scene time `targetMs` on a copy of its runner. */
+export function beginPlayerRuntimeCatchUp(
+  session: PlayerRuntimeSession,
+  targetMs: number,
+): PlayerRuntimeCatchUp {
+  return Object.freeze({
+    targetMs,
+    runtime: session.engine.copy(session),
+    engine: session.engine,
+    events: [],
+  });
+}
+
+/**
+ * Catches up in steps: an ordinary observation without media progress at each next timed event before the target,
+ * then at the target, each followed by the run it makes eligible, as `observePlayerRuntimeTime` does. After each step it
+ * goes on while `more()` holds. The steps give exactly the result of one observation of the target without media
+ * progress, as any observation schedule does (`docs/RUNTIME.md#timers-and-scene-time`); a media event becomes due only
+ * through progress reports, so it is no step. Once a `save`, `delete`, or `takePhoto()` waits for the host, the rest is
+ * that one observation at once, so the host's answer comes at the scene time it gives; a random draw that pauses ends
+ * the catch-up. `"done"` when the copy is ready to adopt, `"dropped"` when it is gone, such as after an operation on the
+ * session, a step that failed the script before the target, or one that threw, which the session itself then repeats.
+ */
+export function stepPlayerRuntimeCatchUp(
+  catchUp: PlayerRuntimeCatchUp,
+  more: () => boolean,
+): "more" | "done" | "dropped" {
+  const { engine, runtime, targetMs, events } = catchUp;
+  try {
+    for (;;) {
+      const state = engine.copyView(runtime);
+      if (state === null) return "dropped";
+      if (state.observedSessionTimeMs >= targetMs || state.randomDraw !== null) return "done";
+      // A failure stands where one observation of the target stands it, with all of it observed: the session repeats
+      // it, so its debug recording also keeps that state.
+      if (state.status === "failed") {
+        engine.drop(runtime);
+        return "dropped";
+      }
+      const nextMs = nextPlayerRuntimeCatchUpStepMs(state);
+      const stepMs = nextMs !== null && nextMs < targetMs ? nextMs : targetMs;
+      const observed = engine.callCopy(runtime, "observeTime", [stepMs, []], (copy) =>
+        copy.observeTime(stepMs, []),
+      );
+      if (observed === null) return "dropped";
+      for (const event of observed.events) events.push(event);
+      if (observed.outcome.kind !== "observed") return "done";
+      const ran = engine.callCopy(runtime, "run", [{}], (copy) => copy.run(), true);
+      if (ran === null) return "dropped";
+      for (const event of ran.events) events.push(event);
+      const after = engine.copyView(runtime);
+      if (after !== null && !playerRuntimeAwaitsHost(after) && !more()) return "more";
+    }
+  } catch {
+    // The copy ended with the call that threw; the same observation on the session itself meets the same error.
+    return "dropped";
+  }
+}
+
+/**
+ * The session after it adopts the copy of `catchUp` in one publication, with the events of its steps; `null` when the
+ * copy was dropped, such as after an operation on the session since it was copied.
+ */
+export function adoptPlayerRuntimeCatchUp(
+  session: PlayerRuntimeSession,
+  catchUp: PlayerRuntimeCatchUp,
+): PlayerRuntimeSession | null {
+  if (session.engine !== catchUp.engine || !session.engine.adopt(session, catchUp.runtime))
+    return null;
+  return publish(appendRuntimeEvents(session, catchUp.events));
+}
+
+/** Drops the copy of `catchUp`; the session stays as it is. */
+export function dropPlayerRuntimeCatchUp(catchUp: PlayerRuntimeCatchUp): void {
+  catchUp.engine.drop(catchUp.runtime);
 }
 
 /** Progress of every running loaded media at scene time `atMs`, playing on at 1× from its last sample. */

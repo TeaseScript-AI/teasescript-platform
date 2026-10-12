@@ -567,7 +567,12 @@ Timers and `wait` measure Player-executed scene time on the persisted session co
 clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
 next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
 are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
-and visibility changes never pause time. When restored execution resumes, the Player rebases its clock on the saved
+and visibility changes never pause time. The Player catches up a late observation without media progress on a copy
+of the session, in ordinary observations at each next timed event and then at the observed time, and gives the browser
+a turn after each task of them. The session shows nothing of it until it adopts the copy in one publication, with the
+result of one observation; any operation on the session meanwhile, such as input, drops the copy, and the session
+observes in one go. An observation close to its next event, and every observation while Debug runs, is one
+observation. When restored execution resumes, the Player rebases its clock on the saved
 `observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceResume`, while held
 catch-up continues from the saved `currentSessionTimeMs`. After a page reload, the explicit Continue of
 [Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation) precedes that resumption, so
