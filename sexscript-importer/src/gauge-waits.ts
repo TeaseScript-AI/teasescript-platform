@@ -2,22 +2,48 @@ import { isRecord } from "./ast.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
 
 /**
- * Legacy waitWithGauge counted its gauge up to the seconds and so did not wait at all for a negative number, where a
- * TeaseScript timer stops the script. Seconds not certain to be at least 0 count from 0, `max(seconds, 0)`.
+ * Legacy waitWithGauge counted its gauge up to the seconds in whole milliseconds, `(int) (seconds * 1000)`
+ * (ss.desktop.MainFrame.waitWithGaugeFromScript), and so did not wait at all for a negative number, or for a remainder
+ * below a millisecond that decimal arithmetic left, where a TeaseScript timer stops the script or, late in a session,
+ * cannot place a deadline that close (TSR050). Seconds not certain to be at least 0 count in whole milliseconds from 0,
+ * `toInteger(max(seconds, 0) * 1000) ms` (debbie2's `10 * (size - 0.3) - nr`); legacy's steps of 40 milliseconds are
+ * not kept.
  *
  * Certain are a literal at least 0, `randomInteger(a..b)` with such an `a`, a random number below such a bound, the
  * sum, product, rounding, absolute value, or maximum with such numbers, and a variable that every write of the file sets
  * to such a number (withProvenGaugeWaits); a load, an answer, a parameter, or a loop variable is not.
  */
-export function atLeastZero(seconds: IrExpression): IrExpression {
-  return certain(seconds, new Set())
-    ? seconds
-    : {
-        kind: "call",
-        name: "max",
-        positional: [seconds, { kind: "literal", value: 0 }],
-        named: {},
-      };
+export function gaugeDuration(seconds: IrExpression): { duration: IrExpression; unit: "s" | "ms" } {
+  if (certain(seconds, new Set())) return { duration: seconds, unit: "s" };
+  const counted: IrExpression = {
+    kind: "call",
+    name: "max",
+    positional: [seconds, { kind: "literal", value: 0 }],
+    named: {},
+  };
+  return {
+    duration: {
+      kind: "call",
+      name: "toInteger",
+      positional: [
+        { kind: "binary", operator: "*", left: counted, right: { kind: "literal", value: 1000 } },
+      ],
+      named: {},
+    },
+    unit: "ms",
+  };
+}
+
+/** The seconds of a gauge wait in whole milliseconds, `toInteger(max(seconds, 0) * 1000)`; null for another value. */
+export function countedSeconds(duration: IrExpression): IrExpression | null {
+  if (duration.kind !== "call" || duration.name !== "toInteger") return null;
+  const [product] = duration.positional;
+  if (product?.kind !== "binary" || product.operator !== "*") return null;
+  const [counted, thousand] = [product.left, product.right];
+  if (thousand.kind !== "literal" || thousand.value !== 1000) return null;
+  if (counted.kind !== "call" || counted.name !== "max") return null;
+  const [seconds, zero] = counted.positional;
+  return seconds !== undefined && zero?.kind === "literal" && zero.value === 0 ? seconds : null;
 }
 
 function certain(value: IrExpression, variables: ReadonlySet<string>): boolean {
@@ -39,8 +65,8 @@ function certain(value: IrExpression, variables: ReadonlySet<string>): boolean {
 }
 
 /**
- * The gauge waits whose `max(seconds, 0)` reads only variables that every write of the file sets to a number certain
- * to be at least 0, which then wait for the seconds as they are. A variable counts where each of its writes is such a
+ * The gauge waits whose `toInteger(max(seconds, 0) * 1000) ms` reads only variables that every write of the file sets to
+ * a number certain to be at least 0, which then wait for the seconds as they are. A variable counts where each of its writes is such a
  * number given the others (`let lineWait = 2`, `lineWait += 1`), and it is not a parameter or a loop variable. A
  * variable of the script, outside every function, does not count where the file calls a function of another file,
  * which may set it as a global.
@@ -50,15 +76,10 @@ export function withProvenGaugeWaits(statements: IrStatement[]): IrStatement[] {
   if (proven.size === 0) return statements;
   const block = (items: readonly IrStatement[]): IrStatement[] =>
     items.map((item): IrStatement => {
-      if (item.kind === "wait" && item.visible && item.unit === "s") {
-        const duration = item.duration;
-        const [seconds, zero] =
-          duration.kind === "call" && duration.name === "max" ? duration.positional : [];
-        return seconds !== undefined &&
-          zero?.kind === "literal" &&
-          zero.value === 0 &&
-          certain(seconds, proven)
-          ? { ...item, duration: seconds }
+      if (item.kind === "wait" && item.visible && item.unit === "ms") {
+        const seconds = countedSeconds(item.duration);
+        return seconds !== null && certain(seconds, proven)
+          ? { ...item, duration: seconds, unit: "s" }
           : item;
       }
       switch (item.kind) {

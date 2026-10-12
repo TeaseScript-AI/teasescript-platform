@@ -1,3 +1,4 @@
+import { countedSeconds } from "./gauge-waits.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
@@ -279,7 +280,7 @@ export function withElapsedDurations(
 /** The variable a wait of seconds or a button's timeout reads, or null. */
 function waitRead(item: IrStatement): Extract<IrExpression, { kind: "variable" }> | null {
   const read =
-    item.kind === "wait" && item.unit === "s"
+    item.kind === "wait" && (item.unit === "s" || item.unit === "ms")
       ? unclamped(item.duration)
       : item.kind === "showButton"
         ? item.timeout
@@ -287,10 +288,12 @@ function waitRead(item: IrStatement): Extract<IrExpression, { kind: "variable" }
   return read?.kind === "variable" ? read : null;
 }
 
-/** The seconds a gauge wait counts from 0 (atLeastZero in lower.ts), `max(seconds, 0)`, or the value itself. */
+/**
+ * The seconds a gauge wait counts in whole milliseconds from 0 (gaugeDuration), `toInteger(max(seconds, 0) * 1000)`, or
+ * the value itself.
+ */
 function unclamped(value: IrExpression): IrExpression {
-  const [seconds, zero] = value.kind === "call" && value.name === "max" ? value.positional : [];
-  return seconds !== undefined && zero?.kind === "literal" && zero.value === 0 ? seconds : value;
+  return countedSeconds(value) ?? value;
 }
 
 class Scope {

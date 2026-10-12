@@ -75,5 +75,5 @@ if load("game.measure", default: false) == true {
   measured = (showButton "Measure") / 1 s
 }
 timer max(measured, 0) s
-timer max(measured, 0) s
+timer toInteger(max(measured, 0) * 1000) ms
 exit

@@ -84,7 +84,7 @@ say prose "Chose ${menuChoice}", instant
 // from 0; a literal, a random number, and their sums are certain.
 let penalty = [-60, 0]
 penalty[0] = penalty[0] + 30
-timer max(penalty[0], 0) s
+timer toInteger(max(penalty[0], 0) * 1000) ms
 timer (randomInteger(0..3) + 1) s
 // So is a variable that every write sets to such a number.
 let gaugeStep = 1

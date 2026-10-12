@@ -5,7 +5,7 @@ import { withCounterLoops } from "./counter-loops.ts";
 import { withSwitchLadders } from "./switch-ladders.ts";
 import { withLoopedTailCalls } from "./tail-calls.ts";
 import { withListAppends } from "./list-appends.ts";
-import { atLeastZero, withProvenGaugeWaits } from "./gauge-waits.ts";
+import { gaugeDuration, withProvenGaugeWaits } from "./gauge-waits.ts";
 import {
   constantString,
   groovyParameters,
@@ -7924,13 +7924,12 @@ function lowerCallStatement(
         span,
       }));
     case "waitWithGauge":
-      // Legacy counted the gauge up to the seconds and so did not wait at all for a negative number, where a timer stops
-      // the script; seconds not certain to be at least 0 count from 0 (atLeastZero).
-      return oneArgumentStatement(args, context, node, (duration) => ({
+      // Legacy counted the gauge up to the seconds in whole milliseconds and so did not wait at all for a negative
+      // number or a remainder below a millisecond; seconds not certain to be at least 0 count so too (gaugeDuration).
+      return oneArgumentStatement(args, context, node, (seconds) => ({
         kind: "wait",
-        duration: atLeastZero(duration),
+        ...gaugeDuration(seconds),
         visible: true,
-        unit: "s",
         span,
       }));
     case "showButton": {
