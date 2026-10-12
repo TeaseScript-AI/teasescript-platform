@@ -312,9 +312,10 @@ The current function subset includes:
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
 Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
-`join`, `addAll`, `sort`, `shuffle`, `take`, and `takeLast`, the `intersection`, `union`, and `difference` of lists and
-sets, the §13 conversions `toString`, `toNumber`, `toInteger`, and `toBoolean` with `default:`, the numeric functions
-`round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
+`join`, `addAll`, `sort`, `shuffle`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, and `count`, the `intersection`,
+`union`, and `difference` of lists and sets, the §13 conversions `toString`, `toNumber`, `toInteger`, and `toBoolean`
+with `default:`, the numeric functions `round` (also with `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`,
+`mod`, and `clamp`, the constant `pi`,
 the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
 `linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
