@@ -95,6 +95,17 @@ test("formatting reaches a command inside a computed call target", () => {
   assert.equal(formatLanguageDocument(document).text, 'call script(askText "Room?")\nexit');
 });
 
+test("formatting spaces an ask's question mode and reaches the asks inside its options", () => {
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    'let name = askText   prose(font: askText   "Font?")   "Name?"\nlet pic = askImage prose(font: askText   "Font?") ("Image?")\nexit',
+  );
+  assert.equal(
+    formatLanguageDocument(document).text,
+    'let name = askText prose(font: askText "Font?") "Name?"\nlet pic = askImage prose(font: askText "Font?") ("Image?")\nexit',
+  );
+});
+
 test("editor help and formatting cover showButton used as a value with a timeout", () => {
   const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5 s';
   const document = createLanguageDocument(

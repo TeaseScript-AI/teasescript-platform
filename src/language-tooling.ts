@@ -995,6 +995,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "callExpression":
       children.push({ kind: "expression", node: expression.callee });
+      if (expression.presentation !== undefined)
+        children.push({ kind: "expression", node: expression.presentation });
       for (const argument of expression.arguments)
         children.push({ kind: "expression", node: argument.value });
       return;
