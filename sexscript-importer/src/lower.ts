@@ -13697,21 +13697,44 @@ const sentinelReads = new WeakSet<AstNode>();
 /**
  * Marks the list positions read into a variable that their loop's condition compares with null at a position the loop
  * counts up, `next = pick[ipick]` in `for (…; next != null; ipick++)` (Stay): Groovy read null past the end of the
- * list, which ended the loop. Only a list proven to be a Groovy list: a Java array's position past its end failed.
+ * list, which ended the loop. Only a list that list literals show to be a Groovy list: a Java array's position past its
+ * end failed.
  */
 function markSentinelReads(body: AstNode, context: LowerContext): void {
-  // The closures a declaration names, with their parameters' names, and the calls of the file.
+  // The closures a declaration names, with their parameters' names; the calls of the file; the names a script uses as
+  // values other than to call them, `def again = picks` or `invoke(picks)`; and the variables declared with a Java
+  // array type, `int[] slots = [1]`, which Groovy made an array.
   const closures = new Map<string, string[]>();
   const calls: AstNode[] = [];
+  const called = new Set<AstNode>();
+  const declared = new Set<AstNode>();
+  const arrays = new Set<string>();
   walkAst(body, (node) => {
-    const right = node.kind === "declaration" ? asNode(node.right) : null;
-    const name = right?.kind === "closure" ? variableName(asNode(node.left)) : null;
-    if (right !== null && name !== null)
-      closures.set(
-        name,
-        (groovyParameters(right.parameters) ?? []).map((parameter) => parameter.name),
-      );
-    if (node.kind === "methodCall") calls.push(node);
+    if (node.kind === "declaration") {
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (left !== null) declared.add(left);
+      const name = right?.kind === "closure" ? variableName(left) : null;
+      if (right !== null && name !== null)
+        closures.set(
+          name,
+          (groovyParameters(right.parameters) ?? []).map((parameter) => parameter.name),
+        );
+      const key = left === null ? null : bindingKey(left, context.bindings);
+      if (key !== null && /^\[|\[\]$/u.test(text(left?.originType) ?? text(left?.type) ?? ""))
+        arrays.add(key);
+    }
+    if (node.kind === "methodCall") {
+      calls.push(node);
+      const receiver = asNode(node.object);
+      if (constantString(node.method) === "call" && receiver !== null) called.add(receiver);
+    }
+  });
+  const escaped = new Set<string>();
+  walkAst(body, (node) => {
+    const name = node.kind === "variable" ? variableName(node) : null;
+    if (name !== null && closures.has(name) && !called.has(node) && !declared.has(node))
+      escaped.add(name);
   });
   // The arguments of a call of a closure, `picks(…)` or `picks.call(…)`.
   const passed = (call: AstNode, closure: string): AstNode[] | null => {
@@ -13721,31 +13744,32 @@ function markSentinelReads(body: AstNode, context: LowerContext): void {
       ? nodeArray(asNode(call.arguments)?.items)
       : null;
   };
-  // A Groovy list, not a Java array: a list literal, lists joined with `+`, a variable only ever set to such values,
-  // or a closure's parameter that every call of every closure with a parameter of its name passes one, and that the
-  // closure sets to nothing else.
-  const groovyList = (list: AstNode, seen = new Set<string>()): boolean => {
-    if (list.kind === "list") return true;
-    if (list.kind === "binary" && list.operator === "+") {
-      const [left, right] = [asNode(list.left), asNode(list.right)];
-      return left !== null && right !== null && groovyList(left, seen) && groovyList(right, seen);
-    }
+  // A list literal, or list literals joined with `+`.
+  const literalList = (value: AstNode): boolean => {
+    if (value.kind === "list") return true;
+    if (value.kind !== "binary" || value.operator !== "+") return false;
+    const [left, right] = [asNode(value.left), asNode(value.right)];
+    return left !== null && right !== null && literalList(left) && literalList(right);
+  };
+  // A Groovy list, not a Java array, shown by list literals alone: a variable not declared as an array whose every
+  // value is one, or a parameter of closures that the script only calls, never sets, and always passes one.
+  const groovyList = (list: AstNode): boolean => {
+    if (literalList(list)) return true;
     const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
-    if (key === null || seen.has(key) || seen.size > 8) return false;
-    seen.add(key);
+    if (key === null || arrays.has(key)) return false;
     const values = context.assignedValues.get(key) ?? [];
-    if (!values.every((value) => groovyList(value, seen))) return false;
-    if (!context.parameterBindings.has(key)) return values.length > 0;
+    if (!context.parameterBindings.has(key)) return values.length > 0 && values.every(literalList);
+    if (values.length > 0) return false;
     const name = variableName(list);
     let given = false;
     for (const [closure, parameters] of closures) {
       const position = parameters.indexOf(name ?? "");
       if (position < 0) continue;
+      if (escaped.has(closure)) return false;
       for (const call of calls) {
-        const arguments_ = passed(call, closure);
-        if (arguments_ === null) continue;
-        const argument = arguments_[position];
-        if (argument === undefined || !groovyList(argument, seen)) return false;
+        const argument = passed(call, closure)?.[position];
+        if (passed(call, closure) === null) continue;
+        if (argument === undefined || !literalList(argument)) return false;
         given = true;
       }
     }
