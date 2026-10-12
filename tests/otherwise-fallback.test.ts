@@ -289,9 +289,21 @@ test("a null check also names a fallback of the value's type, but not for a valu
     "let n: integer? = hide(1)\nn += 1",
     "let n: integer[]? = hide([1])\nn.add(2)",
     "let n: integer[]? = hide([1])\nn.sort()",
+    // Also a value that the changed place is part of.
+    "let n: object? = hide({ toys: [1] })\nn.toys.add(2)",
+    "let n: object? = hide({ toys: [1] })\n(n).toys.add(2)",
+    'let n: object? = hide({ toy: { name: "a" } })\nn.toy.name = "b"',
+    "let n: integer[][]? = hide([[1]])\nn[0][0] = 3",
     'let n = null\nlet x = true\nif x {\n    n = playAudio async "a.mp3"\n}\nn.stop()',
   ])
     assert.deepEqual(messages(source), [check(source.includes("p.name") ? "p" : "n")], source);
+  // A read still gets a fallback, also the index of an element that is set.
+  assert.deepEqual(
+    messages(
+      "let n: object? = hide({ toys: [1] })\nsay n.toys\nlet i: integer? = hide(0)\nlet toys = [1]\ntoys[i] = 2",
+    ),
+    [check("n", "..."), check("i", "0")],
+  );
 });
 
 test("a fallback that asks waits only for a null value, also across a checkpoint and restore", () => {

@@ -2091,9 +2091,8 @@ class TypeChecker {
     let speakerProperty: string | null = null;
     /** A property without a static type, such as one of an `object` or of a value of unknown type. */
     let untyped = false;
-    // The object of a property or an element is changed, and so is the target of `+=` and `-=`, which reads it first.
-    if (target.kind !== "identifier") this.#changed.add(target.object);
-    if (statement.operator !== "=") this.#changed.add(target);
+    // A null check names no fallback for the target or a value it is part of, as `p` in `p.name = "Bo"` or `n += 1`.
+    this.#noteChanged(target);
     if (target.kind === "identifier") {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") {
@@ -5394,7 +5393,7 @@ class TypeChecker {
     const method = callee.property.name;
     // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
     if (COLLECTION_CHANGES.has(method) || method === "sort" || method === "shuffle")
-      this.#changed.add(callee.object);
+      this.#noteChanged(callee.object);
     if (
       (method === "add" || method === "addAll" || method === "get") &&
       unwrap(callee.object).kind !== "identifier"
@@ -7108,6 +7107,17 @@ class TypeChecker {
       `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
       expression.span,
     );
+  }
+
+  /** Notes a value that is changed in place, with the values it is part of, such as `p` in `p.toys.add(1)`. */
+  #noteChanged(expression: Expression): void {
+    for (let node = expression; ;) {
+      this.#changed.add(node);
+      if (node.kind === "parenthesizedExpression") node = node.expression;
+      else if (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
+        node = node.object;
+      else return;
+    }
   }
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
