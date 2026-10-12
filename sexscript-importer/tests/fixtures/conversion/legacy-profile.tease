@@ -200,4 +200,8 @@ if conditional {
 sexscriptLegacySave("club.level", 3)
 sexscriptLegacySave("club.level.kink", 5)
 say prose "Kink ${sexscriptLegacyLoadInteger("club.level.kink")}", instant
+// Legacy load() read null for a key that held an empty list, which stored nothing, so such a key keeps the helpers.
+sexscriptLegacySave("club.picks", [])
+// NOTE SX_LOAD_OPEN_NULL line 15: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+say prose "No picks ${sexscriptLegacyLoad("club.picks", sexscriptLegacyValue(null)) == null}", instant
 exit

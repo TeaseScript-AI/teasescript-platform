@@ -10,3 +10,6 @@ if (loadBoolean("clothes.panties") && !getBoolean("Are you wearing your panties?
 save("club.level", 3)
 save("club.level.kink", 5)
 show("Kink " + loadInteger("club.level.kink"))
+// Legacy load() read null for a key that held an empty list, which stored nothing, so such a key keeps the helpers.
+save("club.picks", [])
+show("No picks " + (load("club.picks") == null))

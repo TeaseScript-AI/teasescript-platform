@@ -30,6 +30,8 @@ export function withLegacyStorage(
   const given = new Map<IrExpression, readonly string[]>();
   // The keys of the saves, deletes, and legacy `load()` reads, which the helpers would take over.
   const routable = new Set<IrExpression>();
+  // The keys of the legacy `load()` reads.
+  const rebuilt: IrExpression[] = [];
   for (const program of programs) {
     const constants = constantTexts(program.statements);
     const scopes = new Map<Caller, Scope>();
@@ -54,7 +56,10 @@ export function withLegacyStorage(
         eachExpression(value, (expression) => {
           if (expression.kind === "load") {
             keys.push({ key: expression.key, caller });
-            if (expression.rebuilds === true) routable.add(expression.key);
+            if (expression.rebuilds === true) {
+              routable.add(expression.key);
+              rebuilt.push(expression.key);
+            }
           }
           if (expression.kind !== "call") return;
           if (expression.local === true)
@@ -112,11 +117,20 @@ export function withLegacyStorage(
   // A save, delete, or legacy `load()` of a key no shape resolves may be of any key, so where there is one, all of them go
   // through the helpers, which keeps one layout for every key; photo references stay as they are.
   const unresolved = [...routable].some((key) => known.get(key) === null);
+  // Legacy `load()` also read null for a key that held an empty list or map, which stored nothing, and for the text
+  // "null"; native storage keeps both, so a key such a read may be goes through the helpers too, with its saves and
+  // deletes.
+  const loaded = rebuilt.flatMap((key) => known.get(key) ?? []);
   const routed = (key: IrExpression): boolean => {
     const found = known.get(key);
     if (found === null) return true;
     if (found === undefined || found.length === 0) return false;
-    return unresolved || found.some((shape) => hierarchical.has(shape));
+    return (
+      unresolved ||
+      found.some(
+        (shape) => hierarchical.has(shape) || loaded.some((read) => mayBeSame(read, shape)),
+      )
+    );
   };
 
   // The helpers' own names may not be those of a file's variables or functions, which they would hide.
@@ -371,29 +385,44 @@ function shapes(
   return null;
 }
 
+/** A character of a shape, or a class of them (`char` null): any character, or any but a dot, once or repeated. */
+type Token = { char: string | null; any: boolean; repeat: boolean };
+
+/** The tokens of a shape: a computed part is one or more characters other than a dot. */
+function tokens(shape: string): Token[] {
+  return [...shape].flatMap((char): Token[] =>
+    char === PART
+      ? [
+          { char: null, any: false, repeat: false },
+          { char: null, any: false, repeat: true },
+        ]
+      : [{ char, any: false, repeat: false }],
+  );
+}
+
 /**
  * Whether some key of shape `child` can be an element of some key of shape `parent`, `parent.<name>...`: whether the
- * two patterns have a text in common, a computed part being one or more characters other than a dot.
+ * two patterns have a text in common.
  */
 function mayBeElement(parent: string, child: string): boolean {
-  // A character, or a class of them (`char` null): any character, or any but a dot, once or repeated.
-  type Token = { char: string | null; any: boolean; repeat: boolean };
-  const tokens = (shape: string): Token[] =>
-    [...shape].flatMap((char): Token[] =>
-      char === PART
-        ? [
-            { char: null, any: false, repeat: false },
-            { char: null, any: false, repeat: true },
-          ]
-        : [{ char, any: false, repeat: false }],
-    );
-  const left: Token[] = [
-    ...tokens(parent),
-    { char: ".", any: false, repeat: false },
-    { char: null, any: true, repeat: false },
-    { char: null, any: true, repeat: true },
-  ];
-  const right = tokens(child);
+  return meet(
+    [
+      ...tokens(parent),
+      { char: ".", any: false, repeat: false },
+      { char: null, any: true, repeat: false },
+      { char: null, any: true, repeat: true },
+    ],
+    tokens(child),
+  );
+}
+
+/** Whether a key of shape `a` can be a key of shape `b`. */
+function mayBeSame(a: string, b: string): boolean {
+  return a === b || meet(tokens(a), tokens(b));
+}
+
+/** Whether two token patterns have a text in common. */
+function meet(left: Token[], right: Token[]): boolean {
   const allows = (token: Token, char: string): boolean =>
     token.char === null ? token.any || char !== "." : token.char === char;
   const meets = (a: Token, b: Token): boolean =>
