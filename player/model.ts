@@ -141,6 +141,11 @@ export interface PlayerFormFieldPresentation {
   readonly kind: "toggle" | "cycle" | "value";
   readonly pressed: boolean;
   readonly state: string | null;
+  /**
+   * Every text a toggle with options or a cycle can show for `state`, in order, so that its button keeps the width of
+   * the longest; empty for any other field.
+   */
+  readonly states: readonly string[];
   /** A typed field the form may be submitted without. */
   readonly optional: boolean;
   /** The typed field the composer edits now. */
