@@ -10,3 +10,6 @@ def back = -1
 show("Last " + seats[back])
 back = 3
 show("Past " + seats[back])
+// A field named length is no list's length, so a negative one still counts from the end.
+def holder = [size: -1, length: -1]
+show("Field " + seats[holder.length])

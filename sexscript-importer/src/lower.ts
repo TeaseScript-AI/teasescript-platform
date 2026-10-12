@@ -13729,9 +13729,10 @@ function markDecrements(body: AstNode, context: LowerContext): void {
 }
 
 /**
- * Whether a list position is never negative: a whole number from 0; a size or length; a random draw below a bound
- * that is never negative; a sum, product, or remainder of such values; or a variable, not a parameter, that is only set
- * to such values, only counts up, and only adds such values.
+ * Whether a list position is never negative: a whole number from 0; the size or length of a list or a text; a random
+ * draw below a bound that is never negative; a sum, product, or remainder of such values; or a variable, not a
+ * parameter, that is only set to such values, only counts up, and only adds such values, in a file whose variables no
+ * module's functions may set.
  */
 function nonNegativePosition(
   node: AstNode,
@@ -13753,11 +13754,19 @@ function nonNegativePosition(
     if (operator === "%") return left !== null && nonNegativePosition(left, context, seen);
     return false;
   }
+  // The length of a list or a text, not an object's field of that name.
+  const measured = (receiver: AstNode | null): boolean => {
+    const type = receiver === null ? 0 : inferType(receiver, context.types);
+    return type !== 0 && onlyOf(type, LIST | STRING);
+  };
   if (node.kind === "property")
-    return ["size", "length"].includes(constantString(node.property) ?? "");
+    return (
+      ["size", "length"].includes(constantString(node.property) ?? "") &&
+      measured(asNode(node.object))
+    );
   if (node.kind === "methodCall") {
     const method = constantString(node.method) ?? "";
-    if (["size", "length"].includes(method)) return true;
+    if (["size", "length"].includes(method)) return measured(asNode(node.object));
     const call = legacyApiCall(node, context);
     const [bound] = call?.arguments ?? [];
     return (
@@ -13768,6 +13777,8 @@ function nonNegativePosition(
   const key = bindingKey(node, context.bindings);
   if (key === null || context.parameterBindings.has(key)) return false;
   if (decrementedKeys.get(context.bindings)?.has(key) === true) return false;
+  // A module's functions may set a script variable of a file that shares them, or that loads modules.
+  if (context.sharesFunctions || context.loadsModuleDirectories.size > 0) return false;
   // A value the variable gets from itself, `n = n + 1`, keeps what its other values show.
   if (seen.has(key)) return true;
   seen.add(key);

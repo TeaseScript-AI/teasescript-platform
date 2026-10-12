@@ -26,7 +26,22 @@ export function withPositions(statements: IrStatement[], used: Set<HelperName>):
     return { kind: "call", name: POSITION_HELPER, positional: [next], named: {} };
   };
   const block = (items: IrStatement[]): IrStatement[] =>
-    items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), rewrite));
+    items.map((item) => {
+      const next = withNestedBlocks(item, block);
+      // A function's parameter defaults are expressions of their own.
+      const defaults: IrStatement =
+        next.kind === "function"
+          ? {
+              ...next,
+              parameters: next.parameters.map((parameter) =>
+                parameter.defaultValue === null
+                  ? parameter
+                  : { ...parameter, defaultValue: rewrite(parameter.defaultValue) },
+              ),
+            }
+          : next;
+      return mapOwnExpressions(defaults, rewrite);
+    });
   return block(statements);
 }
 
@@ -108,8 +123,9 @@ function comparison(
     left: position,
     right: { kind: "literal", value: null },
   });
-  if (always) return missing ? { kind: "literal", value: true } : isNull(false);
-  if (never) return missing ? isNull(true) : { kind: "literal", value: false };
+  // A test whose outcome the position does not change still reads it (which may run code), so it compares the -1.
+  if (always) return missing ? null : isNull(false);
+  if (never) return missing ? isNull(true) : null;
   const compare: IrExpression = {
     kind: "binary",
     operator,

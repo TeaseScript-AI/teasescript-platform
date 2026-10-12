@@ -11,3 +11,9 @@ def missing = text.indexOf("gag")
 show("Missing " + missing + " " + (missing + 1))
 def items = ["gag", "rope", "gag"]
 show("Items " + items.indexOf("rope") + " " + items.indexOf("whip") + " " + (items.indexOf("whip") == -1) + " " + items.lastIndexOf("gag") + " " + items.count("gag"))
+// A test whose outcome the position does not change still reads it, and a parameter's default reads the -1 too.
+def counted = 0
+def tags = { -> counted++; return "a,b" }
+show("Never " + (tags().indexOf("b") < -1) + " " + counted)
+def pick = { position = ["a"].indexOf("missing") -> show("Default " + position) }
+pick()
