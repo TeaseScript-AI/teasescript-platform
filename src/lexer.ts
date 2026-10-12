@@ -33,6 +33,7 @@ const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
   ["function", TokenKind.KeywordFunction],
   ["return", TokenKind.KeywordReturn],
   ["is", TokenKind.KeywordIs],
+  ["otherwise", TokenKind.KeywordOtherwise],
 ]);
 
 const diagnosticCodes = {
@@ -133,11 +134,8 @@ class Lexer {
         this.#scanOptionalEqual(TokenKind.Equal, TokenKind.EqualEqual);
         return;
       case "!":
-        if (this.#peek(1) === "=") {
-          this.#scanTwoCharacterToken(TokenKind.BangEqual);
-        } else {
-          this.#scanInvalidCharacter();
-        }
+        // A lone `!` is a token so that the parser can name `not` instead (V30 §5).
+        this.#scanOptionalEqual(TokenKind.Bang, TokenKind.BangEqual);
         return;
       case "<":
         this.#scanOptionalEqual(TokenKind.Less, TokenKind.LessEqual);
@@ -492,6 +490,12 @@ class Lexer {
       case TokenKind.KeywordNot:
       case TokenKind.KeywordAnd:
       case TokenKind.KeywordOr:
+      case TokenKind.KeywordOtherwise:
+      // The symbols the parser names a word for, as in `"${a || "b"}"` and `"${name ?? "pet"}"`.
+      case TokenKind.Pipe:
+      case TokenKind.Ampersand:
+      case TokenKind.Bang:
+      case TokenKind.Question:
         return true;
       default:
         return false;
@@ -855,6 +859,7 @@ const singleCharacterKinds: Readonly<Record<string, TokenKind>> = {
   ".": TokenKind.Dot,
   "?": TokenKind.Question,
   "|": TokenKind.Pipe,
+  "&": TokenKind.Ampersand,
   "*": TokenKind.Star,
   "/": TokenKind.Slash,
   "%": TokenKind.Percent,

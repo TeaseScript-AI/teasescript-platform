@@ -1,4 +1,4 @@
-import type { CallExpression, Expression, Identifier } from "./ast.js";
+import type { CallExpression, Expression, Identifier, ScalarTypeName } from "./ast.js";
 import {
   booleanFromText,
   CONVERSION_RESULTS,
@@ -846,15 +846,26 @@ function getProblems(
   ];
 }
 
+/** The kinds of handles to what a script started or showed, which no literal can write. */
+const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "timer",
+  "media",
+  "camera",
+  "permanentButton",
+  "messageHandle",
+  "speaker",
+]);
+
 /**
  * The message for a value that may be of a member type an operation does not support, naming the test that makes it
  * safe: `!= null` for null, which also narrows it. Only a plain variable narrows, so a property or element is first
- * kept in a variable.
+ * kept in a variable. For null, the message also names a fallback, unless the value is what the operation changes.
  */
 export function mayBeMessage(
   expression: Expression,
   failing: StaticType,
   passing: readonly StaticType[],
+  fallback = true,
 ): string {
   const node = withoutParentheses(expression);
   const label = node.kind === "identifier" ? node.name : null;
@@ -864,9 +875,29 @@ export function mayBeMessage(
     resolved(failing).kind === "open"
       ? "of a type that no value decided yet, such as an element of an empty list without a written type"
       : describeValue(failing);
+  const or = failing.kind === "null" && fallback ? fallbackFix(label ?? "value", passing) : "";
   return label === null
-    ? `This value may be ${what}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
-    : `'${label}' may be ${what}. Check it first: if ${label} ${test} { ... }`;
+    ? `This value may be ${what}. Keep it in a variable and check it first, as in: if value ${test} { ... }${or}`
+    : `'${label}' may be ${what}. Check it first: if ${label} ${test} { ... }${or}`;
+}
+
+/**
+ * The fallback that a null check names as well (owner decision on #850), with a value of the `passing` types: `0` for
+ * a number, `""` for text, `false` for a boolean, and `...` for any other value. A handle, such as of a timer or of
+ * media, has no value to write as a fallback, so it gets none.
+ */
+export function fallbackFix(label: string, passing: readonly StaticType[]): string {
+  if (passing.some((type) => HANDLE_KINDS.has(resolved(type).kind))) return "";
+  const every = (...names: ScalarTypeName[]) =>
+    passing.length > 0 && passing.every((type) => isScalar(type, ...names));
+  const value = every("integer", "number")
+    ? "0"
+    : every("string")
+      ? '""'
+      : every("boolean")
+        ? "false"
+        : "...";
+  return `, or give a fallback: ${label} otherwise ${value}`;
 }
 
 /**
