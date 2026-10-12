@@ -445,7 +445,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
-  const clock = useRuntimeSceneClock(session, () => device.sample(), held);
+  const clock = useRuntimeSceneClock(
+    session,
+    () => device.sample(),
+    held,
+    () => randomControl === null,
+  );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
   // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
   // cause the error, so the stop is checked again after it.
@@ -485,9 +490,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
     }
   });
-  // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
-  watch([generation, stageImage], ([, image]) => {
-    if (image === null) return;
+  // A Stage image that is no package file, or one the Stage shows as failed when a session starts. One that a catch-up
+  // shows only on its way is not reported, as one late observation would not show it.
+  watch([generation, stageImage, clock.catchingUp], ([, image, catchingUp]) => {
+    if (image === null || catchingUp) return;
     if (resolvePackageAsset(image) === null)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
     else if (failedStageSource.value !== null && resolveAsset(image) === failedStageSource.value)
@@ -495,8 +501,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
 
   watch(
-    [session, held],
-    ([current, paused]) => {
+    [session, held, clock.catchingUp],
+    ([current, paused, catchingUp]) => {
+      // A catch-up under way starts, stops, and moves no media until it is done, as one late observation would not.
+      if (catchingUp && !paused) return;
       // A stopped session keeps no media.
       const media = current && !stopped.value ? playerRuntimeMedia(current.state).media : [];
       // An inspected state, and a draw that waits, show their media where they were, without playing them.
@@ -565,18 +573,25 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     publish: (next) => (session.value = next),
   });
   // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
-  // a session and an action, is reported once, so a dismissal holds only for the request it was given for.
+  // a session and an action, is reported once, so a dismissal holds only for the request it was given for; one that a
+  // catch-up shows only on its way is not.
+  let cameraOnlyReported: string | null = null;
   watch(
-    () => {
-      const request = session.value && activePlayerRuntimeInteraction(session.value.state);
-      return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
-        ? `${generation.value}:${request.actionId}`
-        : null;
+    [
+      () => {
+        const request = session.value && activePlayerRuntimeInteraction(session.value.state);
+        return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
+          ? `${generation.value}:${request.actionId}`
+          : null;
+      },
+      clock.catchingUp,
+    ],
+    ([cameraOnlyRequest, catchingUp]) => {
+      if (catchingUp || cameraOnlyRequest === cameraOnlyReported) return;
+      cameraOnlyReported = cameraOnlyRequest;
+      if (cameraOnlyRequest === null) notices.dismiss(playerNoticeKeys.imageNeedsCamera);
+      else notices.publish(playerNotices.imageNeedsCamera());
     },
-    (cameraOnlyRequest) =>
-      cameraOnlyRequest === null
-        ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
-        : notices.publish(playerNotices.imageNeedsCamera()),
   );
   // A stopped session's captures and cameras end; its media goes with the media watcher above.
   watch(
@@ -1130,6 +1145,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = { plan: false, count: 0, last: null };
   let keeping: Promise<void> | null = null;
   let keepAgain = false;
+  // A session asked to be kept while a catch-up was under way, kept once the catch-up is done.
+  let keepWhenCaughtUp = false;
   /**
    * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
    * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
@@ -1154,6 +1171,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Only a script a host prepared with `prepareScript` keeps its session.
     if (keptScope === null || scriptPlan === null || current === null) return;
     if (inspecting.value || activation.value !== null) return;
+    // A catch-up under way shows a session that has not reached the observed time yet.
+    if (clock.catchingUp.value) {
+      keepWhenCaughtUp = true;
+      return;
+    }
     // Taken before anything waits: later operations change the session.
     let snapshotJson: string;
     try {
@@ -1210,11 +1232,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The session is kept at each interaction it newly presents and when it ends, and when the page is hidden.
   let keptActionId: number | null = null;
   watch(session, (current) => {
-    if (current === null || inspecting.value) return;
+    // An interaction a catch-up presents only on its way is not kept, as one late observation would not show it.
+    if (current === null || inspecting.value || clock.catchingUp.value) return;
     const actionId = activePlayerRuntimeInteraction(current.state)?.actionId ?? null;
     const ended = current.state.status === "halted" || current.state.status === "failed";
     if ((actionId === null || actionId === keptActionId) && !ended) return;
     keptActionId = actionId;
+    keepSessionLater();
+  });
+  watch(clock.catchingUp, (catchingUp) => {
+    if (catchingUp || !keepWhenCaughtUp) return;
+    keepWhenCaughtUp = false;
     keepSessionLater();
   });
   useEventListener(
@@ -1858,8 +1886,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     async debugExportCandidate(
       shown: Pick<DebugExportCandidate, "player" | "host">,
     ): Promise<DebugExportCandidate> {
-      // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
-      const current = session.value;
+      // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state. A
+      // catch-up under way finishes first.
+      const current = clock.settle();
       // The shown state, after a call that threw rebuilt from the recorded calls; without it, the export has no session
       // state, so it never presents an earlier state as the one shown.
       const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
@@ -1973,6 +2002,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     timers: clock.timers,
     /** The display estimate of scene time, for presentation only; see `refreshSceneTimeWhile`. */
     sceneTimeMs: clock.displayTimeMs,
+    /** Whether a late observation is being caught up; the session then shows a step of it, not the observed time. */
+    catchingUp: clock.catchingUp,
     /** Keeps `sceneTimeMs` refreshing while `demand` holds, until the calling scope ends. */
     refreshSceneTimeWhile: clock.refreshWhile,
     /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */

@@ -1601,10 +1601,13 @@ export function catchUpPlayerRuntimeTime(
   }
 }
 
-/** The earliest deadline of a timed event after the observed time, or `null`. */
+/**
+ * The earliest deadline of a timed event after the observed time, or `null`. A silent round that draws its successor's
+ * length from a range is a step too: catch-up settles such rounds one by one, not in one arithmetic skip.
+ */
 function nextDeadlineMs(state: PlayerRuntimeState): number | null {
   let nextMs: number | null = null;
-  for (const atMs of timedDeadlines(state, timerEvent)) {
+  for (const atMs of timedDeadlines(state, (timer) => timerEvent(timer) || timer.range !== null)) {
     if (atMs > state.observedSessionTimeMs && (nextMs === null || atMs < nextMs)) nextMs = atMs;
   }
   return nextMs;

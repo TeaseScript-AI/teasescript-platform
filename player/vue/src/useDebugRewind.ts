@@ -40,7 +40,8 @@ export function useDebugRewind(player: PlayerSessionHost) {
     void ended?.destroy();
   }
   function follow(session: PlayerRuntimeSession | null) {
-    if (publishing || session === null) return;
+    // A catch-up under way is followed once it is done, as one late observation would publish it.
+    if (publishing || session === null || player.catchingUp.value) return;
     history.value ??= new DebugHistory(session.plan, rewind.openSpill(), rewind.memoryBudget);
     history.value.follow(session, marks());
     revision.value++;

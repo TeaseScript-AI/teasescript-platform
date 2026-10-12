@@ -1,4 +1,4 @@
-import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from "vue";
+import { computed, ref, shallowReactive, shallowRef, watch, type Ref, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport } from "../../../src/index.js";
 import {
@@ -22,49 +22,45 @@ const CATCH_UP_TASK_MS = 10;
  * Scene time continues while the page is hidden; a new or restored session is rebased so an unavailable gap is not
  * consumed. Every observation carries the media progress `mediaReports` measures, so media cues follow what was
  * actually played. A late observation without media progress catches up event by event, a task at a time
- * (`catchUp`), so the page stays responsive; input, and everything else that observes, finishes it first.
+ * (`catchUp`), so the page stays responsive; `catchingUp` holds meanwhile, and input, and everything else that
+ * observes, finishes it first.
  */
 export function useRuntimeSceneClock(
   session: ShallowRef<PlayerRuntimeSession | null>,
   mediaReports: () => readonly MediaProgressReport[] = () => [],
-  /**
-   * While it holds, scene time stands at the last observation, or where a catch-up under way goes, and nothing is
-   * observed; rebase when it ends.
-   */
+  /** While it holds, scene time stands at the last observation and nothing is observed; rebase when it ends. */
   paused: Readonly<Ref<boolean>> = ref(false),
+  /**
+   * Whether a late observation may catch up in steps; otherwise it is one observation. Not while Debug decides random
+   * draws: a draw that pauses would stand inside the catch-up, and Debug's choices could change between steps.
+   */
+  steps: () => boolean = () => true,
 ) {
   let origin = performance.now();
   const displayTimeMs = ref(0);
-  // The scene time the last catch-up went to, for the sessions of its engine. While a session stands behind it, the
-  // catch-up goes on, and a hold, such as a random draw a step paused at, stands at it and rebases from it.
-  let ahead: { readonly engine: PlayerRuntimeSession["engine"]; readonly ms: number } | null = null;
-
-  /** The scene time observed for the session: its observed time, or where its catch-up goes. */
-  function observedMs(current: PlayerRuntimeSession): number {
-    const aheadMs = ahead?.engine === current.engine ? ahead.ms : 0;
-    return Math.max(current.state.observedSessionTimeMs, aheadMs);
-  }
+  // The scene time the last catch-up went to, for the sessions of its engine: a session behind it is catching up.
+  const ahead = shallowRef<{
+    readonly engine: PlayerRuntimeSession["engine"];
+    readonly ms: number;
+  } | null>(null);
 
   /** Whether a catch-up of the session is under way. */
   function behind(current: PlayerRuntimeSession): boolean {
-    return current.state.observedSessionTimeMs < observedMs(current);
+    const target = ahead.value;
+    return target?.engine === current.engine && current.state.observedSessionTimeMs < target.ms;
   }
 
   function sceneTimeMs(current: PlayerRuntimeSession): number {
-    if (paused.value) return observedMs(current);
-    return Math.max(observedMs(current), performance.now() - origin);
+    if (paused.value) return current.state.observedSessionTimeMs;
+    return Math.max(current.state.observedSessionTimeMs, performance.now() - origin);
   }
 
-  /**
-   * Continues from the session's persisted time, or from where a catch-up under way goes; call after starting or
-   * restoring a session.
-   */
+  /** Continues from the session's persisted time; call after starting or restoring a session. */
   function rebase() {
     const current = session.value;
     if (!current) return;
-    const atMs = observedMs(current);
-    origin = performance.now() - atMs;
-    displayTimeMs.value = atMs;
+    origin = performance.now() - current.state.observedSessionTimeMs;
+    displayTimeMs.value = current.state.observedSessionTimeMs;
   }
 
   /** Submits an ordinary time observation and publishes the resulting session. */
@@ -87,14 +83,14 @@ export function useRuntimeSceneClock(
     const targetMs = sceneTimeMs(current);
     const reports = mediaReports();
     let next = current;
-    if (reports.length > 0) {
+    if (reports.length > 0 || !steps()) {
       const result = observePlayerRuntimeTime(current, targetMs, reports);
       if (result.outcome.kind === "observed") next = result.session;
     } else {
       const until = performance.now() + CATCH_UP_TASK_MS;
       next = catchUpPlayerRuntimeTime(current, targetMs, () => performance.now() < until);
     }
-    ahead = { engine: next.engine, ms: targetMs };
+    ahead.value = { engine: next.engine, ms: targetMs };
     if (next !== current) session.value = next;
     // Time did not move on since the last observation, so the next deadline is still ahead.
     else if (current.state.observedSessionTimeMs >= targetMs) scheduleWakeUp(current);
@@ -177,6 +173,8 @@ export function useRuntimeSceneClock(
     observe,
     catchUp,
     settle,
+    /** Whether a catch-up is under way: the session shows a slice of it, not yet the observed time. */
+    catchingUp: computed(() => session.value !== null && behind(session.value)),
     rebase,
     /** The display estimate of scene time; it refreshes only while something presented needs it. */
     displayTimeMs: computed(() => displayTimeMs.value),
