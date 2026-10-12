@@ -1093,15 +1093,19 @@ export class Session {
     };
     const action = record(view.foregroundAction);
     if (action.kind === "delay" || action.kind === "chatPacingGate") add(action.deadlineMs);
+    // An interaction's timeout leaves out the time a block that interrupted it ran (`pausedMs`).
     if (action.kind === "interaction" && typeof action.timeoutMs === "number")
-      add(Number(action.createdAtMs) + action.timeoutMs);
+      add(
+        Number(action.createdAtMs) +
+          (typeof action.pausedMs === "number" ? action.pausedMs : 0) +
+          action.timeoutMs,
+      );
     for (const background of list(view.backgroundActions)) {
       if (background.kind === "chatPacingGate") add(background.deadlineMs);
       if (background.kind === "timer") add(record(background.timer).deadlineMs);
     }
-    // The wait that a running timer, media, or button block interrupted.
-    const suspended = record(view.suspendedAction);
-    if (suspended.kind === "delay") add(suspended.deadlineMs);
+    // A wait that a running timer, media, or button block interrupted stands still until the block returns, and then
+    // goes on with the time it had left: it is no deadline meanwhile.
     // Media plays on through every observation, and the runtime catches up on its cues and passes; a stop at the end
     // of a pass is needed only where the story waits for that media, or where nothing else will happen.
     const running = runtime

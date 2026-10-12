@@ -319,7 +319,9 @@ also answers asks whose prompt the code computes (`askText "Type: ${line}"`), wh
 script keeps (`(showButton …) / 1 s`, `beg < 15 s`) can also be pressed after the player thinks for just over each
 compared number of seconds or duration (60 s without one), or of the value in the state that the time is compared with
 (`(showButton …) / 1 s > count`). So can any button between two clock reads whose difference a condition compares
-with a constant (`took = getTimestamp().toSeconds() - start` after it, then `took < 5`), just past that constant. Waiting for the next deadline (a timer, a timeout, or the end of awaited media), and
+with a constant (`took = getTimestamp().toSeconds() - start` after it, then `took < 5`), just past that constant. Waiting for the next deadline (a timer, a timeout, or the end of awaited media; not a wait that a timer, media, or
+button block interrupted, which stands still while the block runs and goes on with the time it had left once it
+returns), and
 each shown permanent button, are options too. Media loads succeed with one second per pass, and `askImage` gets one
 stored image. A camera request (`takePhoto`) finds no camera; a step of the search (an expansion's, a chosen random
 outcome's, or a followed wait's) that answered one so goes again with a photo, that stored image, the first time at its

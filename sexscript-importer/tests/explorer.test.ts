@@ -477,7 +477,7 @@ test(
 );
 
 test(
-  "the inputs of a state come from its runtime session: a caller's compared constants, a compared duration, the time a timed button is compared with, and the wait a block interrupted",
+  "the inputs of a state come from its runtime session: a caller's compared constants, a compared duration, the time a timed button is compared with, and the wait a block interrupted only once the block returns",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -574,12 +574,21 @@ test(
         update,
       );
 
-    // A timer block interrupts a wait with a button: the player can also wait for the end of the interrupted wait.
+    // A timer block interrupts a wait with a button: the interrupted wait stands still while the block runs, so the
+    // player can only press; once the block returns, the wait goes on with the time it had left.
     const timed = start('timer async 1 s {\n  showButton "Hit"\n}\nwait 10 s\nsay "Done."\nexit\n');
-    assert.deepEqual(timed.session.options(timed.step.runtime), [
+    assert.deepEqual(timed.session.options(timed.step.runtime), [{ kind: "button", label: "Hit" }]);
+    const pressed = timed.session.apply(
+      timed.step.runtime,
       { kind: "button", label: "Hit" },
-      { kind: "wait", untilMs: 10_000 },
-    ]);
+      false,
+    );
+    assert.ok(pressed !== null);
+    // Nothing else can happen then: the step lets the rest of the wait pass, to its end at 10 s.
+    assert.deepEqual(
+      [pressed.snapshot.status, pressed.snapshot.currentSessionTimeMs, pressed.texts.at(-1)],
+      ["halted", 10_000, "Done."],
+    );
   },
 );
 
