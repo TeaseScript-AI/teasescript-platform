@@ -868,10 +868,18 @@ function limitStop(
   };
 }
 
-/** A sentence that a prompt quotes, or names after "Type:" or "Write:" at the end of a line, to type. */
+/**
+ * A sentence that a prompt quotes, or names after "Type:" or "Write:" at the end of a line, to type. A single quote
+ * opens a quotation only before a word and closes it only after one, so an apostrophe inside a word, as in "you're",
+ * is neither.
+ */
 function quotedAnswer(text: string): string | undefined {
+  const quoted = [
+    ...text.matchAll(/["“„«]([^"“”„«»\n]{3,200})["”“»]/gu),
+    ...text.matchAll(/(?<![\p{L}\p{N}])'([^\n]{3,200}?)'(?![\p{L}\p{N}])/gu),
+  ].sort((a, b) => a.index - b.index);
   return (
-    [...text.matchAll(/["'“„«]([^"'“”„«»\n]{3,200})["'”“»]/gu)].at(-1)?.[1] ??
+    quoted.at(-1)?.[1] ??
     [
       ...text.matchAll(
         /(?:^|\n)\s*(?:type|write|copy|schreibe|tippe)\s*:\s*([^\n]{3,200}?)\s*$/gimu,
