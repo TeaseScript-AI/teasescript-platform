@@ -483,7 +483,8 @@ if not hasPermission {
 Rules:
 
 - Use `and`, `or`, and `not`.
-- `&&`, `||`, and `!` are not part of the language.
+- `&&`, `||`, and `!` are not part of the language; each is a compile error that names the word to write
+  ([§39](#no-symbolic-logical-operators)). `!=` is the comparison.
 - Parentheses may be used to make precedence explicit.
 
 ```text
@@ -499,13 +500,14 @@ Expression precedence from strongest to weakest:
 1. Parenthesized expressions
 2. Property access, indexing, and function calls
 3. Unary `+` and unary `-`
-4. `*`, `/`, `%`
-5. `+`, `-`
-6. Ranges `..` and `..=`
-7. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and type tests `is`, `is not` ([§13](#13-explicit-types))
-8. `not`
-9. `and`
-10. `or`
+4. `otherwise` ([§18](#fallback-with-otherwise))
+5. `*`, `/`, `%`
+6. `+`, `-`
+7. Ranges `..` and `..=`
+8. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and type tests `is`, `is not` ([§13](#13-explicit-types))
+9. `not`
+10. `and`
+11. `or`
 
 Postfix operations such as property access, indexing, and function calls associate from left to right:
 
@@ -513,7 +515,7 @@ Postfix operations such as property access, indexing, and function calls associa
 player.toys[0].name
 ```
 
-Arithmetic operators associate from left to right within the same precedence level:
+Arithmetic operators and `otherwise` associate from left to right within the same precedence level:
 
 ```text
 20 / 5 * 2 // (20 / 5) * 2
@@ -1993,8 +1995,42 @@ if file != null {
 ```
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
-error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
-can instead get a default, as in `load("level", default: 1)`.
+error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A value can
+instead get a fallback, as in `n otherwise 0` ([below](#fallback-with-otherwise)), and a loaded value a default, as in
+`load("level", default: 1)`.
+
+### Fallback with `otherwise`
+**Status:** Accepted (Owner decision on #850, 2026-10-12)
+
+`a otherwise b` gives `a` when it is not `null`, and otherwise `b`. `b` is evaluated only when `a` is `null`, so a
+fallback that calls a function or asks runs only then:
+
+```text
+let start = path.lastIndexOf("/") otherwise -1
+say "Hello ${nickname otherwise "pet"}"
+let name = nickname otherwise savedName otherwise "pet"
+let answer = nickname otherwise askText "Name?"
+```
+
+- The result is not `null` unless the fallback can be: with `count: integer?`, `count otherwise 0` is an `integer`,
+  and `count otherwise null` stays an `integer?`. The result's type joins the value's type without `null` and the
+  fallback's type as for a list `get` default ([§16](#reading-an-element-with-a-default)): `name otherwise 0` on a
+  `string?` is a `string | integer`.
+- A chain runs from left to right and gives the first value that is not `null`.
+- `otherwise` binds more strongly than `*` and `+` ([§5](#expression-precedence-and-associativity)), so the fallback
+  belongs to the value before it: `count otherwise 0 + 1` is `(count otherwise 0) + 1`, `"Hi " + name otherwise "pet"`
+  adds the name or `"pet"`, and `nickname otherwise "pet" == "pet"` compares the result. A computed fallback needs
+  parentheses, as in `count otherwise (base + 1)`. A unit belongs to the number it follows: in `delay otherwise 5 s`,
+  the fallback is `5 s`, so a number of seconds with a fallback is `(delay otherwise 5) s`.
+- A value that the compiler knows can never be `null`, also one narrowed by a check, gets warning `TSV062`, because
+  its fallback is never used. The message names what to remove, such as `'count' is never null here, so the fallback
+  after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the warning goes on the first `otherwise` whose
+  left side can no longer be `null`, as `otherwise "x"` in `nickname otherwise "pet" otherwise "x"`, and names every
+  fallback from there. A value of unknown type, such as an untyped parameter or loaded data, gets no warning.
+- A fallback does not catch an error: `items[5] otherwise 0` still fails when the list has no position 5, and
+  `toys[key] otherwise 0` when the dict has no such key. When the element can never be `null`, the warning names the
+  read that has a default instead, `items.get(5, default: 0)` ([§16](#reading-an-element-with-a-default),
+  [§40](#40-dictionaries)).
 
 ## 19. Choices
 **Status:** Accepted
@@ -5047,6 +5083,7 @@ save
 load
 delete
 is
+otherwise
 ```
 
 The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker, and `global function` declares a global function, while `global identifier = ...` declares a global. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
@@ -5265,6 +5302,7 @@ Rejected:
 &&
 ||
 !
+??
 ```
 
 Accepted:
@@ -5273,6 +5311,18 @@ Accepted:
 and
 or
 not
+otherwise
+```
+
+Each rejected symbol is one compile error that names the word, and the script is read on as if the word were
+written, so no other error follows from it. `!=` stays the comparison, and `?` after a type stays optional
+([§18](#18-null-and-optional-values)):
+
+```text
+TeaseScript writes 'and' instead of '&&': if a and b { ... }
+TeaseScript writes 'or' instead of '||': if a or b { ... }
+TeaseScript writes 'not' instead of '!': if not a { ... }
+TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise "pet"
 ```
 
 ### Reserved generic media controls
