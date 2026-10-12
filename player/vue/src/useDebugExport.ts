@@ -65,6 +65,8 @@ export function useDebugExport(
     choices.value = NO_PERSONAL_CONTENT;
     if (!isOpen) return;
     try {
+      // A catch-up under way finishes first, so the session and what the Player shows of it agree.
+      player.finishCatchUp();
       const frozen = await player.debugExportCandidate(details());
       if (current === generation) candidate.value = frozen;
     } catch {

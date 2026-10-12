@@ -349,6 +349,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerRuntimeSession | null>(null);
+  // The session as one late observation publishes it: `session` itself, except while a catch-up is under way, when it
+  // stays at the last caught-up publication. What the Player does beyond showing the session follows it: keeping the
+  // session, rewind points, notices, media, captures, and cameras (RUNTIME.md "Timers and scene time").
+  const caughtUp = shallowRef<PlayerRuntimeSession | null>(null);
   // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
   const rewindRetirements = ref(0);
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
@@ -367,7 +371,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Which random draws Debug decides or pauses at; every session of the Player gets it.
   let randomControl: RandomControlOptions | null = null;
   // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
-  const servicedSession = computed(() => (held.value ? null : session.value));
+  const servicedSession = computed(() => (held.value ? null : caughtUp.value));
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
@@ -451,6 +455,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     held,
     () => randomControl === null,
   );
+  watch(
+    [session, clock.catchingUp],
+    ([current, catchingUp]) => {
+      if (!catchingUp) caughtUp.value = current;
+    },
+    { immediate: true, flush: "sync" },
+  );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
   // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
   // cause the error, so the stop is checked again after it.
@@ -461,6 +472,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
+  );
+  // The Stage image of the caught-up session, which notices are about.
+  const caughtUpStageImage = computed(() =>
+    caughtUp.value === null ? null : playerRuntimeMedia(caughtUp.value.state).stage.image,
   );
   // The Stage source the browser could not load, as the Stage reports it while it shows that source, or `null`. The
   // Stage keeps that image hidden while its source stays, also into a new session, which then gets no new browser error.
@@ -473,7 +488,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let readEntries: PlayerRuntimeSession["transcriptEntries"] | null = null;
   let readCount = 0;
   const checkedSpeakers = new Set<string>();
-  watch(session, (current) => {
+  watch(caughtUp, (current) => {
     const entries = current?.transcriptEntries ?? null;
     if (entries !== readEntries) {
       readEntries = entries;
@@ -490,10 +505,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
     }
   });
-  // A Stage image that is no package file, or one the Stage shows as failed when a session starts. One that a catch-up
-  // shows only on its way is not reported, as one late observation would not show it.
-  watch([generation, stageImage, clock.catchingUp], ([, image, catchingUp]) => {
-    if (image === null || catchingUp) return;
+  // Avatars the browser could not load while a catch-up was under way: their messages stay, so they are reported once
+  // it is done.
+  const failedAvatars = new Set<string>();
+  watch(caughtUp, () => {
+    for (const path of failedAvatars)
+      reportUnusableMedia(path, playerNotices.unusableMedia("image", path, "failed"));
+    failedAvatars.clear();
+  });
+  // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
+  watch([generation, caughtUpStageImage], ([, image]) => {
+    if (image === null) return;
     if (resolvePackageAsset(image) === null)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
     else if (failedStageSource.value !== null && resolveAsset(image) === failedStageSource.value)
@@ -501,10 +523,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
 
   watch(
-    [session, held, clock.catchingUp],
-    ([current, paused, catchingUp]) => {
-      // A catch-up under way starts, stops, and moves no media until it is done, as one late observation would not.
-      if (catchingUp && !paused) return;
+    [caughtUp, held],
+    ([current, paused]) => {
       // A stopped session keeps no media.
       const media = current && !stopped.value ? playerRuntimeMedia(current.state).media : [];
       // An inspected state, and a draw that waits, show their media where they were, without playing them.
@@ -537,7 +557,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   watch(servicedSession, () => void serviceCapture());
   // A session that ended releases its camera.
   watch(
-    () => session.value?.state.status,
+    () => caughtUp.value?.state.status,
     (status) => {
       if (status === "halted" || status === "failed") camera.release();
     },
@@ -573,25 +593,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     publish: (next) => (session.value = next),
   });
   // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
-  // a session and an action, is reported once, so a dismissal holds only for the request it was given for; one that a
-  // catch-up shows only on its way is not.
-  let cameraOnlyReported: string | null = null;
+  // a session and an action, is reported once, so a dismissal holds only for the request it was given for.
   watch(
-    [
-      () => {
-        const request = session.value && activePlayerRuntimeInteraction(session.value.state);
-        return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
-          ? `${generation.value}:${request.actionId}`
-          : null;
-      },
-      clock.catchingUp,
-    ],
-    ([cameraOnlyRequest, catchingUp]) => {
-      if (catchingUp || cameraOnlyRequest === cameraOnlyReported) return;
-      cameraOnlyReported = cameraOnlyRequest;
-      if (cameraOnlyRequest === null) notices.dismiss(playerNoticeKeys.imageNeedsCamera);
-      else notices.publish(playerNotices.imageNeedsCamera());
+    () => {
+      const request = caughtUp.value && activePlayerRuntimeInteraction(caughtUp.value.state);
+      return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
+        ? `${generation.value}:${request.actionId}`
+        : null;
     },
+    (cameraOnlyRequest) =>
+      cameraOnlyRequest === null
+        ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
+        : notices.publish(playerNotices.imageNeedsCamera()),
   );
   // A stopped session's captures and cameras end; its media goes with the media watcher above.
   watch(
@@ -1095,6 +1108,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
+    failedAvatars.clear();
     debugEdits.value = null;
     inspecting.value = paused;
     rewound.value = null;
@@ -1123,7 +1137,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // before and does not end anew.
   const endings = ref(0);
   let rewoundGeneration = -1;
-  watch([session, generation], ([next, current], [previous, before]) => {
+  watch([caughtUp, generation], ([next, current], [previous, before]) => {
     if (next?.state.status !== "halted") return;
     if (current === before ? previous?.state.status !== "halted" : current !== rewoundGeneration)
       endings.value++;
@@ -1224,16 +1238,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // The session kept before stays; a reload continues from there.
     }
   }
-  /** Keeps the shown session as it is now and waits until it is kept. */
+  /** Keeps the shown session as it is now, a catch-up under way finished first, and waits until it is kept. */
   async function keepSession(): Promise<void> {
-    keepSessionLater();
-    while (keeping !== null) await keeping;
+    do {
+      clock.settle();
+      keepWhenCaughtUp = false;
+      keepSessionLater();
+      while (keeping !== null) await keeping;
+      // A catch-up that started meanwhile deferred the keep.
+    } while (keepWhenCaughtUp && !disposed);
   }
   // The session is kept at each interaction it newly presents and when it ends, and when the page is hidden.
   let keptActionId: number | null = null;
-  watch(session, (current) => {
-    // An interaction a catch-up presents only on its way is not kept, as one late observation would not show it.
-    if (current === null || inspecting.value || clock.catchingUp.value) return;
+  watch(caughtUp, (current) => {
+    if (current === null || inspecting.value) return;
     const actionId = activePlayerRuntimeInteraction(current.state)?.actionId ?? null;
     const ended = current.state.status === "halted" || current.state.status === "failed";
     if ((actionId === null || actionId === keptActionId) && !ended) return;
@@ -1945,8 +1963,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     resolveAsset,
     /** Reports a speaker's avatar image that the browser could not load or decode, as a Stage image is reported. */
     avatarFailed(path: string) {
-      if (resolvePackageAsset(path) !== null)
-        reportUnusableMedia(path, playerNotices.unusableMedia("image", path, "failed"));
+      if (resolvePackageAsset(path) === null) return;
+      if (clock.catchingUp.value) failedAvatars.add(path);
+      else reportUnusableMedia(path, playerNotices.unusableMedia("image", path, "failed"));
     },
     /** The authored Stage image of the session, or `null` for an empty Stage. */
     stageImage,
@@ -1965,7 +1984,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      */
     stageImageFailure(src: string | null) {
       failedStageSource.value = src;
-      const image = stageImage.value;
+      // A failure of an image a catch-up shows only on its way is not reported: the caught-up session shows another.
+      const image = caughtUpStageImage.value;
       if (src === null || image === null || resolveAsset(image) !== src) return;
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
     },
@@ -2002,8 +2022,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     timers: clock.timers,
     /** The display estimate of scene time, for presentation only; see `refreshSceneTimeWhile`. */
     sceneTimeMs: clock.displayTimeMs,
-    /** Whether a late observation is being caught up; the session then shows a step of it, not the observed time. */
-    catchingUp: clock.catchingUp,
+    /**
+     * The session as one late observation publishes it: `session`, except while a catch-up is under way, when it is the
+     * last caught-up publication. Follow it for anything beyond showing the session.
+     */
+    caughtUpSession: computed(() => caughtUp.value),
+    /** Finishes a catch-up under way at once, as input does, before something reads the session as observed. */
+    finishCatchUp: clock.settle,
     /** Keeps `sceneTimeMs` refreshing while `demand` holds, until the calling scope ends. */
     refreshSceneTimeWhile: clock.refreshWhile,
     /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */

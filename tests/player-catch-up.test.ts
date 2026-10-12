@@ -14,7 +14,12 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
+import {
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+  type KeptRoomStore,
+  type KeptSessionStore,
+} from "../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan, RandomControlOptions, RuntimeSnapshot } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -96,7 +101,10 @@ test("a save during a catch-up is answered at the scene time one late observatio
 // The Vue session host and its scene clock, loaded through the build tool like the Player loads them.
 interface SessionHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly caughtUpSession: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
+  readonly stageImage: Readonly<Ref<string | null>>;
+  readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   prepare(create: () => PlayerRuntimeSession): void;
   prepareScript(plan: InstructionPlan, create: () => PlayerRuntimeSession): Promise<void>;
   loadScriptStorage(): Promise<void>;
@@ -104,6 +112,9 @@ interface SessionHost {
   activate(): Promise<void>;
   observe(): PlayerRuntimeSession | null;
   update(next: PlayerRuntimeSession): void;
+  stageImageFailure(src: string | null): void;
+  avatarFailed(path: string): void;
+  setDebugMode(enabled: boolean): void;
   setRandomControl(control: RandomControlOptions | null): void;
   resolveRandomDraw(drawId: number, outcome: "natural"): void;
   debugExportCandidate(shown: {
@@ -119,6 +130,8 @@ interface SessionHost {
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
   keptSessions?: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
+  resolveAsset?: (path: string) => string | null;
 }) => SessionHost;
 
 before(async () => {
@@ -131,17 +144,20 @@ before(async () => {
 });
 
 /**
- * Starts `source` in a Player whose monotonic clock moves on a millisecond at each reading, as if the Player's work
- * took that long, so a catch-up uses up its task after a few steps. Deadline wake-ups fire only when `wakeUp` lets
- * them; a catch-up goes on in tasks of its own. `late` moves the clock on as a page in the background would and lets
- * the page show again. With `keptSessions`, the script keeps its session, as one with saved data does.
+ * Starts `source` in a Player whose monotonic clock moves on `msPerReading` at each reading, as if the Player's work
+ * took that long, so a catch-up uses up its task after a few steps (one, at 11 ms). Deadline wake-ups fire only when
+ * `wakeUp` lets them; a catch-up goes on in tasks of its own. `late` moves the clock on as a page in the background
+ * would and lets the page show again. With `keptSessions`, the script keeps its session, as one with saved data does.
  */
 async function mount(
   context: TestContext,
   source: string,
   options: {
+    readonly msPerReading?: number;
     readonly randomControl?: RandomControlOptions;
     readonly keptSessions?: KeptSessionStore;
+    readonly debugRooms?: KeptRoomStore;
+    readonly resolveAsset?: (path: string) => string | null;
   } = {},
 ) {
   // Event targets are the only browser surface these scripts use; no media elements are created.
@@ -155,19 +171,17 @@ async function mount(
   }
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let nowMs = 0;
-  context.mock.method(performance, "now", () => (nowMs += 1));
+  const msPerReading = options.msPerReading ?? 1;
+  context.mock.method(performance, "now", () => (nowMs += msPerReading));
+  const { msPerReading: _, randomControl, ...hostOptions } = options;
+  const keeps = options.keptSessions !== undefined;
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession(
-      options.keptSessions === undefined
-        ? {}
-        : { scriptStorage: savedData(), keptSessions: options.keptSessions },
-    ),
+    usePlayerSession(keeps ? { ...hostOptions, scriptStorage: savedData() } : hostOptions),
   )!;
   context.after(() => scope.stop());
-  if (options.randomControl !== undefined) host.setRandomControl(options.randomControl);
-  if (options.keptSessions === undefined)
-    host.prepare(() => createPlayerRuntimeSession(source, sessionOptions));
+  if (randomControl !== undefined) host.setRandomControl(randomControl);
+  if (!keeps) host.prepare(() => createPlayerRuntimeSession(source, sessionOptions));
   else {
     await host.loadScriptStorage();
     const plan = compilePlayerProject(source).plan;
@@ -200,6 +214,29 @@ function savedData(): ScriptStorageProvider {
     clear: async () => {},
   };
 }
+
+/** A kept-session store in memory that records the observed time of each snapshot it keeps. */
+function recordingKeptSessions(keptMs: number[], first?: Promise<void>): KeptSessionStore {
+  const store = memoryKeptSessionStore();
+  let held = first;
+  return {
+    session: (scope) => store.session(scope),
+    discard: (scope) => store.discard(scope),
+    media: store.media,
+    publish: async (scope, update) => {
+      // EVIDENCE: the Player keeps the JSON of a snapshot it exported and validated (`playerRuntimeSnapshotJson`).
+      const kept = JSON.parse(update.snapshotJson) as RuntimeSnapshot;
+      keptMs.push(kept.observedSessionTimeMs);
+      await store.publish(scope, update);
+      const wait = held;
+      held = undefined;
+      await wait;
+    },
+  };
+}
+
+/** Whether the host is catching up: it shows a step, not the caught-up session. */
+const catchingUp = (host: SessionHost) => host.session.value !== host.caughtUpSession.value;
 
 /** Lets the tasks of a catch-up run until the session stays as it is; returns how many sessions they published. */
 async function caughtUp(host: SessionHost) {
@@ -237,7 +274,7 @@ test("in a hidden page, a catch-up a late wake-up starts goes on without timers"
   // Hidden pages throttle timers, and animation frames do not run in them at all.
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   wakeUp(1_000);
-  assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
+  assert.ok(catchingUp(host), "a catch-up is under way");
   // No timer fires from here on.
   await caughtUp(host);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
@@ -246,7 +283,7 @@ test("in a hidden page, a catch-up a late wake-up starts goes on without timers"
 test("input during a catch-up finishes it first and lands at the scene time it arrives at", async (context) => {
   const { host, late } = await mount(context, rounds);
   late(1_000);
-  assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
+  assert.ok(catchingUp(host), "a catch-up is under way");
   // As the Player's interaction does: observe, then answer what is presented.
   const observed = host.observe()!;
   const atMs = observed.state.observedSessionTimeMs;
@@ -264,7 +301,7 @@ test("input during a catch-up finishes it first and lands at the scene time it a
 test("a debug export asked for during a catch-up finishes it first", async (context) => {
   const { host, late } = await mount(context, rounds);
   late(1_000);
-  assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
+  assert.ok(catchingUp(host), "a catch-up is under way");
   const candidate = await host.debugExportCandidate({
     player: {},
     host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
@@ -274,36 +311,106 @@ test("a debug export asked for during a catch-up finishes it first", async (cont
 
 test("what a catch-up shows only on its way is neither kept nor reported", async (context) => {
   const keptMs: number[] = [];
-  const store = memoryKeptSessionStore();
-  const keptSessions: KeptSessionStore = {
-    session: (scope) => store.session(scope),
-    discard: (scope) => store.discard(scope),
-    media: store.media,
-    publish: (scope, update) => {
-      // EVIDENCE: the Player keeps the JSON of a snapshot it exported and validated (`playerRuntimeSnapshotJson`).
-      const kept = JSON.parse(update.snapshotJson) as RuntimeSnapshot;
-      keptMs.push(kept.observedSessionTimeMs);
-      return store.publish(scope, update);
-    },
-  };
-  // Timed buttons and a missing Stage image come and go on the way; one late observation shows none of them.
+  // Timed buttons, a missing Stage image, and one the browser cannot load come and go on the way, and two speakers
+  // speak, one with a missing avatar and one whose avatar the browser cannot load; one late observation shows only the
+  // messages, whose avatars are reported once the catch-up is done.
   const { host, late } = await mount(
     context,
-    'repeat 20 {\n  let tap = showButton "Tap", timeout: 10 ms\n}\nshowImage "missing.png"\nrepeat 20 {\n  wait 10 ms\n}\nshowImage null\nlet done = showButton "Done"\nexit',
-    { keptSessions },
+    'speaker guide {\n  displayName: "Guide"\n  avatar: "missing.png"\n}\nspeaker host {\n  displayName: "Host"\n  avatar: "face.png"\n}\nrepeat 3 {\n  let tap = showButton "Tap", timeout: 10 ms\n}\nshowImage "corrupt.png"\nwait 10 ms\nshowImage "gone.png"\nsay as guide "Hi", instant\nsay as host "Hello", instant\nwait 10 ms\nshowImage null\nlet done = showButton "Done"\nexit',
+    {
+      msPerReading: 11,
+      keptSessions: recordingKeptSessions(keptMs),
+      resolveAsset: (path) =>
+        path === "corrupt.png" || path === "face.png" ? `/files/${path}` : null,
+    },
   );
   await caughtUp(host);
   keptMs.length = 0;
   late(1_000);
-  assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
+  let failed = false;
+  for (let guard = 0; catchingUp(host); guard += 1) {
+    assert.ok(guard < 20, "the catch-up ends");
+    assert.deepEqual(host.notices.value, [], "nothing is reported on the way");
+    // The Stage reports that the browser could not load the image it shows.
+    if (host.stageImage.value === "corrupt.png") {
+      host.stageImageFailure("/files/corrupt.png");
+      failed = true;
+    }
+    // The transcript reports that the browser could not load an avatar it shows.
+    if (host.session.value!.transcriptEntries.some((entry) => entry.text === "Hello"))
+      host.avatarFailed("face.png");
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   await caughtUp(host);
+  assert.ok(failed, "the catch-up showed the image that fails");
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
-  assert.deepEqual(host.notices.value, [], "the image that came and went is not reported");
+  assert.equal(
+    host.notices.value.length,
+    2,
+    "only the avatars of the messages that stay are reported",
+  );
   assert.ok(keptMs.length > 0, "the session is kept once the catch-up is done");
   assert.ok(
     keptMs.every((ms) => ms >= 1_000),
     `kept at ${keptMs.join(", ")}`,
   );
+});
+
+test("an image request a catch-up shows only on its way opens no camera", async (context) => {
+  let opened = 0;
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia: () => {
+          opened += 1;
+          return new Promise(() => {});
+        },
+      },
+    },
+  });
+  context.after(() => {
+    if (previous) Object.defineProperty(globalThis, "navigator", previous);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  });
+  const { host, late } = await mount(
+    context,
+    'timer async 20 ms { exit }\nwait 10 ms\nlet image = askImage("Transient")\nexit',
+    { msPerReading: 11 },
+  );
+  late(1_000);
+  assert.ok(catchingUp(host), "a catch-up is under way");
+  assert.equal(host.session.value!.state.foregroundAction?.kind, "interaction");
+  await caughtUp(host);
+  assert.equal(host.session.value!.state.status, "halted");
+  assert.equal(opened, 0);
+});
+
+test("turning Debug on during a catch-up keeps the normal session as one late observation leaves it", async (context) => {
+  const keptMs: number[] = [];
+  let release = () => {};
+  const firstKept = new Promise<void>((resolve) => (release = resolve));
+  const { host, late } = await mount(
+    context,
+    'repeat 10 {\n  wait 1 ms\n}\nlet done = showButton "Done"\nexit',
+    {
+      msPerReading: 11,
+      keptSessions: recordingKeptSessions(keptMs, firstKept),
+      debugRooms: memoryKeptRoomStore(),
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  // The room change waits for the normal session's keep that is still being written.
+  host.setDebugMode(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  late(1_000);
+  assert.ok(catchingUp(host), "a catch-up is under way");
+  release();
+  await caughtUp(host);
+  for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.rooms.current.value, "debug");
+  assert.ok(keptMs.at(-1)! >= 1_000, `kept at ${keptMs.join(", ")}`);
 });
 
 test("while Debug decides random draws, a late observation is one observation", async (context) => {
@@ -324,4 +431,25 @@ test("while Debug decides random draws, a late observation is one observation", 
     host.session.value!.transcriptEntries.map((entry) => entry.text),
     ["rolled"],
   );
+});
+
+test("turning Debug's random draws on during a catch-up finishes it with natural draws", async (context) => {
+  const { host, late } = await mount(
+    context,
+    'repeat 5 {\n  wait 10 ms\n  let r = randomInteger(1..=6)\n}\nlet done = showButton "Done"\nexit',
+    { msPerReading: 11 },
+  );
+  late(1_000);
+  assert.ok(catchingUp(host), "a catch-up is under way");
+  let decided = 0;
+  host.setRandomControl({
+    decide: () => {
+      decided += 1;
+      return { kind: "suspend" };
+    },
+  });
+  assert.ok(!catchingUp(host));
+  assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
+  assert.equal(host.session.value!.state.randomDraw, null);
+  assert.equal(decided, 0);
 });

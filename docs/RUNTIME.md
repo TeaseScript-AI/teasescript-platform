@@ -569,10 +569,11 @@ next deadline, before input continues the script, when the page's visibility cha
 are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
 and visibility changes never pause time. The Player submits a late observation without media progress in steps, an
 ordinary observation at each next timed event and then at the observed time, and gives the browser a turn after each
-task of steps; this gives the result of one observation. It shows each step, but keeps the session, takes rewind
-points, reports missing files, and changes media playback only once the catch-up is done. Input, host answers, Debug
-controls, and hiding the page first complete a catch-up under way with one observation of the current time, so they land
-no earlier than without steps. While Debug decides random draws, a late observation is one observation.
+task of steps; this gives the result of one observation. It shows each step, but everything else it does with the
+session (keeping it, rewind points, image notices, media playback, photos, and cameras) follows only the publication
+that ends the catch-up. Input, host answers, Debug controls, a debug export, and hiding the page first complete a
+catch-up under way with one observation of the current time, so they land no earlier than without steps. While Debug
+decides random draws, a late observation is one observation.
 When restored execution resumes, the Player rebases its clock on the saved
 `observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceResume`, while held
 catch-up continues from the saved `currentSessionTimeMs`. After a page reload, the explicit Continue of

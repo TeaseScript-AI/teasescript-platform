@@ -40,17 +40,17 @@ export function useDebugRewind(player: PlayerSessionHost) {
     void ended?.destroy();
   }
   function follow(session: PlayerRuntimeSession | null) {
-    // A catch-up under way is followed once it is done, as one late observation would publish it.
-    if (publishing || session === null || player.catchingUp.value) return;
+    if (publishing || session === null) return;
     history.value ??= new DebugHistory(session.plan, rewind.openSpill(), rewind.memoryBudget);
     history.value.follow(session, marks());
     revision.value++;
   }
-  // Every published session is followed, so a point keeps exactly the events that led to it.
+  // Every published session is followed, so a point keeps exactly the events that led to it; a catch-up only once it
+  // is done, as one late observation publishes it.
   watch(player.generation, () => publishing || end(), { flush: "sync" });
   watch(rewind.retirements, end, { flush: "sync" });
-  watch(player.session, follow, { flush: "sync" });
-  follow(player.session.value);
+  watch(player.caughtUpSession, follow, { flush: "sync" });
+  follow(player.caughtUpSession.value);
   rewind.onAdopted(() => {
     history.value?.adopt();
     revision.value++;
