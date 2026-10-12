@@ -500,10 +500,10 @@ Expression precedence from strongest to weakest:
 1. Parenthesized expressions
 2. Property access, indexing, and function calls
 3. Unary `+` and unary `-`
-4. `otherwise` ([§18](#fallback-with-otherwise))
-5. `*`, `/`, `%`
-6. `+`, `-`
-7. Ranges `..` and `..=`
+4. `*`, `/`, `%`
+5. `+`, `-`
+6. Ranges `..` and `..=`
+7. `otherwise` ([§18](#fallback-with-otherwise))
 8. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and type tests `is`, `is not` ([§13](#13-explicit-types))
 9. `not`
 10. `and`
@@ -534,6 +534,14 @@ Ranges and comparisons do not chain. Parentheses or logical operators must be us
 1..10..20   // compile error
 minimum < value and value < maximum // valid
 minimum < value < maximum           // compile error
+```
+
+An operand of `otherwise` that is arithmetic or a range needs parentheses ([§18](#fallback-with-otherwise)):
+
+```text
+count otherwise 0 + 1   // compile error
+(count otherwise 0) + 1 // valid
+count otherwise (0 + 1) // valid
 ```
 
 Because comparisons bind more strongly than `not`, this:
@@ -1995,9 +2003,16 @@ if file != null {
 ```
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
-error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A value can
-instead get a fallback, as in `n otherwise 0` ([below](#fallback-with-otherwise)), and a loaded value a default, as in
-`load("level", default: 1)`.
+error. The message names the check to write, inside which `n` is an `integer`, and a fallback
+([below](#fallback-with-otherwise)):
+
+```text
+'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0
+```
+
+The fallback is `0` for a number, `""` for text, `false` for a boolean, and `...` for another value. The message names
+none for a value that an assignment or a method changes, such as `items` in `items.add(1)`, because a fallback gives a
+copy, nor for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
 
 ### Fallback with `otherwise`
 **Status:** Accepted (Owner decision on #850, 2026-10-12)
@@ -2017,11 +2032,19 @@ let answer = nickname otherwise askText "Name?"
   fallback's type as for a list `get` default ([§16](#reading-an-element-with-a-default)): `name otherwise 0` on a
   `string?` is a `string | integer`.
 - A chain runs from left to right and gives the first value that is not `null`.
-- `otherwise` binds more strongly than `*` and `+` ([§5](#expression-precedence-and-associativity)), so the fallback
-  belongs to the value before it: `count otherwise 0 + 1` is `(count otherwise 0) + 1`, `"Hi " + name otherwise "pet"`
-  adds the name or `"pet"`, and `nickname otherwise "pet" == "pet"` compares the result. A computed fallback needs
-  parentheses, as in `count otherwise (base + 1)`. A unit belongs to the number it follows: in `delay otherwise 5 s`,
-  the fallback is `5 s`, so a number of seconds with a fallback is `(delay otherwise 5) s`.
+- An operand of `otherwise` that is arithmetic or a range needs parentheses, because the fallback could be meant for
+  the value next to it or for the whole operand ([§5](#expression-precedence-and-associativity)). Arithmetic is `+`,
+  `-`, `*`, `/`, `%`, a sign before the left operand, as in `-x otherwise 0`, and a range `..` or `..=`. The compile
+  error names both readings, with the code as written:
+
+  ```text
+  Put parentheses around what 'otherwise' belongs to: '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'.
+  ```
+
+- A sign before the fallback can be read only one way, as in `path.lastIndexOf("/") otherwise -1`. `otherwise` binds
+  more strongly than comparisons, type tests, `not`, `and`, and `or`, so `nickname otherwise "pet" == "pet"` compares
+  the result, and a chain or an interpolation needs no parentheses. A unit belongs to the number it follows: in
+  `delay otherwise 5 s`, the fallback is `5 s`, so a number of seconds with a fallback is `(delay otherwise 5) s`.
 - A value that the compiler knows can never be `null`, also one narrowed by a check, gets warning `TSV062`, because
   its fallback is never used. The message names what to remove, such as `'count' is never null here, so the fallback
   after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the warning goes on the first `otherwise` whose
