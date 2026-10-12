@@ -5316,11 +5316,12 @@ class TypeChecker {
                 typeOf,
               ),
             );
-          // A dict gives the value or the default, so their types join. A default of unknown type makes the result
-          // unknown, so a place checks it when the script runs.
-          return fallback === undefined
-            ? results[index]!
-            : union([results[index]!, plainType(fallback)]);
+          if (fallback === undefined) return results[index]!;
+          // A dict gives the value or the default, so their types join as in a literal, where an empty list default
+          // takes the element type of a list value, and a default of another type adds its type. A default of unknown
+          // type makes the result unknown, so a place checks it when the script runs.
+          const both = [results[index]!, plainType(fallback)];
+          return joinTypes(both) ?? union(both);
         });
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);

@@ -704,6 +704,20 @@ test("get takes a default of any type, and its result joins the value type with 
     ),
     [],
   );
+  // The types join as in a literal: an empty list default takes the element type of the dict's lists.
+  assert.deepEqual(
+    says(
+      [
+        "let rounds: integer[] dict = dict{ warmup: [10, 20] }",
+        'for count in rounds.get("warmup", default: []) {',
+        "    say count + 1",
+        "}",
+        'say rounds.get("cooldown", default: []).length',
+        "exit",
+      ].join("\n"),
+    ),
+    ["11", "21", "0"],
+  );
   // A dict whose value type no value decided yet takes it from the default, as from a first value, so counting and
   // grouping need no declared type. A later value of another type is the usual error.
   assert.deepEqual(
