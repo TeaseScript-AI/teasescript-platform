@@ -4160,6 +4160,8 @@ class TypeChecker {
    * values must be valid, and written sources must leave the player a way to answer.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+    if (expression.presentation !== undefined)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     const sources: boolean[] = [];
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
@@ -6008,6 +6010,9 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    // The options of the question's mode are evaluated first, as for `say`.
+    if (expression.presentation !== null)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     if (expression.interactionKind === "form")
       return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind === "booleans")
@@ -6028,6 +6033,7 @@ class TypeChecker {
     }
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
+        if (operand === expression.presentation) continue;
         const type = yield* compileChild(this.#expressionTask(operand, scope));
         if (operand === expression.prefill)
           this.#checkInteractionPrefill(expression.interactionKind, operand, type);

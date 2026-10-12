@@ -18,6 +18,7 @@ import type {
   TimerParts,
   Expression,
   MediaParts,
+  ObjectLiteral,
   FunctionDeclaration,
   GlobalStatement,
   Program,
@@ -534,6 +535,8 @@ class SemanticValidator {
   #statement: Statement | null = null;
   /** The value of each `say` statement, whose call of an unknown `skippable` or `unskippable` gets a hint. */
   readonly #sayStatementValues = new WeakSet<Expression>();
+  /** The questions of asks, whose call of an unknown `prose` or `bubble` is a mode written with its question. */
+  readonly #askQuestions = new WeakSet<Expression>();
 
   /** The `script(...)` call that a transfer statement being checked names directly, as in `goto script("a.tease")`. */
   #directTarget: {
@@ -1876,6 +1879,8 @@ class SemanticValidator {
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
         } else {
+          this.#validatePresentationProperties(expression.presentation);
+          if (expression.question !== null) this.#askQuestions.add(expression.question);
           for (const operand of askOperands(expression))
             yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
         }
@@ -2021,6 +2026,11 @@ class SemanticValidator {
             }
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
+            this.#validatePresentationProperties(expression.presentation ?? null);
+            if (expression.presentation !== undefined)
+              yield* compileChild(
+                this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
+              );
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
@@ -2053,12 +2063,15 @@ class SemanticValidator {
               expression.callee.span,
             );
           } else if (!this.#reportFileName(name, expression.callee.span)) {
-            // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text.
+            // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text, and an
+            // ask reads `askText prose("Name?")` as a question that calls `prose`, as `say` does.
             const hint =
               this.#sayStatementValues.has(expression) &&
               (name === "skippable" || name === "unskippable")
                 ? ` To say a message ${name}, write its text without parentheses, as in 'say ${name} "Hi"'. Only a say used as a value, such as 'let line = say ${name} ("Hi", instant)', takes its text in parentheses.`
-                : "";
+                : this.#askQuestions.has(expression) && (name === "bubble" || name === "prose")
+                  ? ` To show the question as ${name}, write the question after '${name}' without parentheses around it, as in '${name} "Name?"', or give '${name}' its own parentheses first, as in '${name}() ("Name?")'.`
+                  : "";
             this.#report(
               semanticCode.unknownFunction,
               `Unknown function '${name}'.${hint}`,
@@ -2204,6 +2217,15 @@ class SemanticValidator {
     expression satisfies never;
   }
 
+  /** The options of a message mode written for a `say` or an ask's question, such as `prose(align: "center")`. */
+  #validatePresentationProperties(presentation: ObjectLiteral | null): void {
+    if (presentation === null) return;
+    for (const property of presentation.properties)
+      this.#diagnostics.push(
+        ...presentationPropertyDiagnostics(property.name.name, property.value),
+      );
+  }
+
   /** A `say`, as a statement or a value: its operands under the speaker it chooses, and its presentation and pacing. */
   *#validateSayTask(parts: SayParts, scope: SemanticScope, statement: boolean): CompileTask<void> {
     const contextualSpeaker =
@@ -2216,10 +2238,7 @@ class SemanticValidator {
       yield* compileChild(
         this.#validateExpressionTask(parts.presentation, scope, contextualSpeaker),
       );
-      for (const property of parts.presentation.properties)
-        this.#diagnostics.push(
-          ...presentationPropertyDiagnostics(property.name.name, property.value),
-        );
+      this.#validatePresentationProperties(parts.presentation);
     }
     this.#diagnostics.push(...messageColorDiagnostics(parts.value));
     if (statement) this.#sayStatementValues.add(parts.value);

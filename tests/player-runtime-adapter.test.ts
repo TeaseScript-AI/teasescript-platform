@@ -119,6 +119,32 @@ exit
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
 });
 
+test("an ask's prose question reaches the transcript as prose with its field, and keeps its mode on restore", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide {
+  prose: { align: "left" }
+}
+let name = askText as guide prose(position: "center") "Your name?"
+say "Hello \${name}", instant
+exit
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message") throw new Error("Expected the question.");
+  assert.equal(entry.text, "Your name?");
+  assert.deepEqual(entry.presentation, {
+    kind: "prose",
+    position: "center",
+    align: "left",
+    font: null,
+    color: null,
+    background: null,
+  });
+  assert.equal(playerRuntimeForeground(session)?.kind, "ask-text");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  assert.equal(playerRuntimeForeground(restored)?.kind, "ask-text");
+});
+
 test("speaker identity remains stable when authored presentation changes", () => {
   const session = createPlayerRuntimeSession(`
 speaker guide { displayName: "Guide" }

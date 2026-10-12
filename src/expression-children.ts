@@ -34,18 +34,24 @@ export function namedAskArguments(
 }
 
 /**
- * The operands of an ask in evaluation order: the question, then `hint:` and `prefill:` in the order they are written,
- * or every named argument of an ask that keeps them. For `askChoice`, the `prefill:` that follows its options.
+ * The operands of an ask in evaluation order: the options of its question's mode, then the question, then `hint:` and
+ * `prefill:` in the order they are written, or every named argument of an ask that keeps them. For `askChoice`, the
+ * `prefill:` that follows its options.
  */
 export function askOperands(expression: InteractionExpression): readonly Expression[] {
+  const presentation = expression.presentation === null ? [] : [expression.presentation];
   if (hasNamedAskArguments(expression))
-    return namedAskArguments(expression).map((argument) => argument.value);
+    return [...presentation, ...namedAskArguments(expression).map((argument) => argument.value)];
   const named = [expression.hint, expression.prefill].filter(
     (operand): operand is Expression => operand !== null,
   );
   if (named.length === 2 && named[1]!.span.start.offset < named[0]!.span.start.offset)
     named.reverse();
-  return expression.question === null ? named : [expression.question, ...named];
+  return [
+    ...presentation,
+    ...(expression.question === null ? [] : [expression.question]),
+    ...named,
+  ];
 }
 
 /**
@@ -92,7 +98,11 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "indexExpression":
       return [expression.object, expression.index];
     case "callExpression":
-      return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
+      return [
+        expression.callee,
+        ...(expression.presentation === undefined ? [] : [expression.presentation]),
+        ...expression.arguments.map((argument) => argument.value),
+      ];
     case "unaryExpression":
     case "unitExpression":
       return [expression.operand];

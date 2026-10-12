@@ -252,6 +252,11 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText("Q", prefill: '), "prefill");
   assert.equal(activeSlot('askText("Q", hint: '), "hint");
   assert.equal(activeSlot('askText as mistress ("Q", prefill: '), "prefill");
+  // So do the parentheses after the question's mode and its own parentheses.
+  assert.equal(activeSlot('askText prose() ("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText as mistress prose(align: "left") ("Q", hint: '), "hint");
+  assert.equal(activeSlot('let more = askText prose() ("Q") + '), null);
+  assert.equal(activeSlot('askText prose "Q", hint: '), "hint");
   assert.equal(activeSlot('askText("Q"'), "question");
   assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
   assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");

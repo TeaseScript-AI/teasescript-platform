@@ -449,7 +449,12 @@ class Lexer {
         this.#tokens[index - 1]?.kind !== TokenKind.Dot) ||
         isInteractionCommand(previous?.lexeme) ||
         (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
-          isInteractionCommand(this.#tokens[index - 2]?.lexeme)))
+          isInteractionCommand(this.#tokens[index - 2]?.lexeme)) ||
+        // The mode of an ask's question, as in `askText prose "Name?"` or `askText as mistress prose "Name?"`.
+        ((previous?.lexeme === "bubble" || previous?.lexeme === "prose") &&
+          (isInteractionCommand(this.#tokens[index - 1]?.lexeme) ||
+            (this.#tokens[index - 2]?.kind === TokenKind.KeywordAs &&
+              isInteractionCommand(this.#tokens[index - 3]?.lexeme)))))
     ) {
       return true;
     }

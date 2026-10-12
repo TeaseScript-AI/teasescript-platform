@@ -240,6 +240,15 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askForm", "form"],
   ["askBooleans", "booleans"],
 ]);
+/** The modes of a message, `bubble` and `prose`, which a `say` or an ask's question may write. */
+const PRESENTATION_MODES: ReadonlySet<string> = new Set(["bubble", "prose"]);
+/** Tokens that may start an expression but also continue the one before them, as `(` calls and `-` subtracts. */
+const EXPRESSION_CONTINUATIONS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.Plus,
+  TokenKind.Minus,
+]);
 /** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
 const ASK_OPTIONS: readonly string[] = ["prefill", "hint"];
 const FORM_OPTIONS: readonly string[] = [
@@ -927,8 +936,11 @@ class Parser {
     );
   }
 
-  /** `bubble` or `prose`, with its named options in parentheses or none, as the presentation object of a `say`. */
-  *#parseSayPresentation(): ParseTask<ObjectLiteral> {
+  /**
+   * `bubble` or `prose`, with its named options in parentheses or none, as the presentation object of a `say` or of an
+   * ask's question. Without `options`, the mode is written alone and parentheses after it are not its own.
+   */
+  *#parseSayPresentation(options = true): ParseTask<ObjectLiteral> {
     const mode = this.#advance();
     const properties: ObjectProperty[] = [
       {
@@ -944,7 +956,7 @@ class Parser {
       },
     ];
     let endSpan = mode.span;
-    if (this.#match(TokenKind.LeftParenthesis)) {
+    if (options && this.#match(TokenKind.LeftParenthesis)) {
       this.#skipNewlines();
       while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
         if (!isPropertyName(this.#peek())) {
@@ -3761,6 +3773,12 @@ class Parser {
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
     }
+    if (
+      this.#checkIdentifier("askImage") &&
+      this.#peek(1).kind === TokenKind.Identifier &&
+      PRESENTATION_MODES.has(this.#peek(1).lexeme)
+    )
+      return yield* parseChild(this.#parseAskImageWithPresentation());
     // The earlier name of `askChoice` is an error that names the fix, and the ask is read as written (#830).
     if (this.#checkIdentifier("choose")) {
       this.#reportToken(
@@ -3875,7 +3893,7 @@ class Parser {
     const command = this.#advance();
     const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
     if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
-      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, null, null));
+      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, null, null, null));
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3899,7 +3917,27 @@ class Parser {
       speaker = this.#identifier(this.#advance());
     }
     if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
-      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, asSpan, speaker));
+      return yield* parseChild(
+        this.#parseBoundedAsk(command, interactionKind, asSpan, speaker, null),
+      );
+    // The question's mode, as `say` writes it after its speaker (#832); `askChoice` has no question to show.
+    let presentation: ObjectLiteral | null = null;
+    if (this.#atQuestionPresentation()) {
+      const mode = this.#peek();
+      presentation = yield* parseChild(this.#parseSayPresentation());
+      if (interactionKind === "choice") {
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          `askChoice has no question, so it takes no '${mode.lexeme}'. Say the question before it, as in 'say ${mode.lexeme} "Which one?"'.`,
+          presentation.span,
+        );
+        presentation = null;
+      }
+    }
+    if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
+      return yield* parseChild(
+        this.#parseBoundedAsk(command, interactionKind, asSpan, speaker, presentation),
+      );
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3997,6 +4035,7 @@ class Parser {
         interactionKind,
         asSpan,
         speaker,
+        presentation,
         question,
         named,
         spanFrom(command.span, end),
@@ -4132,6 +4171,7 @@ class Parser {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
+      presentation: null,
       question: null,
       hint: null,
       prefill,
@@ -4142,14 +4182,15 @@ class Parser {
   }
 
   /**
-   * `askText [as speaker] ([question][, hint: text][, prefill: value])` and the other basic asks: the parentheses hold
-   * the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
+   * `askText [as speaker] [mode] ([question][, hint: text][, prefill: value])` and the other basic asks: the parentheses
+   * hold the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
    */
   *#parseBoundedAsk(
     command: Token,
     interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
     asSpan: SourceSpan | null,
     speaker: Identifier | null,
+    presentation: ObjectLiteral | null,
   ): ParseTask<InteractionExpression | null> {
     const written = yield* parseChild(
       this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
@@ -4193,6 +4234,7 @@ class Parser {
       interactionKind,
       asSpan,
       speaker,
+      presentation,
       parts.value,
       named,
       spanFrom(command.span, call.span),
@@ -4247,12 +4289,15 @@ class Parser {
     interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
     asSpan: SourceSpan | null,
     speaker: Identifier | null,
+    presentation: ObjectLiteral | null,
     question: Expression | null,
     named: readonly FormArgument[],
     span: SourceSpan,
   ): InteractionExpression {
     const keepsArguments = NAMED_ASK_OPTIONS.has(interactionKind);
     const has = (name: string) => named.some((argument) => argument.name.name === name);
+    if (presentation !== null && question === null && !(keepsArguments && has("message")))
+      this.#reportQuestionlessPresentation(command, presentation);
     if (interactionKind === "form" && !has("fields"))
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -4282,6 +4327,7 @@ class Parser {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
+      presentation,
       question,
       hint: option("hint"),
       prefill: option("prefill"),
@@ -4289,6 +4335,82 @@ class Parser {
       formArguments: Object.freeze(keepsArguments ? [...named] : []),
       span,
     });
+  }
+
+  /** A mode written for a question that the ask does not have, which would say nothing. */
+  #reportQuestionlessPresentation(command: Token, presentation: ObjectLiteral): void {
+    const mode = staticModeName(presentation);
+    this.#reportSpan(
+      parserDiagnosticCode.unsupportedInteractionForm,
+      `'${mode}' shows the question, but this ${command.lexeme} has none. Write the question after '${mode}', or leave '${mode}' out.`,
+      presentation.span,
+    );
+  }
+
+  /**
+   * Whether `bubble` or `prose` here is the mode of an ask's question rather than the question itself, read as for
+   * `say`: the mode is followed by the question, as in `askText prose "Name?"`, or by the ask's parentheses after its
+   * options, as in `askText prose() ("Name?")`. Parentheses right after the word that a value follows are its options,
+   * as in `prose(align: "center") "Name?"`; otherwise the word starts the question, as `prose` in `askText prose + "?"`
+   * or the call in `askText prose("Name?")`. Only tokens are read, so nested asks are not parsed again.
+   */
+  #atQuestionPresentation(): boolean {
+    if (!this.#check(TokenKind.Identifier) || !PRESENTATION_MODES.has(this.#peek().lexeme))
+      return false;
+    if (this.#atSayModeBeforeBoundedText()) return true;
+    let after = 1;
+    if (this.#peek(1).kind === TokenKind.LeftParenthesis) {
+      let first = 2;
+      while (this.#peek(first).kind === TokenKind.Newline) first += 1;
+      if (
+        this.#peek(first).kind !== TokenKind.RightParenthesis &&
+        !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
+      )
+        return false;
+      this.#shared.closers ??= delimiterClosers(this.tokens);
+      const closer = this.#shared.closers.get(this.#current + 1);
+      if (closer === undefined) return false;
+      after = closer + 1 - this.#current;
+    }
+    const next = this.#peek(after);
+    return (
+      isExpressionStart(next) &&
+      !EXPRESSION_CONTINUATIONS.has(next.kind) &&
+      !(this.#blockEndsCompactInteraction && next.kind === TokenKind.LeftBrace)
+    );
+  }
+
+  /**
+   * `askImage bubble(options) (arguments)` or `askImage prose (arguments)`: the question's mode, as for a basic ask
+   * (#832). Parentheses after the mode hold its options only when the arguments follow them.
+   */
+  *#parseAskImageWithPresentation(): ParseTask<CallExpression | null> {
+    const command = this.#advance();
+    this.#shared.closers ??= delimiterClosers(this.tokens);
+    const closer = this.#shared.closers.get(this.#current + 1);
+    const withOptions =
+      this.#peek(1).kind === TokenKind.LeftParenthesis &&
+      closer !== undefined &&
+      this.tokens[closer + 1]?.kind === TokenKind.LeftParenthesis;
+    const presentation = yield* parseChild(this.#parseSayPresentation(withOptions));
+    if (!this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        `askImage takes its question in parentheses after '${staticModeName(presentation)}', as in 'askImage ${staticModeName(presentation)} ("Show me")'.`,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    if (
+      !call.arguments.some(
+        (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+      )
+    )
+      this.#reportQuestionlessPresentation(command, presentation);
+    return Object.freeze({ ...call, presentation });
   }
 
   /** `default:` at `offset` tokens ahead, the named fallback of `load` or the session-start value of a `global`. */
@@ -5075,6 +5197,14 @@ function typeName(token: Token): TypeName | undefined {
     default:
       return undefined;
   }
+}
+
+/** The mode a presentation object was written with: its first property, `kind`, holds `bubble` or `prose`. */
+function staticModeName(presentation: ObjectLiteral): string {
+  const kind = presentation.properties[0]!.value;
+  return kind.kind === "stringLiteral" && kind.parts[0]?.kind === "stringText"
+    ? kind.parts[0].value
+    : "prose";
 }
 
 const propertyNameKinds: ReadonlySet<TokenKind> = new Set([

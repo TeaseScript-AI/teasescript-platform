@@ -248,6 +248,10 @@ let day = askDate hint: "Pick a day"
   again.
 - `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
   question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
+- The question may be shown as `say` shows a message (owner decision on #832, 2026-10-11): `bubble(options)` or
+  `prose(options)` after `as speaker` and before the question, as in `askText prose "Your name?"`, with the options of
+  `say`, evaluated once before the question. Without one, the speaker's mode applies, a bubble by default. A mode needs
+  a question ([V30 §20](../specifications/accepted-syntaxes-v30.md#20-input-functions)).
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
   hint shows none while the control keeps its accessible name. In a text or number field the hint shows only while the
   field is empty, so a prefill usually hides it; a date or time control shows it beside the control, also with a

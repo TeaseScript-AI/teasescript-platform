@@ -111,12 +111,24 @@ let moment = askDateTime "When are you free?"
 let name = askText("Your name?", prefill: "Ada")
 let more = askInteger as mistress ("How many?", prefill: 3) + 1
 
+let name = askText prose "Your name?"
+let count = askInteger as mistress prose(align: "center") "How many?"
+let name = askText prose() ("Your name?", prefill: "Ada")
+let picture = askImage prose ("Show me your setup")
+
 let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
 
 The basic asks also take their arguments in parentheses, with the same meaning; the `)` ends the ask inside a larger
 expression, and `as speaker` comes before the parentheses
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
+
+Every ask that takes a question shows it as `say` shows a message: `bubble(options)` or `prose(options)` after
+`as speaker` and before the question chooses the mode, with the options of `say`, and without one the speaker's mode
+applies, a bubble by default. As for `say`, a mode before parentheses is written with its own, `askText prose() (...)`,
+since `askText prose("Name?")` asks the value of a call to `prose`; `askImage`, which always takes parentheses, also
+takes `askImage prose (...)`. `askChoice` has no question, so a question shown as prose is a `say prose` before it
+([V30 §20](specifications/accepted-syntaxes-v30.md#20-input-functions)).
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say` but with no reading time of its own, once, and the field opens with it. `hint:` is help text shown in the field
