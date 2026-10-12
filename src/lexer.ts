@@ -62,6 +62,8 @@ class Lexer {
   #line = 0;
   #column = 0;
   #singleLineStringDepth = 0;
+  /** By the index of each `InterpolationEnd` token, the index of the `InterpolationStart` token it closes. */
+  readonly #interpolationStarts = new Map<number, number>();
   /** The end of the line `#quotesFollowOnLine` last searched, and the offset of the second-to-last quote before it. */
   #quoteSearch = { lineEnd: -1, secondToLastQuote: -1 };
 
@@ -306,6 +308,7 @@ class Lexer {
         stringParts.push({ kind: "interpolation" });
         const interpolationOffset = this.#offset;
         const interpolationStart = this.#position();
+        const startToken = this.#tokens.length;
         this.#advanceCodeUnit();
         this.#advanceCodeUnit();
         this.#emitToken(
@@ -314,7 +317,10 @@ class Lexer {
           interpolationStart,
           this.#position(),
         );
-        if ((yield* parseChild(this.#scanInterpolation(interpolationStart, block))) === "eof") {
+        if (
+          (yield* parseChild(this.#scanInterpolation(interpolationStart, startToken, block))) ===
+          "eof"
+        ) {
           if (block) this.#normalizeBlockText(stringParts);
           if (!block) this.#singleLineStringDepth -= 1;
           this.#report(
@@ -368,6 +374,7 @@ class Lexer {
 
   *#scanInterpolation(
     interpolationStart: SourcePosition,
+    startToken: number,
     outerBlock: boolean,
   ): ParseTask<"closed" | "stringEnd" | "eof"> {
     let braceDepth = 0;
@@ -382,6 +389,7 @@ class Lexer {
         const endOffset = this.#offset;
         const endStart = this.#position();
         this.#advanceCodeUnit();
+        this.#interpolationStarts.set(this.#tokens.length, startToken);
         this.#emitToken(TokenKind.InterpolationEnd, endOffset, endStart, this.#position());
         return "closed";
       }
@@ -504,23 +512,19 @@ class Lexer {
 
   /**
    * The index of the `(` that the `)` at `index` closes, found back to the interpolation it stands in, or `null`. Only
-   * a quote right after a `)` asks, and the search goes back over that one group, also over the complete
-   * interpolations of strings inside it, as in `prose(font: "${name}")`.
+   * a quote right after a `)` asks, and the search goes back over that one group. It jumps over each complete
+   * interpolation of a string inside it, as in `prose(font: "${name}")`, so nested asks are not searched again.
    */
   #openerOf(index: number): number | null {
     let depth = 0;
-    let interpolations = 0;
     for (let at = index; at >= 0; at -= 1) {
       const kind = this.#tokens[at]!.kind;
       if (kind === TokenKind.RightParenthesis) depth += 1;
       else if (kind === TokenKind.LeftParenthesis) {
         depth -= 1;
         if (depth === 0) return at;
-      } else if (kind === TokenKind.InterpolationEnd) interpolations += 1;
-      else if (kind === TokenKind.InterpolationStart) {
-        if (interpolations === 0) return null;
-        interpolations -= 1;
-      }
+      } else if (kind === TokenKind.InterpolationEnd) at = this.#interpolationStarts.get(at) ?? at;
+      else if (kind === TokenKind.InterpolationStart) return null;
     }
     return null;
   }
