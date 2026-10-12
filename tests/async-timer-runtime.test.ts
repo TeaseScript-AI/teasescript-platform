@@ -1748,3 +1748,53 @@ test("restore requires a record for every timer handle, and the next operation d
   assert.equal(validateRuntimeSnapshot(kept, session.plan).valid, true);
   assert.deepEqual(observeTime(session.plan, kept, 1_500).snapshot.settledTimers, []);
 });
+
+test("a late observation gives each scene time the instruction budget that observing each deadline gives", () => {
+  const budget = { instructionBudget: 500 };
+  /** Observes every deadline as it comes, then `endMs`, as a punctual Player does. */
+  const stepwise = (source: string, endMs: number): Session => {
+    const session = new Session(source);
+    for (let guard = 0; session.snapshot.status === "waiting"; guard += 1) {
+      assert.ok(guard < 50, "the script ends within its few deadlines");
+      const deadlines = session.timers().map((action) => action.timer.deadlineMs ?? endMs);
+      const action = session.snapshot.foregroundAction;
+      if (action?.kind === "delay") deadlines.push(action.deadlineMs);
+      const next = Math.min(endMs, ...deadlines);
+      if (next >= endMs) break;
+      session.at(next, budget);
+    }
+    return session.at(endMs, budget);
+  };
+  const assertSamePlay = (source: string): Session => {
+    const late = new Session(source).at(1000, budget);
+    const punctual = stepwise(source, 1000);
+    assert.deepEqual(late.events, punctual.events);
+    assert.deepEqual(late.snapshot, punctual.snapshot);
+    return late;
+  };
+
+  // Issue #841: every round rests well within the budget, while the rounds that one late run catches up exceed it.
+  const resting = "repeat 20 {\n  repeat 60 {}\n  wait 1 ms\n}\nexit";
+  const caughtUp = new Session(resting);
+  const observed = observeTime(caughtUp.plan, caughtUp.snapshot, 1000).snapshot;
+  assert.ok(run(caughtUp.plan, observed).instructionsExecuted > budget.instructionBudget);
+  assert.equal(assertSamePlay(resting).snapshot.status, "halted");
+
+  // A loop that never lets scene time pass still exhausts the budget, after caught-up rests, in an expiry block, and
+  // with waits of no time.
+  const failures = [
+    ["repeat 3 {\n  repeat 60 {}\n  wait 1 ms\n}\nrepeat 1000 {}\nexit", "repeat 1000", 3],
+    [
+      "timer async 2 ms {\n  repeat 1000 {}\n}\nrepeat 5 {\n  repeat 60 {}\n  wait 1 ms\n}\nexit",
+      "repeat 1000",
+      2,
+    ],
+    ["wait 1 ms\nrepeat 1000 {\n  wait 0 s\n}\nexit", "repeat 1000", 1],
+  ] as const;
+  for (const [source, loop, sceneTimeMs] of failures) {
+    const failed = assertSamePlay(source).snapshot;
+    assert.equal(failed.failure?.code, "TSR037", source);
+    assert.equal(failed.failure?.span.start.offset, source.indexOf(loop), source);
+    assert.equal(failed.currentSessionTimeMs, sceneTimeMs, source);
+  }
+});
