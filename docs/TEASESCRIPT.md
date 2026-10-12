@@ -344,8 +344,8 @@ variable, element, or property is a `number` when one of its assignments can sto
 types they support, and on a union every member must support them; reading an object property that no object at its
 place can have is a compile error, decided at the end of the check from code anywhere in the project; union types, type
 names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain variables; using a possibly
-null value where its non-null type is required is a compile error that names the check, and `a otherwise b` gives a
-fallback instead ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
+null value where its non-null type is required is a compile error that names the check and a fallback with
+`otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
 unsupported operand or such a property read `TSV043`, returns of different types, list elements of different types, or
 an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison
 warning `TSV046`, and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot

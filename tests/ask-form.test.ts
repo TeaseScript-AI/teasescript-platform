@@ -616,7 +616,7 @@ test("askForm with cancel: may return null, which the script checks before readi
     compileSource(
       'let a = askForm fields: { on: false }, cancel: "Back"\nlet b: boolean = a.on\nexit',
     ).diagnostics.map((diagnostic) => diagnostic.message),
-    ["'a' may be null. Check it first: if a != null { ... }"],
+    ["'a' may be null. Check it first: if a != null { ... }, or give a fallback: a otherwise ..."],
   );
 });
 
@@ -673,7 +673,7 @@ test("askBooleans asks with one toggle per text and returns their states in orde
       'let a = askBooleans(texts: ["A"], prefill: [true], cancel: "Back")\nlet b: boolean[] = a',
     ),
     [
-      "'b' is declared as boolean[], so it cannot start as a list (boolean[]) or null. Check it first: if a != null { ... }",
+      "'b' is declared as boolean[], so it cannot start as a list (boolean[]) or null. Check it first: if a != null { ... }, or give a fallback: a otherwise ...",
     ],
   );
   // Lists of different lengths that the compiler cannot see fail when the form opens.

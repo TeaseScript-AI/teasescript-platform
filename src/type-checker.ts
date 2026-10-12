@@ -88,6 +88,7 @@ import {
   type Sharing,
   collectionMethodProblems,
   expressionLabel,
+  fallbackFix,
   LIST_SEARCHES,
   mayBeMessage,
   memberProblems,
@@ -988,6 +989,12 @@ class TypeChecker {
 
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
+
+  /**
+   * The values that an assignment or a method changes, such as `items` in `items.add(1)`. A null check names no
+   * fallback for them, because what a fallback gives is a copy, so the change would be lost.
+   */
+  readonly #changed = new WeakSet<Expression>();
 
   /** The flows at the reachable `break` statements of each enclosing loop, and whether a `continue` is reachable. */
   readonly #loops: { readonly start: FlowState; breaks: Changes[]; continued: boolean }[] = [];
@@ -2084,6 +2091,9 @@ class TypeChecker {
     let speakerProperty: string | null = null;
     /** A property without a static type, such as one of an `object` or of a value of unknown type. */
     let untyped = false;
+    // The object of a property or an element is changed, and so is the target of `+=` and `-=`, which reads it first.
+    if (target.kind !== "identifier") this.#changed.add(target.object);
+    if (statement.operator !== "=") this.#changed.add(target);
     if (target.kind === "identifier") {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") {
@@ -5382,6 +5392,9 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
+    // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
+    if (COLLECTION_CHANGES.has(method) || method === "sort" || method === "shuffle")
+      this.#changed.add(callee.object);
     if (
       (method === "add" || method === "addAll" || method === "get") &&
       unwrap(callee.object).kind !== "identifier"
@@ -7101,7 +7114,7 @@ class TypeChecker {
   #reportMayBe(expression: Expression, failing: StaticType, passing: readonly StaticType[]): void {
     this.#report(
       typeCode.invalidOperand,
-      mayBeMessage(expression, failing, passing),
+      mayBeMessage(expression, failing, passing, !this.#changed.has(expression)),
       expression.span,
     );
   }
@@ -9242,9 +9255,10 @@ function checkFirstFix(
     !listed && all.every((member) => passing.includes(member) || member.kind === "null")
       ? "!= null"
       : `is ${typeName(listed ? { kind: "list", element: union(passing) } : union(passing))}`;
+  const or = test === "!= null" ? fallbackFix(label ?? "value", passing) : "";
   return label === null
-    ? ` Keep it in a variable and check it first, as in: if value ${test} { ... }`
-    : ` Check it first: if ${label} ${test} { ... }`;
+    ? ` Keep it in a variable and check it first, as in: if value ${test} { ... }${or}`
+    : ` Check it first: if ${label} ${test} { ... }${or}`;
 }
 
 /** A short suggestion for the most common mismatches of a variable. */

@@ -220,7 +220,11 @@ test("numeric functions check their arguments", () => {
       ["TSV020", "sqrt(...) takes 1 argument (value), received 0.", "sqrt()"],
       ["TSV020", "pow(...) takes 2 arguments (base, exponent), received 1.", "pow(2)"],
       ["TSV022", "abs(...) takes no named arguments. Remove 'by:'.", "by"],
-      ["TSV043", "'maybe' may be null. Check it first: if maybe != null { ... }", "maybe"],
+      [
+        "TSV043",
+        "'maybe' may be null. Check it first: if maybe != null { ... }, or give a fallback: maybe otherwise 0",
+        "maybe",
+      ],
       [
         "TSV043",
         "'choice' may be text (string). Check it first: if choice is integer { ... }",

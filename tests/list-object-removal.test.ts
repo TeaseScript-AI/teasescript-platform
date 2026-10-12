@@ -176,7 +176,7 @@ test("the compiler reports a list index it can see is invalid", () => {
     // A possibly null index is checked first (owner decision on #504 Q1).
     [
       "function remove(index: integer?) {\n    items.removeAt(index)\n}",
-      "TSV043 'index' may be null. Check it first: if index != null { ... }",
+      "TSV043 'index' may be null. Check it first: if index != null { ... }, or give a fallback: index otherwise 0",
     ],
     [
       "function remove(index: integer?) {\n    if index != null {\n        items.removeAt(index)\n    }\n}",

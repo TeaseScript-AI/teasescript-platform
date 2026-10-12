@@ -82,7 +82,14 @@ exit`,
     diagnostics(
       `${HIDE}let name: string? = hide(null)\nlet shown = name otherwise null\nsay shown + "!"\nexit`,
     ),
-    [["error", "TSV043", "'shown' may be null. Check it first: if shown != null { ... }", "shown"]],
+    [
+      [
+        "error",
+        "TSV043",
+        `'shown' may be null. Check it first: if shown != null { ... }, or give a fallback: shown otherwise ""`,
+        "shown",
+      ],
+    ],
   );
   // A fallback of another type gives a union, which needs a test before an operation of one type.
   assert.deepEqual(
@@ -108,7 +115,12 @@ if count != null {
 exit`;
   assert.deepEqual(
     diagnostics(source("other")).map((diagnostic) => diagnostic.slice(1, 3)),
-    [["TSV043", "'count' may be null. Check it first: if count != null { ... }"]],
+    [
+      [
+        "TSV043",
+        "'count' may be null. Check it first: if count != null { ... }, or give a fallback: count otherwise 0",
+      ],
+    ],
   );
   assert.deepEqual(
     diagnostics(source("count")).map((diagnostic) => diagnostic[1]),
@@ -242,6 +254,44 @@ exit`,
     ),
     ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "36"],
   );
+});
+
+test("a null check also names a fallback of the value's type, but not for a value that is changed", () => {
+  const messages = (source: string) =>
+    compileSource(`${HIDE}${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  const check = (name: string, fallback?: string) =>
+    `'${name}' may be null. Check it first: if ${name} != null { ... }${fallback === undefined ? "" : `, or give a fallback: ${name} otherwise ${fallback}`}`;
+  for (const [declared, use, fallback] of [
+    ["integer", "say n + 1", "0"],
+    ["number", "say n * 2", "0"],
+    ["string", 'say n + "!"', '""'],
+    ["boolean", "if n {\n    say 1\n}", "false"],
+    ["duration", "wait n", "..."],
+    ["integer[]", "say n.count()", "..."],
+  ] as const)
+    assert.deepEqual(
+      messages(`let n: ${declared}? = hide(null)\n${use}`),
+      [check("n", fallback)],
+      use,
+    );
+  // A value that is not a variable, and a store into a narrower place.
+  assert.deepEqual(messages('say "a/b".lastIndexOf("/") + 1'), [
+    "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
+  ]);
+  assert.deepEqual(messages("let n: integer? = hide(null)\nlet m: integer = n"), [
+    "'m' is declared as integer, so it cannot start as a whole number (integer) or null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0",
+  ]);
+  // A fallback would be a copy, so a value that an assignment or a method changes gets only the check, and so does a
+  // handle, for which no fallback can be written.
+  for (const source of [
+    'let p: object? = hide({ name: "a" })\np.name = "b"',
+    "let n: integer[]? = hide([1])\nn[0] = 2",
+    "let n: integer? = hide(1)\nn += 1",
+    "let n: integer[]? = hide([1])\nn.add(2)",
+    "let n: integer[]? = hide([1])\nn.sort()",
+    'let n = null\nlet x = true\nif x {\n    n = playAudio async "a.mp3"\n}\nn.stop()',
+  ])
+    assert.deepEqual(messages(source), [check(source.includes("p.name") ? "p" : "n")], source);
 });
 
 test("a fallback that asks waits only for a null value, also across a checkpoint and restore", () => {
