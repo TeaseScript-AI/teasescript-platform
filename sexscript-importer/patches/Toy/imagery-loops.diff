@@ -1,6 +1,6 @@
 --- a/scripts/toy/imagery.groovy
 +++ b/scripts/toy/imagery.groovy
-@@ -1,45 +1,85 @@
+@@ -1,45 +1,81 @@
  { toy ->
 -	final IMAGEDATA = {
 -		return new File("${toy.DATAFOLDER}/images/toy")
@@ -68,25 +68,22 @@
 +		"emily/whitelingeriebed": "1:lingerie,dressed,stood,mean;2:lingerie,dressed,kneel,tease;3:lingerie,dressed,stood;4:lingerie,dressed;5:lingerie,dressed,stood,ass,tease;6:lingerie,dressed,kneel,ass,tease;7:lingerie,dressed,kneel;8:lingerie,dressed,stood,tease;9:lingerie,dressed,sit,ass;10:lingerie,sit,tease,tits;11:lingerie,sit,tease;15:lay,lingerie,tits,tease,pussy;16:lay,lingerie,tease,tits,pussy;17:lay,lingerie,tits,tease,pussy;18:lay,lingerie,tits,tease;19:lay,lingerie,tease,pussy;20:lay,lingerie,tease,pussy;21:lay,lingerie,tease;22:lay,lingerie",
 +		"emily/whitelingeriefeather": "1:dressed,stood,ass;2:sit,tits,pussy;3:sit,tits,pussy,tease;4:dressed,stood,ass;5:stood,ass,pussy;6:stood,ass;7:dressed,stood,ass;8:stood,tits,pussy;9:dressed,kneel,tits,tease;10:dressed,kneel;11:sit,tits,pussy,mean;12:dressed,stood,ass;13:dressed,stood,ass;14:dressed,kneel,tits,tease;15:sit,tits,pussy,tease;16:dressed,stood,tease"
 +	];
-+	final IMAGEDATA = [:];
-+	for (domme in ["ancilla", "emily", "figures"]) {
-+		def sets = [:];
-+		for (path in TAGFILES.keySet()) {
-+			def parts = path.split("/");
-+			if (parts[0] != domme) continue;
-+			def images = [];
-+			for (l in TAGFILES[path].split(";")) {
-+				def fields = l.split(":");
-+				images.add([
-+					image: fields[0],
-+					tags: fields[1]
-+						.split(",")
-+						.findAll { t -> !t.isEmpty() }
-+				]);
-+			}
-+			sets[parts[1]] = [set: parts[1], images: images];
++	// The images of a domme's set with their tags, read from its tags file where a lookup needs them, so that no
++	// catalogue of all images is kept; null for a domme or set without a tags file.
++	final setImages = { domme, set ->
++		final path = domme + "/" + set;
++		if (set == null || !TAGFILES.containsKey(path)) return null;
++		def images = [];
++		for (l in TAGFILES[path].split(";")) {
++			def fields = l.split(":");
++			images.add([
++				image: fields[0],
++				tags: fields[1]
++					.split(",")
++					.findAll { t -> !t.isEmpty() }
++			]);
 +		}
-+		IMAGEDATA[domme] = [domme: domme, sets: sets];
++		return images;
 +	}
 +
 +	// Toy's matchTags: every tag of the spec must be in the image's tags, and no "!tag" may be.
@@ -111,11 +108,10 @@
 -		if (!matches) return null;
 -		matches = matches
 -			.images.findAll(matchTags(spec));
-+		if (!IMAGEDATA.containsKey(domme)) return null;
-+		final sets = IMAGEDATA[domme].sets;
-+		if (set == null || !sets.containsKey(set)) return null;
++		final images = setImages(domme, set);
++		if (images == null) return null;
 +		def matches = [];
-+		for (image in sets[set].images) {
++		for (image in images) {
 +			if (imageMatches(image.tags, spec)) matches.add(image);
 +		}
  		if (matches.isEmpty()) return null;
@@ -124,7 +120,7 @@
  	};
  
  	toy.metaClass.showImage { spec ->
-@@ -60,18 +100,32 @@
+@@ -60,18 +96,33 @@
  	};
  
  	toy.metaClass.selectImageSet { domme, specs ->
@@ -132,19 +128,20 @@
 -		if (!matches) return null;
 -		matches = matches.sets.values().findAll({ s -> specs.every({ spec -> selectImage(domme, s.set, spec)})});
 -		return matches[getRandom(matches.size())];
-+		if (!IMAGEDATA.containsKey(domme)) return null;
-+		final sets = IMAGEDATA[domme].sets;
++		// The sets of the domme, in the order of their tags files; the name of a random one that has an image for every spec.
++		final prefix = domme + "/";
 +		def matches = [];
-+		for (key in sets.keySet()) {
-+			final s = sets[key];
++		for (path in TAGFILES.keySet()) {
++			if (!path.startsWith(prefix)) continue;
++			final set = path.substring(prefix.length());
 +			def all = true;
 +			for (spec in specs) {
-+				if (!selectImage(domme, s.set, spec)) {
++				if (!selectImage(domme, set, spec)) {
 +					all = false;
 +					break;
 +				}
 +			}
-+			if (all) matches.add(s);
++			if (all) matches.add(set);
 +		}
 +		if (matches.isEmpty()) return null;
 +		return randomItem(matches);
@@ -165,7 +162,7 @@
  			case ASS:
  				if (!stateIs(GAGGED))
  					return compose([
-@@ -112,10 +166,20 @@
+@@ -112,10 +163,17 @@
  		def outfit = loadString("toy.owner.outfit");
  		def outfitTime = loadInteger("toy.owner.outfitTime");
  		if (outfitTime > getTime() - 7200) { // Recent, check
@@ -174,10 +171,7 @@
 -				prev = prev.sets[outfit];
 -				if (prev && specs.every({ spec -> selectImage(DOMME.id, prev.set, spec)})) {
 +			def known = false;
-+			if (outfit != null && IMAGEDATA.containsKey(DOMME.id)) {
-+				final sets = IMAGEDATA[DOMME.id].sets;
-+				known = sets.containsKey(outfit);
-+			}
++			if (outfit != null) known = TAGFILES.containsKey(DOMME.id + "/" + outfit);
 +			if (known) {
 +				def all = true;
 +				for (spec in specs) {
@@ -190,3 +184,19 @@
  					loadDomme(DOMME.id, outfit);
  					return outfit;
  				}
+@@ -130,11 +188,11 @@
+ 			loadDomme(DOMME.id, outfit);
+ 			return null;
+ 		}
+-		save("toy.owner.outfit", outfit.set);
++		save("toy.owner.outfit", outfit);
+ 		save("toy.owner.outfitTime", getTime());
+-		loadDomme(DOMME.id, outfit.set);
+-		executeTrigger("ownerOutfitChange", outfit.set);
+-		return outfit.set;
++		loadDomme(DOMME.id, outfit);
++		executeTrigger("ownerOutfitChange", outfit);
++		return outfit;
+ 	};
+ 	return null;
+ }
