@@ -4424,8 +4424,9 @@ let strokes = [say("First", instant), say("Second", instant)]
   changes nothing and reports developer warning `TSW010`, and `remove()` again does nothing. The handle keeps its
   identity, so `==` and `say line` work as before.
 - **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
-  same message, and `==` compares messages, not texts. A message stays changeable while a handle to it remains, also
-  an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller, or a block.
+  same message, and `==` compares messages, not texts. Until removed, a message stays changeable while a handle to it
+  remains, also an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller,
+  or a block.
   `say line` shows `<message N>`; `${line}` and `toString(line)` are errors, so use `line.text`. A handle belongs to its
   session: `save` refuses it ([§25](#25-persistent-storage-and-keys)), and saved data and host values cannot hold one.
 - **Types.** `messageHandle` is a protected type name ([§38](#38-keywords-and-protected-built-ins)) that annotations
