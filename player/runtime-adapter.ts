@@ -1497,7 +1497,7 @@ export function observePlayerRuntimeTime(
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
 export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
-  const times = timedDeadlines(state, (timer) => !timer.repeat || timer.handlerFunctionId !== null);
+  const times = timedDeadlines(state, timerEvent);
   if (state.status !== "failed") {
     for (const action of state.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
@@ -1508,6 +1508,11 @@ export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | nu
   const nextMs = Math.min(...times);
   const observedMs = state.observedSessionTimeMs;
   return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
+}
+
+/** Whether a timer's deadline is an event: a round of a repeating timer without an expiry block runs nothing. */
+function timerEvent(timer: RuntimeTimerSnapshot): boolean {
+  return !timer.repeat || timer.handlerFunctionId !== null;
 }
 
 /** When the next event of media playing at 1× is due; a departure needs progress after the sample it leaves. */
@@ -1566,6 +1571,43 @@ export function advancePlayerRuntimeTime(
     next = stepPlayerRuntimeTime(current, targetMs);
   }
   return current;
+}
+
+/**
+ * Catches up a late observation of scene time `targetMs` in steps: an ordinary observation without media progress at
+ * each next timed event before `targetMs`, then at `targetMs`. Each step runs what its event makes runnable, and the
+ * catch-up goes on after a step while `more()` holds, so a Player can give the browser a turn between steps. The steps
+ * give exactly the result of one observation of `targetMs` without media progress, as any observation schedule does
+ * (`docs/RUNTIME.md#timers-and-scene-time`); a media event becomes due only through progress reports, so it is no
+ * step. Once a `save`, `delete`, or `takePhoto()` waits for the host, the rest is that one observation at once, so the
+ * host's answer comes at the scene time that observation gives; a random draw that pauses stops the catch-up. Returns
+ * the session reached.
+ */
+export function catchUpPlayerRuntimeTime(
+  session: PlayerRuntimeSession,
+  targetMs: number,
+  more: () => boolean,
+): PlayerRuntimeSession {
+  let current = session;
+  for (;;) {
+    const { state } = current;
+    if (state.observedSessionTimeMs >= targetMs || state.randomDraw !== null) return current;
+    const nextMs = playerRuntimeAwaitsHost(state) ? null : nextDeadlineMs(state);
+    const stepMs = nextMs !== null && nextMs < targetMs ? nextMs : targetMs;
+    const result = observePlayerRuntimeTime(current, stepMs);
+    if (result.outcome.kind !== "observed") return current;
+    current = result.session;
+    if (!playerRuntimeAwaitsHost(current.state) && !more()) return current;
+  }
+}
+
+/** The earliest deadline of a timed event after the observed time, or `null`. */
+function nextDeadlineMs(state: PlayerRuntimeState): number | null {
+  let nextMs: number | null = null;
+  for (const atMs of timedDeadlines(state, timerEvent)) {
+    if (atMs > state.observedSessionTimeMs && (nextMs === null || atMs < nextMs)) nextMs = atMs;
+  }
+  return nextMs;
 }
 
 /** Progress of every running loaded media at scene time `atMs`, playing on at 1× from its last sample. */
