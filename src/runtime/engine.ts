@@ -3390,6 +3390,7 @@ function startTimer(
       elapsedMs: 0,
       runningSinceMs: snapshot.currentSessionTimeMs,
       anchoredRounds: instruction.repeat && range === null ? 0 : null,
+      overrunReported: false,
     },
   };
   snapshot.nextActionId += 1;

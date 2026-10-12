@@ -41,6 +41,7 @@ const TIMER_KEYS = [
   "elapsedMs",
   "runningSinceMs",
   "anchoredRounds",
+  "overrunReported",
 ] as const;
 
 const TIMER_ACTION_KEYS = [
@@ -219,6 +220,9 @@ function validTimerRecord(
     !validRange(timer.range) ||
     (timer.range !== null && (!timer.repeat || timer.repeatDurationMs !== null)) ||
     (timer.repeat && timer.range === null && timer.repeatDurationMs === null) ||
+    // Only the block of a repeating timer can outlast a round.
+    typeof timer.overrunReported !== "boolean" ||
+    (timer.overrunReported && (!timer.repeat || timer.handlerFunctionId === null)) ||
     !isValidSessionTime(now) ||
     !validCurrentRound(timer, now)
   ) {

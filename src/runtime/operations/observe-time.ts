@@ -276,6 +276,7 @@ export function processDueWork(
           events,
           trace,
           control,
+          true,
         );
       } catch (error) {
         if (unit && error instanceof RandomSuspension)
