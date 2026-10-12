@@ -679,7 +679,7 @@ export interface FormArgument {
   readonly value: Expression;
 }
 
-/** One compact `choose` option: an optional authored value before `:`, then its expression. */
+/** One compact `askChoice` option: an optional authored value before `:`, then its expression. */
 export interface InteractionChoiceOption {
   readonly kind: "interactionChoiceOption";
   readonly value: Identifier | NumberLiteral | null;

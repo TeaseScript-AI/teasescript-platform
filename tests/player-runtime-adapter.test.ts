@@ -194,7 +194,7 @@ say as guide "**Ready?**", instant
 showButton as guide "Continue"
 let text = askText as guide hint: "Text"
 let amount = askNumber as guide hint: "Number"
-let choice = choose as guide first: "Same", second: "Same"
+let choice = askChoice as guide first: "Same", second: "Same"
 say as guide "${"${text}"} / ${"${amount}"} / ${"${choice}"}", instant
 exit
 `);
@@ -292,7 +292,7 @@ exit
 
 test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
-    'let choice = choose "First", "Second"\nsay choice, instant\nexit',
+    'let choice = askChoice "First", "Second"\nsay choice, instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   assert.equal(foreground?.kind, "choose");
@@ -312,7 +312,7 @@ test("runtime adapter preserves choice order and rendered-selection semantics", 
 
 test("runtime adapter selects the rendered button even when two buttons return the same value", () => {
   const session = createPlayerRuntimeSession(
-    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant\nexit',
+    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = askChoice options\nsay [choice], instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
@@ -361,7 +361,7 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
 
 test("runtime checkpoint restore reconstructs presentation without replay or completion", () => {
   let session = createPlayerRuntimeSession(
-    'say "Question", instant\nlet answer = choose one: "One", two: "Two"\nsay answer, instant\nexit',
+    'say "Question", instant\nlet answer = askChoice one: "One", two: "Two"\nsay answer, instant\nexit',
   );
   const before = playerRuntimeForeground(session);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
@@ -497,7 +497,7 @@ exit
 test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
   let session = createPlayerRuntimeSession(`
 let reply = askText hint: "Reply"
-let answer = choose left: "Left", right: "Right"
+let answer = askChoice left: "Left", right: "Right"
 showButton "Continue"
 exit
 `);
@@ -1279,7 +1279,7 @@ test("a message update replaces its row in place, keeping its identity, speaker,
 
 test("an answer whose run throws leaves the transcript as the Player showed it, and the next answer follows on", () => {
   const source = [
-    'let pick = choose again: "Again", long: "Long"',
+    'let pick = askChoice again: "Again", long: "Long"',
     'if pick == "long" {',
     '  say "deep", instant',
     "}",

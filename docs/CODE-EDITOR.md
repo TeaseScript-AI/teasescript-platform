@@ -72,7 +72,7 @@ Special command, block, keyword, and token syntax remains parser-owned. A librar
 ## Accepted first Standard Library POC tooling
 
 ADR 0018 accepts parser-owned compact forms for `showButton`, `askText`,
-`askNumber`, `choose`, and `say` pacing. Grammar-aware support for those
+`askNumber`, `askChoice`, and `say` pacing. Grammar-aware support for those
 official forms is parser/compiler-owned.
 
 The first implementation should provide:
@@ -85,7 +85,7 @@ The first implementation should provide:
 - diagnostics for negative, non-finite, unsupported-magnitude, or overflowing explicit pacing values;
 - documentation that input text is a Standard UI hint rather than an automatic speaker transcript message;
 - documentation of exact text/number normalization, simple return types, and mandatory interactions with no player cancellation result (timer expiry blocks may still discard an interrupted interaction; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time));
-- formatting that preserves the accepted compact order and keeps compact `choose` options in one statement;
+- formatting that preserves the accepted compact order and keeps compact `askChoice` options in one statement;
 - source-span preservation from compact syntax through fully lowered plan instructions;
 - debugger/simulator inspection of pending interaction kind, requesting speaker, normalized completion, pacing deadline, action location, and skip policy;
 - diagnostics for concrete versioned technical limits selected by the implementation;

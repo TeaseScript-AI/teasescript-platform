@@ -35,7 +35,7 @@ test("an instant say after a paced say waits for its reading time", () => {
 test("buttons, a choice, an ask, and a form after a paced say wait for its reading time", () => {
   for (const [source, question] of [
     ['showButton "Go"', null],
-    ['let pick = choose ["Red", "Blue"]', null],
+    ['let pick = askChoice ["Red", "Blue"]', null],
     ['let name = askText "Name?"', "Name?"],
     ['let ready = askBoolean "Ready?"', "Ready?"],
     ['let answers = askForm "Settings", fields: { n: { type: "integer", value: 1 } }', "Settings"],

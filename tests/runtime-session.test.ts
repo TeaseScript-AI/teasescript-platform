@@ -49,7 +49,7 @@ import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 
 const CHOICE_LOOP = `let rounds = 0
 while rounds < 100 {
-    let picked = choose "left", "right"
+    let picked = askChoice "left", "right"
     rounds += 1
     say "Round \${rounds}: \${picked}", instant
     wait 1 s
@@ -802,7 +802,7 @@ exit
 
 test("callReturnInstructions gives where each active call continues, outermost first", () => {
   const plan = compileValidPlan(`function inner(first) {
-    let answer = choose first, "b"
+    let answer = askChoice first, "b"
     return answer
 }
 function outer(first) {

@@ -65,7 +65,7 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 
 - Detailed interaction result objects, including the author-facing option that selects them.
 - Compatibility mapping, names, and option shapes that expose the accepted V30 parenthesized input/choice options
-  and custom compact `choose` field hints without changing their accepted behavior.
+  and custom compact `askChoice` field hints without changing their accepted behavior.
 - Advanced accessibility override field for Standard UI and custom UI.
 - Deterministic speaker-aware typing-indicator syntax, formula, defaults, checkpoint state, and relation to smart
   autoplay.

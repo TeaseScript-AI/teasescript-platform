@@ -137,11 +137,11 @@ const HELP = Object.freeze({
       "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
     syntax: "askDateTime [as speaker] [question] [, prefill: datetime] [, hint: text]",
   }),
-  choose: Object.freeze({
-    command: "choose" as const,
+  askChoice: Object.freeze({
+    command: "askChoice" as const,
     summary:
       "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element; an element may be a { value?, text, background? } object.",
-    syntax: "choose [as speaker] [value:] option, [value:] option, ...",
+    syntax: "askChoice [as speaker] [value:] option, [value:] option, ...",
   }),
   say: Object.freeze({
     command: "say" as const,
@@ -232,7 +232,7 @@ export function languageCompletions(
     items.push(command("askDate", "Compact date input expression"));
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
-    items.push(command("choose", "Compact choice expression"));
+    items.push(command("askChoice", "Compact choice expression"));
     items.push(command("showCamera", "Show the camera view and give its handle"));
     items.push(
       Object.freeze({
@@ -429,7 +429,7 @@ type CompactCommand =
   | "askDate"
   | "askTime"
   | "askDateTime"
-  | "choose"
+  | "askChoice"
   | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
 
@@ -440,7 +440,7 @@ const INTERACTION_COMMANDS = {
   date: "askDate",
   time: "askTime",
   datetime: "askDateTime",
-  choice: "choose",
+  choice: "askChoice",
 } as const satisfies Record<string, CompactCommand>;
 
 function compactCommandContext(
@@ -471,7 +471,7 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
     token.lexeme === "askDate" ||
     token.lexeme === "askTime" ||
     token.lexeme === "askDateTime" ||
-    token.lexeme === "choose"
+    token.lexeme === "askChoice"
   ) {
     return token.lexeme;
   }
@@ -612,7 +612,7 @@ function askArgumentsOpener(
   tokens: readonly Token[],
   after: number,
 ): number {
-  if (command === "say" || command === "showButton" || command === "choose") return -1;
+  if (command === "say" || command === "showButton" || command === "askChoice") return -1;
   const opener =
     tokens[after]?.kind === TokenKind.KeywordAs && tokens[after + 1]?.kind === TokenKind.Identifier
       ? after + 2
@@ -635,7 +635,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askTime":
     case "askDateTime":
       return Object.freeze(["speaker", "question", "prefill", "hint"]);
-    case "choose":
+    case "askChoice":
       return Object.freeze(["speaker", "options"]);
     case "say":
       return Object.freeze(["speaker", "skip policy", "text", "pacing"]);

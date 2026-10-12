@@ -431,11 +431,11 @@ test("persist is a literal option of the command, and the block line it replaces
   // Text that would take the option as its own, such as a compact choice, is grouped in the replacement, which keeps
   // the two choice options and makes the button persist.
   const [replacement] = compileSource(
-    'showPermanentButton choose "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
+    'showPermanentButton askChoice "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
   ).diagnostics.map(
     (diagnostic) => /'(showPermanentButton .*) \{'\.$/u.exec(diagnostic.message)?.[1],
   );
-  assert.equal(replacement, 'showPermanentButton (choose "A", "B"), persist: true');
+  assert.equal(replacement, 'showPermanentButton (askChoice "A", "B"), persist: true');
   const [statement] = parse(`${replacement} {\n    say "clicked"\n}\nexit`).program.statements;
   assert.ok(statement?.kind === "showPermanentButtonStatement");
   assert.equal(statement.persist, true);
@@ -507,7 +507,7 @@ test("mixing permanent buttons with other values suggests no unwritable type", (
   const button = 'let b = showPermanentButton "x" {\n}\n';
   for (const source of [
     `${button}let values = [b, 1]\nexit`,
-    `${button}let answer = choose { value: b, text: "B" }, { value: 1, text: "One" }\nexit`,
+    `${button}let answer = askChoice { value: b, text: "B" }, { value: 1, text: "One" }\nexit`,
   ]) {
     const mixes = compileSource(source)
       .diagnostics.filter((diagnostic) => diagnostic.code === "TSV044")

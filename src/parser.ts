@@ -228,7 +228,7 @@ interface RangeSegment {
   readonly from: number;
   readonly to: number;
 }
-/** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
+/** The compact interaction commands other than `askChoice`, and the kind of answer each asks for. */
 const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
   ["askText", "text"],
   ["askNumber", "number"],
@@ -1521,7 +1521,7 @@ class Parser {
     this.#skipNewlines();
     if (this.#checkIdentifier("persist") && this.#peek(1).kind === TokenKind.Colon) {
       let written = this.#sourceText(textStart, textEnd);
-      // Text such as a compact `choose` would take the option as its own, so it is grouped.
+      // Text such as a compact `askChoice` would take the option as its own, so it is grouped.
       if (!SELF_DELIMITED_EXPRESSIONS.has(text.kind)) written = `(${written})`;
       this.#reportToken(
         parserDiagnosticCode.invalidMediaForm,
@@ -3757,8 +3757,17 @@ class Parser {
       this.#checkIdentifier("askBoolean") ||
       this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("askBooleans") ||
-      this.#checkIdentifier("choose")
+      this.#checkIdentifier("askChoice")
     ) {
+      return yield* parseChild(this.#parseInteractionExpression());
+    }
+    // The earlier name of `askChoice` is an error that names the fix, and the ask is read as written (#830).
+    if (this.#checkIdentifier("choose")) {
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "'choose' is now called 'askChoice', like the other asks that wait for the player's answer. Write 'askChoice' instead.",
+        token,
+      );
       return yield* parseChild(this.#parseInteractionExpression());
     }
     if (this.#checkIdentifier("showButton")) {
@@ -3870,7 +3879,7 @@ class Parser {
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
-        `Parenthesized ${command.lexeme} arguments are not supported in the compact interaction syntax.`,
+        "Parenthesized askChoice arguments are not supported in the compact interaction syntax.",
         this.#peek().span,
       );
       this.#synchronizeStatement();
@@ -3894,7 +3903,7 @@ class Parser {
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
-        `Parenthesized ${command.lexeme} arguments are not supported in the compact interaction syntax.`,
+        "Parenthesized askChoice arguments are not supported in the compact interaction syntax.",
         this.#peek().span,
       );
       this.#synchronizeStatement();
@@ -4016,7 +4025,7 @@ class Parser {
           missingChoiceOptionWasReported = true;
           this.#reportSpan(
             parserDiagnosticCode.expectedChoiceOption,
-            "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+            "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
             name.span,
           );
           this.#skipInteractionRest();
@@ -4026,7 +4035,7 @@ class Parser {
         ) {
           this.#reportSpan(
             parserDiagnosticCode.unsupportedInteractionForm,
-            "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+            "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
             this.#peek().span,
           );
           this.#skipInteractionRest();
@@ -4086,7 +4095,7 @@ class Parser {
           if (this.#check(TokenKind.KeywordAs)) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
-              "The 'as speaker' clause must appear immediately after 'choose'.",
+              "The 'as speaker' clause must appear immediately after 'askChoice'.",
               this.#peek().span,
             );
           } else {

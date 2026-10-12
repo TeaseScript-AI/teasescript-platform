@@ -309,7 +309,7 @@ test("session text shows what the player saw; values that were never said need t
   let session = createPlayerRuntimeSession(
     [
       'let secret = load("private", default: "")',
-      'let pick = choose [{ text: "Pick", value: secret }]',
+      'let pick = askChoice [{ text: "Pick", value: secret }]',
       'let typed = askText("Name", prefill: secret)',
       'save "kept" as secret',
       'say "Done"',

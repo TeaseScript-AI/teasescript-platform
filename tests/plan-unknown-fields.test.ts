@@ -55,7 +55,7 @@ const REPRESENTATIVE_SOURCE = [
   "wait 1 s",
   'showButton "Continue"',
   'let answer = askText hint: "Name ${values.length}"',
-  'let choice = choose first: "One", second: "Two"',
+  'let choice = askChoice first: "One", second: "Two"',
   "exit",
 ].join("\n");
 

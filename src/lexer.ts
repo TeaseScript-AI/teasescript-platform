@@ -651,6 +651,8 @@ function isInteractionCommand(value: string | undefined): boolean {
     value === "askBoolean" ||
     value === "askForm" ||
     value === "askBooleans" ||
+    value === "askChoice" ||
+    // The earlier name of `askChoice` is parsed as one, so its error names the fix.
     value === "choose"
   );
 }

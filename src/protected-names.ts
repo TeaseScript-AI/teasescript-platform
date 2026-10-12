@@ -21,7 +21,6 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "true",
   "false",
   "null",
-  "choose",
   "speaker",
   "say",
   "as",
@@ -119,6 +118,9 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "cancelSchedule",
   "askText",
   "askNumber",
+  "askChoice",
+  // The earlier name of `askChoice` stays reserved, so its use is a compile error that names the fix (#830).
+  "choose",
   "showButton",
   "takePhoto",
   "askImage",

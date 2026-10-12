@@ -22,9 +22,9 @@ import {
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind").
 
 const twoChoices = [
-  'let first = choose "One", "Two"',
+  'let first = askChoice "One", "Two"',
   'say "first ${first}", instant',
-  'let second = choose "Red", "Blue"',
+  'let second = askChoice "Red", "Blue"',
   'say "second ${second}", instant',
   "exit",
 ].join("\n");
@@ -312,9 +312,9 @@ test("Back and Forward show a changed message as each state had it, and the grey
   const first = createPlayerRuntimeSession(
     [
       'let strokes = say "Strokes: 0", instant',
-      'let first = choose "One", "Two"',
+      'let first = askChoice "One", "Two"',
       'strokes.text = "Strokes: 1"',
-      'let second = choose "Red", "Blue"',
+      'let second = askChoice "Red", "Blue"',
       'strokes.text = "Strokes: 50"',
       'say "done", instant',
       "exit",

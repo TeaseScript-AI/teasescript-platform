@@ -739,9 +739,9 @@ like a Stage image, is a warning [player notice](#player-notices).
 ## Composer and foreground interactions
 
 The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
-the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear after the latest message inside the
-same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and below in the
-normal viewport; a larger bottom safe-area inset takes precedence where needed.
+the answer field for `askText` and `askNumber`; `askChoice` and `showButton` controls appear after the latest message
+inside the same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and
+below in the normal viewport; a larger bottom safe-area inset takes precedence where needed.
 Invalid submissions show a short red notice anchored to the composer input without changing its height or moving choices.
 In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
 changes, after a brief delay, or when the player taps outside it.
@@ -821,7 +821,7 @@ Standard keyboard behavior is:
 - `Enter` submits;
 - `Shift+Enter` inserts a newline;
 - Space in the empty composer activates the preselected button: a `showButton`, or the button that `prefill:` of
-  `choose` or `askBoolean` preselects; without one it does nothing, and while a text, number, or date field waits
+  `askChoice` or `askBoolean` preselects; without one it does nothing, and while a text, number, or date field waits
   it types. A focused button keeps its own Space: it activates that button, and a focused form toggle flips without
   submitting the form;
 - Enter, in the input or on Send, and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
@@ -872,9 +872,9 @@ replaced, and a restored session asks for the camera again but never takes a pho
 used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered, and a
 [player notice](#player-notices) says so.
 
-`choose` and `showButton` keep the composer enabled rather than visually disabling it:
+`askChoice` and `showButton` keep the composer enabled rather than visually disabling it:
 
-- `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
+- `askChoice`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
   the same action, and so does Space in the empty composer, since its button is always preselected; other text does
   not;
@@ -905,8 +905,8 @@ adds nothing to the transcript; submitting adds the player's answer listing ever
 ([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
 of the `›` response marker; screen readers read its plain text. Each cycle line names the option the cycle showed,
 also where several of its options share a value. Exact
-unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for `choose`. A
-form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
+unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for
+`askChoice`. A form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
@@ -922,8 +922,8 @@ the transcript's reading width, grow with their labels, and allow long labels to
 buttons and wraps onto additional rows rather than scrolling horizontally. It adds no inline padding beyond the
 transcript reading gutter; each button retains its own label padding. The gap from the preceding message to the
 group follows the separate-bubble gap (12px). The Player action button is the shared style
-for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
-vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
+for script-driven foreground and right-rail actions, including `askChoice` and `showButton`: minimum height `44px`,
+`8px` vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
 apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting

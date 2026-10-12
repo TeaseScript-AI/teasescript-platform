@@ -183,8 +183,8 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 ### Rewind
 
 While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
-session newly presents (`choose`, a button, an ask, or `askImage`), the one shown when Debug is turned on included; an
-ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
+session newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included;
+an ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
 validated state as checkpoint JSON, which includes the session's storage view, and the events that led to it, which
 rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
 photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,

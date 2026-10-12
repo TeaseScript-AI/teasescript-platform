@@ -656,7 +656,9 @@ test("objects keep fixed properties, and dicts are not choices", () => {
       ],
     ],
   );
-  assert.deepEqual(codes('let pick = choose dict{ a: "x" }\nexit'), [["TSV029", 'dict{ a: "x" }']]);
+  assert.deepEqual(codes('let pick = askChoice dict{ a: "x" }\nexit'), [
+    ["TSV029", 'dict{ a: "x" }'],
+  ]);
   assert.deepEqual(codes("let dict = 1"), [["TSV001", "dict"]]);
 });
 

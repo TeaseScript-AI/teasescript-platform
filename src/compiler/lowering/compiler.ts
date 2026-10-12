@@ -1660,10 +1660,11 @@ export class InstructionCompiler {
   }
 
   /**
-   * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
-   * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
-   * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
-   * any operand. It is said `instant`, so its field or buttons appear with it (owner decision on #829, 2026-10-11).
+   * A basic ask says its question, then opens its field; `askChoice` opens its buttons, and `askBoolean` says its
+   * question, then opens its two buttons. The question and the options are evaluated once, in written order, before
+   * the question is said, so a prefill that asks itself comes first. The question is said by the requesting speaker,
+   * captured before any operand. It is said `instant`, so its field or buttons appear with it (owner decision on #829,
+   * 2026-10-11).
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -1890,8 +1891,8 @@ export class InstructionCompiler {
   /**
    * `askBoolean` with an operand only known at runtime, or with its question named `message:`: like a form, its
    * arguments are evaluated in written order into one object, from which it says its question. Its two buttons,
-   * `yesText:` (default "Yes") returning `true` and `noText:` (default "No") returning `false`, then open as a `choose`
-   * of two choice objects.
+   * `yesText:` (default "Yes") returning `true` and `noText:` (default "No") returning `false`, then open as an
+   * `askChoice` of two choice objects.
    */
   *#lowerAskBooleanTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     const span = copySpan(expression.span);
