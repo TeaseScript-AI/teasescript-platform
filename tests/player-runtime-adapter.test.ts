@@ -43,6 +43,7 @@ import {
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
   stepPlayerRuntimeFormField,
+  skipPlayerRuntimeImage,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   playerRuntimeForm,
@@ -780,11 +781,14 @@ test("an image request is presented, survives a restore while it waits, and show
     hint: "Add an image",
     allowFile: true,
     allowCamera: true,
+    skip: null,
     types: [".png"],
     mime: null,
   });
-  // Typed text does not answer an image request.
+  // Typed text does not answer an image request, and without `allowSkip: true` there is no skip.
   assert.equal(submitPlayerRuntimeComposer(session, "me.png"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "Skip"), null);
+  assert.equal(skipPlayerRuntimeImage(session), null);
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(playerRuntimeForeground(restored), presented);
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
@@ -806,6 +810,32 @@ test("an image request is presented, survives a restore while it waits, and show
   );
   // Without a pending image request there is nothing to answer.
   assert.equal(answerPlayerRuntimeImage(answered.session, reference, store), null);
+});
+
+test("a skippable image request offers Skip, also after a restore, and a skip answers null", () => {
+  const session = createPlayerRuntimeSession(
+    'let pick = askImage("Show me.", allowSkip: true)\nif pick == null {\n  say "No photo, then.", instant\n}\nexit',
+  );
+  const presented = playerRuntimeForeground(session);
+  assert.ok(presented?.kind === "ask-image");
+  assert.equal(presented.skip, "Skip");
+  const point = createPlayerRuntimeRestorePoint(session);
+  // The skip control's exact text skips, as its button does; other text is not an answer.
+  for (const skip of [
+    skipPlayerRuntimeImage,
+    (restored: PlayerRuntimeSession) => submitPlayerRuntimeComposer(restored, "Skip"),
+  ]) {
+    const restored = restorePlayerRuntimeSession(point);
+    assert.deepEqual(playerRuntimeForeground(restored), presented);
+    assert.equal(submitPlayerRuntimeComposer(restored, "skip"), null);
+    const skipped = skip(restored);
+    assert.equal(skipped?.outcome.kind, "completed");
+    assert.equal(skipped.session.state.status, "halted");
+    assert.deepEqual(
+      skipped.session.transcriptEntries.map((entry) => entry.text),
+      ["Show me.", "Skip", "No photo, then."],
+    );
+  }
 });
 
 test("an image request without a hint shows the default hint, and an explicitly empty one stays empty", () => {

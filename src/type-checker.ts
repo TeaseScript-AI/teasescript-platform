@@ -4251,19 +4251,21 @@ class TypeChecker {
   }
 
   /**
-   * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
-   * values must be valid, and written sources must leave the player a way to answer.
+   * The message (question) and hint of `askImage` are shown text, the sources and `allowSkip:` are booleans, and `types:`
+   * and `mime:` are lists of texts. Written values must be valid, and written sources must leave the player a way to
+   * answer. The answer is an image reference, or also `null` unless `allowSkip:` is left out or written `false`.
    */
-  *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+  *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     if (expression.presentation !== undefined)
       yield* compileChild(this.#expressionTask(expression.presentation, scope));
     const sources: boolean[] = [];
+    let skippable = false;
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
       const name = argument.kind === "namedArgument" ? argument.name.name : "message";
       if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
       else if (name === "hint") this.#checkShownText(argument.value, type, "an input hint");
-      else if (name === "allowCamera" || name === "allowFile") {
+      else if (name === "allowCamera" || name === "allowFile" || name === "allowSkip") {
         this.#reportUnless(
           type,
           (member) => isScalar(member, "boolean"),
@@ -4271,7 +4273,8 @@ class TypeChecker {
           `'${name}:' takes true or false`,
         );
         const written = unwrapGrouping(argument.value);
-        if (written.kind === "booleanLiteral") sources.push(written.value);
+        if (name === "allowSkip") skippable = written.kind !== "booleanLiteral" || written.value;
+        else if (written.kind === "booleanLiteral") sources.push(written.value);
       } else if (name === "types" || name === "mime") {
         this.#reportUnless(
           type,
@@ -4289,6 +4292,7 @@ class TypeChecker {
     // Only both sources written as false leave no way to answer; an omitted source is allowed.
     if (sources.length === 2 && !sources[0] && !sources[1])
       this.#report(typeCode.invalidOperand, IMAGE_NO_SOURCE_MESSAGE, expression.span);
+    return skippable ? optional(STRING_TYPE) : STRING_TYPE;
   }
 
   /** A written `types:` or `mime:` list holds at least one entry, and each written text is valid. */
@@ -5365,10 +5369,10 @@ class TypeChecker {
       return optional(STRING_TYPE);
     }
     if (isAskImageCall(expression)) {
-      yield* compileChild(this.#askImageTask(expression, scope));
-      // Like an interaction, it waits for the player, and its answer is always an image reference.
+      const answer = yield* compileChild(this.#askImageTask(expression, scope));
+      // Like an interaction, it waits for the player.
       this.#suspend();
-      return STRING_TYPE;
+      return answer;
     }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);

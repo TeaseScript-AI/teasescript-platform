@@ -203,7 +203,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, and camera, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -3869,7 +3869,8 @@ async function askImageScenario(cdp, origin, profile) {
  * The camera route of `askImage`: the camera opens by itself with the request, on the Stage, or in the camera window a
  * script shows. The shutter on the viewfinder takes a photo the player may take again, and "Use this" alone answers the
  * request with the camera's own, unmirrored picture. A camera the request opened turns off after the answer, also one
- * given as a file. A camera that fails offers "Try again" while the paperclip stays.
+ * given as a file, or a skip. A camera that fails offers "Try again" while the paperclip stays. A request written with
+ * `allowSkip: true` offers Skip under its question, which answers `null`; one without offers none.
  */
 // Exports a package's saved data from Player Settings in the default build, without Debug: one downloaded file with the
 // saved photo's exact bytes, the same data as text with copying and its manual fallback, no unsaved photo, released
@@ -4991,6 +4992,45 @@ async function askImageCameraScenario(cdp, origin, profile) {
       8_000,
       "Try again did not open the camera",
     );
+
+    // Skip answers a skippable request with `null`: the viewfinder closes, the camera turns off, and the transcript
+    // shows the player's Skip.
+    const skip = `[...document.querySelectorAll('[data-image-skip]')]`;
+    await start("picture-skip");
+    await waitFor(
+      cdp,
+      `${liveVideo("[data-stage-camera]")} && ${skip}.length === 1 && ${skip}[0].textContent.trim() === 'Skip'`,
+      8_000,
+      "The skippable request offered no Skip beside the camera",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `${skip}[0].closest('[data-foreground-controls]') !== null && !${skip}[0].closest('[data-image-capture]')`,
+      ),
+      true,
+      "Skip is not among the chat's controls",
+    );
+    await physicalClick(cdp, "[data-image-skip]");
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-image-capture]') || document.querySelector('[data-image-capture]').textContent.includes('Now a photo you cannot skip')`,
+      8_000,
+      "Skip did not close the skipped request's viewfinder",
+    );
+    await waitFor(
+      cdp,
+      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim() === 'Skip') && document.body.innerText.includes('No photo, then.')`,
+      8_000,
+      "Skip did not answer the request with null",
+    );
+    await waitFor(
+      cdp,
+      `${liveVideo("[data-stage-camera]")} && ${visible("[data-composer-attach]")}`,
+      8_000,
+      "The next request did not open",
+    );
+    assertEqual(await value(cdp, `${skip}.length`), 0, "A request without allowSkip offered Skip");
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
       identifier: tracking.result.identifier,

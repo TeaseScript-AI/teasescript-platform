@@ -4,7 +4,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import PlayerActionButton from "./components/PlayerActionButton.vue";
 import type { PlayerForegroundPresentation } from "../../model.js";
 const props = defineProps<{ foreground: PlayerForegroundPresentation | null; disabled: boolean }>();
-const emit = defineEmits<{ activate: [optionId: string | null] }>();
+const emit = defineEmits<{ activate: [optionId: string | null]; skip: [] }>();
 const group = ref<HTMLElement | null>(null);
 const balanceLastRow = ref(false);
 const choiceRows = computed(() => {
@@ -58,7 +58,11 @@ watch(() => props.foreground, async () => {
   <div
     ref="group"
     data-foreground-controls
-    v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
+    v-if="
+      foreground?.kind === 'choose' ||
+      foreground?.kind === 'show-button' ||
+      (foreground?.kind === 'ask-image' && foreground.skip !== null)
+    "
     role="group"
     :aria-label="foreground.accessibleName"
     class="flex min-w-0 flex-col items-center"
@@ -77,6 +81,14 @@ watch(() => props.foreground, async () => {
         />
       </div>
     </template>
+    <!-- The skip of an image request written with allowSkip: true. Not preselected: Space never skips. -->
+    <PlayerActionButton
+      v-else-if="foreground.kind === 'ask-image'"
+      :disabled="disabled"
+      :label="foreground.skip ?? undefined"
+      data-image-skip
+      @click="emit('skip')"
+    />
     <!-- The visible label names the button; the localized default only stands in for a blank label. -->
     <PlayerActionButton
       v-else

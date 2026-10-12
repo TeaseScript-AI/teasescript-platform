@@ -6,7 +6,7 @@ import {
   temporalAnswer,
 } from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
-import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../image-input.js";
+import { IMAGE_ANSWER_TRANSCRIPT_TEXT, IMAGE_SKIP_TEXT } from "../../image-input.js";
 import type {
   InteractionAccessibleName,
   InteractionChoiceOption,
@@ -169,15 +169,21 @@ export function resolveInteractionCompletion(
           : presentDateTime(context.presentation, answer);
     return { ok: true, result: answer, transcriptText };
   }
-  // The answer is an image the trusted host stored, by its reference; the transcript never shows the reference.
+  // The answer is an image the trusted host stored, by its reference; the transcript never shows the reference. A
+  // request that allows it may be skipped instead, which answers `null`.
   if (action.ui.kind === "image") {
+    if (payload.kind === "skip" && Object.keys(payload).length === 1)
+      return action.ui.allowSkip
+        ? { ok: true, result: null, transcriptText: IMAGE_SKIP_TEXT }
+        : { ok: false, message: "This image request cannot be skipped, so it needs an image." };
     const reference =
       payload.kind === "image" && Object.keys(payload).length === 2 ? payload.reference : undefined;
     if (typeof reference !== "string" || reference.length === 0 || !completionStringFits(reference))
       return {
         ok: false,
-        message:
-          "Image completion requires { kind: 'image', reference } with a stored image reference.",
+        message: action.ui.allowSkip
+          ? "Image completion requires { kind: 'image', reference } with a stored image reference, or { kind: 'skip' }."
+          : "Image completion requires { kind: 'image', reference } with a stored image reference.",
       };
     if (capturedMedia?.holds(reference, "image") !== true)
       return { ok: false, message: "The image is not stored media of this host." };
@@ -234,6 +240,7 @@ export function cloneImageUi(
     hint: ui.hint,
     allowCamera: ui.allowCamera,
     allowFile: ui.allowFile,
+    allowSkip: ui.allowSkip,
     types: ui.types === null ? null : [...ui.types],
     mime: ui.mime === null ? null : [...ui.mime],
     accessibleName,
@@ -247,7 +254,7 @@ export function cloneImageUi(
 export function imageRequestValue(
   ui: Pick<
     ImageInteractionUi,
-    "question" | "hint" | "allowCamera" | "allowFile" | "types" | "mime"
+    "question" | "hint" | "allowCamera" | "allowFile" | "allowSkip" | "types" | "mime"
   >,
 ): SerializableRuntimeValue {
   const texts = (items: readonly string[]): SerializableRuntimeValue => ({
@@ -261,6 +268,7 @@ export function imageRequestValue(
       ...(ui.hint === null ? [] : [{ name: "hint", value: ui.hint }]),
       { name: "allowCamera", value: ui.allowCamera },
       { name: "allowFile", value: ui.allowFile },
+      { name: "allowSkip", value: ui.allowSkip },
       ...(ui.types === null ? [] : [{ name: "types", value: texts(ui.types) }]),
       ...(ui.mime === null ? [] : [{ name: "mime", value: texts(ui.mime) }]),
     ],

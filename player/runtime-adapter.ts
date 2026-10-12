@@ -53,6 +53,7 @@ import {
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { formValueText } from "../src/interaction-answers.js";
+import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
 import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
@@ -737,6 +738,7 @@ export function playerRuntimeForeground(
         hint: action.ui.hint ?? "Add an image…",
         allowFile: action.ui.allowFile,
         allowCamera: action.ui.allowCamera,
+        skip: action.ui.allowSkip ? IMAGE_SKIP_TEXT : null,
         types: action.ui.types,
         mime: action.ui.mime,
       });
@@ -1201,6 +1203,9 @@ export function submitPlayerRuntimeComposer(
         ? cancelPlayerRuntimeForm(session)
         : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
+  // The exact text of a skippable image request's skip control skips it; other text never answers an image request.
+  if (action?.ui.kind === "image")
+    return submittedText === IMAGE_SKIP_TEXT ? skipPlayerRuntimeImage(session) : null;
   if (
     action === null ||
     (action.interactionKind !== "text" &&
@@ -1520,6 +1525,15 @@ function updatePlayerRuntimeForm(
     session: applyOperation(session, operation, null),
     outcome: operation.outcome,
   });
+}
+
+/** Skips the pending `askImage` written with `allowSkip: true`, which answers `null`, and continues on success. */
+export function skipPlayerRuntimeImage(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.ui.kind !== "image" || !action.ui.allowSkip) return null;
+  return completePlayerAction(session, action, { kind: "skip" });
 }
 
 export function activatePlayerRuntimeButton(

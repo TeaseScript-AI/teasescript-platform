@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 85;
+export const INSTRUCTION_PLAN_VERSION = 86;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -700,12 +700,13 @@ export interface FormUi {
 }
 
 /**
- * How the player may answer `askImage` (V30 §20): from the camera, from a file, or both, and which file extensions and
- * image MIME types a file needs; `null` accepts any image.
+ * How the player may answer `askImage` (V30 §20): from the camera, from a file, or both, whether the player may skip it,
+ * which answers `null`, and which file extensions and image MIME types a file needs; `null` accepts any image.
  */
 export interface ImageRequest {
   readonly allowCamera: boolean;
   readonly allowFile: boolean;
+  readonly allowSkip: boolean;
   readonly types: readonly string[] | null;
   readonly mime: readonly string[] | null;
 }
