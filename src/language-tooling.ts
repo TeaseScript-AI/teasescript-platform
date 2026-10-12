@@ -420,6 +420,8 @@ function isExpressionCompletionContext(
   return (
     last.kind === TokenKind.Equal ||
     last.kind === TokenKind.KeywordReturn ||
+    // A fallback may ask, as in `nickname otherwise askText "Name?"` (V30 §18).
+    last.kind === TokenKind.KeywordOtherwise ||
     last.kind === TokenKind.LeftParenthesis ||
     last.kind === TokenKind.LeftBracket ||
     last.kind === TokenKind.Colon ||

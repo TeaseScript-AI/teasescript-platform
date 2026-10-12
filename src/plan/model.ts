@@ -1174,11 +1174,28 @@ export type UnitPlan =
   | { readonly calendar: false; readonly unit: DurationUnitPlan }
   | { readonly calendar: true; readonly unit: "d" | "w" | "mo" | "y" };
 
-/** `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it. */
+/**
+ * `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it.
+ * `otherwise` gives the left value, or the right one when the left is `null`, and evaluates the right one only then.
+ */
 export interface BinaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "binary";
   readonly operator:
-    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or" | "in";
+    | "*"
+    | "/"
+    | "%"
+    | "+"
+    | "-"
+    | "=="
+    | "!="
+    | "<"
+    | "<="
+    | ">"
+    | ">="
+    | "and"
+    | "or"
+    | "in"
+    | "otherwise";
   readonly left: ExpressionPlan;
   readonly right: ExpressionPlan;
 }

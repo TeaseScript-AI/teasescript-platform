@@ -298,6 +298,7 @@ const typeCode = {
   randomStartValue: "TSV055",
   closedLoop: "TSV058",
   invalidCameraPlacement: "TSV059",
+  unusedFallback: "TSV062",
 } as const;
 
 /**
@@ -4670,6 +4671,86 @@ class TypeChecker {
     );
   }
 
+  /**
+   * `a otherwise b otherwise c`, checked from the left (V30 §18). A fallback runs only when everything before it is
+   * null, so what it changes may or may not have happened afterwards. The result is not null unless the last fallback
+   * may be, and its type joins the value and the fallback as for a list `get` default. The first `otherwise` whose left
+   * side the compiler knows is never null gets warning TSV062, which names that fallback and those after it.
+   */
+  *#otherwiseTask(
+    root: Extract<Expression, { kind: "binaryExpression" }>,
+    scope: Scope,
+  ): CompileTask<StaticType> {
+    // The chain from the inside out; a part in parentheses is a value of its own, as in `(a otherwise b) otherwise c`.
+    const chain: Extract<Expression, { kind: "binaryExpression" }>[] = [];
+    let value: Expression = root;
+    while (value.kind === "binaryExpression" && value.operator === "otherwise") {
+      chain.push(value);
+      value = value.left;
+    }
+    chain.reverse();
+    yield* compileChild(this.#expressionTask(value, scope));
+    let unused: number | null = null;
+    let type: StaticType = UNKNOWN_TYPE;
+    for (const [index, node] of chain.entries()) {
+      // The result may be the value or the fallback itself, so it is a copy that later stores to either cannot share.
+      const left = this.#capture(node.left);
+      if (unused === null && neverNull(left)) unused = index;
+      const start = this.#flow.mark();
+      yield* compileChild(this.#expressionTask(node.right, scope));
+      const changes = this.#flow.undo(start);
+      this.#flow.apply(this.#flow.join([new Map(), changes]));
+      type = fallbackType(left, plainType(this.#capture(node.right)));
+      // The root's own type is recorded by its caller.
+      if (node !== root) this.#types.set(node, type);
+    }
+    if (unused !== null) this.#warnUnusedFallback(chain, unused);
+    return type;
+  }
+
+  /**
+   * Warns that the fallbacks from `chain[first]` on are never used, because the value before that `otherwise` is never
+   * null (owner decision on #850). An element read by index fails instead of giving null, so for one, the warning names
+   * `get` with a `default:`.
+   */
+  #warnUnusedFallback(
+    chain: readonly Extract<Expression, { kind: "binaryExpression" }>[],
+    first: number,
+  ): void {
+    const node = chain[first]!;
+    const unused = chain.slice(first);
+    const subject = expressionText(node.left);
+    const holder = subject === null ? "This value" : `'${subject}'`;
+    const fallbacks = unused.map((part) => fallbackText(part.right));
+    const removed = fallbacks.every((text) => text !== null)
+      ? `'${fallbacks.map((text) => `otherwise ${text}`).join(" ")}'`
+      : null;
+    let fix =
+      unused.length === 1
+        ? `Remove ${removed ?? "'otherwise' and the fallback after it"}.`
+        : `Remove ${removed ?? "each 'otherwise' with its fallback"}.`;
+    const read = unwrap(node.left);
+    if (read.kind === "indexExpression" && first === 0) {
+      const collection = resolved(this.#typeOf(read.object));
+      const kind = isList(collection) ? "list" : isDict(collection) ? "dict" : null;
+      const parts = [expressionText(read.object), expressionText(read.index), fallbacks[0]];
+      if (kind !== null)
+        fix = `Reading ${kind === "list" ? "a position the list" : "a key the dict"} does not have is an error, not null. ${
+          parts.every((part) => part !== null)
+            ? `For a fallback there, write '${parts[0]}.get(${parts[1]}, default: ${parts[2]})'.`
+            : "For a fallback there, use get with 'default:' instead."
+        }`;
+    }
+    this.diagnostics.push(
+      createDiagnostic(
+        DiagnosticSeverity.Warning,
+        typeCode.unusedFallback,
+        `${holder} is never null here, so ${unused.length === 1 ? "the fallback after 'otherwise' is" : "the fallbacks after 'otherwise' are"} never used. ${fix}`,
+        createSourceSpan(node.operatorSpan.start, chain.at(-1)!.span.end),
+      ),
+    );
+  }
+
   /** Warns about a type test whose result the compiler can prove (ADR 0021 rule 4.5). */
   #warnConstantTest(
     node: Extract<Expression, { kind: "typeTestExpression" }>,
@@ -4704,6 +4785,8 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "binaryExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    if (expression.operator === "otherwise")
+      return yield* compileChild(this.#otherwiseTask(expression, scope));
     if (
       ["and", "or"].includes(expression.operator) ||
       (["==", "!="].includes(expression.operator) &&
@@ -8632,6 +8715,36 @@ function numberPrefillFix(expression: Expression): string {
 function unwrap(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
+}
+
+/** Whether the compiler knows that a value of `type` is never null: it knows every member, and none is null. */
+function neverNull(type: StaticType): boolean {
+  const all = members(type);
+  return all.every(isKnown) && !all.some((member) => member.kind === "null");
+}
+
+/**
+ * The type of `value otherwise fallback` (V30 §18): the value where it is never null, the fallback where it is only
+ * null, and otherwise both, joined as for a list `get` default: where the fallback has a part that no value decided
+ * yet, such as `[]`, as in a literal, and otherwise as a union, so an undecided value is not decided by its fallback.
+ */
+function fallbackType(value: StaticType, fallback: StaticType): StaticType {
+  if (neverNull(value)) return value;
+  const kept = nonNullType(value);
+  if (resolved(kept).kind === "never") return fallback;
+  const undecided = (type: StaticType): boolean =>
+    containsType(type, (part) => part.kind === "open");
+  const joined = undecided(fallback) && !undecided(kept) ? joinTypes([kept, fallback]) : undefined;
+  return joined ?? union([kept, fallback]);
+}
+
+/** A fallback as source text for a fix that shows it, also `true`, `false`, `null`, and `[]`. */
+function fallbackText(expression: Expression): string | null {
+  const node = unwrap(expression);
+  if (node.kind === "booleanLiteral") return String(node.value);
+  if (node.kind === "nullLiteral") return "null";
+  if (node.kind === "listLiteral" && node.elements.length === 0) return "[]";
+  return expressionText(expression);
 }
 
 /** A slot already decided by its first value at `at`, so a later mismatch can name that line. */

@@ -1459,7 +1459,8 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     case "typeTest":
       return expressionGuaranteesTemporaryEvaluation(value.value, temporaryId);
     case "binary":
-      if (value.operator === "and" || value.operator === "or") {
+      // The right operand of a short-circuit operator may not run.
+      if (value.operator === "and" || value.operator === "or" || value.operator === "otherwise") {
         return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);
       }
       return (

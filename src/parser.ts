@@ -3245,7 +3245,9 @@ class Parser {
 
   *#parseOr(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseAnd());
-    while (expression !== null && (this.#match(TokenKind.KeywordOr) || this.#matchSymbolicOr())) {
+    while (expression !== null) {
+      const operator = this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbolicOr();
+      if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseAnd());
       if (right === null) {
@@ -3255,14 +3257,16 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, "or");
+      expression = this.#binary(expression, right, "or", operator);
     }
     return expression;
   }
 
   *#parseAnd(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseNot());
-    while (expression !== null && this.#match(TokenKind.KeywordAnd)) {
+    while (expression !== null) {
+      const operator = this.#matchOperator(TokenKind.KeywordAnd);
+      if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseNot());
       if (right === null) {
@@ -3272,7 +3276,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, "and");
+      expression = this.#binary(expression, right, "and", operator);
     }
     return expression;
   }
@@ -3316,7 +3320,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(left, right, binaryOperator(operator));
+      expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
       return left;
     }
@@ -3443,13 +3447,13 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
   }
 
   *#parseMultiplicative(): ParseTask<Expression | null> {
-    let expression = yield* parseChild(this.#parseUnaryArithmetic());
+    let expression = yield* parseChild(this.#parseOtherwise());
     while (
       expression !== null &&
       (this.#check(TokenKind.Star) ||
@@ -3458,7 +3462,7 @@ class Parser {
     ) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseUnaryArithmetic());
+      const right = yield* parseChild(this.#parseOtherwise());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -3466,7 +3470,30 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
+    }
+    return expression;
+  }
+
+  /**
+   * `a otherwise b`, left-associative. It binds tighter than `*` and `+`, so that the fallback belongs to the value
+   * that may be null: `count otherwise 0 + 1` adds 1 to the count or to 0 (V30 §5, §18).
+   */
+  *#parseOtherwise(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseUnaryArithmetic());
+    while (expression !== null) {
+      const operator = this.#matchOperator(TokenKind.KeywordOtherwise);
+      if (operator === null) break;
+      this.#skipContinuationNewlines();
+      const right = yield* parseChild(this.#parseUnaryArithmetic());
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a fallback value after 'otherwise'.",
+        );
+        return null;
+      }
+      expression = this.#binary(expression, right, "otherwise", operator);
     }
     return expression;
   }
@@ -4813,12 +4840,14 @@ class Parser {
     left: Expression,
     right: Expression,
     operator: BinaryExpression["operator"],
+    operatorSpan: SourceSpan,
   ): BinaryExpression {
     return Object.freeze({
       kind: "binaryExpression",
       operator,
       left,
       right,
+      operatorSpan: copySpan(operatorSpan),
       span: spanFrom(left.span, right.span),
     });
   }
@@ -5104,17 +5133,23 @@ class Parser {
     return this.#peek().kind === kind;
   }
 
+  /** The span of the word operator `kind` when it comes next, which it consumes, or `null`. */
+  #matchOperator(kind: TokenKind): SourceSpan | null {
+    return this.#match(kind) ? this.#previous().span : null;
+  }
+
   /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
-  #matchSymbolicOr(): boolean {
-    if (!this.#check(TokenKind.Pipe)) return false;
+  #matchSymbolicOr(): SourceSpan | null {
+    if (!this.#check(TokenKind.Pipe)) return null;
     const first = this.#advance();
     const last = this.#match(TokenKind.Pipe) ? this.#previous() : first;
+    const span = spanFrom(first.span, last.span);
     this.#reportSpan(
       parserDiagnosticCode.symbolicOperator,
       "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
-      spanFrom(first.span, last.span),
+      span,
     );
-    return true;
+    return span;
   }
 
   #checkIdentifier(name: string): boolean {
@@ -5233,6 +5268,7 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
   TokenKind.KeywordFunction,
   TokenKind.KeywordReturn,
   TokenKind.KeywordIs,
+  TokenKind.KeywordOtherwise,
 ]);
 
 function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
@@ -5321,6 +5357,7 @@ function continuesExpression(kind: TokenKind): boolean {
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
     kind === TokenKind.KeywordNot ||
+    kind === TokenKind.KeywordOtherwise ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||

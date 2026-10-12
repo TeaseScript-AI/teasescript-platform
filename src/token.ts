@@ -33,6 +33,7 @@ export const TokenKind = {
   KeywordFunction: "keywordFunction",
   KeywordReturn: "keywordReturn",
   KeywordIs: "keywordIs",
+  KeywordOtherwise: "keywordOtherwise",
 
   LeftBrace: "leftBrace",
   RightBrace: "rightBrace",

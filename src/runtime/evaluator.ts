@@ -1068,6 +1068,11 @@ export class Evaluator {
                 break;
               }
             }
+            // The fallback runs only for a null value (V30 §18).
+            if (expression.operator === "otherwise" && frame.value !== null) {
+              value = frame.value;
+              break;
+            }
             frame.stage = 2;
             pending.push(evaluationFrame(expression.right));
             continue;
@@ -1863,6 +1868,7 @@ export class Evaluator {
         );
       return right;
     }
+    if (expression.operator === "otherwise") return right;
     if (expression.operator === "==" || expression.operator === "!=") {
       const equal = serializableEquals(left, right);
       return expression.operator === "==" ? equal : !equal;

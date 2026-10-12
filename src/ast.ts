@@ -875,12 +875,28 @@ export interface UnaryExpression {
   readonly span: SourceSpan;
 }
 
+/** `a otherwise b` gives `a`, or `b` when `a` is `null`, and evaluates `b` only then (V30 §18). */
 export interface BinaryExpression {
   readonly kind: "binaryExpression";
   readonly operator:
-    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or";
+    | "*"
+    | "/"
+    | "%"
+    | "+"
+    | "-"
+    | "=="
+    | "!="
+    | "<"
+    | "<="
+    | ">"
+    | ">="
+    | "and"
+    | "or"
+    | "otherwise";
   readonly left: Expression;
   readonly right: Expression;
+  /** The operator as written, such as `otherwise`, or a symbol that the parser reported, such as `??`. */
+  readonly operatorSpan: SourceSpan;
   readonly span: SourceSpan;
 }
 

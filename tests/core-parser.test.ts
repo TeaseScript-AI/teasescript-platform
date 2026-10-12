@@ -72,6 +72,22 @@ test("builds V30 precedence with comparison stronger than not", () => {
     "not",
     ["==", "score", 5],
   ]);
+  // `otherwise` binds tighter than arithmetic, so a fallback belongs to the value before it, and associates left.
+  assert.deepEqual(
+    expressionShape(
+      initializerOf("let result = a otherwise b + 1 == c otherwise d and not e otherwise false"),
+    ),
+    [
+      "and",
+      ["==", ["+", ["otherwise", "a", "b"], 1], ["otherwise", "c", "d"]],
+      ["not", ["otherwise", "e", false]],
+    ],
+  );
+  assert.deepEqual(expressionShape(initializerOf("let result = -a otherwise b otherwise -1 * 2")), [
+    "*",
+    ["otherwise", ["otherwise", ["-", "a"], "b"], ["-", 1]],
+    2,
+  ]);
 });
 
 test("associates arithmetic left and unary operators right", () => {
@@ -141,6 +157,7 @@ test("accepts every keyword as a property name in unambiguous property positions
     "function",
     "return",
     "is",
+    "otherwise",
   ];
 
   for (const keyword of keywords) {

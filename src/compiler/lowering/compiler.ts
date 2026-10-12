@@ -1352,6 +1352,13 @@ export class InstructionCompiler {
     ) {
       return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
     }
+    if (
+      expression.kind === "binaryExpression" &&
+      expression.operator === "otherwise" &&
+      this.#containsUserCall(expression.right)
+    ) {
+      return yield* compileChild(this.#lowerFallbackTask(expression));
+    }
     switch (expression.kind) {
       case "booleanLiteral":
       case "nullLiteral":
@@ -2602,6 +2609,59 @@ export class InstructionCompiler {
     return {
       plan: result,
       temporaryIds: [...key.temporaryIds, ...lowered.temporaryIds, resultTemporary],
+    };
+  }
+
+  /**
+   * `a otherwise b` whose fallback runs as instructions, such as an ask: the value waits in a temporary, and the fallback
+   * runs only when it is null and then takes its place, as a `load` default does (V30 §18).
+   */
+  *#lowerFallbackTask(
+    expression: Extract<Expression, { kind: "binaryExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    const left = yield* compileChild(this.#lowerExpressionTask(expression.left));
+    const resultTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: left.plan,
+      expectBoolean: false,
+      span: copySpan(expression.left.span),
+    });
+    const result: TemporaryExpressionPlan = {
+      kind: "temporary",
+      temporaryId: resultTemporary,
+      span: copySpan(expression.span),
+    };
+    const conditional = this.instructions.length;
+    const conditionalInstruction: JumpIfFalseInstruction = {
+      kind: "jumpIfFalse",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: result,
+        right: { kind: "literal", value: null, span: copySpan(expression.span) },
+        span: copySpan(expression.span),
+      },
+      target: -1,
+      span: copySpan(expression.span),
+    };
+    this.instructions.push(conditionalInstruction);
+    const right = yield* compileChild(this.#lowerExpressionTask(expression.right));
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: right.plan,
+      expectBoolean: false,
+      span: copySpan(expression.right.span),
+    });
+    this.instructions[conditional] = {
+      ...conditionalInstruction,
+      target: this.instructions.length,
+    };
+    return {
+      plan: result,
+      temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
     };
   }
 

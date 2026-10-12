@@ -51,6 +51,8 @@ test("completion exposes accepted compact commands and takePhoto", () => {
     "showCamera",
   ])
     assert.ok(expression.includes(expected), expected);
+  // A fallback may ask (V30 §18).
+  assert.ok(labels("let name = nickname otherwise ").includes("askText"));
 });
 
 test("completion exposes optional speaker and current say modifiers", () => {
