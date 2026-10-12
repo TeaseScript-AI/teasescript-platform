@@ -6,8 +6,8 @@ import { mapChildren } from "./variable-types.ts";
  * A null test that only gives a variable or a property a default, `if x == null { x = d }`, becomes `otherwise` (#850),
  * which evaluates `d` only where `x` is null, as the test did. Right after an assignment of `x`, the default joins it,
  * `x = e otherwise d`, where `d` neither reads `x` nor runs code that could (a call, or an ask, during which a button's
- * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. A storage read in `e`
- * keeps its own assignment, which gives it the variable's declared type (V30 §25). Elsewhere the test becomes
+ * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. A test right after a
+ * storage read stays as it is (hasLoad). Elsewhere the test becomes
  * `x = x otherwise d`, also after a `let`, whose variable's type comes from its first value, which `otherwise` would
  * make one without null.
  */
@@ -37,10 +37,11 @@ export function withNullDefaults(
         assigned?.kind === "assign" &&
         assigned.operator === "=" &&
         samePath(assigned.target, found.path) &&
-        !readsPath(found.value, found.path) &&
-        !hasLoad(assigned.value)
+        !readsPath(found.value, found.path)
       ) {
-        result[before] = { ...assigned, value: otherwise(assigned.value, found.value) };
+        // A storage read keeps its test (hasLoad).
+        if (hasLoad(assigned.value)) result.push(item);
+        else result[before] = { ...assigned, value: otherwise(assigned.value, found.value) };
         continue;
       }
       result.push({
@@ -100,7 +101,8 @@ function samePath(left: IrExpression, right: IrExpression): boolean {
 
 /**
  * Whether a value reads storage: a `load` reads its key as the declared type of the variable it is assigned to (V30 §25),
- * which it would no longer be as an operand of `otherwise`.
+ * which it would no longer be as an operand of `otherwise`, and a computed key's value has a type the compiler does
+ * not know, whose `otherwise` it rejects where it accepts the test's assignment (reported to the language owner).
  */
 function hasLoad(value: IrExpression): boolean {
   let found = false;
