@@ -2098,9 +2098,30 @@ let name = askText "What is your name?", prefill: "Slave", hint: "Type your name
 The question, `prefill:`, and `hint:` are evaluated once, in the order they are written, before the question is said;
 the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
-accepts what a field text accepts, so a list is an error. Without a question nothing is said. In the head of `if`,
-`while`, `repeat`, `for`, or `switch`, the `{` of the block ends a compact ask or `askChoice`, so
-`if askBoolean { ... }` asks without a question.
+accepts what a field text accepts, so a list is an error. Without a question nothing is said, and the ask only opens
+its input, so a question said earlier, such as with `say prose`, is enough. In the head of `if`, `while`, `repeat`,
+`for`, or `switch`, the `{` of the block ends a compact ask or `askChoice`, so `if askBoolean { ... }` asks without a
+question.
+
+An ask's question is shown as `say` shows a message (owner decision on #832, 2026-10-11): `bubble(options)` or
+`prose(options)` after `as speaker` and before the question chooses its mode, with the options of `say`
+([§37](#message-presentation-defaults-and-overrides)), which are evaluated once, before the question. Without a mode
+the speaker's mode applies, a bubble by default. This holds for every ask that takes a question: the basic asks,
+`askBoolean`, `askForm`, `askBooleans`, and `askImage`, also when the question is `message:`.
+
+```text
+let name = askText prose "What is your name?"
+let count = askInteger as mistress prose(align: "center") "How many?", prefill: 3
+let ok = askBoolean bubble(background: "gold") "Ready?"
+let name = askText prose() ("What is your name?", hint: "Type your name")
+let picture = askImage prose ("Show me your setup", hint: "Attach a photo")
+```
+
+The mode is read as for `say`. The word is a mode when the question follows it, or, written with parentheses, when the
+parentheses of the ask follow them; otherwise it is part of the question, so `askText prose("Name?")` asks the value of
+a call to a function `prose`, and a variable `prose` stays a question. `askImage`, which always takes parentheses, also
+takes `askImage prose (...)`. A mode needs a question: `askText prose hint: "Help"` is a compile error. `askChoice` has
+no question, so it takes no mode; say the question before it, as in `say prose "Which one?"`.
 
 ### Text input
 
@@ -2196,9 +2217,10 @@ let count = askInteger("Enter a whole number")
 ```
 
 `askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
-`askInteger [as speaker] [question] [, prefill: integer] [, hint: text]` is implemented as the whole-number counterpart
-of `askNumber` ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an
-optional sign and digits within the safe integer range.
+`askInteger [as speaker] [bubble(options) | prose(options)] [question] [, prefill: integer] [, hint: text]` is
+implemented as the whole-number counterpart of `askNumber`
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an optional sign and
+digits within the safe integer range.
 
 ### Multiple integer inputs
 
@@ -2440,7 +2462,8 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
-The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, prefill: value] [, hint: text]` are
+The compact forms `askDate`, `askTime`, and
+`askDateTime [as speaker] [bubble(options) | prose(options)] [question] [, prefill: value] [, hint: text]` are
 implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
 control submits strict ISO text ([§35](#35-date-time-and-durations)); a local time that the player's zone
 skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
