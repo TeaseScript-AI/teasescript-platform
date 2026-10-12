@@ -92,8 +92,7 @@ save points as "game.points"
 // A labelled block runs in place; one that declares a variable keeps it in its own scope.
 let ready = false
 if true {
-  say prose "Ready?", instant
-  let answer = askBoolean
+  let answer = askBoolean prose "Ready?"
   if answer {
     ready = true
   }
@@ -129,7 +128,7 @@ function rooms {
 }
 let roomList = rooms()
 say prose "Where to?", instant
-let room = choose sexscriptLegacyMenuOptions(roomList, 0)
+let room = askChoice sexscriptLegacyMenuOptions(roomList, 0)
 say prose "Going to ${roomList[room]}", instant
 // A call that passes null for a parameter whose default gives it a type: the parameter takes null too.
 function afterLock(pre: boolean? = false) {

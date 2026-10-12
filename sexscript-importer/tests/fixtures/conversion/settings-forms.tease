@@ -38,7 +38,7 @@ let showPics = true
 let showDays = true
 let menu = 1
 // NOTE SX_MENU_FORM line 14: The legacy menu switched 2 settings one click at a time until "Back"; one form of toggles asks them together, after a choice that offers "Reset to default" first, since that sets fixed values.
-if (choose change: "Change", reset: "Reset to default") == "reset" {
+if (askChoice change: "Change", reset: "Reset to default") == "reset" {
   showPics = true
   showDays = true
 }

@@ -65,8 +65,7 @@ let laughs = 2.5
 // NOTE SX_LIST_JOIN line 34: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
 say prose "${chant.join(" ")} ${"ha".repeat(toInteger(laughs))}", instant
 // The sum of a list that may be empty adds up in a whole number, and is null without elements, as Groovy's was.
-say prose "How many days?", instant
-let dayCount = askInteger prefill: 0
+let dayCount = askInteger prose "How many days?", prefill: 0
 let collectResult = []
 for day in 0..dayCount {
   collectResult.add(day * 2)

@@ -164,7 +164,7 @@ lastPick = pick
 // A menu choice minus one reads the last element when the player picks the first button, as Groovy counted it.
 let ratings = ["soft", "hard", "none"]
 say prose "Which limit?", instant
-let limit = choose 0: "Back",
+let limit = askChoice 0: "Back",
   1: "Soft",
   2: "Hard"
 // NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
@@ -198,17 +198,14 @@ let twiceValue = sexscriptLegacyTimes(top([["x", "y"]]), 2)
 say prose "Twice ${twiceValue.join(",")}", instant
 // A character of a text that only the converted types prove text reads through a helper: type inference reads the
 // `shot` of both blocks as one variable, of unknown type.
-say prose "Replay?", instant
-if askBoolean {
+if askBoolean prose "Replay?" {
   // NOTE SX_LOAD_OPEN_NULL line 44: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
   let shot = load "game.shot", default: sexscriptLegacyValue(null)
   say prose "Saved ${shot}", instant
 }
-say prose "Shoot?", instant
-if askBoolean {
+if askBoolean prose "Shoot?" {
   let shot = ""
-  say prose "Your shot (A1 to G7):", instant
-  shot = askText().replace("\n", " ")
+  shot = askText prose() ("Your shot (A1 to G7):").replace("\n", " ")
   say prose "Column ${sexscriptLegacyTextAt(shot, 0)}, row ${sexscriptLegacyTextAt(shot, 1)}", instant
 }
 // A list repeated by a count that may be missing is repeated as a number.

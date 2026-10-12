@@ -44,14 +44,14 @@ function sexscriptLegacyShowSwitch(command) {
   let last = command.trim().split(" ").last.lowercase()
   if ["on", "ein", "an"].contains(last) {
     if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
+      sexscriptLegacySwitchButton.remove()
     }
     sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
     }
   }
   if ["off", "aus"].contains(last) {
     if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
+      sexscriptLegacySwitchButton.remove()
     }
     sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
     }
@@ -115,8 +115,7 @@ playVideo async "videos/intro.mp4"
 playVideo async "clips/scene.mp4"
 // A prefill that may be blank opens the input without a default then, as the legacy empty field did.
 let draft = ""
-say prose "Your name?", instant
-let answer = askText(prefill: draft).replace("\n", " ")
+let answer = askText prose() ("Your name?", prefill: draft).replace("\n", " ")
 say prose "Hello ${answer}", instant
 // A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
 function checkPhoto(snapfile) {

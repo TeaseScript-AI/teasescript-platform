@@ -11,17 +11,17 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
 let sexscriptLegacyDeviceButtons = dict{}
 function sexscriptLegacyShowDevice(device, state) {
   if sexscriptLegacyDeviceButtons.contains(device) {
-    removePermanentButton(sexscriptLegacyDeviceButtons[device])
+    sexscriptLegacyDeviceButtons[device].remove()
   }
   sexscriptLegacyDeviceButtons[device] = showPermanentButton "${device}: ${state}", persist: true {
   }
 }
 function sexscriptLegacyOpenTray {
   if sexscriptLegacyDeviceButtons.contains("CD tray") {
-    removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
+    sexscriptLegacyDeviceButtons["CD tray"].remove()
   }
   sexscriptLegacyDeviceButtons["CD tray"] = showPermanentButton "CD tray: OPEN", persist: true {
-    removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
+    sexscriptLegacyDeviceButtons["CD tray"].remove()
   }
 }
 let sexscriptLegacySwitchButton = null
@@ -29,14 +29,14 @@ function sexscriptLegacyShowSwitch(command) {
   let last = command.trim().split(" ").last.lowercase()
   if ["on", "ein", "an"].contains(last) {
     if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
+      sexscriptLegacySwitchButton.remove()
     }
     sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
     }
   }
   if ["off", "aus"].contains(last) {
     if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
+      sexscriptLegacySwitchButton.remove()
     }
     sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
     }

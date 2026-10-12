@@ -54,8 +54,7 @@ sleep()
 // NOTE SX_UNION_TYPE line 17: Groovy let 'playing' hold values of several types; TeaseScript declares it 'boolean | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if playing is boolean { ... }
 let playing: boolean | integer = true
 while (playing is boolean and playing == true) or (playing is number and playing != 0) {
-  say prose "Stop?", instant
-  if askBoolean {
+  if askBoolean prose "Stop?" {
     playing = 0
   }
 }

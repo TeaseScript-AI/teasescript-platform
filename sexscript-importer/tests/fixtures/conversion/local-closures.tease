@@ -62,8 +62,7 @@ if askBoolean {
 if punish != null and punish != "" {
   sexscriptLegacyCall(punish, [])
 }
-say prose "Hurry?", instant
-if askBoolean {
+if askBoolean prose "Hurry?" {
   // TODO SX_CLOSURE_DISCOVERY line 29: Closure wait is declared in a block of the script; as a function at the top, where TeaseScript declares functions, a name would mean something else: the closure reads a variable of such a block, or the script declares, binds, or uses its name elsewhere. Pass those values as parameters, or rename it.
   // | def wait = { seconds -> show("Skipping ${seconds} seconds") }
 }

@@ -71,10 +71,8 @@ if given is string {
   say prose "A text", instant
 }
 // Several conditional fragments in one text are computed first, so the text is written once.
-say prose "Leashed?", instant
-let leashed = askBoolean
-say prose "Gagged?", instant
-let gagged = askBoolean
+let leashed = askBoolean prose "Leashed?"
+let gagged = askBoolean prose "Gagged?"
 let conditional = ""
 if leashed {
   conditional = " with the leash"

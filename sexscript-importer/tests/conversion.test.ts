@@ -895,7 +895,7 @@ test(
       // Legacy showed a number default as text; a map default has no text form.
       assert.match(
         output,
-        /^say prose "Code\?", instant\nlet code = askText\(prefill: "42"\)\.replace\("\\n", " "\)$/mu,
+        /^let code = askText prose\(\) \("Code\?", prefill: "42"\)\.replace\("\\n", " "\)$/mu,
       );
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
       // A negative button timeout failed in legacy and is rejected by TeaseScript.

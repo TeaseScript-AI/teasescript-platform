@@ -67,6 +67,7 @@ import {
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { withLegacyImagePaths } from "./image-paths.ts";
+import { withAskQuestions } from "./ask-questions.ts";
 import { withPositions } from "./positions.ts";
 import {
   type CapturedLocal,
@@ -2344,8 +2345,9 @@ function lowerFileOnce(
   }
   // The passes over the typed statements, in this order: typed storage reads parsed as legacy did, a button's seconds
   // kept as a duration, empty texts dropped, animations and counters made messages that change in place, repeated texts
-  // shortened. Every text is said at once as prose, a question too before its field opens, a text with blank lines as
-  // one message, and every legacy wait stays as written (owner decisions 2026-10-11).
+  // shortened, a question said right before its ask moved into the ask (ask-questions.ts). Every text is said at once as
+  // prose, a question too before its field opens, a text with blank lines as one message, and every legacy wait stays as
+  // written (owner decisions 2026-10-11).
   const { diagnostics } = context;
   // A module's script variables, and those of a script that loads modules, are shared with other files.
   const shared = mixin !== null || context.loadsModuleDirectories.size > 0;
@@ -2361,6 +2363,7 @@ function lowerFileOnce(
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withoutRepeatedText(texts, diagnostics);
   texts = withGroovyRanges(texts, (base) => freshName(base, context));
+  texts = withAskQuestions(texts);
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
@@ -18810,7 +18813,7 @@ function pushPrompt(
   }
   const say: IrStatement = { kind: "say", value: message, span: inputNode.span };
   if (onlyOf(inferType(messageNode, context.types), STRING)) {
-    context.prelude.push(say);
+    context.prelude.push({ ...say, prompt: true });
   } else if (isRepeatableExpression(messageNode)) {
     // A null legacy message kept the current text instead of showing "null".
     context.prelude.push({
@@ -18839,7 +18842,7 @@ function pushPrompt(
   return true;
 }
 
-/** Legacy getSelectedValue() returns the zero-based index, which numeric `choose` labels reproduce. */
+/** Legacy getSelectedValue() returns the zero-based index, which numeric `askChoice` labels reproduce. */
 function lowerSelectedValue(
   node: AstNode,
   args: AstNode[],
@@ -18868,7 +18871,7 @@ function lowerSelectedValue(
       context,
       node,
       "SX_DYNAMIC_CHOICE_OPTIONS",
-      "getSelectedValue() options come from a runtime list in a shape the importer does not convert: choose can take written options followed by one list, but this list is built inside a larger expression or is not proven to be a list. Build the option list in its own statement.",
+      "getSelectedValue() options come from a runtime list in a shape the importer does not convert: askChoice can take written options followed by one list, but this list is built inside a larger expression or is not proven to be a list. Build the option list in its own statement.",
     );
   }
   const options: IrExpression[] = [];
@@ -18891,7 +18894,7 @@ function lowerSelectedValue(
 }
 
 /**
- * getSelectedValue() over a runtime list as a `choose` with a list option (V30 §19, PR #515): written options before
+ * getSelectedValue() over a runtime list as an `askChoice` with a list option (V30 §19, PR #515): written options before
  * one runtime list keep their zero-based index as numeric value and the list's elements become choice objects with
  * the following ones, so the result stays the legacy index. A `collect` that builds the list becomes a loop before
  * the statement. Returns undefined when the options do not have that shape.

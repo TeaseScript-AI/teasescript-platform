@@ -22,8 +22,7 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
 // A read that keeps its null declares its key's type at the variable it starts, with the other values the script gives
 // that variable.
 let payload: boolean | integer[] | string | null = load "game.payload", default: null
-say prose "A list?", instant
-if askBoolean {
+if askBoolean prose "A list?" {
   payload = [1]
 } else {
   payload = "text"
@@ -35,8 +34,7 @@ save payload == null as "game.payloadMissing"
 function mark {
   save 1 as "game.marked"
 }
-say prose "Check?", instant
-if askBoolean() and load("game.marked", default: null) == null {
+if askBoolean prose() ("Check?") and load("game.marked", default: null) == null {
   say prose "Not marked.", instant
 }
 // A number key's empty value is a number.
@@ -59,8 +57,7 @@ save 3 as "game.count"
 // NOTE SX_LOAD_OPEN_NULL line 22: Legacy read null for a missing key and filled the value in before using it, which the compiler cannot prove, so this read keeps that null of an open type, checked where it is used, and its key has no declared type.
 let value = load "game.count", default: sexscriptLegacyValue(null)
 while value == null {
-  say prose "A number?", instant
-  value = askInteger prefill: 1
+  value = askInteger prose "A number?", prefill: 1
 }
 // NOTE SX_PLUS_OPERAND_TYPE line 24: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say prose "Value ${value + 1}", instant
@@ -91,8 +88,7 @@ if savedPoints == null {
   save 80 as "game.points"
 }
 let points = sexscriptLegacyLoadInteger("game.points")
-say prose "Halve the distance to 90?", instant
-if askBoolean {
+if askBoolean prose "Halve the distance to 90?" {
   points = 90 + (points - 90) / 2
 }
 save 7 + points as "game.points"

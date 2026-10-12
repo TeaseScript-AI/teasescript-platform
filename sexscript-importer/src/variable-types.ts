@@ -2363,7 +2363,7 @@ function commonType(types: readonly TeaseType[]): TeaseType {
   return common ?? UNKNOWN;
 }
 
-/** The value type `choose` returns: all values share one type, integers and numbers together are numbers. */
+/** The value type `askChoice` returns: all values share one type, integers and numbers together are numbers. */
 function sharedValueType(types: readonly TeaseType[]): TeaseType {
   const numeric = (type: TeaseType): boolean =>
     type.kind === "scalar" && (type.name === "integer" || type.name === "number");

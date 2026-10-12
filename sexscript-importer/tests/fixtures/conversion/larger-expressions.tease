@@ -58,8 +58,7 @@ let total = 1 + conditional2
 // An input on the right of && asks only when the left side allows it.
 let conditional3 = missed > 1
 if conditional3 {
-  say prose "Continue?", instant
-  conditional3 = askBoolean
+  conditional3 = askBoolean prose "Continue?"
 }
 if conditional3 {
   say prose "Continuing", instant
@@ -112,7 +111,7 @@ let menuTexts = []
 for it in opts {
   menuTexts.add(it.lbl)
 }
-let picked = opts[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].ID
+let picked = opts[(askChoice sexscriptLegacyMenuOptions(menuTexts, 0))].ID
 let rounds = randomInteger(0..3) + 1
 // NOTE SX_EACH_RETURN_CONTINUE line 29: Groovy return inside each() or times() ended only the current iteration and discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.
 for it in 0..rounds {

@@ -108,8 +108,7 @@ if sexscriptLegacyCompare(record, 10) >= 0 {
   say prose "A new record", instant
 }
 // A variable of a block keeps its own null tests: the first streak is never compared with null.
-say prose "Keep the streak?", instant
-if askBoolean {
+if askBoolean prose "Keep the streak?" {
   let streak = 0
   // NOTE SX_LOAD_KEEPS_VALUE line 27: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
   streak = load "training.streak", default: streak

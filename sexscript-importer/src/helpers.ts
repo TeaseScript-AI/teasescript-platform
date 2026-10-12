@@ -606,10 +606,10 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
         {
           kind: "expression",
           expression: {
-            kind: "call",
-            name: "removePermanentButton",
-            positional: [deviceButton(device)],
-            named: {},
+            kind: "methodCall",
+            target: deviceButton(device),
+            name: "remove",
+            arguments: [],
           },
           span: null,
         },
@@ -2271,10 +2271,10 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               {
                 kind: "expression",
                 expression: {
-                  kind: "call",
-                  name: "removePermanentButton",
-                  positional: [v("sexscriptLegacySwitchButton")],
-                  named: {},
+                  kind: "methodCall",
+                  target: v("sexscriptLegacySwitchButton"),
+                  name: "remove",
+                  arguments: [],
                 },
                 span: null,
               },
