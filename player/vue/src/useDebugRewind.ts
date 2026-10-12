@@ -45,12 +45,11 @@ export function useDebugRewind(player: PlayerSessionHost) {
     history.value.follow(session, marks());
     revision.value++;
   }
-  // Every published session is followed, so a point keeps exactly the events that led to it; a catch-up only once it
-  // is done, as one late observation publishes it.
+  // Every published session is followed, so a point keeps exactly the events that led to it.
   watch(player.generation, () => publishing || end(), { flush: "sync" });
   watch(rewind.retirements, end, { flush: "sync" });
-  watch(player.caughtUpSession, follow, { flush: "sync" });
-  follow(player.caughtUpSession.value);
+  watch(player.session, follow, { flush: "sync" });
+  follow(player.session.value);
   rewind.onAdopted(() => {
     history.value?.adopt();
     revision.value++;

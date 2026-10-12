@@ -62,6 +62,14 @@ interface Paused {
   readonly record: boolean;
 }
 
+/** How far the log reaches the latest publication of the session; see `DebugRecorder.published`. */
+interface PublishedLog {
+  readonly revision: number;
+  readonly operations: number | null;
+  readonly last: DebugOperation | null;
+  readonly paused: Paused;
+}
+
 /** How much of a session the recorder keeps; diagnostic retention, not a limit on scripts. */
 export interface DebugRecorderLimits {
   readonly operations: number;
@@ -80,6 +88,9 @@ const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2
  * between. A call that ends the session in failure, or that throws, freezes the recording, so later calls cannot evict
  * its evidence. A host callback that throws during a recorded call, the media store or the random decision, leaves the
  * recording incomplete, because a replay has only the answers it gave.
+ *
+ * Calls on a copy of the session's runner, on which a late observation catches up, are logged as the session's once
+ * it adopts the copy, and dropped with it otherwise.
  *
  * A call that pauses at a random draw stays one record: each resolution that continues it adds its events to it, and a
  * chosen one also its outcome, rather than a record of its own, so many natural resolutions add no record. When the log
@@ -108,18 +119,26 @@ export class DebugRecorder {
    * does not reach it; the last of them as it was then, which a resolution may have extended since; and where the
    * session stood paused.
    */
-  #published: {
-    readonly revision: number;
-    readonly operations: number | null;
-    readonly last: DebugOperation | null;
-    readonly paused: Paused;
-  } | null = null;
+  #published: PublishedLog | null = null;
   #paused: Paused = { draw: null, record: false };
   /** The recording once it froze; until then, the recording is the log. */
   #frozen: FrozenRecording | null = null;
   #problem: string | null = null;
   /** How the player gave the answer the calls being made pass, while `answeredBy` runs them. */
   #input: DebugAnswerInput | null = null;
+  /** The log as it was before the calls being made on a copy of the session's runner; see `stage`. */
+  #staged: {
+    readonly anchor: RuntimeSnapshot | null;
+    readonly operations: DebugOperation[];
+    readonly count: number;
+    readonly argumentBytes: number;
+    readonly broken: boolean;
+    readonly current: (() => RuntimeSnapshot) | null;
+    readonly published: PublishedLog | null;
+    readonly paused: Paused;
+    readonly frozen: FrozenRecording | null;
+    readonly problem: string | null;
+  } | null = null;
 
   constructor(limits: Partial<DebugRecorderLimits> = {}) {
     this.#limits = { ...DEFAULT_LIMITS, ...limits };
@@ -148,6 +167,55 @@ export class DebugRecorder {
     this.#published = { revision, operations: 0, last: null, paused: this.#paused };
     this.#frozen = null;
     this.#problem = null;
+    this.#staged = null;
+  }
+
+  /**
+   * Logs `owner`'s calls made on a copy of its runner, which `copy` exports, as calls of the session until `commit`
+   * keeps them, once the session adopted the copy, or `rollback` drops them with the copy and restores the log as it
+   * was. Calls of the session itself are not made meanwhile.
+   */
+  stage(owner: PlayerRuntimeEngine, copy: () => RuntimeSnapshot): void {
+    if (owner !== this.#owner) return;
+    this.#staged = {
+      anchor: this.#anchor,
+      operations: this.#operations,
+      count: this.#operations.length,
+      argumentBytes: this.#argumentBytes,
+      broken: this.#broken,
+      current: this.#current,
+      published: this.#published,
+      paused: this.#paused,
+      frozen: this.#frozen,
+      problem: this.#problem,
+    };
+    this.#current = copy;
+  }
+
+  /** Keeps the calls logged since `stage`: the session's runner is the copy now, which it exports again as before. */
+  commit(owner: PlayerRuntimeEngine): void {
+    const staged = this.#staged;
+    if (owner !== this.#owner || staged === null) return;
+    this.#current = staged.current;
+    this.#staged = null;
+  }
+
+  /** Drops the calls logged since `stage` and restores the log as it was then. */
+  rollback(owner: PlayerRuntimeEngine): void {
+    const staged = this.#staged;
+    if (owner !== this.#owner || staged === null) return;
+    // A restart since then left the earlier log as it was; otherwise the staged calls follow its calls.
+    staged.operations.length = staged.count;
+    this.#anchor = staged.anchor;
+    this.#operations = staged.operations;
+    this.#argumentBytes = staged.argumentBytes;
+    this.#broken = staged.broken;
+    this.#current = staged.current;
+    this.#published = staged.published;
+    this.#paused = staged.paused;
+    this.#frozen = staged.frozen;
+    this.#problem = staged.problem;
+    this.#staged = null;
   }
 
   /** Notes that `owner` published `revision` after the calls logged so far. */
@@ -163,15 +231,24 @@ export class DebugRecorder {
 
   /** The recording so far, or `null` before any session began. */
   recording(): DebugRecording | null {
-    if (this.#plan === null || this.#anchor === null || this.#current === null) return null;
-    const frozen = this.#frozen;
+    // Calls on a copy the session has not adopted are not the session's yet.
+    const log = this.#staged ?? {
+      anchor: this.#anchor,
+      operations: this.#operations,
+      count: this.#operations.length,
+      current: this.#current,
+      frozen: this.#frozen,
+      problem: this.#problem,
+    };
+    if (this.#plan === null || log.anchor === null || log.current === null) return null;
+    const frozen = log.frozen;
     return {
       plan: this.#plan,
-      anchorSnapshot: frozen?.anchor ?? this.#anchor,
-      operations: [...(frozen?.operations ?? this.#operations)],
-      endSnapshot: frozen === null ? this.#current() : this.#frozenEnd(frozen),
-      complete: this.#problem === null,
-      reason: this.#problem,
+      anchorSnapshot: frozen?.anchor ?? log.anchor,
+      operations: frozen === null ? log.operations.slice(0, log.count) : [...frozen.operations],
+      endSnapshot: frozen === null ? log.current() : this.#frozenEnd(frozen),
+      complete: log.problem === null,
+      reason: log.problem,
     };
   }
 

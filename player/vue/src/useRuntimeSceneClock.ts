@@ -1,19 +1,25 @@
-import { computed, ref, shallowReactive, shallowRef, watch, type Ref, type ShallowRef } from "vue";
+import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport } from "../../../src/index.js";
 import {
-  catchUpPlayerRuntimeTime,
+  adoptPlayerRuntimeCatchUp,
+  beginPlayerRuntimeCatchUp,
+  dropPlayerRuntimeCatchUp,
+  nextPlayerRuntimeCatchUpStepMs,
   observePlayerRuntimeTime,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
+  stepPlayerRuntimeCatchUp,
+  type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
 
 const DISPLAY_REFRESH_MS = 250;
 // Browsers fire longer `setTimeout` delays immediately; a later wake-up re-schedules the rest.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
-// How long one task may catch up the events of a late observation before it gives the browser a turn.
+// How long one task may catch up the events of a late observation before it gives the browser a turn. An observation
+// within that time of its next event is on time and observed in one go.
 const CATCH_UP_TASK_MS = 10;
 
 /**
@@ -21,34 +27,23 @@ const CATCH_UP_TASK_MS = 10;
  * observes time at the next deadline, before input, before a checkpoint capture, and at page lifecycle changes.
  * Scene time continues while the page is hidden; a new or restored session is rebased so an unavailable gap is not
  * consumed. Every observation carries the media progress `mediaReports` measures, so media cues follow what was
- * actually played. A late observation without media progress catches up event by event, a task at a time
- * (`catchUp`), so the page stays responsive; `catchingUp` holds meanwhile, and input, and everything else that
- * observes, finishes it first.
+ * actually played. A late observation without media progress catches up on a copy of the session, a task at a time
+ * (`catchUp`), so the page stays responsive; the session adopts the copy in one publication once it is done, and input,
+ * and everything else that observes, observes in one go instead.
  */
 export function useRuntimeSceneClock(
   session: ShallowRef<PlayerRuntimeSession | null>,
   mediaReports: () => readonly MediaProgressReport[] = () => [],
   /** While it holds, scene time stands at the last observation and nothing is observed; rebase when it ends. */
   paused: Readonly<Ref<boolean>> = ref(false),
-  /**
-   * Whether a late observation may catch up in steps; otherwise it is one observation. Not while Debug decides random
-   * draws: a draw that pauses would stand inside the catch-up, and Debug's choices could change between steps.
-   */
-  steps: () => boolean = () => true,
+  /** Whether a late observation may catch up on a copy; otherwise it is one observation. */
+  copies: () => boolean = () => true,
 ) {
   let origin = performance.now();
   const displayTimeMs = ref(0);
-  // The scene time the last catch-up went to, for the sessions of its engine: a session behind it is catching up.
-  const ahead = shallowRef<{
-    readonly engine: PlayerRuntimeSession["engine"];
-    readonly ms: number;
-  } | null>(null);
-
-  /** Whether a catch-up of the session is under way. */
-  function behind(current: PlayerRuntimeSession): boolean {
-    const target = ahead.value;
-    return target?.engine === current.engine && current.state.observedSessionTimeMs < target.ms;
-  }
+  // The late observation being caught up on a copy of the session, which goes on in its own tasks.
+  let pending: PlayerRuntimeCatchUp | null = null;
+  let nextTask: MessagePort | null = null;
 
   function sceneTimeMs(current: PlayerRuntimeSession): number {
     if (paused.value) return current.state.observedSessionTimeMs;
@@ -63,65 +58,92 @@ export function useRuntimeSceneClock(
     displayTimeMs.value = current.state.observedSessionTimeMs;
   }
 
-  /** Submits an ordinary time observation and publishes the resulting session. */
+  /** Drops a catch-up under way; the session stays as it is. */
+  function cancel() {
+    nextTask?.close();
+    nextTask = null;
+    if (pending !== null) dropPlayerRuntimeCatchUp(pending);
+    pending = null;
+  }
+
+  /**
+   * Submits an ordinary time observation and publishes the resulting session. A catch-up under way is dropped: this
+   * observation covers its time.
+   */
   function observe(): PlayerRuntimeSession | null {
     const current = session.value;
     if (!current || paused.value) return current;
+    cancel();
     const result = observePlayerRuntimeTime(current, sceneTimeMs(current), mediaReports());
     if (result.outcome.kind === "observed") session.value = result.session;
     return session.value;
   }
 
+  /** Observes at once while a catch-up is under way, so what follows comes after it; otherwise does nothing. */
+  function settle(): PlayerRuntimeSession | null {
+    return pending === null ? session.value : observe();
+  }
+
   /**
-   * Observes at a deadline or another opportunity, without the result being needed at once. Media progress is measured
-   * now, so an observation that reports it is one observation. Without, the observation catches up from event to event
-   * (`catchUpPlayerRuntimeTime`) for one task and publishes what it reached; the next task goes on.
+   * Observes at a deadline or another opportunity, without the result being needed at once. An observation on time,
+   * or one with media progress, which is measured now, is one observation. A late one catches up on a copy of the
+   * session (`beginPlayerRuntimeCatchUp`) for one task at a time and publishes nothing until the session adopts the
+   * copy; if the session was used meanwhile, the copy is gone and the session observes in one go.
    */
   function catchUp() {
     const current = session.value;
     if (!current || paused.value) return;
+    if (pending !== null) {
+      if (copies()) return continueCatchUp(current, pending);
+      // Debug started meanwhile: Debug follows every observation as it happens.
+      return void observe();
+    }
     const targetMs = sceneTimeMs(current);
     const reports = mediaReports();
-    let next = current;
-    if (reports.length > 0 || !steps()) {
+    const stepMs = nextPlayerRuntimeCatchUpStepMs(current.state);
+    if (
+      reports.length > 0 ||
+      !copies() ||
+      stepMs === null ||
+      targetMs - stepMs <= CATCH_UP_TASK_MS
+    ) {
       const result = observePlayerRuntimeTime(current, targetMs, reports);
-      if (result.outcome.kind === "observed") next = result.session;
-    } else {
-      const until = performance.now() + CATCH_UP_TASK_MS;
-      next = catchUpPlayerRuntimeTime(current, targetMs, () => performance.now() < until);
+      if (result.outcome.kind === "observed") session.value = result.session;
+      return;
     }
-    ahead.value = { engine: next.engine, ms: targetMs };
-    if (next !== current) session.value = next;
-    // Time did not move on since the last observation, so the next deadline is still ahead.
-    else if (current.state.observedSessionTimeMs >= targetMs) scheduleWakeUp(current);
+    pending = beginPlayerRuntimeCatchUp(current, targetMs);
+    continueCatchUp(current, pending);
   }
 
-  /** Finishes a catch-up under way at once, with `observe`; otherwise gives the session as it stands. */
-  function settle(): PlayerRuntimeSession | null {
-    const current = session.value;
-    return current !== null && behind(current) ? observe() : current;
+  function continueCatchUp(current: PlayerRuntimeSession, catchingUp: PlayerRuntimeCatchUp) {
+    const until = performance.now() + CATCH_UP_TASK_MS;
+    const step = stepPlayerRuntimeCatchUp(catchingUp, () => performance.now() < until);
+    // The next task goes on. A message, unlike a timer, is neither clamped nor throttled while the page is hidden,
+    // where late observations mostly come from.
+    if (step === "more") {
+      nextTask = inNextTask(catchUp);
+      return;
+    }
+    pending = null;
+    const adopted = step === "done" ? adoptPlayerRuntimeCatchUp(current, catchingUp) : null;
+    if (adopted !== null) session.value = adopted;
+    else observe();
   }
 
   let wakeUp: ReturnType<typeof setTimeout> | undefined;
-  let nextTask: MessagePort | null = null;
   function scheduleWakeUp(current: PlayerRuntimeSession | null) {
     if (wakeUp !== undefined) clearTimeout(wakeUp);
     wakeUp = undefined;
-    nextTask?.close();
-    nextTask = null;
+    // A catch-up belongs to its session and runs only while nothing holds; any other publication leaves it to notice
+    // whether the session was used meanwhile.
+    if (pending !== null && (paused.value || pending.engine !== current?.engine)) cancel();
     if (!current) return;
     displayTimeMs.value = sceneTimeMs(current);
-    if (paused.value) return;
+    if (paused.value || pending !== null) return;
     // A queued timer or media block waits for a pending storage write, and catch-up holds at its due time: an overdue
     // deadline cannot progress until the acknowledgement, whose published session schedules again. Without a queued
     // block, deadlines are observed as usual.
     if (pendingPlayerRuntimeStorageWrite(current.state) && current.state.queuedBlocks > 0) return;
-    // A catch-up goes on in the next task. A message, unlike a timer, is neither clamped nor throttled while the page
-    // is hidden, where late observations mostly come from.
-    if (behind(current)) {
-      nextTask = inNextTask(catchUp);
-      return;
-    }
     const deadlines = playerRuntimeDeadlines(current.state);
     if (deadlines.length === 0) return;
     const delay = Math.min(...deadlines) - sceneTimeMs(current);
@@ -173,8 +195,6 @@ export function useRuntimeSceneClock(
     observe,
     catchUp,
     settle,
-    /** Whether a catch-up is under way: the session shows a slice of it, not yet the observed time. */
-    catchingUp: computed(() => session.value !== null && behind(session.value)),
     rebase,
     /** The display estimate of scene time; it refreshes only while something presented needs it. */
     displayTimeMs: computed(() => displayTimeMs.value),
