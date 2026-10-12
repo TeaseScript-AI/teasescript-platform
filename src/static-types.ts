@@ -897,89 +897,130 @@ export function missingPropertyReads(
     heads.set(head, path);
     return path;
   };
-  const verdicts = new Map<string, Map<PropertyTable, Map<PropertyPath, boolean>>>();
-  return reads.map((read) => {
-    const known = verdicts.get(read.name) ?? new Map<PropertyTable, Map<PropertyPath, boolean>>();
-    verdicts.set(read.name, known);
-    const search = { name: read.name, root, extend, holders };
-    if (searchLineage(read.tables, search, known)) return undefined;
-    const names = new Set<string>();
-    searchLineage(read.tables, search, new Map(), names);
-    return [...names];
-  });
+  const byName = new Map<string, number[]>();
+  for (const [index, read] of reads.entries()) {
+    const indexes = byName.get(read.name) ?? [];
+    indexes.push(index);
+    byName.set(read.name, indexes);
+  }
+  const missing: (readonly string[] | undefined)[] = reads.map(() => undefined);
+  for (const [name, indexes] of byName) {
+    const places = new PropertyPlaces(name, holders, root, extend);
+    for (const index of indexes)
+      if (!places.read(reads[index]!.tables))
+        missing[index] = places.properties(reads[index]!.tables);
+  }
+  return missing;
 }
 
 /**
- * Whether an object at the place of one of `tables` may have the property `name` when the script runs. The search
- * goes through the places whose objects may reach that place, each as a table and the path of properties from its
- * objects to the objects read: a source at the same path, the table that holds a table at a property, one property
- * up, and down a property again. Objects whose properties the compiler cannot know, at any such place, may have it.
- * A table that the search reaches at a second path keeps objects at two depths of the objects read, as through
- * `node = node.next`, so it may hold its own nested objects and have it too. `known` keeps for each place it decides
- * whether it may, so a later read of the same name searches no place twice. With `names`, the search collects the
- * properties the objects read can have instead, and goes through every place.
+ * The places whose objects may reach the places of the reads of one property, each a table and the path of properties
+ * from its objects to the objects read: a source at the same path, the table that holds a table at a property, one
+ * property up, and down a property again. A read visits the places that no earlier read of the property visited and
+ * decides for each whether an object there may have the property, so every place is visited once for all reads.
  */
-function searchLineage(
-  tables: readonly PropertyTable[],
-  search: {
-    readonly name: string;
-    readonly root: PropertyPath;
-    readonly extend: (head: string, tail: PropertyPath) => PropertyPath;
-    readonly holders: Holders;
-  },
-  known: Map<PropertyTable, Map<PropertyPath, boolean>>,
-  names?: Set<string>,
-): boolean {
-  const places: {
+class PropertyPlaces {
+  readonly #places: {
     readonly table: PropertyTable;
     readonly path: PropertyPath;
-    readonly from: number;
+    readonly next: number[];
+    may: boolean;
   }[] = [];
-  const seen = new Map<PropertyTable, PropertyPath>();
-  const decide = (table: PropertyTable, path: PropertyPath, verdict: boolean): void => {
-    const paths = known.get(table) ?? new Map<PropertyPath, boolean>();
-    paths.set(path, verdict);
-    known.set(table, paths);
-  };
-  // The place `at` and every place that led to it may have the property.
-  const found = (at: number): true => {
-    for (let index = at; index >= 0; index = places[index]!.from)
-      decide(places[index]!.table, places[index]!.path, true);
-    return true;
-  };
-  // Adds a place reached from `from`, or tells that it, and so `from`, may have the property.
-  const reach = (table: PropertyTable, path: PropertyPath, from: number): boolean => {
-    const verdict = known.get(table)?.get(path);
-    if (verdict !== undefined) return verdict && found(from);
-    const first = seen.get(table);
-    if (first === path) return false;
-    if (first !== undefined) return names === undefined && found(from);
-    seen.set(table, path);
-    places.push({ table, path, from });
-    return false;
-  };
-  for (const table of tables) if (reach(table, search.root, -1)) return true;
-  for (let at = 0; at < places.length; at += 1) {
-    const { table, path } = places[at]!;
-    if (names !== undefined && path.head === undefined)
-      for (const property of table.keys()) names.add(property);
-    else if (table.open || (path.head === undefined && table.has(search.name))) return found(at);
-    const value = path.head === undefined ? undefined : table.get(path.head);
-    for (const part of value === undefined ? [] : firstParts(value))
-      if (part.kind === "object" && part.properties !== null) {
-        if (reach(part.properties, path.tail!, at)) return true;
-      } else if (
-        part.kind === "unknown" ||
-        part.kind === "object" ||
-        (part.kind === "open" && part.heldUnknown !== undefined)
-      )
-        return found(at);
-    for (const source of table.sources ?? []) if (reach(source, path, at)) return true;
-    for (const [holder, property] of search.holders.get(table) ?? [])
-      if (reach(holder, search.extend(property, path), at)) return true;
+  readonly #ids = new Map<PropertyTable, Map<PropertyPath, number>>();
+
+  constructor(
+    readonly name: string,
+    readonly holders: Holders,
+    readonly root: PropertyPath,
+    readonly extend: (head: string, tail: PropertyPath) => PropertyPath,
+  ) {}
+
+  /**
+   * Whether an object read from one of `tables` may have the property: a place it reaches has it at the objects read,
+   * or objects whose properties the compiler cannot know may reach one. A table that the read reaches again at a longer
+   * path than one it reached it at holds objects at two depths of the objects read, as through `node = node.next`, so
+   * the objects read may be any of its nested ones.
+   */
+  read(tables: readonly PropertyTable[]): boolean {
+    const places = this.#places;
+    // The places this read adds are numbered from `first` on.
+    const first = places.length;
+    const paths = new Map<PropertyTable, Set<PropertyPath>>();
+    const place = (table: PropertyTable, path: PropertyPath): number | undefined => {
+      const known = this.#ids.get(table)?.get(path);
+      if (known !== undefined) return known;
+      const reached = paths.get(table) ?? new Set<PropertyPath>();
+      for (let tail = path.tail; reached.size > 0 && tail !== undefined; tail = tail.tail)
+        if (reached.has(tail)) return undefined;
+      reached.add(path);
+      paths.set(table, reached);
+      const ids = this.#ids.get(table) ?? new Map<PropertyPath, number>();
+      ids.set(path, places.length);
+      this.#ids.set(table, ids);
+      places.push({ table, path, next: [], may: false });
+      return places.length - 1;
+    };
+    const starts = tables.map((table) => place(table, this.root)!);
+    // The places this read added that may have the property by themselves.
+    const found: number[] = [];
+    for (let at = first; at < places.length; at += 1) {
+      const { table, path, next } = places[at]!;
+      let may = table.open || (path.head === undefined && table.has(this.name));
+      const link = (other: number | undefined): void => {
+        if (other === undefined) may = true;
+        else next.push(other);
+      };
+      const value = path.head === undefined ? undefined : table.get(path.head);
+      for (const part of value === undefined ? [] : firstParts(value))
+        if (part.kind === "object" && part.properties !== null)
+          link(place(part.properties, path.tail!));
+        else if (
+          part.kind === "unknown" ||
+          part.kind === "object" ||
+          (part.kind === "open" && part.heldUnknown !== undefined)
+        )
+          may = true;
+      for (const source of table.sources ?? []) link(place(source, path));
+      for (const [holder, property] of this.holders.get(table) ?? [])
+        link(place(holder, this.extend(property, path)));
+      if (may) found.push(at);
+    }
+    // A place that reaches one that may have the property may have it too; places of earlier reads are decided.
+    const previous = new Map<number, number[]>();
+    for (let at = first; at < places.length; at += 1)
+      for (const other of places[at]!.next)
+        if (other < first) {
+          if (places[other]!.may) found.push(at);
+        } else {
+          const from = previous.get(other) ?? [];
+          from.push(at);
+          previous.set(other, from);
+        }
+    while (found.length > 0) {
+      const at = found.pop()!;
+      if (places[at]!.may) continue;
+      places[at]!.may = true;
+      for (const from of previous.get(at) ?? []) found.push(from);
+    }
+    return starts.some((at) => places[at]!.may);
   }
-  if (names === undefined) for (const { table, path } of places) decide(table, path, false);
-  return false;
+
+  /** The properties of the objects read from `tables`, which a read of them visited. */
+  properties(tables: readonly PropertyTable[]): string[] {
+    const names = new Set<string>();
+    const pending = tables.map((table) => this.#ids.get(table)!.get(this.root)!);
+    const reached = new Set(pending);
+    for (let index = 0; index < pending.length; index += 1) {
+      const { table, path, next } = this.#places[pending[index]!]!;
+      if (path.head === undefined) for (const name of table.keys()) names.add(name);
+      for (const other of next)
+        if (!reached.has(other)) {
+          reached.add(other);
+          pending.push(other);
+        }
+    }
+    return [...names];
+  }
 }
 
 /**

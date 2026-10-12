@@ -101,6 +101,44 @@ test("a property that only some code adds compiles, and its read is checked when
   );
 });
 
+test("the error names every property that the objects read can have, through each place they come from", () => {
+  // `chosen` takes the objects of `target.left` and of `target.right`, which the block's objects reach later.
+  assert.deepEqual(
+    diagnostics(
+      'let target = { left: { first: 1 }, right: { second: 2 } }\nlet incoming = { name: "incoming" }\ntimer async 1 s {\n    incoming.left = { first: 3, size: 4 }\n    incoming.right = { second: 5, color: "red" }\n}\nwait 2 s\ntarget = incoming\nlet chosen = target.left\nchosen = target.right\nsay target.left.colro\nsay chosen.colro\nexit',
+    ),
+    [
+      [
+        "TSV043",
+        "'target.left' has no property 'colro'. Its properties are 'first' and 'size'.",
+        "colro",
+      ],
+      [
+        "TSV043",
+        "'chosen' has no property 'colro'. Its properties are 'first', 'second', 'size', and 'color'. Did you mean 'color'?",
+        "colro",
+      ],
+    ],
+  );
+  // The objects of one place, reached at two of its properties, are not a place that holds itself.
+  assert.deepEqual(
+    diagnostics(
+      'let a = { left: { name: "left" }, right: { name: "right" } }\nlet b = a\nb.left = a.right\nsay b.left.color\nexit',
+    ),
+    [["TSV043", "'b.left' has no property 'color'. Its only property is 'name'.", "color"]],
+  );
+  // A place whose own property feeds it, as a linked list does, may hold objects at any depth: the runtime decides.
+  assert.deepEqual(
+    outcome(
+      'let node = { value: 1, next: { value: 2 } }\nnode = node.next\nsay "${node.value}"\nsay node.other\nexit',
+    ),
+    {
+      said: ["2"],
+      failure: ["TSR017", "'node' has no property 'other'. Its only property is 'value'."],
+    },
+  );
+});
+
 test("a value the compiler cannot know may have any property", () => {
   for (const source of [
     // A parameter without a type or default.
