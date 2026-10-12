@@ -3299,6 +3299,54 @@ test(
 );
 
 test(
+  "with compared answers, a text ask is also answered for what the code reads of the answer: a length, a part at a position, characters looked up in texts, and a text with a value in it",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const run = (source: string) => {
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      return explore(engine, plan, {
+        seed: 1,
+        budgetMs: 60_000,
+        maxStates: 3000,
+        sources: new Map([["main.tease", source]]),
+        diagnostics: [],
+        comparedAnswers: true,
+      });
+    };
+    const sources = {
+      // A name that is not the default and has three characters at least.
+      name:
+        'let name = askText()\nwhile name.lowercase().contains("slave") or name.length < 3 {\n  name = askText()\n}\n' +
+        'say "Hello."\nexit\n',
+      // An admission longer than four characters that starts with "I ".
+      admit:
+        "let running = true\nwhile running {\n  let why = askText()\n  if why.length > 4 {\n" +
+        '    if why.lowercase().substring(0, 2) == "i " {\n      running = false\n    }\n  }\n}\nsay "Good."\nexit\n',
+      // The line to write, compared through a text with the line in it.
+      line:
+        'let lineWrite = "I will obey."\nlet done = 0\nwhile done < 2 {\n  let line = askText()\n' +
+        '  if line == "${lineWrite}" {\n    done += 1\n  }\n}\nsay "Done."\nexit\n',
+      // A grid square: a letter and a digit, each looked up in a text; the far corner is one of them.
+      grid:
+        'let xs = "ABC"\nlet ys = "123"\nlet c = askText()\nlet x = -1\nlet y = -1\nwhile c.length != 2 or x < 0 or y < 0 {\n' +
+        "  c = askText()\n  if c.length == 2 {\n    x = xs.indexOf(c.substring(0, 1).uppercase())\n" +
+        '    y = ys.indexOf(c.substring(1, 2))\n  }\n}\nif x == 2 and y == 2 {\n  say "Corner."\n}\nexit\n',
+    };
+    for (const [name, source] of Object.entries(sources)) {
+      const result = run(source);
+      assert.deepEqual(
+        [result.search.stoppedBy, result.coverage.percent, result.traps.length],
+        ["exhausted", 100, 0],
+        name,
+      );
+    }
+  },
+);
+
+test(
   "with compared answers, a typed ask is also answered with what the code compares the answer with in that state, such as the line to type",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

@@ -1229,11 +1229,18 @@ function comparedLiterals(instruction: Data): Literals {
 
 /** Values a typed answer is compared with, tried per ask. */
 const MAX_COMPARED_VALUES = 3;
+/** Answers made for what the code reads of a text answer (its length, a part of it, its characters), at most. */
+const MAX_SHAPED_ANSWERS = 64;
+/** The longest answer made for a compared length. */
+const MAX_SHAPED_LENGTH = 64;
 
 /**
  * The values of compared expressions in a state, as answers to a typed ask: texts for a text ask (`integer` null); for a
  * number ask (`integer` tells whether it takes integers only), each number `v` as `v - 1`, `v`, and `v + 1`. Variables
- * are read from their innermost binding.
+ * are read from their innermost binding. For a text ask, also answers made of `x` for what the code reads of the answer
+ * (`comparedWith`): a compared length `n` as `n - 1`, `n`, and `n + 1` characters; a compared part at a position, there,
+ * also followed by more characters; and characters looked up in texts, each combination of those texts' characters at
+ * their positions (at most {@link MAX_SHAPED_ANSWERS}, else the first, second, ... character of each).
  */
 function comparedValues(
   expressions: readonly unknown[],
@@ -1242,14 +1249,62 @@ function comparedValues(
 ): string[] {
   const bindings = bindingsOf(snapshot, true);
   const found = new Set<string>();
+  const shaped = new Set<string>();
+  const lookups = new Map<number, Set<string>>();
   for (const expression of expressions) {
+    const shape = record(expression);
+    if (
+      shape.kind === "answerLength" ||
+      shape.kind === "answerSlice" ||
+      shape.kind === "answerLookup"
+    ) {
+      if (integer !== null) continue;
+      const value = valueOf(shape.value, bindings, true);
+      const start = Number(shape.start);
+      if (shape.kind === "answerLength" && typeof value === "number")
+        for (const length of [value - 1, value, value + 1])
+          if (Number.isSafeInteger(length) && length >= 1 && length <= MAX_SHAPED_LENGTH)
+            shaped.add("x".repeat(length));
+      if (shape.kind === "answerSlice" && typeof value === "string" && value !== "") {
+        shaped.add("x".repeat(start) + value);
+        shaped.add(`${"x".repeat(start)}${value}xxx`);
+      }
+      if (shape.kind === "answerLookup" && typeof value === "string" && value !== "") {
+        const characters = lookups.get(start) ?? new Set<string>();
+        for (const character of value) characters.add(character);
+        lookups.set(start, characters);
+      }
+      continue;
+    }
     const value = valueOf(expression, bindings, true);
     if (integer === null && typeof value === "string" && value.trim() !== "") found.add(value);
     if (integer !== null && typeof value === "number" && (!integer || Number.isSafeInteger(value)))
       for (const near of [value - 1, value, value + 1]) found.add(String(near));
     if (found.size >= MAX_COMPARED_VALUES) break;
   }
-  return [...found];
+  for (const answer of lookedUpAnswers(lookups)) shaped.add(answer);
+  return [...found, ...[...shaped].slice(0, MAX_SHAPED_ANSWERS)];
+}
+
+/**
+ * Answers whose characters at some positions come from texts they are looked up in (position to characters): every
+ * combination while there are at most {@link MAX_SHAPED_ANSWERS}, else the first characters of each together, then the
+ * second ones, and so on; other positions are `x`.
+ */
+function lookedUpAnswers(lookups: ReadonlyMap<number, ReadonlySet<string>>): string[] {
+  if (lookups.size === 0) return [];
+  const length = Math.max(...lookups.keys()) + 1;
+  const positions = Array.from({ length }, (_, at) => [...(lookups.get(at) ?? new Set(["x"]))]);
+  const count = positions.reduce((product, characters) => product * characters.length, 1);
+  if (count <= MAX_SHAPED_ANSWERS)
+    return positions.reduce<string[]>(
+      (answers, characters) => answers.flatMap((answer) => characters.map((c) => answer + c)),
+      [""],
+    );
+  const widest = Math.max(...positions.map((characters) => characters.length));
+  return Array.from({ length: Math.min(widest, MAX_SHAPED_ANSWERS) }, (_, index) =>
+    positions.map((characters) => characters[index % characters.length]).join(""),
+  );
 }
 
 /**
@@ -1314,6 +1369,21 @@ function valueOf(
       return typeof value.name === "string" ? readValue(bindings.get(value.name)) : undefined;
     case "group":
       return valueOf(value.expression, bindings, current);
+    // A text with values in it: their texts and whole numbers in place.
+    case "template": {
+      let text = "";
+      for (const part of list(value.parts)) {
+        if (part.kind === "text" && typeof part.value === "string") {
+          text += part.value;
+          continue;
+        }
+        const inner = valueOf(part.expression, bindings, current);
+        if (typeof inner === "string" || (typeof inner === "number" && Number.isSafeInteger(inner)))
+          text += String(inner);
+        else return undefined;
+      }
+      return text;
+    }
     case "unary": {
       const operand = valueOf(value.operand, bindings, current);
       return value.operator === "-" && typeof operand === "number" ? -operand : undefined;

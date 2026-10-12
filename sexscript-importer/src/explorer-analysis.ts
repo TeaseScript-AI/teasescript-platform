@@ -3129,6 +3129,13 @@ function readable(expression: unknown, top = true): boolean {
       return (
         readable(value.object, false) && readable(value.index, false) && namesIn(value).size > 0
       );
+    // A text with values in it (`"${line}"`), of which at least one is read.
+    case "template":
+      return (
+        list(value.parts).every(
+          (part) => part.kind === "text" || readable(part.expression, false),
+        ) && namesIn(value).size > 0
+      );
     default:
       return false;
   }
@@ -3140,11 +3147,56 @@ const TIMING_WINDOW = 40;
 const MAX_COMPARED = 4;
 
 /**
+ * What part of a typed answer an expression reads, past changes of letter case: its length (`answer.length`), or its
+ * characters from `start` (`answer.substring(0, 2)`, also `answer.lowercase().substring(0, 2)`); null for another
+ * expression.
+ */
+function answerShape(
+  expression: unknown,
+): { kind: "answerLength" } | { kind: "answerSlice"; start: number; end: number | null } | null {
+  let value = record(expression);
+  for (;;) {
+    const callee = record(value.callee);
+    if (value.kind === "group") value = record(value.expression);
+    else if (
+      value.kind === "call" &&
+      callee.kind === "property" &&
+      (callee.name === "lowercase" || callee.name === "uppercase") &&
+      list(value.arguments).length === 0
+    )
+      value = record(callee.object);
+    else break;
+  }
+  if (value.kind === "property" && value.name === "length") return { kind: "answerLength" };
+  const callee = record(value.callee);
+  const bounds = list(value.arguments).map((argument) => record(argument.value));
+  if (
+    value.kind === "call" &&
+    callee.kind === "property" &&
+    callee.name === "substring" &&
+    (bounds.length === 1 || bounds.length === 2) &&
+    bounds.every(
+      (bound) =>
+        bound.kind === "literal" && Number.isSafeInteger(bound.value) && Number(bound.value) >= 0,
+    )
+  )
+    return {
+      kind: "answerSlice",
+      start: Number(bounds[0]!.value),
+      end: bounds.length === 2 ? Number(bounds[1]!.value) : null,
+    };
+  return null;
+}
+
+/**
  * The expressions the code compares the results of interactions with, by the instruction of the interaction, when their
  * value can be read from a state (variables, properties, indices, and arithmetic), the four nearest the interaction:
  *
  * - `asks`: typed asks (text and number, also when the code computes the prompt), in each comparison or text test
- *   (`answer == line`, `answer.contains(word)`) whose one side comes from the answer (`DataFlow.flowOf`);
+ *   (`answer == line`, `answer.contains(word)`) whose one side comes from the answer (`DataFlow.flowOf`); where that
+ *   side is the answer's length or a part of it ({@link answerShape}), also a constant, as `answerLength` or
+ *   `answerSlice` of it (`answer.length < 3`, `answer.substring(0, 2) == "i "`); and each character of the answer that
+ *   is looked up in a text (`letters.indexOf(answer.substring(0, 1))`), as `answerLookup` of that text;
  * - `timed`: buttons whose result is the time the player took, in each comparison shortly after the button that
  *   compares that result itself (`(showButton "Done") / 1 s > count`).
  */
@@ -3191,6 +3243,13 @@ export function comparedWith(
     return count + (hasComparison(instruction) ? 1 : 0);
   }, 0);
   const pair = (answer: unknown, other: unknown, at: number) => {
+    // The answer's length or a part of it is compared with a constant too.
+    const shape = kind === "asks" ? answerShape(answer) : null;
+    if (shape !== null) {
+      if (readable(other, false))
+        for (const source of sources(answer, at)) keep(source, { ...shape, value: other }, at);
+      return;
+    }
     if (!readable(other)) return;
     // A timed button's result divided by a duration (`/ 10 s`) is compared in that unit: the other side, read in
     // seconds, is scaled by it.
@@ -3204,38 +3263,40 @@ export function comparedWith(
             left: other,
             right: { kind: "literal", value: unit / 1000 },
           };
-    for (const source of sources(answer, at)) {
-      const known =
-        found.get(source) ??
-        new Map<string, { expression: unknown; rank: readonly [number, number] }>();
-      found.set(source, known);
-      const key = JSON.stringify(compared, (name, item: unknown) =>
-        name === "span" ? undefined : item,
-      );
-      if (kind === "timed") {
-        if (known.size < MAX_COMPARED) known.set(key, { expression: compared, rank: [0, 0] });
-        continue;
-      }
-      const rank = [
-        flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
-        between(at, source),
-      ] as const;
-      const before = known.get(key);
-      if (before !== undefined) {
-        if (worse(rank, before.rank) < 0) known.set(key, { expression: compared, rank });
-        continue;
-      }
-      if (known.size < MAX_COMPARED) {
-        known.set(key, { expression: compared, rank });
-        continue;
-      }
-      const [last, kept] = [...known].reduce((most, entry) =>
-        worse(entry[1].rank, most[1].rank) > 0 ? entry : most,
-      );
-      if (worse(rank, kept.rank) < 0) {
-        known.delete(last);
-        known.set(key, { expression: compared, rank });
-      }
+    for (const source of sources(answer, at)) keep(source, compared, at);
+  };
+  /** Keeps an expression compared with an interaction's result, the {@link MAX_COMPARED} nearest per interaction. */
+  const keep = (source: number, compared: unknown, at: number) => {
+    const known =
+      found.get(source) ??
+      new Map<string, { expression: unknown; rank: readonly [number, number] }>();
+    found.set(source, known);
+    const key = JSON.stringify(compared, (name, item: unknown) =>
+      name === "span" ? undefined : item,
+    );
+    if (kind === "timed") {
+      if (known.size < MAX_COMPARED) known.set(key, { expression: compared, rank: [0, 0] });
+      return;
+    }
+    const rank = [
+      flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
+      between(at, source),
+    ] as const;
+    const before = known.get(key);
+    if (before !== undefined) {
+      if (worse(rank, before.rank) < 0) known.set(key, { expression: compared, rank });
+      return;
+    }
+    if (known.size < MAX_COMPARED) {
+      known.set(key, { expression: compared, rank });
+      return;
+    }
+    const [last, kept] = [...known].reduce((most, entry) =>
+      worse(entry[1].rank, most[1].rank) > 0 ? entry : most,
+    );
+    if (worse(rank, kept.rank) < 0) {
+      known.delete(last);
+      known.set(key, { expression: compared, rank });
     }
   };
   const walk = (value: unknown, at: number): void => {
@@ -3249,6 +3310,19 @@ export function comparedWith(
       pair(value.right, value.left, at);
     }
     const callee = record(value.callee);
+    // A character of the answer looked up in a text: the answer may have any of that text's characters there.
+    const looked = record(list(value.arguments)[0]).value;
+    const part = kind === "asks" ? answerShape(looked) : null;
+    if (
+      value.kind === "call" &&
+      callee.kind === "property" &&
+      callee.name === "indexOf" &&
+      part?.kind === "answerSlice" &&
+      part.end === part.start + 1 &&
+      readable(callee.object, false)
+    )
+      for (const source of sources(looked, at))
+        keep(source, { kind: "answerLookup", start: part.start, value: callee.object }, at);
     if (
       value.kind === "call" &&
       callee.kind === "property" &&
