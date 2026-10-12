@@ -184,6 +184,36 @@ exit`,
     );
 });
 
+test("&&, ||, !, and ?? each give one error that names the word, and parsing goes on with the word", () => {
+  const symbol = (word: string, written: string, example: string) => [
+    "error",
+    "TSP037",
+    `TeaseScript writes '${word}' instead of '${written}': ${example}`,
+    written,
+  ];
+  const and = symbol("and", "&&", "if a and b { ... }");
+  const or = symbol("or", "||", "if a or b { ... }");
+  const not = symbol("not", "!", "if not a { ... }");
+  const otherwise = symbol("otherwise", "??", 'let name = nickname otherwise "pet"');
+  for (const [source, expected] of [
+    ['let a = true\nlet b = false\nif a && b { say "x" }\nexit', [and]],
+    ['let a = true\nif a || false { say "x" }\nexit', [or]],
+    ['let a = true\nif !a { say "x" }\nexit', [not]],
+    [`${HIDE}let a: integer? = hide(null)\nlet b = a ?? 0\nexit`, [otherwise]],
+    // In an interpolation, a quote after the symbol starts a string, as after the word.
+    [
+      `${HIDE}let a: string? = hide(null)\nsay "\${a ?? "pet"} \${a || "x"} \${a && "y"} \${!a}"\nexit`,
+      [otherwise, or, and, not],
+    ],
+    // `!=` stays the comparison, and `?` stays the optional type next to `??`.
+    [
+      `${HIDE}let a: string? = hide(null)\nlet b: string? = a ?? "x"\nsay a != b\nexit`,
+      [otherwise],
+    ],
+  ] as const)
+    assert.deepEqual(diagnostics(source), expected, source);
+});
+
 test("a value the compiler knows is never null gets TSV062, which names the fallback to remove", () => {
   const unused = (subject: string, fix: string, plural = false) =>
     `${subject} is never null here, so ${plural ? "the fallbacks after 'otherwise' are" : "the fallback after 'otherwise' is"} never used. ${fix}`;

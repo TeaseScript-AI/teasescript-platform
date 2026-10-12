@@ -3265,7 +3265,9 @@ class Parser {
   *#parseAnd(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseNot());
     while (expression !== null) {
-      const operator = this.#matchOperator(TokenKind.KeywordAnd);
+      const operator =
+        this.#matchOperator(TokenKind.KeywordAnd) ??
+        this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo", "and", "if a and b { ... }");
       if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseNot());
@@ -3283,7 +3285,10 @@ class Parser {
 
   *#parseNot(): ParseTask<Expression | null> {
     const operators: Token[] = [];
-    while (this.#match(TokenKind.KeywordNot)) {
+    while (
+      this.#match(TokenKind.KeywordNot) ||
+      this.#matchSymbol(TokenKind.Bang, "one", "not", "if not a { ... }") !== null
+    ) {
       operators.push(this.#previous());
       this.#skipContinuationNewlines();
     }
@@ -3482,7 +3487,14 @@ class Parser {
   *#parseOtherwise(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseUnaryArithmetic());
     while (expression !== null) {
-      const operator = this.#matchOperator(TokenKind.KeywordOtherwise);
+      const operator =
+        this.#matchOperator(TokenKind.KeywordOtherwise) ??
+        this.#matchSymbol(
+          TokenKind.Question,
+          "two",
+          "otherwise",
+          'let name = nickname otherwise "pet"',
+        );
       if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseUnaryArithmetic());
@@ -5141,12 +5153,41 @@ class Parser {
   /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
   #matchSymbolicOr(): SourceSpan | null {
     if (!this.#check(TokenKind.Pipe)) return null;
-    const first = this.#advance();
-    const last = this.#match(TokenKind.Pipe) ? this.#previous() : first;
-    const span = spanFrom(first.span, last.span);
+    if (this.#peek(1).kind === TokenKind.Pipe)
+      return this.#matchSymbol(TokenKind.Pipe, "oneOrTwo", "or", "if a or b { ... }");
+    const span = this.#advance().span;
     this.#reportSpan(
       parserDiagnosticCode.symbolicOperator,
       "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
+      span,
+    );
+    return span;
+  }
+
+  /**
+   * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once and returns the
+   * symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns `null` when it does not come
+   * next. The symbol is one token of `kind`, as `!`, one or two, as `&` or `&&`, or two that touch, as `??`, which is
+   * not the `?` of a type.
+   */
+  #matchSymbol(
+    kind: TokenKind,
+    form: "one" | "oneOrTwo" | "two",
+    word: string,
+    example: string,
+  ): SourceSpan | null {
+    const first = this.#peek();
+    const second = this.#peek(1);
+    if (first.kind !== kind) return null;
+    const touching = second.kind === kind && second.span.start.offset === first.span.end.offset;
+    if (form === "two" && !touching) return null;
+    this.#advance();
+    const last = form !== "one" && second.kind === kind ? this.#advance() : first;
+    const symbol = last === first ? first.lexeme : first.lexeme + last.lexeme;
+    const span = spanFrom(first.span, last.span);
+    this.#reportSpan(
+      parserDiagnosticCode.symbolicOperator,
+      `TeaseScript writes '${word}' instead of '${symbol}': ${example}`,
       span,
     );
     return span;

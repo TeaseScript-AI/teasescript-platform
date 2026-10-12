@@ -298,10 +298,13 @@ test("mixed list literals need a declared union, and every other mix points to i
 
 test("'|' outside a type points to 'or'", () => {
   assert.deepEqual(diagnostics("let both = true || false"), [
+    ["TSP037", "TeaseScript writes 'or' instead of '||': if a or b { ... }", "||"],
+  ]);
+  assert.deepEqual(diagnostics("let both = true | false"), [
     [
       "TSP037",
       "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
-      "||",
+      "|",
     ],
   ]);
 });
