@@ -768,7 +768,7 @@ say toString(7).padStart(3, "0")          // 007
 | `text.length` | the number of characters, counted as Unicode code points |
 | `text.contains(part)` | `true` when `part` occurs in `text` |
 | `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
-| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `-1` |
+| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `null` when `part` does not occur |
 | `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
 | `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
 | `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
@@ -782,6 +782,15 @@ Rules:
 
 - Positions and lengths count code points from `0`, like list indexes. A position is an integer from `0` through the
   length, and `end` may not be before `start`. A `count` or padding `length` is an integer of `0` or more.
+- `indexOf` and `lastIndexOf` give an `integer?` (owner decision, 2026-10-12), so a position is checked before it is
+  used as a number ([§18](#18-null-and-optional-values)):
+
+  ```text
+  let slash = path.lastIndexOf("/")
+  if slash != null {
+      say path.substring(slash + 1)
+  }
+  ```
 - Searching and replacing compare text literally and case-sensitively. A `replace` search and a padding `fill` must be
   non-empty.
 - Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
@@ -1530,6 +1539,9 @@ items.clear()
 items.sort()
 items.shuffle()
 items.contains("map")
+items.indexOf("map")
+items.lastIndexOf("map")
+items.count("map")
 items.join(", ")
 items.intersection(other)
 items.union(other)
@@ -1695,8 +1707,9 @@ Runtime behavior:
 - Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
-  list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element.
+  list and a set, are never equal. List `contains(value)`, `indexOf(value)`, `lastIndexOf(value)`, `count(value)`, and
+  `remove(value)` use this equality, so they also find objects and nested lists; `remove(value)` removes the first
+  equal element.
 - A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
   ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
   handles, and script references. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
@@ -1763,6 +1776,30 @@ let recent: integer[] = load("pushups", default: [])
 recent.add(count)
 save recent.takeLast(20) as "pushups"
 ```
+
+### Finding a value in a list
+**Status:** Accepted (Owner decision, 2026-10-12)
+
+`indexOf(value)` and `lastIndexOf(value)` return the index of the first or the last element equal (`==`) to `value`,
+or `null` when no element is. Their result is an `integer?`, so an index is checked before it is used as a number
+([§18](#18-null-and-optional-values)). `count(value)` returns how many elements are equal to `value`, `0` when none
+are. All three leave the list unchanged:
+
+```text
+let queue = ["wash", "feed", "walk", "wash"]
+queue.indexOf("wash")       // 0
+queue.lastIndexOf("wash")   // 3
+queue.indexOf("sleep")      // null
+queue.count("wash")         // 2
+
+let at = queue.indexOf("feed")
+if at != null {
+    say queue[at + 1]       // walk
+}
+```
+
+Sets have none of the three: a set has no indexes, and it holds each member once, so `contains(value)` says what
+`count(value)` would.
 
 ### Statistics
 **Status:** Accepted (Owner decision, 2026-10-07)
