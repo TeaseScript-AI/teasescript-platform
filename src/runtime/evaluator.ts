@@ -1563,6 +1563,10 @@ export class Evaluator {
             "removeLast",
             "clear",
             "contains",
+            "indexOf",
+            "lastIndexOf",
+            "count",
+            "get",
             "toSet",
             "join",
             "take",
@@ -2233,7 +2237,8 @@ export class Evaluator {
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     const namedArgument = Object.keys(named)[0];
-    if (namedArgument !== undefined)
+    // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
+    if (namedArgument !== undefined && name !== "get")
       throw fault(
         "TSR015",
         `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
@@ -2361,6 +2366,38 @@ export class Evaluator {
         case "contains":
           expect(1);
           return this.#findValue(receiver.items, positional[0]!) >= 0;
+        // A value that no element equals has no position: null (#840).
+        case "indexOf":
+        case "lastIndexOf": {
+          expect(1);
+          const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
+          return index < 0 ? null : index;
+        }
+        case "count": {
+          expect(1);
+          let count = 0;
+          for (const item of receiver.items)
+            if (serializableEquals(item, positional[0]!)) count += 1;
+          return count;
+        }
+        // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
+        // default (#844).
+        case "get": {
+          const names = Object.keys(named);
+          if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
+            throw fault(
+              "TSR028",
+              "'list.get(index, default: value)' takes an index and a 'default:' value.",
+              span,
+            );
+          const index = positional[0]!;
+          return typeof index === "number" &&
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < receiver.items.length
+            ? receiver.items[index]!
+            : named.default!;
+        }
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
@@ -3423,8 +3460,14 @@ export class Evaluator {
     return removed;
   }
 
-  #findValue(items: readonly SerializableRuntimeValue[], value: SerializableRuntimeValue): number {
-    for (let index = 0; index < items.length; index += 1) {
+  /** The index of the first element equal to `value`, or with `last` of the last one; -1 when there is none. */
+  #findValue(
+    items: readonly SerializableRuntimeValue[],
+    value: SerializableRuntimeValue,
+    last = false,
+  ): number {
+    for (let step = 0; step < items.length; step += 1) {
+      const index = last ? items.length - 1 - step : step;
       if (serializableEquals(items[index]!, value)) return index;
     }
     return -1;

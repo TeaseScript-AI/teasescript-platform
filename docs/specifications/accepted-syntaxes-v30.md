@@ -768,7 +768,7 @@ say toString(7).padStart(3, "0")          // 007
 | `text.length` | the number of characters, counted as Unicode code points |
 | `text.contains(part)` | `true` when `part` occurs in `text` |
 | `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
-| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `-1` |
+| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `null` when `part` does not occur |
 | `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
 | `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
 | `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
@@ -782,6 +782,15 @@ Rules:
 
 - Positions and lengths count code points from `0`, like list indexes. A position is an integer from `0` through the
   length, and `end` may not be before `start`. A `count` or padding `length` is an integer of `0` or more.
+- `indexOf` and `lastIndexOf` give an `integer?` (owner decision, 2026-10-12), so a position is checked before it is
+  used as a number ([§18](#18-null-and-optional-values)):
+
+  ```text
+  let slash = path.lastIndexOf("/")
+  if slash != null {
+      say path.substring(slash + 1)
+  }
+  ```
 - Searching and replacing compare text literally and case-sensitively. A `replace` search and a padding `fill` must be
   non-empty.
 - Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
@@ -1530,6 +1539,10 @@ items.clear()
 items.sort()
 items.shuffle()
 items.contains("map")
+items.indexOf("map")
+items.lastIndexOf("map")
+items.count("map")
+items.get(1, default: "none")
 items.join(", ")
 items.intersection(other)
 items.union(other)
@@ -1685,8 +1698,9 @@ Those examples require an explicit element or `.random` where the receiving API 
 
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
-  is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
+- An invalid index raises a runtime error rather than returning `null`; `get(index, default: value)` gives a default
+  instead ([§16](#reading-an-element-with-a-default)). The compiler reports an index that it can see is negative or not
+  a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
 - Interpolating an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
   element to select from.
@@ -1695,8 +1709,9 @@ Runtime behavior:
 - Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
-  list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element.
+  list and a set, are never equal. List `contains(value)`, `indexOf(value)`, `lastIndexOf(value)`, `count(value)`, and
+  `remove(value)` use this equality, so they also find objects and nested lists; `remove(value)` removes the first
+  equal element.
 - A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
   ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
   handles, and script references. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
@@ -1763,6 +1778,52 @@ let recent: integer[] = load("pushups", default: [])
 recent.add(count)
 save recent.takeLast(20) as "pushups"
 ```
+
+### Finding a value in a list
+**Status:** Accepted (Owner decision, 2026-10-12)
+
+`indexOf(value)` and `lastIndexOf(value)` return the index of the first or the last element equal (`==`) to `value`,
+or `null` when no element is. Their result is an `integer?`, so an index is checked before it is used as a number
+([§18](#18-null-and-optional-values)). `count(value)` returns how many elements are equal to `value`, `0` when none
+are. All three leave the list unchanged:
+
+```text
+let queue = ["wash", "feed", "walk", "wash"]
+queue.indexOf("wash")       // 0
+queue.lastIndexOf("wash")   // 3
+queue.indexOf("sleep")      // null
+queue.count("wash")         // 2
+
+let at = queue.indexOf("feed")
+if at != null {
+    say queue[at + 1]       // walk
+}
+```
+
+Sets have none of the three: a set has no indexes, and it holds each member once, so `contains(value)` says what
+`count(value)` would.
+
+### Reading an element with a default
+**Status:** Accepted (Owner decision, 2026-10-12)
+
+`get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an
+`index` that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
+`items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
+`default:` is required and may be of any type. The result's type joins the element type and the default's type: for a
+`string[]`, `default: null` gives a `string?` ([§18](#18-null-and-optional-values)), and `default: 0` a
+`string | integer`. Like any argument, the default is evaluated before the lookup. The compiler checks the index as for
+`items[index]`, except that a negative index gives the default: an index that it can see is not a whole number, such as
+`0.5`, or may be `null`, is an error.
+
+```text
+let deck = ["ace", "king"]
+deck.get(1, default: "none")             // "king"
+deck.get(2, default: "none")             // "none"
+deck.get(-1, default: "none")            // "none"
+let card = deck.get(turn, default: null) // a string?, checked before it is used as text
+```
+
+Sets have no `get`: a set has no positions, and `contains(value)` says whether it holds a value.
 
 ### Statistics
 **Status:** Accepted (Owner decision, 2026-10-07)
@@ -5211,7 +5272,9 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
   is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
-  its result has the value type. Like any argument, the default is evaluated before the lookup.
+  its result has the value type. Like any argument, the default is evaluated before the lookup. A list reads an
+  element with `get(index, default: value)`, whose default may be of any type
+  ([§16](#reading-an-element-with-a-default)).
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an

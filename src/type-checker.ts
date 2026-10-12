@@ -87,6 +87,8 @@ import {
   type Sharing,
   collectionMethodProblems,
   expressionLabel,
+  LIST_SEARCHES,
+  mayBeMessage,
   memberProblems,
   type OperationProblem,
 } from "./operation-checks.js";
@@ -5222,6 +5224,15 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // A list's `get` takes its index as indexing does, but gives its default for a negative one (#844). A member without
+    // `get`, such as null, is reported below instead, and a dict, which has one, here, as for indexing.
+    if (
+      method === "get" &&
+      expression.arguments[0]?.kind === "positionalArgument" &&
+      members(value).some(isList) &&
+      members(value).every((member) => memberMethodType(member, method) !== undefined)
+    )
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
     if (isDictReceiver(value) && DICT_METHODS.has(method)) {
@@ -5284,7 +5295,10 @@ class TypeChecker {
         const atCall = members(resolved(receiverAtCall));
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
-          if (textual) {
+          // A list or set checks its own methods, also `indexOf` and `lastIndexOf`, which take any value on a list.
+          if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
+            return this.#collectionMethodType(method, kept, callee.property, expression);
+          if (textual)
             this.#reportProblems(
               memberProblems(
                 callee.object,
@@ -5294,11 +5308,7 @@ class TypeChecker {
                 typeOf,
               ),
             );
-            return results[index]!;
-          }
-          return isListOrSet(kept)
-            ? this.#collectionMethodType(method, kept, callee.property, expression)
-            : results[index]!;
+          return results[index]!;
         });
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
@@ -5320,7 +5330,7 @@ class TypeChecker {
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
-    // A set has no order to sort or shuffle (V30 §16).
+    // A set has no order to sort, shuffle, or take from, and no positions or repeated members to search for (V30 §16).
     else if (
       all.length === 1 &&
       isListOrSet(failing) &&
@@ -5413,7 +5423,8 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, or a set operation on one list or set, as evaluated, and gives its result (V30 §16).
+   * Checks `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as evaluated,
+   * and gives its result (V30 §16).
    */
   #collectionMethodType(
     method: string,
@@ -5427,6 +5438,14 @@ class TypeChecker {
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
+    if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
+    // The element, or the default, which may be of another type, so their types join (#844).
+    if (method === "get") {
+      const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
+      return problems.length > 0 || fallback === undefined
+        ? UNKNOWN_TYPE
+        : union([copyType(value.element), plainType(typeOf(fallback.value))]);
+    }
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -6832,16 +6851,9 @@ class TypeChecker {
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
   #reportMayBe(expression: Expression, failing: StaticType, passing: readonly StaticType[]): void {
-    // Only a plain variable narrows, so a property or element is first kept in a variable.
-    const node = unwrap(expression);
-    const label = node.kind === "identifier" ? node.name : null;
-    // A value that may be null is checked with `!= null`, which also narrows it.
-    const test = failing.kind === "null" ? "!= null" : `is ${typeName(union(passing))}`;
     this.#report(
       typeCode.invalidOperand,
-      label === null
-        ? `This value may be ${describeValue(failing)}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
-        : `'${label}' may be ${describeValue(failing)}. Check it first: if ${label} ${test} { ... }`,
+      mayBeMessage(expression, failing, passing),
       expression.span,
     );
   }
@@ -7952,6 +7964,15 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
       return { kind: value.kind, element: copyType(value.element) };
     case "contains":
       return BOOLEAN_TYPE;
+    // Only a list has positions; a value that no element equals has none (#840).
+    case "indexOf":
+    case "lastIndexOf":
+      return value.kind === "list" ? optional(INTEGER_TYPE) : undefined;
+    case "count":
+      return value.kind === "list" ? INTEGER_TYPE : undefined;
+    // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
+    case "get":
+      return value.kind === "list" ? copyType(value.element) : undefined;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
     case "toSet":
       return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
@@ -9047,6 +9068,7 @@ const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 
 /** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
 function textResultType(member: TextMember): StaticType {
+  if (member.result === "integer?") return optional(INTEGER_TYPE);
   return member.result === "string[]"
     ? { kind: "list", element: STRING_TYPE }
     : scalarType(member.result);

@@ -322,11 +322,235 @@ test("take and takeLast return a new list of the first or last elements", () => 
       count,
     );
   assert.deepEqual(diagnostics("function f(m: integer?) {\n    say [1, 2].takeLast(m)\n}\nexit"), [
-    ["TSV043", "takeLast() needs a whole number (integer), not null.", "m"],
+    ["TSV043", "'m' may be null. Check it first: if m != null { ... }", "m"],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say [1, 2].takeLast(dynamic(-2))\nexit`), [
     "TSR057",
     "takeLast() needs a whole number of at least 0, not -2.",
+  ]);
+});
+
+test("indexOf, lastIndexOf, and count find a value by ==, and a missing value has no position", () => {
+  assert.deepEqual(
+    said(
+      [
+        DYNAMIC,
+        "let xs = [3, 5, 3]",
+        'say "${xs.indexOf(3) == 0} ${xs.lastIndexOf(3) == 2} ${xs.indexOf(9) == null} ${xs.count(3) == 2} ${xs.count(9) == 0}"',
+        // Equality is ==, as for contains: nested lists and objects by value, and values of other kinds never.
+        'let nested: (integer[] | object)[] = [[1, 2], { a: [1], b: "x" }, [1, 2]]',
+        'say "${nested.indexOf([1, 2])} ${nested.lastIndexOf([1, 2])} ${nested.indexOf({ b: "x", a: [1] })} ${nested.indexOf([2, 1])} ${nested.count([1, 2])}"',
+        'say "${[1, 2].indexOf("1")} ${[null, 1].indexOf(null)} ${[1, 2].count("1")} ${dynamic([1, 5]).lastIndexOf(5)}"',
+        // A checked position is a whole number.
+        'let queue = ["wash", "feed", "walk"]',
+        'let at = queue.indexOf("feed")',
+        "if at != null {",
+        "    say queue[at + 1]",
+        "}",
+        'let last = queue.lastIndexOf("sleep")',
+        "if last == null {",
+        '    say "not queued"',
+        "}",
+        'let washes: integer = queue.count("wash")',
+        "say washes",
+        "exit",
+      ].join("\n"),
+    ),
+    ["true true true true true", "0 2 1 null 2", "null 0 0 1", "walk", "not queued", "1"],
+  );
+  const check = (name: string) =>
+    `'${name}' may be null. Check it first: if ${name} != null { ... }`;
+  const cases: [string, [string, string, string][]][] = [
+    [
+      "let xs = [1, 2]\nsay xs[xs.indexOf(2)]\nexit",
+      [
+        [
+          "TSV043",
+          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "xs.indexOf(2)",
+        ],
+      ],
+    ],
+    ["let xs = [1, 2]\nlet at = xs.indexOf(2)\nsay at + 1\nexit", [["TSV043", check("at"), "at"]]],
+    [
+      "let xs = [1, 2]\nlet at = xs.lastIndexOf(2)\nsay xs.take(at)\nexit",
+      [["TSV043", check("at"), "at"]],
+    ],
+    [
+      "say set[1].indexOf(1)\nexit",
+      [
+        [
+          "TSV043",
+          "A set has no positions, so it has no indexOf(). Copy it into a list with toList() first.",
+          "indexOf",
+        ],
+      ],
+    ],
+    [
+      "say set[1].count(1)\nexit",
+      [
+        [
+          "TSV043",
+          "A set holds each member once, so it has no count(). Use contains(...) instead.",
+          "count",
+        ],
+      ],
+    ],
+    [
+      "say [1].indexOf()\nexit",
+      [["TSV020", "indexOf() takes 1 argument (value), received 0.", "[1].indexOf()"]],
+    ],
+    [
+      "say [1].count(value: 1)\nexit",
+      [["TSV022", "count() takes its value without a name. Remove 'value:'.", "value"]],
+    ],
+    // Only lists count, and lists search for any value, so the arguments are checked whatever the receiver is.
+    [
+      `${DYNAMIC}say dynamic([1]).lastIndexOf(1, 2)\nexit`,
+      [
+        [
+          "TSV020",
+          "lastIndexOf() takes 1 argument (value), received 2.",
+          "dynamic([1]).lastIndexOf(1, 2)",
+        ],
+      ],
+    ],
+  ];
+  for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
+  assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).indexOf(1)\nexit`), [
+    "TSR016",
+    "Sets have no method 'indexOf'.",
+  ]);
+});
+
+test("get gives the element at an index, or its default for an index the list does not have", () => {
+  assert.deepEqual(
+    said(
+      [
+        DYNAMIC,
+        'say "${[1, 2].get(0, default: 9) == 1} ${[1, 2].get(2, default: 9) == 9} ${[1, 2].get(-1, default: 9) == 9}"',
+        // An index the compiler cannot know gives the element only at a whole-number position, and otherwise the default.
+        "let scores = [10, 20]",
+        'say [scores.get(dynamic(1.0), default: 0), scores.get(dynamic(1.5), default: 0), scores.get(dynamic("1"), default: 0), scores.get(dynamic(null), default: 0)]',
+        // A default of another type makes the result optional or a union, which a check narrows.
+        'let deck = ["ace", "king"]',
+        "let card = deck.get(2, default: null)",
+        "if card == null {",
+        '    say "no card"',
+        "}",
+        "let next = deck.get(1, default: null)",
+        "if next != null {",
+        "    say next.uppercase()",
+        "}",
+        "let shown: string | integer = deck.get(5, default: 0)",
+        "say shown",
+        // A kept element is a copy, as with grid[0].
+        "let grid = [[1], [2]]",
+        "let row = grid.get(0, default: [])",
+        "row.add(9)",
+        "say grid",
+        "say row",
+        "exit",
+      ].join("\n"),
+    ),
+    ["true true true", "[20, 0, 0, 0]", "no card", "KING", "0", "[[1], [2]]", "[1, 9]"],
+  );
+  const deck = 'let deck = ["ace", "king"]\n';
+  const cases: [string, [string, string, string][]][] = [
+    [
+      `${deck}let card: string = deck.get(0, default: null)\nexit`,
+      [
+        [
+          "TSV041",
+          "'card' is declared as string, so it cannot start as text (string) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "deck.get(0, default: null)",
+        ],
+      ],
+    ],
+    [
+      `${deck}let card: string = deck.get(0, default: 0)\nexit`,
+      [
+        [
+          "TSV041",
+          "'card' is declared as string, so it cannot start as text (string) or a whole number (integer). Keep it in a variable and check it first, as in: if value is string { ... }",
+          "deck.get(0, default: 0)",
+        ],
+      ],
+    ],
+    // The index is checked as for deck[index]: a whole number, also when the compiler can see it is not.
+    [
+      `${deck}say deck.get(0.5, default: "")\nexit`,
+      [
+        [
+          "TSV043",
+          "A list index must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+          "0.5",
+        ],
+      ],
+    ],
+    [
+      `${deck}let at = deck.indexOf("king")\nsay deck.get(at, default: "")\nexit`,
+      [["TSV043", "'at' may be null. Check it first: if at != null { ... }", "at"]],
+    ],
+    [
+      'function pick(c: string[] | string dict) {\n    say c.get(0, default: "")\n}\nexit',
+      [
+        [
+          "TSV043",
+          "'c' may be a dict (string dict). Check it first: if c is string[] { ... }",
+          "c",
+        ],
+      ],
+    ],
+    [
+      'say set["ace"].get(0, default: "")\nexit',
+      [
+        [
+          "TSV043",
+          "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
+          "get",
+        ],
+      ],
+    ],
+    [
+      `${deck}say deck.get(0)\nexit`,
+      [
+        [
+          "TSV020",
+          "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'.",
+          "deck.get(0)",
+        ],
+      ],
+    ],
+    [
+      `${deck}say deck.get(0, "")\nexit`,
+      [
+        [
+          "TSV020",
+          "'get(index, default: value)' takes one index and a 'default:'.",
+          'deck.get(0, "")',
+        ],
+      ],
+    ],
+    [
+      `${deck}say deck.get(0, fallback: "")\nexit`,
+      [
+        [
+          "TSV022",
+          "get(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
+          "fallback",
+        ],
+      ],
+    ],
+  ];
+  for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
+  assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).get(0, default: 3)\nexit`), [
+    "TSR016",
+    "Sets have no method 'get'.",
+  ]);
+  assert.deepEqual(failure(`${DYNAMIC}say dynamic([1]).get(0)\nexit`), [
+    "TSR028",
+    "'list.get(index, default: value)' takes an index and a 'default:' value.",
   ]);
 });
 
@@ -537,11 +761,20 @@ test("list results survive checkpoint resume", () => {
     'let task = randomWeighted(dict{ "squats": 3, "plank": 1 })',
     "wait 1 s",
     'say "${target} ${recent.join()} ${trend.slope} ${predict(trend, 3)} ${task == "squats" or task == "plank"}"',
+    // A search waits for its value after reading its list.
+    'let rounds = [["squats"], ["plank"], ["squats"]]',
+    "function exercise(name: string) {",
+    "    wait 1 s",
+    "    return [name]",
+    "}",
+    'say "${rounds.lastIndexOf(exercise("squats"))} ${rounds.indexOf(exercise("lunges"))} ${rounds.count(exercise("squats"))}"',
+    // So does get, for its default.
+    'say "${rounds.get(1, default: exercise("rest")).join()} ${rounds.get(5, default: exercise("rest")).join()}"',
     "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["11 11, 18, 16 2.5 20 true"],
+    ["11 11, 18, 16 2.5 20 true", "2 null 2", "plank rest"],
   );
 });

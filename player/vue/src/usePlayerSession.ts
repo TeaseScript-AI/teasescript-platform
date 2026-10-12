@@ -444,7 +444,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
-  const clock = useRuntimeSceneClock(session, () => device.sample(), held);
+  // A late observation catches up on a copy of the session, except while Debug runs: its history and the debug
+  // export's replay then follow each observation as it happens.
+  const clock = useRuntimeSceneClock(
+    session,
+    () => device.sample(),
+    held,
+    () => debugTrace.value === null && randomControl === null,
+  );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
   // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
   // cause the error, so the stop is checked again after it.
@@ -508,7 +515,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     { immediate: true },
   );
   // Media cues depend on measured progress, not on a deadline, so observe regularly while media is active.
-  const sampling = useIntervalFn(() => clock.observe(), MEDIA_SAMPLE_MS, { immediate: false });
+  const sampling = useIntervalFn(clock.catchUp, MEDIA_SAMPLE_MS, { immediate: false });
   // Pending load reports also keep observing, so the engine runs until it can accept them.
   watch(
     () => session.value !== null && (device.active || pendingLoadCount.value > 0),
@@ -1296,6 +1303,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function setDebugMode(enabled: boolean) {
     if (enabled === debugMode) return;
+    // A catch-up under way finishes first, as one observation, so the change comes no earlier than without it.
+    clock.settle();
     debugMode = enabled;
     if (enabled && room.value === "normal" && normalStorage !== undefined) void copyToDebugRoom();
     else applyDebugMode();
@@ -1325,8 +1334,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * on naturally.
    */
   function setRandomControl(control: RandomControlOptions | null) {
+    // A catch-up under way finishes first, as one observation, with the draws it started with.
+    const current = clock.settle();
     randomControl = control;
-    const current = session.value;
     if (current === null) return;
     applyRandomControl(current);
     if (control === null && current.state.randomDraw !== null)
