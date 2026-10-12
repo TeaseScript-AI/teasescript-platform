@@ -653,11 +653,11 @@ continuation runs once the block returns. Asynchronous timers and media keep run
 
 Blocks never interrupt each other, so a repeating timer whose block takes at least as long as its period has its next
 round due whenever the block returns, and while that repeats the interrupted path cannot continue (owner decision,
-2026-10-12). Developer warning `TSW018` reports this once per timer: when the timer's block returns normally after a
-round of that timer ran out at its deadline during the block, and the block took at least as long as that round. Its
-message names the timer statement and that round's length. Rounds that ran out before the block started because another
-block held them back, a round that the script ends through `remaining` or `pause()`, and a block left by `goto`, `end`,
-or `exit` do not count. The interrupt frame keeps the round's length (`endedRoundMs`) and the active timer record
+2026-10-12). Developer warning `TSW018` reports this once per timer: when a still-active timer's block returns normally
+after a round of that timer ran out at its deadline during the block, and the block took at least as long as that round.
+Its message names the timer statement and that round's length. Rounds that ran out before the block started because
+another block held them back, a round that the script ends through `remaining` or `pause()`, and a block left by `goto`,
+`end`, or `exit` do not count. The interrupt frame keeps the round's length (`endedRoundMs`) and the active timer record
 whether the warning was reported (`overrunReported`), so a restored session reports it at the same return, once.
 
 `stop()` on an active timer cancels its unstarted queued blocks; on a finished or stopped timer it is a silent no-op.
