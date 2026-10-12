@@ -44,6 +44,7 @@ export function useRuntimeSceneClock(
   // The late observation being caught up on a copy of the session, which goes on in its own tasks.
   let pending: PlayerRuntimeCatchUp | null = null;
   let nextTask: MessagePort | null = null;
+  let disposed = false;
 
   function sceneTimeMs(current: PlayerRuntimeSession): number {
     if (paused.value) return current.state.observedSessionTimeMs;
@@ -92,7 +93,7 @@ export function useRuntimeSceneClock(
    */
   function catchUp() {
     const current = session.value;
-    if (!current || paused.value) return;
+    if (!current || paused.value || disposed) return;
     if (pending !== null) {
       if (copies()) return continueCatchUp(current, pending);
       // Debug started meanwhile: Debug follows every observation as it happens.
@@ -121,6 +122,8 @@ export function useRuntimeSceneClock(
     // The next task goes on. A message, unlike a timer, is neither clamped nor throttled while the page is hidden,
     // where late observations mostly come from.
     if (step === "more") {
+      // Another opportunity may have stepped meanwhile; one task goes on.
+      nextTask?.close();
       nextTask = inNextTask(catchUp);
       return;
     }
@@ -150,7 +153,10 @@ export function useRuntimeSceneClock(
     wakeUp = setTimeout(catchUp, Math.min(MAX_TIMEOUT_MS, Math.max(0, delay)));
   }
   watch([session, paused], () => scheduleWakeUp(session.value), { immediate: true });
-  tryOnScopeDispose(() => scheduleWakeUp(null));
+  tryOnScopeDispose(() => {
+    disposed = true;
+    scheduleWakeUp(null);
+  });
 
   const timers = computed(() =>
     session.value ? playerRuntimeTimers(session.value.state, displayTimeMs.value) : [],

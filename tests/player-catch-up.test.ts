@@ -146,6 +146,7 @@ async function mount(context: TestContext, source: string, randomControl?: Rando
   await host.activate();
   return {
     host,
+    unmount: () => scope.stop(),
     late(milliseconds: number) {
       nowMs += milliseconds;
       document.dispatchEvent(new Event("visibilitychange"));
@@ -246,6 +247,30 @@ test("an operation on the session during a catch-up drops the copy, and the sess
     ),
   );
   replays(host);
+});
+
+test("a script that fails during a catch-up fails as one late observation fails it, also in its recording", async (context) => {
+  const source = "wait 10 ms\nsay chance(101), instant\nexit";
+  const { host, late } = await mount(context, source);
+  late(1_000);
+  await caughtUp(host, 1_000);
+  const session = host.session.value!;
+  assert.equal(session.state.status, "failed");
+  assert.deepEqual(
+    canonical(session),
+    canonical(observedLate(source, session.state.observedSessionTimeMs)),
+  );
+  replays(host);
+});
+
+test("leaving the Player ends a catch-up, also one that several opportunities stepped", async (context) => {
+  const { host, late, unmount } = await mount(context, rounds);
+  const shown = host.session.value;
+  late(1_000);
+  window.dispatchEvent(new Event("pageshow"));
+  unmount();
+  for (let round = 0; round < 50; round += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.session.value, shown);
 });
 
 test("while Debug runs, a late observation is one observation", async (context) => {

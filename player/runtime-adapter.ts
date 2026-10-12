@@ -1724,7 +1724,7 @@ export function beginPlayerRuntimeCatchUp(
  * through progress reports, so it is no step. Once a `save`, `delete`, or `takePhoto()` waits for the host, the rest is
  * that one observation at once, so the host's answer comes at the scene time it gives; a random draw that pauses ends
  * the catch-up. `"done"` when the copy is ready to adopt, `"dropped"` when it is gone, such as after an operation on the
- * session or a step that threw, which the session itself then repeats.
+ * session, a step that failed the script before the target, or one that threw, which the session itself then repeats.
  */
 export function stepPlayerRuntimeCatchUp(
   catchUp: PlayerRuntimeCatchUp,
@@ -1736,6 +1736,12 @@ export function stepPlayerRuntimeCatchUp(
       const state = engine.copyView(runtime);
       if (state === null) return "dropped";
       if (state.observedSessionTimeMs >= targetMs || state.randomDraw !== null) return "done";
+      // A failure stands where one observation of the target stands it, with all of it observed: the session repeats
+      // it, so its debug recording also keeps that state.
+      if (state.status === "failed") {
+        engine.drop(runtime);
+        return "dropped";
+      }
       const nextMs = nextPlayerRuntimeCatchUpStepMs(state);
       const stepMs = nextMs !== null && nextMs < targetMs ? nextMs : targetMs;
       const observed = engine.callCopy(runtime, "observeTime", [stepMs, []], (copy) =>
