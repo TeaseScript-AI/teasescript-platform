@@ -1566,6 +1566,7 @@ export class Evaluator {
             "indexOf",
             "lastIndexOf",
             "count",
+            "get",
             "toSet",
             "join",
             "take",
@@ -2236,7 +2237,8 @@ export class Evaluator {
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     const namedArgument = Object.keys(named)[0];
-    if (namedArgument !== undefined)
+    // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
+    if (namedArgument !== undefined && name !== "get")
       throw fault(
         "TSR015",
         `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
@@ -2377,6 +2379,24 @@ export class Evaluator {
           for (const item of receiver.items)
             if (serializableEquals(item, positional[0]!)) count += 1;
           return count;
+        }
+        // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
+        // default (#844).
+        case "get": {
+          const names = Object.keys(named);
+          if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
+            throw fault(
+              "TSR028",
+              "'list.get(index, default: value)' takes an index and a 'default:' value.",
+              span,
+            );
+          const index = positional[0]!;
+          return typeof index === "number" &&
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < receiver.items.length
+            ? receiver.items[index]!
+            : named.default!;
         }
         case "toSet":
           expect(0);

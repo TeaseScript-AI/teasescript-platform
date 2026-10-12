@@ -638,8 +638,8 @@ export function rootName(expression: Expression): string | null {
 export const LIST_SEARCHES: ReadonlySet<string> = new Set(["indexOf", "lastIndexOf", "count"]);
 
 /**
- * The list methods that reorder a list in place, take part of it, or search it, and the set operations of lists and
- * sets (V30 §16, ADR 0013).
+ * The list methods that reorder a list in place, take part of it, search it, or read an element with a default, and
+ * the set operations of lists and sets (V30 §16, ADR 0013).
  */
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "sort",
@@ -647,15 +647,16 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "take",
   "takeLast",
   ...LIST_SEARCHES,
+  "get",
   "intersection",
   "union",
   "difference",
 ]);
 
 /**
- * Compile-time problems with `sort`, `shuffle`, `take`, `takeLast`, a search, `intersection`, `union`, or `difference`
- * on a list or set: argument names and count, reordering, taking from, or searching a set, elements `sort` cannot
- * order, and a set operation's argument that is neither a list nor a set.
+ * Compile-time problems with `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, `intersection`, `union`, or
+ * `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a position of
+ * a set, elements `sort` cannot order, and a set operation's argument that is neither a list nor a set.
  */
 export function collectionMethodProblems(
   name: string,
@@ -665,6 +666,7 @@ export function collectionMethodProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (LIST_SEARCHES.has(name)) return searchProblems(name, receiverType, property, call);
+  if (name === "get") return getProblems(receiverType, property, call);
   if (name === "take" || name === "takeLast")
     return takeProblems(name, receiverType, property, call, typeOf);
   const reorders = name === "sort" || name === "shuffle";
@@ -802,6 +804,47 @@ function searchProblems(
       },
     ];
   return [];
+}
+
+/**
+ * Problems with a list's `get(index, default: value)`: one index and a `default:`, as a dict's `get` takes a key and a
+ * `default:` (#844). The index is checked as for `list[index]`.
+ */
+function getProblems(
+  receiverType: StaticType & { readonly kind: "list" | "set" },
+  property: Identifier,
+  call: CallExpression,
+): OperationProblem[] {
+  if (receiverType.kind === "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
+        span: property.span,
+      },
+    ];
+  const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
+  const unknown = named.find((argument) => argument.name.name !== "default");
+  if (unknown !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`,
+        span: unknown.name.span,
+      },
+    ];
+  const positional = call.arguments.length - named.length;
+  if (positional === 1 && named.length === 1) return [];
+  return [
+    {
+      kind: "argumentCount",
+      message:
+        positional === 1 && named.length === 0
+          ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
+          : "'get(index, default: value)' takes one index and a 'default:'.",
+      span: call.span,
+    },
+  ];
 }
 
 /**

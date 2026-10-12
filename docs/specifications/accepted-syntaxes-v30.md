@@ -1542,6 +1542,7 @@ items.contains("map")
 items.indexOf("map")
 items.lastIndexOf("map")
 items.count("map")
+items.get(1, default: "none")
 items.join(", ")
 items.intersection(other)
 items.union(other)
@@ -1697,8 +1698,9 @@ Those examples require an explicit element or `.random` where the receiving API 
 
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
-  is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
+- An invalid index raises a runtime error rather than returning `null`; `get(index, default: value)` gives a default
+  instead ([§16](#reading-an-element-with-a-default)). The compiler reports an index that it can see is negative or not
+  a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
 - Interpolating an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
   element to select from.
@@ -1800,6 +1802,28 @@ if at != null {
 
 Sets have none of the three: a set has no indexes, and it holds each member once, so `contains(value)` says what
 `count(value)` would.
+
+### Reading an element with a default
+**Status:** Accepted (Owner decision, 2026-10-12)
+
+`get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an
+`index` that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
+`items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
+`default:` is required and may be of any type. The result's type joins the element type and the default's type: for a
+`string[]`, `default: null` gives a `string?` ([§18](#18-null-and-optional-values)), and `default: 0` a
+`string | integer`. Like any argument, the default is evaluated before the lookup. The compiler checks the index as for
+`items[index]`, except that a negative index gives the default: an index that it can see is not a whole number, such as
+`0.5`, or may be `null`, is an error.
+
+```text
+let deck = ["ace", "king"]
+deck.get(1, default: "none")             // "king"
+deck.get(2, default: "none")             // "none"
+deck.get(-1, default: "none")            // "none"
+let card = deck.get(turn, default: null) // a string?, checked before it is used as text
+```
+
+Sets have no `get`: a set has no positions, and `contains(value)` says whether it holds a value.
 
 ### Statistics
 **Status:** Accepted (Owner decision, 2026-10-07)
@@ -5248,7 +5272,9 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
   is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
-  its result has the value type. Like any argument, the default is evaluated before the lookup.
+  its result has the value type. Like any argument, the default is evaluated before the lookup. A list reads an
+  element with `get(index, default: value)`, whose default may be of any type
+  ([§16](#reading-an-element-with-a-default)).
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
