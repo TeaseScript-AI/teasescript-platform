@@ -12051,6 +12051,7 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
     if (typeof text === "string" && text !== "") parts.push({ text });
     const valueNode = values[index];
     if (valueNode === undefined) continue;
+    nullTolerantReads.add(valueNode);
     const listParts = listText(valueNode, context);
     if (listParts === null) return null;
     if (listParts !== undefined) {
@@ -12587,7 +12588,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position can be one past the end of the list, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return pastEndRead(target, index, indexNode, context);
+      return pastEndRead(node, target, index, indexNode, targetNode, context);
     }
     if (!context.writeTargets.has(node) && pastShorterLiteral(indexNode, targetNode, context)) {
       addDiagnostic(
@@ -12597,7 +12598,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return pastEndRead(target, index, indexNode, context);
+      return pastEndRead(node, target, index, indexNode, targetNode, context);
     }
     // A position whose largest value, from numbers and random draws, reaches past the list literals the variable always
     // holds: `texts[roll - 1]` after `roll = 1 + getRandom(6)` over five texts (justalittlefun's fourth roll).
@@ -12613,7 +12614,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position can reach past the end of the list written out, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return pastEndRead(target, index, indexNode, context);
+      return pastEndRead(node, target, index, indexNode, targetNode, context);
     }
     // A variable that may hold a negative position, such as a -1 for "none yet": Groovy counted it from the end.
     if (
@@ -12688,6 +12689,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
+  if (mapped === "==" || mapped === "!=")
+    for (const side of [leftNode, rightNode]) if (side !== null) nullTolerantReads.add(side);
   const presence = textPresence(mapped, leftNode, rightNode, context);
   if (presence !== undefined) return presence;
   // Groovy ordered null below every value, where TeaseScript stops at an ordering of null (TSR009).
@@ -13693,17 +13696,28 @@ function isRepeatableIndex(node: AstNode): boolean {
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
 /** List positions that the code compares with null, which read past the end as null (see lowerIndex). */
 const nullComparedReads = new WeakSet<AstNode>();
+/** Expressions whose null the code takes as Groovy did: a side of `==` or `!=`, and a value written into a text. */
+const nullTolerantReads = new WeakSet<AstNode>();
 /**
  * A list read that Groovy gave null past the end: `list.get(i, default: null)` where the position is never negative
- * (#844), and otherwise the helper, which also counts a negative position from the end as Groovy did.
+ * (#844), and otherwise the helper, which also counts a negative position from the end as Groovy did. The native
+ * read is typed as the element or null, so it is used only where the code takes a null (nullTolerantReads); elsewhere
+ * the compiler would stop a use, such as a property or a variable of the element's type, that Groovy left to run.
  */
 function pastEndRead(
+  node: AstNode,
   target: IrExpression,
   index: IrExpression,
   indexNode: AstNode,
+  targetNode: AstNode | null,
   context: LowerContext,
 ): IrExpression {
-  if (!nonNegativePosition(indexNode, context))
+  if (
+    targetNode === null ||
+    !onlyOf(inferType(targetNode, context.types), LIST) ||
+    !nullTolerantReads.has(node) ||
+    !nonNegativePosition(indexNode, context)
+  )
     return useHelper(context, "itemAt", [target, index]);
   return {
     kind: "methodCall",

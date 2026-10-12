@@ -315,7 +315,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `for (…; next != null; ipick++)`, a closure only called with list literals; a Java array's end failed in Groovy too),
   goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), or, past the end where the position
   is never negative (a whole number from 0, a size or length, a random draw, sums of them, a counter only counted up),
-  through the native `list.get(i, default: null)` (#844), except where the position certainly
+  of a list, where the code takes the null, through the native `list.get(i, default: null)` (#844): a side of `==` or
+  `!=`, or a value written into a text (elsewhere the read's optional type would stop a use that the helper's untyped
+  value passes, such as a property or a variable of the element's type), except where the position certainly
   names an element: a menu position, after a test that rules out the menu's written options, of a menu over
   `["Back"] + list` or over a list that a loop built with one option for each element of the read list, and a counter
   that started at 0 or more, only grew since, and is tested below the list's size, with nothing in between that may
