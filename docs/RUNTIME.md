@@ -716,8 +716,9 @@ executing the next instruction, including from `waiting`, unless a block is alre
 commit window is open (released prepared `say` output, an interaction result handoff, or a settled terminal action),
 or a foreground pacing gate holds the chat. The block runs in an interrupt call frame that saves the interrupted
 position, temporaries, scope and loop depth, and the interrupted foreground delay or interaction. The interrupt
-frame may exceed `maxCallDepth` by one because it is not an author call. Expiry blocks run within the normal per-entry
-instruction budget, so extreme catch-up of handler-bearing rounds can exhaust it.
+frame may exceed `maxCallDepth` by one because it is not an author call. Expiry blocks count against the instruction
+budget of the scene time they run at ([Runtime defaults and limits](#runtime-defaults-and-limits)), so many rounds
+that end at one scene time can exhaust it.
 
 The suspended foreground action is inert: a completion for it returns `suspendedAction` without mutation. A suspended
 delay settles in due-work order and publishes `actionCompleted`, without replacing `lastSettlement`; its continuation
@@ -1498,8 +1499,14 @@ choices are unrelated to resource capacity.
 A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
 tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
-The failure points at the innermost loop of the running call when execution runs inside one, and otherwise, as while a
-waiting session catches up timer blocks, at the next instruction. Fresh snapshot creation validates the plan,
+The budget of `run(...)` and `stepToEvent(...)` counts the instructions the operation executes at one scene time,
+also across expiry blocks and waits of no time; catch-up that moves scene time starts the count again.
+Scene time only moves while nothing can execute, so a loop that never lets time pass stays within one count, and a late
+observation gives every scene time it catches up the count that observing its deadline on time gives: it fails a
+script exactly where that would. One operation after a late observation can therefore execute up to one budget per
+scene time it catches up. A paused random draw keeps the count at its scene time. The failure points at the innermost
+loop of the running call when execution runs inside one, and otherwise, as while the script waits between expiry
+blocks, at the next instruction. Fresh snapshot creation validates the plan,
 serializable globals, script storage, call-depth limit, and RNG seed before returning state.
 
 Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values
@@ -1578,7 +1585,7 @@ restart, and report the failure with its debug export.
 | `TSR034` | An assignment that replaces a speaker. | Change the speaker's properties instead. |
 | `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. _Defect._ | Report it. |
 | `TSR036` | Arithmetic without a finite result: division or remainder by zero, a number or duration too large, a math function outside its domain, or a regression whose points all have the same x. | Check that the divisor is not 0, use smaller values, or pass values the function accepts. |
-| `TSR037` | The instruction budget of one run is used up, usually by a loop that neither waits nor ends. | Add a wait, or check the loop's condition. |
+| `TSR037` | The instruction budget of one run at one scene time is used up, usually by a loop that neither waits nor ends. | Add a wait, or check the loop's condition. |
 | `TSR039` | A numeric argument outside its range, such as `chance(150)` or a negative weight. | Pass a value in the range the message gives. |
 | `TSR040` | `randomInteger(...)` without a range. | Pass a range such as `1..=6`. |
 | `TSR041` | A random selection from an empty range. | Use a range that holds at least one number. |
