@@ -5254,8 +5254,12 @@ class TypeChecker {
         // The default may be of any type, and the result joins it with the value type (V30 §40). Only a value type that
         // no value decided yet, such as that of `dict{}`, takes a default the compiler knows as a first stored value
         // would, so that `counts.get(key, default: 0) + 1` counts; parts of it that the compiler cannot know are
-        // checked when the script runs. A default of unknown type decides nothing and makes the result unknown.
-        if (undecidedValues(value) && isKnown(fallback)) {
+        // checked when the script runs. A default of unknown type decides nothing and makes the result unknown. A test
+        // may narrow a variable whose own value type is still undecided, which the default then decides.
+        const node = unwrap(callee.object);
+        const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
+        const own = entry?.kind === "variable" ? entry.variable.type : value;
+        if ((undecidedValues(value) || undecidedValues(own)) && isKnown(fallback)) {
           const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
           yield* compileChild(
             this.#storeElementTask(

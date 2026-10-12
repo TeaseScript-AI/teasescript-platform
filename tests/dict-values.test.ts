@@ -745,6 +745,30 @@ test("get takes a default of any type, and its result joins the value type with 
       '"x"',
     ],
   ]);
+  // Also where a test narrowed the dict; a dict whose value type is decided keeps its narrowing.
+  assert.deepEqual(
+    codes(
+      'let e = dict{}\nif e is integer dict {\n    say e.get("a", default: 0)\n}\ne["b"] = "x"\nexit',
+    ),
+    [["TSV041", '"x"']],
+  );
+  assert.deepEqual(
+    says(
+      [
+        "function show(scores: (integer dict)?) {",
+        "    if scores != null {",
+        '        let s = scores.get("bea", default: "none")',
+        "        if s is string {",
+        '            say "${s} of ${scores.length}"',
+        "        }",
+        "    }",
+        "}",
+        "show(dict{ anna: 3 })",
+        "exit",
+      ].join("\n"),
+    ),
+    ["none of 1"],
+  );
   // A default the compiler cannot know is not checked: the result is unknown, so a place checks it instead. Parts of
   // a default that decides the value type are still checked against it.
   assert.deepEqual(
