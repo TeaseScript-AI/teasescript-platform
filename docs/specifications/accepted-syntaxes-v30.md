@@ -3614,11 +3614,15 @@ let buttonId = showPermanentButton "Fail", persist: true {
 }
 ```
 
-Remove a button explicitly; removing a button that is already gone does nothing:
+Remove a button with the `remove()` method of its handle; removing a button that is already gone does nothing (owner
+decision on #836, 2026-10-11):
 
 ```text
-removePermanentButton(buttonId)
+buttonId.remove()
 ```
+
+`remove()` takes no arguments and gives `null`, and it is the button handle's only method. The earlier command
+`removePermanentButton` stays protected: its call is a compile error that names `buttonId.remove()`.
 
 The text follows the rules of other button labels ([§16](#lists-in-text)). Buttons appear in the order they were shown.
 
@@ -4378,13 +4382,16 @@ reading time, so `say "Hold.", instant` followed by `wait 30 s` takes exactly 30
 **Status:** Accepted (Owner decision on #512, 2026-10-07).
 
 A `say` used as a value shows its message as usual and gives a `messageHandle` for it. Its one property, `text`, reads
-the message's current text and changes it in place:
+the message's current text and changes it in place, and its one method, `remove()`, takes the message out of the
+conversation (owner decision on #836, 2026-10-11):
 
 ```text
 let line = say "Waiting.", instant
 wait 1 s
 line.text += "."
 line.text = "Ready."
+wait 2 s
+line.remove()
 
 let counter: messageHandle = say("Strokes: 0", instant)
 let strokes = [say("First", instant), say("Second", instant)]
@@ -4409,7 +4416,13 @@ let strokes = [say("First", instant), say("Second", instant)]
   presentation, and place in the conversation, and the conversation shows only its current text. The same text again
   changes nothing, and `""` empties the message without removing it. A text write starts no reading time of its own;
   use `wait` between changes. `text` takes only text: write `"Strokes: ${count}"` for a number. A handle has no other
-  property, no methods, and no operators besides `==` and `!=`.
+  property, no other method, and no operators besides `==` and `!=`.
+- **`remove()`.** It takes no arguments and gives `null`. The message leaves the conversation, which shows the messages
+  around it as if it had never been there, also after a restored checkpoint. Like a text write, it starts no reading
+  time of its own and waits for the reading time of an earlier message, as any statement does. After it, the handle
+  behaves as a stopped timer's does ([§27](#handles)): `text` still reads the text the message had, a text write
+  changes nothing and reports developer warning `TSW010`, and `remove()` again does nothing. The handle keeps its
+  identity, so `==` and `say line` work as before.
 - **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
   same message, and `==` compares messages, not texts. A message stays changeable while a handle to it remains, also
   an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller, or a block.
@@ -5115,7 +5128,6 @@ askDateTime
 wait
 timer
 showPermanentButton
-removePermanentButton
 playAudio
 playVideo
 stopAudio
@@ -5150,7 +5162,8 @@ This protected list may grow when new engine APIs are added. Editor autocomplete
 
 The earlier names `timestamp`, `getTimestamp`, and `toTimestamp` stay protected: each use is a compile error that names
 `absoluteDateTime`, `getAbsoluteDateTime`, or `toAbsoluteDateTime` ([ADR 0026](../decisions/0026-unified-time-semantics.md)).
-So does `choose`, which names `askChoice` ([§19](#19-choices)).
+So does `choose`, which names `askChoice` ([§19](#19-choices)), and `removePermanentButton`, whose call names the
+button's `remove()` ([§28](#28-permanent-buttons)).
 
 ### Debug mode
 **Status:** Accepted (Owner decision, 2026-10-07)
