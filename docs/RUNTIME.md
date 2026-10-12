@@ -1645,13 +1645,13 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
 - **Branch decisions.** A variable write, `return` value, storage write, message, or Stage image names in `control`
   the innermost branch decision of the same call on whose taken side it happened: an `if`, `else if`, or `else`, a
-  `switch` case or `default`, a `while` round, the right side of an `and` or `or` that a pausing operand compiles to
-  instructions, or a `load` default. A `decision` record holds the condition's value and causes and names the decision
-  it was made inside of; it is recorded when a write first names it, so a decision that governs no write leaves no
-  record. Code of another call, such as a called function or a timer or button block, names its own decisions only. A
-  decision is kept while execution is on its taken side, at most 256 at once, the newest; one dropped beyond that,
-  such as an early case of a long chain of unmatched cases, leaves its later writes, and the decisions it enclosed,
-  without a link to it, never with another's.
+  `switch` case or `default`, a `while` round, the right side of an `and`, `or`, or `otherwise` that a pausing operand
+  compiles to instructions, or a `load` default. A `decision` record holds the condition's value and causes and names
+  the decision it was made inside of; it is recorded when a write first names it, so a decision that governs no write
+  leaves no record. Code of another call, such as a called function or a timer or button block, names its own decisions
+  only. A decision is kept while execution is on its taken side, at most 256 at once, the newest; one dropped beyond
+  that, such as an early case of a long chain of unmatched cases, leaves its later writes, and the decisions it
+  enclosed, without a link to it, never with another's.
 
 ## Instruction trace
 
@@ -1663,9 +1663,9 @@ call executed. Both lists are in ascending order and hold each entry once, so th
 - `instructions`: the plan index of every instruction the call executed, including one that failed. Starting a timer,
   media, or permanent-button block executes none; the block's own instructions follow.
 - `branches`: `[instruction, next]`, the successor taken by an instruction that chooses it at run time:
-  - `jumpIfFalse`, the condition of an `if`, `else if`, or `switch` case, the right side of an `and` or `or` that a
-    pausing operand compiles to instructions, or a `load` default: `instruction + 1` when the condition was true,
-    otherwise its `target`;
+  - `jumpIfFalse`, the condition of an `if`, `else if`, or `switch` case, the right side of an `and`, `or`, or
+    `otherwise` that a pausing operand compiles to instructions, or a `load` default: `instruction + 1` when the
+    condition was true, otherwise its `target`;
   - `loopStart`, which runs before each round of a `repeat`, `for`, or `while`: `instruction + 1` for a round, its
     `target` when the loop ends;
   - `transfer`, a `goto` or `call` naming a file or a `call label`, and `end`: where execution continued, such as the
