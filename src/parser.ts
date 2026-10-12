@@ -1192,6 +1192,7 @@ class Parser {
       kind: "waitStatement",
       duration: delay,
       unit,
+      lengthSpan: duration.span,
       span: spanFrom(keyword.span, duration.span),
     });
   }
@@ -1248,6 +1249,7 @@ class Parser {
       display,
       duration,
       unit,
+      lengthSpan: written.span,
       label,
       repeat: false,
       persist: false,
@@ -1381,6 +1383,7 @@ class Parser {
       display,
       duration: parts.duration,
       unit: parts.unit,
+      lengthSpan: duration.span,
       label,
       repeat: flags.repeat,
       persist: flags.persist,

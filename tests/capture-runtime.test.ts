@@ -289,27 +289,26 @@ test("a capture reserves its events on top of what active actions still need", (
   assert.equal(validateRuntimeSnapshot(result.snapshot, plan).valid, true);
 });
 
-test("an earlier pacing gate may settle after a capture before its result is consumed", () => {
+test("a capture after a paced say starts only when the say's reading time ends", () => {
   for (const answer of ["captured", "unavailable"] as const) {
     const { plan, snapshot } = started('say "hi"\nlet photo = takePhoto()\nshowImage photo\nexit');
-    const gate = snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
-    assert.ok(gate !== undefined, "the message is still pacing in the background");
-    const settled =
-      answer === "captured"
-        ? captured(plan, snapshot).snapshot
-        : unavailable(plan, snapshot, "denied").snapshot;
-    const skipped = completeAction(plan, settled, {
-      actionId: gate.actionId,
+    const gate = snapshot.foregroundAction;
+    assert.equal(gate?.kind, "chatPacingGate", "the script waits for the message's reading time");
+    const skipped = completeAction(plan, snapshot, {
+      actionId: gate!.actionId,
       actionKind: "chatPacingGate",
       payload: { kind: "skip" },
     });
     assert.equal(skipped.outcome.kind, "completed", answer);
-    assert.equal(validateRuntimeSnapshot(skipped.snapshot, plan).valid, true, answer);
-    assert.deepEqual(
-      restoreCheckpoint(createCheckpoint(plan, skipped.snapshot)).snapshot,
-      skipped.snapshot,
-    );
-    const finished = runUntilExit(plan, skipped.snapshot).snapshot;
+    const capturing = run(plan, skipped.snapshot).snapshot;
+    pendingCapture(capturing);
+    assert.equal(validateRuntimeSnapshot(capturing, plan).valid, true, answer);
+    assert.deepEqual(restoreCheckpoint(createCheckpoint(plan, capturing)).snapshot, capturing);
+    const settled =
+      answer === "captured"
+        ? captured(plan, capturing).snapshot
+        : unavailable(plan, capturing, "denied").snapshot;
+    const finished = runUntilExit(plan, settled).snapshot;
     assert.equal(finished.stageImage, answer === "captured" ? PHOTO : null, answer);
   }
 });

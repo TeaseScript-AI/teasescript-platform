@@ -33,7 +33,7 @@ function kinds(instructions: readonly Instruction[]): string[] {
   return instructions.map((instruction) => instruction.kind);
 }
 
-test("accepted media forms compile, each behind a pacing barrier", () => {
+test("accepted media forms compile", () => {
   const compiled = plan(
     [
       'showImage "images/room.jpg"',
@@ -53,12 +53,11 @@ test("accepted media forms compile, each behind a pacing barrier", () => {
     ].join("\n"),
   );
   const shown = kinds(compiled.instructions).filter((kind) =>
-    ["pacingBarrier", "showImage", "playMedia", "stopAudio"].includes(kind),
+    ["showImage", "playMedia", "stopAudio"].includes(kind),
   );
   assert.deepEqual(shown, [
-    ...Array<string>(3).fill("pacingBarrier,showImage").join(",").split(","),
-    ...Array<string>(9).fill("pacingBarrier,playMedia").join(",").split(","),
-    "pacingBarrier",
+    ...Array<string>(3).fill("showImage"),
+    ...Array<string>(9).fill("playMedia"),
     "stopAudio",
   ]);
 });
@@ -173,26 +172,6 @@ test("invalid media forms are rejected with focused diagnostics", () => {
   for (const [source, code, offending] of cases) {
     assertRejected(source, code, lastSpan(source, offending));
   }
-});
-
-test("statement-level media handle operations get a receiver barrier; reads do not", () => {
-  const compiled = plan(
-    [
-      'let music = playAudio async "a.mp3"',
-      "music.pause()",
-      "music.position = 10 s",
-      "music.remaining -= 5 s",
-      'say "${music.position}"',
-      "exit",
-    ].join("\n"),
-  );
-  const barriers = compiled.instructions.filter(
-    (instruction) => instruction.kind === "pacingBarrier",
-  );
-  assert.deepEqual(
-    barriers.map((barrier) => barrier.kind === "pacingBarrier" && barrier.receiver?.kind),
-    [undefined, "preparedReference", "preparedReference", "preparedReference"],
-  );
 });
 
 test("cue detection needs a complete position and block; indexed and called uses stay ordinary", () => {
@@ -367,21 +346,7 @@ function mutablePlan(compiled: InstructionPlan): { instructions: Record<string, 
   return JSON.parse(JSON.stringify(compiled)) as { instructions: Record<string, unknown>[] };
 }
 
-test("plan validation accepts only compiler-shaped barrier receivers and no finish on indefinite media", () => {
-  const compiled = plan('let m = playAudio async "a"\nm.stop()\nexit');
-  const barrierIndex = compiled.instructions.findIndex(
-    (instruction) => instruction.kind === "pacingBarrier" && instruction.receiver !== null,
-  );
-  const corrupted = mutablePlan(compiled);
-  const span = compiled.instructions[barrierIndex]!.span;
-  corrupted.instructions[barrierIndex]!.receiver = {
-    kind: "call",
-    callee: { kind: "identifier", name: "m", span },
-    arguments: [],
-    span,
-  };
-  assert.equal(validateInstructionPlan(corrupted).valid, false);
-
+test("plan validation rejects a finish on indefinite media", () => {
   const repeating = plan('playAudio async repeat "a" {\n  at 1 s {\n  }\n}\nexit');
   const play = repeating.instructions.find(
     (instruction): instruction is PlayMediaInstruction => instruction.kind === "playMedia",

@@ -325,7 +325,7 @@ test("an image answer replays from the recorded store answer alone, without the 
   const compiled = compileProject([
     {
       path: "main.tease",
-      source: 'let photo = askImage("Photo", allowCamera: false)\nsay photo\nexit',
+      source: 'let photo = askImage("Photo", allowCamera: false)\nsay photo, instant\nexit',
     },
   ]);
   assert.ok(compiled.plan);

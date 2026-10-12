@@ -20,7 +20,6 @@ import {
 } from "../plan/model.js";
 import { addTag, readTagText, type Tag } from "../tags.js";
 import {
-  cloneMessageMarkup,
   messageMarkupVisibleText,
   parseMessageMarkup,
   type MessageMarkup,
@@ -90,7 +89,7 @@ import {
   executeSetFallback,
   executeTransfer,
 } from "./operations/transfers.js";
-import { activeFunctionFrame, contextRootId, interruptRunning } from "./activations.js";
+import { activeFunctionFrame, contextRootId } from "./activations.js";
 import {
   bindingKey,
   closeDebugTrace,
@@ -154,7 +153,6 @@ import type {
   RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
-  RuntimePreparedSayOutputSnapshot,
   RuntimeTimerActionSnapshot,
   RuntimeMediaActionSnapshot,
   RuntimePermanentButtonActionSnapshot,
@@ -185,7 +183,6 @@ import {
   calculateSmartPacingDurationMs,
   exactPacingMilliseconds,
 } from "./actions/pacing.js";
-import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 import { normalizeOpaqueColor } from "../color.js";
 import {
   returnFromTimerHandler,
@@ -216,8 +213,6 @@ import {
   isObject,
   isRange,
   isSet,
-  isMediaHandle,
-  isCameraView,
   isSpeakerReference,
   isTime,
 } from "./value-predicates.js";
@@ -316,6 +311,19 @@ export function executeValidatedInstruction(
 /** How many instructions an operation executed so far, including one whose due work a draw then paused. */
 interface Progress {
   executed: number;
+  /** The scene time the budget counts at: catch-up that moves scene time starts the count again. */
+  budgetTimeMs: number;
+  /** The instructions executed at that scene time, including those before a draw paused the operation. */
+  counted: number;
+}
+
+function startProgress(snapshot: RuntimeSnapshot, counted: number): Progress {
+  return { executed: 0, budgetTimeMs: snapshot.currentSessionTimeMs, counted };
+}
+
+/** The instructions the budget counted at the state's scene time, which a paused draw keeps. */
+function budgetUsed(snapshot: RuntimeSnapshot, progress: Progress): number {
+  return snapshot.currentSessionTimeMs > progress.budgetTimeMs ? 0 : progress.counted;
 }
 
 /**
@@ -328,7 +336,9 @@ function executeCapturedInstruction(
   context: RuntimeExecutionContext,
   progress: Progress,
 ): void {
-  progress.executed += executeInstructionBoundary(plan, snapshot, context);
+  const executed = executeInstructionBoundary(plan, snapshot, context);
+  progress.executed += executed;
+  progress.counted += executed;
   if (
     snapshot.status !== "failed" &&
     // Work due exactly at the observed time also settles once execution waits or ends.
@@ -528,30 +538,44 @@ function driveRoot(
     instructionTraceFor(plan, options),
     control,
   );
-  const progress: Progress = { executed: 0 };
+  const progress = startProgress(snapshot, 0);
   try {
     if (root === "executeInstruction")
       executeCapturedInstruction(plan, snapshot, context, progress);
-    else runInstructions(plan, snapshot, context, progress, budget!, 0, root === "stepToEvent");
+    else runInstructions(plan, snapshot, context, progress, budget!, root === "stepToEvent");
   } catch (error) {
     if (!(error instanceof RandomSuspension)) throw error;
-    pauseAtDraw(snapshot, error, root, budget, progress.executed, context.events.length > 0);
+    pauseAtDraw(
+      snapshot,
+      error,
+      root,
+      budget,
+      budgetUsed(snapshot, progress),
+      context.events.length > 0,
+    );
   }
   return controlledResult(snapshot, context, progress.executed);
 }
 
-/** Runs instructions within `budget`, of which an operation that a draw paused used `used` before. */
+/**
+ * Runs instructions within `budget` per scene time. Scene time only moves while nothing can execute, so a loop that
+ * never waits stays at one scene time, while each deadline that a late observation catches up starts the count again,
+ * as observing that deadline on time would.
+ */
 function runInstructions(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
   progress: Progress,
   budget: number,
-  used: number,
   untilEvent: boolean,
 ): void {
   while (executionRunnable(snapshot) && !(untilEvent && context.events.length > 0)) {
-    if (used + progress.executed >= budget) {
+    if (snapshot.currentSessionTimeMs > progress.budgetTimeMs) {
+      progress.budgetTimeMs = snapshot.currentSessionTimeMs;
+      progress.counted = 0;
+    }
+    if (progress.counted >= budget) {
       failForBudget(plan, snapshot, context.events, budget);
       break;
     }
@@ -692,24 +716,15 @@ function resumeCaptured(
     instructionTraceFor(plan, options),
     control,
   );
-  const progress: Progress = { executed: 0 };
+  const progress = startProgress(snapshot, pending.instructionsUsed ?? 0);
   const budget = pending.instructionBudget;
-  const used = pending.instructionsUsed ?? 0;
   try {
     if (pending.unit === "instruction")
       executeCapturedInstruction(plan, snapshot, context, progress);
     else processDueWork(plan, snapshot, context.events, trace, control);
     control.assertReplayDone();
     if (pending.root === "run" || (pending.root === "stepToEvent" && !pending.eventsBefore))
-      runInstructions(
-        plan,
-        snapshot,
-        context,
-        progress,
-        budget!,
-        used,
-        pending.root === "stepToEvent",
-      );
+      runInstructions(plan, snapshot, context, progress, budget!, pending.root === "stepToEvent");
   } catch (error) {
     if (error instanceof RandomReplayDivergence)
       throw new RuntimeDataError("TSR101", error.message);
@@ -719,7 +734,7 @@ function resumeCaptured(
       error,
       pending.root,
       budget,
-      used + progress.executed,
+      budgetUsed(snapshot, progress),
       pending.eventsBefore || context.events.length > 0,
     );
   }
@@ -1123,7 +1138,7 @@ function executePlannedInstruction(
       returnFromFunction(plan, snapshot, null, instruction.span, events, evaluator);
       return;
     case "say": {
-      executeSayAtomically(plan, instruction, snapshot, evaluator, events);
+      executeSayAtomically(instruction, snapshot, evaluator, events);
       return;
     }
     case "wait": {
@@ -1163,11 +1178,8 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      assertEventSequenceCapacity(
-        snapshot,
-        requiredEventSequencesForNewDelay(snapshot),
-        instruction.span,
-      );
+      // The wait's request and its completion.
+      assertEventSequenceCapacity(snapshot, 2, instruction.span);
       const sequence = takeSequence(snapshot);
       const action = Object.freeze({
         kind: "delay" as const,
@@ -1218,10 +1230,7 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      const backgroundPacingGate = snapshot.backgroundActions.some(
-        (action) => action.kind === "chatPacingGate",
-      );
-      const requiredEventSequences = backgroundPacingGate ? 4 : 3;
+      const requiredEventSequences = 3;
       assertEventSequenceCapacity(snapshot, requiredEventSequences, instruction.span);
       const prepared = "preparedUi" in instruction;
       const speaker = prepared
@@ -1260,25 +1269,8 @@ function executePlannedInstruction(
           : materialized.ui.kind === "form" && materialized.ui.timeout !== null
             ? formTimeoutMs(materialized.ui.timeout.milliseconds, snapshot, instruction.span)
             : null;
-      const backgroundGate = snapshot.backgroundActions.find(
-        (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
-      );
-      if (backgroundGate !== undefined) {
-        settleBackgroundPacingGate(
-          plan,
-          snapshot,
-          backgroundGate,
-          "consumedByForegroundInteraction",
-          events,
-        );
-      }
       if (materialized.warning !== undefined) {
-        // The pacing gate settled above took its sequence already.
-        assertEventSequenceCapacity(
-          snapshot,
-          requiredEventSequences - (backgroundGate === undefined ? 0 : 1) + 1,
-          instruction.span,
-        );
+        assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
         events.push(
           Object.freeze({
             kind: "developerWarning",
@@ -1408,16 +1400,6 @@ function executePlannedInstruction(
       stopAllMediaForSessionEnd(snapshot);
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
       snapshot.backgroundActions.length = 0;
-      snapshot.preparedSayOutput = null;
-      if (
-        snapshot.lastSettlement?.actionKind === "chatPacingGate" &&
-        snapshot.lastSettlement.releasedPreparedOutputInstruction !== null
-      ) {
-        snapshot.lastSettlement = Object.freeze({
-          ...snapshot.lastSettlement,
-          releasedPreparedOutputInstruction: null,
-        });
-      }
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
@@ -1435,9 +1417,6 @@ function executePlannedInstruction(
           span: copySpan(instruction.span),
         } satisfies ExitEvent),
       );
-      return;
-    case "pacingBarrier":
-      executePacingBarrier(instruction, snapshot, evaluator);
       return;
     case "showImage":
       showImage(plan, instruction, snapshot, evaluator, events);
@@ -2702,13 +2681,12 @@ function advance(snapshot: RuntimeSnapshot): void {
  * retain RNG, warning, event, or action changes.
  */
 function executeSayAtomically(
-  plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "say" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = sayEvaluatesNoExpression(instruction, snapshot)
+  const stagedSnapshot = sayEvaluatesNoExpression(instruction)
     ? expressionFreeSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
     : stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
@@ -2717,7 +2695,7 @@ function executeSayAtomically(
   // Trace records made while staging commit or vanish with the staged state.
   const stage = evaluator.trace?.stage() ?? null;
   try {
-    executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+    executeSay(instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
   } catch (error) {
     evaluator.trace?.rollback(stage);
     throw error;
@@ -2738,16 +2716,11 @@ function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
 }
 
 /**
- * Whether `executeSay` evaluates no expression of this say: it releases prepared output, or its text is literal or
- * prepared, without explicit presentation, at smart or instant pacing. Any expression, even a read, can change nested
- * state before a later step rejects the say, so every other say keeps the deep staging clone.
+ * Whether `executeSay` evaluates no expression of this say: its text is literal or prepared, without explicit
+ * presentation, at smart or instant pacing. Any expression, even a read, can change nested state before a later step
+ * rejects the say, so every other say keeps the deep staging clone.
  */
-function sayEvaluatesNoExpression(
-  instruction: Extract<Instruction, { kind: "say" }>,
-  snapshot: RuntimeSnapshot,
-): boolean {
-  const prepared = snapshot.preparedSayOutput;
-  if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) return true;
+function sayEvaluatesNoExpression(instruction: Extract<Instruction, { kind: "say" }>): boolean {
   return (
     (instruction.textTemporary !== undefined || instruction.value.kind === "literal") &&
     instruction.presentation === null &&
@@ -2757,9 +2730,8 @@ function sayEvaluatesNoExpression(
 
 /**
  * Staging for a say that evaluates no expression. Such a say replaces root fields and changes only the speaker
- * warning list and the background actions in place, and a result-bearing say also its temporaries and live messages, so
- * it copies those and shares everything else read-only. Every field is listed so that a new snapshot field must be
- * classified here.
+ * warning list in place, and a result-bearing say also its temporaries and live messages, so it copies those and shares
+ * everything else read-only. Every field is listed so that a new snapshot field must be classified here.
  */
 function expressionFreeSayStagingClone(
   snapshot: RuntimeSnapshot,
@@ -2794,11 +2766,10 @@ function expressionFreeSayStagingClone(
     chatPacingSettings: snapshot.chatPacingSettings,
     temporalCaptures: snapshot.temporalCaptures,
     foregroundAction: snapshot.foregroundAction,
-    backgroundActions: [...snapshot.backgroundActions],
+    backgroundActions: snapshot.backgroundActions,
     nextActionId: snapshot.nextActionId,
     lastSettlement: snapshot.lastSettlement,
     interactionResultHandoff: snapshot.interactionResultHandoff,
-    preparedSayOutput: snapshot.preparedSayOutput,
     settledTimers: snapshot.settledTimers,
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers,
@@ -2845,50 +2816,11 @@ function executeSpeakerAtomically(
 }
 
 function executeSay(
-  plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "say" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const prepared = snapshot.preparedSayOutput;
-  if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
-    validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
-    snapshot.preparedSayOutput = null;
-    const sequence = emitSay(
-      snapshot,
-      events,
-      instruction.span,
-      prepared.speaker,
-      // Captured markup is mutable; output markup is frozen.
-      cloneMessageMarkup(prepared.content),
-      prepared.text,
-      prepared.presentation,
-    );
-    evaluator.trace?.releaseOutput(sequence, prepared.owningInstruction, prepared.text);
-    if (instruction.destinationTemporary !== undefined) {
-      // Snapshot validation keeps the source of every result-bearing say's prepared output.
-      if (prepared.sourceText === undefined)
-        throw new TypeError("Prepared output of a result-bearing say lacks its source.");
-      giveMessageHandle(
-        snapshot,
-        evaluator,
-        instruction.destinationTemporary,
-        sequence,
-        prepared.sourceText,
-      );
-    }
-    establishPacingAfterSay(
-      snapshot,
-      events,
-      instruction.span,
-      prepared.durationMs,
-      prepared.skippable,
-    );
-    snapshot.nextInstruction = prepared.continuationInstruction;
-    return;
-  }
-
   const preparedSpeaker =
     instruction.speakerTemporary === undefined
       ? (() => {
@@ -2942,53 +2874,6 @@ function executeSay(
       : instruction.pacing;
   const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
   const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
-  const activeGate = snapshot.backgroundActions.find(
-    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
-  );
-  if (activeGate !== undefined) {
-    if (durationMs === 0) {
-      assertEventSequenceCapacity(snapshot, 2, instruction.span);
-      settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
-      const sequence = emitSay(
-        snapshot,
-        events,
-        instruction.span,
-        output,
-        content,
-        text,
-        presentation,
-      );
-      if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
-      if (instruction.destinationTemporary !== undefined)
-        giveMessageHandle(
-          snapshot,
-          evaluator,
-          instruction.destinationTemporary,
-          sequence,
-          authoredText,
-        );
-      advance(snapshot);
-      return;
-    }
-    const preparedOutput: RuntimePreparedSayOutputSnapshot = Object.freeze({
-      owningInstruction: snapshot.nextInstruction,
-      continuationInstruction: snapshot.nextInstruction + 1,
-      speaker: output === null ? null : { ...output },
-      content,
-      text,
-      // Shown later, so the handle it gives then is made from this source.
-      ...(instruction.destinationTemporary === undefined ? {} : { sourceText: authoredText }),
-      presentation,
-      durationMs,
-      skippable,
-    });
-    const index = snapshot.backgroundActions.indexOf(activeGate);
-    snapshot.backgroundActions.splice(index, 1);
-    snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
-    snapshot.status = "waiting";
-    if (textCauses !== null) evaluator.trace!.holdOutput(snapshot.nextInstruction, textCauses);
-    return;
-  }
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
   const sequence = emitSay(snapshot, events, instruction.span, output, content, text, presentation);
   if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
@@ -3000,9 +2885,8 @@ function executeSay(
       sequence,
       authoredText,
     );
-  if (durationMs > 0)
-    establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
-  advance(snapshot);
+  if (durationMs > 0) holdForReadingTime(snapshot, events, instruction.span, durationMs, skippable);
+  else advance(snapshot);
 }
 
 /**
@@ -3137,7 +3021,11 @@ function emitSay(
   return sequence;
 }
 
-function establishPacingAfterSay(
+/**
+ * A paced message lasts its reading time: the script waits at the say, as at a `wait`, until time or a permitted skip
+ * settles the gate, and then continues with the next statement (owner decision on #829, 2026-10-11).
+ */
+function holdForReadingTime(
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
   span: SourceSpan,
@@ -3167,10 +3055,10 @@ function establishPacingAfterSay(
     deadlineMs,
     skippable,
     requestEventSequence,
-    preparedOutput: null,
   });
   snapshot.nextActionId += 1;
-  snapshot.backgroundActions.push(action);
+  snapshot.foregroundAction = action;
+  snapshot.status = "waiting";
   const requestEvent: ActionRequestedEvent = Object.freeze({
     kind: "actionRequested",
     sequence: requestEventSequence,
@@ -3211,17 +3099,6 @@ function requiredEventSequencesForNewPacingGate(): number {
   return sayOutput + pacingRequest + pacingCompletion;
 }
 
-/** A new wait needs its request and completion, plus a background gate completion. */
-function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
-  const delayRequestAndCompletion = 2;
-  const backgroundPacingCompletion = snapshot.backgroundActions.some(
-    (action) => action.kind === "chatPacingGate",
-  )
-    ? 1
-    : 0;
-  return delayRequestAndCompletion + backgroundPacingCompletion;
-}
-
 /** Fails the session; `path` is the project file whose source the failure's span is in. */
 function failSnapshot(
   snapshot: RuntimeSnapshot,
@@ -3253,8 +3130,8 @@ function failSnapshot(
 
 /**
  * Fails at the innermost loop of the running call, the likely cause; otherwise, as while waiting between timer blocks,
- * at the next instruction. The budget counts the whole invocation, including earlier loops and waits that catch-up
- * settled, so the message names the limit rather than the work of that loop.
+ * at the next instruction. The budget counts everything the operation executed at this scene time, including earlier
+ * loops and timer blocks, so the message names the limit rather than the work of that loop.
  */
 function failForBudget(
   plan: InstructionPlan,
@@ -3901,33 +3778,6 @@ function startMedia(
 }
 
 /**
- * Main-story media presentation waits for the previous message's pacing, like a later `say`: an active background
- * pacing gate becomes the foreground action without prepared output, and this barrier runs again once it settles.
- * A barrier with a receiver waits only when that receiver is a media handle. Interrupt blocks, and functions they
- * call, keep the canonical interrupt pacing behavior, so a barrier never waits while one runs.
- */
-function executePacingBarrier(
-  instruction: Extract<Instruction, { kind: "pacingBarrier" }>,
-  snapshot: RuntimeSnapshot,
-  evaluator: Evaluator,
-): void {
-  const gate = snapshot.backgroundActions.find(
-    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
-  );
-  if (
-    gate !== undefined &&
-    !interruptRunning(snapshot) &&
-    (instruction.receiver === null || isPacedHandle(evaluator.evaluate(instruction.receiver)))
-  ) {
-    snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
-    snapshot.foregroundAction = Object.freeze({ ...gate, preparedOutput: null });
-    snapshot.status = "waiting";
-    return;
-  }
-  advance(snapshot);
-}
-
-/**
  * Shows a permanent button after the shown ones, as background work that waits for clicks. Its block runs for the
  * activation that showed it, like a timer's, and the script continues at once.
  */
@@ -3999,11 +3849,6 @@ function showPermanentButton(
     } satisfies ActionRequestedEvent),
   );
   advance(snapshot);
-}
-
-/** Handles whose property writes wait for the previous message's pacing: media playback and camera views. */
-function isPacedHandle(value: SerializableRuntimeValue): boolean {
-  return isMediaHandle(value) || isCameraView(value);
 }
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {

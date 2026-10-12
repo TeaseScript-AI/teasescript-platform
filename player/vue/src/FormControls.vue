@@ -5,7 +5,9 @@ import PlayerActionButton from "./components/PlayerActionButton.vue";
 import type { PlayerFormPresentation } from "../../model.js";
 
 // One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and its submit
-// and cancel buttons stay visible below them. Each toggle shows and announces its own state.
+// and cancel buttons stay visible below them. Each toggle shows and announces its own state. A toggle with options and a
+// cycle stack every text they can show in one cell, so they keep the width of the longest and a press never resizes
+// them; the others are invisible, so only the current text is shown and announced (Owner decision, 2026-10-07).
 defineProps<{ form: PlayerFormPresentation; accessibleName: string; disabled: boolean }>();
 const emit = defineEmits<{
   step: [fieldId: string];
@@ -32,8 +34,16 @@ const emit = defineEmits<{
             @update:model-value="emit('step', field.id)"
           >
             <PlayerActionButton :data-form-field="field.id" :authored-fill="field.authoredFill" :disabled="disabled">
-              <span aria-hidden="true">{{ field.state === null ? (field.pressed ? "✓ " : "✗ ") : "" }}</span
-              >{{ field.label }}<template v-if="field.state !== null">: {{ field.state }}</template>
+              <template v-if="field.state === null"
+                ><span aria-hidden="true">{{ field.pressed ? "✓ " : "✗ " }}</span
+                >{{ field.label }}</template
+              >
+              <span v-else class="state-stack">
+                <span>{{ field.label }}: {{ field.state }}</span>
+                <span v-for="(shown, index) in field.states" :key="index" class="invisible"
+                  >{{ field.label }}: {{ shown }}</span
+                >
+              </span>
             </PlayerActionButton>
           </Toggle>
           <!-- A typed field opens in the composer; the edited one is marked current. -->
@@ -55,7 +65,13 @@ const emit = defineEmits<{
             :disabled="disabled"
             @click="emit('step', field.id)"
           >
-            {{ field.label }}: {{ field.state }} <span aria-hidden="true">↻</span>
+            <span class="state-stack">
+              <span>{{ field.label }}: {{ field.state }}</span>
+              <span v-for="(shown, index) in field.states" :key="index" class="invisible"
+                >{{ field.label }}: {{ shown }}</span
+              >
+            </span>
+            <span aria-hidden="true">↻</span>
           </PlayerActionButton>
         </template>
       </div>
@@ -92,6 +108,12 @@ const emit = defineEmits<{
 [data-form-controls] [data-editing] {
   background: var(--story-choice-pressed);
   box-shadow: inset 0 1px 3px #00000030;
+}
+.state-stack {
+  display: inline-grid;
+}
+.state-stack > * {
+  grid-area: 1 / 1;
 }
 /* Many fields scroll inside the form, so the submit button stays in reach, also above a software keyboard. */
 [data-form-fields] :deep([data-reka-scroll-area-viewport]) {

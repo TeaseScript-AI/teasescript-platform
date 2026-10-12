@@ -53,7 +53,7 @@ test("askDate, askTime, and askDateTime return the ISO answer as a value", () =>
     },
   ] as const) {
     const session = start(
-      `let value = ${command} "When?", hint: "Pick one"\nsay value, instant\nsay value.toISO()\nexit`,
+      `let value = ${command} "When?", hint: "Pick one"\nsay value, instant\nsay value.toISO(), instant\nexit`,
     );
     assert.deepEqual(playerRuntimeForeground(session), {
       kind,

@@ -1079,23 +1079,6 @@ function validateInstruction(
         );
       }
       return;
-    case "pacingBarrier":
-      if (!hasExactKeys(value, ["kind", "receiver", "span"])) {
-        errors.push(planError("TSC002", "Pacing-barrier instruction has an invalid shape.", path));
-      }
-      if (value.receiver !== null) {
-        validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
-        if (!isBarrierReceiver(value.receiver)) {
-          errors.push(
-            planError(
-              "TSC002",
-              "A pacing-barrier receiver must be a prepared value or an identifier with property or simple index access.",
-              `${path}.receiver`,
-            ),
-          );
-        }
-      }
-      return;
     case "showImage":
       if (!hasExactKeys(value, ["kind", "image", "span"])) {
         errors.push(planError("TSC002", "Show-image instruction has an invalid shape.", path));
@@ -1192,33 +1175,6 @@ function validateInstruction(
       return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
-  }
-}
-
-/**
- * The receiver shapes the compiler emits: an identifier, temporary, or prepared reference, with property access or
- * literal/identifier indexes.
- */
-function isBarrierReceiver(value: unknown): boolean {
-  let current = value;
-  for (;;) {
-    if (!isRecord(current)) return false;
-    if (
-      current.kind === "identifier" ||
-      current.kind === "temporary" ||
-      current.kind === "preparedReference"
-    )
-      return true;
-    if (current.kind === "property") {
-      current = current.object;
-    } else if (current.kind === "index") {
-      const index = current.index;
-      if (!isRecord(index) || (index.kind !== "literal" && index.kind !== "identifier"))
-        return false;
-      current = current.object;
-    } else {
-      return false;
-    }
   }
 }
 

@@ -281,9 +281,6 @@ export class InstructionCompiler {
   /** Timer expiry blocks and media cue blocks, compiled after the user functions in registration order. */
   readonly #handlers: RegisteredHandler[] = [];
 
-  /** A statement-level media control call whose receiver waits at a pacing barrier once it is evaluated. */
-  #barrierCall: Expression | null = null;
-
   /** The `let` name that a media initializer binds in its own blocks. */
   readonly #selfHandleByInitializer = new Map<MediaParts, string>();
 
@@ -342,11 +339,9 @@ export class InstructionCompiler {
         yield* compileChild(this.#lowerMediaTask(statement, false));
         return;
       case "stopAudioStatement":
-        this.#emitPacingBarrier(null, statement.span);
         this.instructions.push({ kind: "stopAudio", span: copySpan(statement.span) });
         return;
       case "showImageStatement": {
-        this.#emitPacingBarrier(null, statement.span);
         const lowered = this.#lowerExpression(statement.image);
         this.instructions.push({
           kind: "showImage",
@@ -357,14 +352,12 @@ export class InstructionCompiler {
         return;
       }
       case "hideImageStatement":
-        this.#emitPacingBarrier(null, statement.span);
         this.instructions.push({ kind: "showImage", image: null, span: copySpan(statement.span) });
         return;
       case "showCameraStatement":
         this.#lowerShowCamera(statement.placement, false, statement.span);
         return;
       case "hideCameraStatement":
-        this.#emitPacingBarrier(null, statement.span);
         this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
         return;
       case "saveStatement": {
@@ -463,10 +456,6 @@ export class InstructionCompiler {
       }
       case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
-        // The target object is already prepared once; the barrier waits when it holds a media handle or camera view.
-        if (target.plan.kind === "property" && PACED_HANDLE_PROPERTIES.has(target.plan.name)) {
-          this.#emitPacingBarrier(target.plan.object, statement.span);
-        }
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
             kind: "validateAssignmentTarget",
@@ -507,15 +496,6 @@ export class InstructionCompiler {
         return;
       }
       case "expressionStatement": {
-        const call = unwrapParentheses(statement.expression);
-        const method = call.kind === "callExpression" ? unwrapParentheses(call.callee) : call;
-        if (
-          call.kind === "callExpression" &&
-          method.kind === "propertyAccessExpression" &&
-          MEDIA_CONTROL_METHODS.has(method.property.name)
-        ) {
-          this.#barrierCall = call;
-        }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
@@ -1033,12 +1013,8 @@ export class InstructionCompiler {
         };
   }
 
-  /**
-   * Lowers a play command. A pacing barrier comes first, so main-story media waits for the previous message's
-   * pacing; operands then evaluate in source order.
-   */
+  /** Lowers a play command; its operands evaluate in source order. */
   *#lowerMediaTask(media: MediaParts, value: boolean): CompileTask<LoweredExpression | null> {
-    this.#emitPacingBarrier(null, media.span);
     const repeatOperand =
       media.repeat === null || media.repeat.kind === "indefinite"
         ? null
@@ -1126,13 +1102,12 @@ export class InstructionCompiler {
         };
   }
 
-  /** `showCamera [stage]` waits for the previous message's pacing like the Stage image, then shows the camera view. */
+  /** `showCamera [stage]` shows the camera view. */
   #lowerShowCamera(
     placement: "window" | "stage",
     value: boolean,
     span: SourceSpan,
   ): LoweredExpression | null {
-    this.#emitPacingBarrier(null, span);
     const destinationTemporary = value ? this.#allocateTemporary() : null;
     this.instructions.push({
       kind: "showCamera",
@@ -1146,14 +1121,6 @@ export class InstructionCompiler {
           plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
           temporaryIds: [destinationTemporary],
         };
-  }
-
-  /**
-   * Main-story media presentation waits for the previous message's pacing. A handle operation passes its already
-   * evaluated receiver; the barrier then waits only for a media handle or a camera view.
-   */
-  #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
-    this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
   }
 
   /** The variables that blocks of one resource share with the code that creates it, in the order of first use. */
@@ -1296,11 +1263,7 @@ export class InstructionCompiler {
 
   *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (
-      this.#contextualSpeakerTemporary === null &&
-      expression !== this.#barrierCall &&
-      !this.#containsUserCall(expression)
-    )
+    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
       return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
@@ -1495,14 +1458,6 @@ export class InstructionCompiler {
         const method = unwrapParentheses(expression.callee);
         if (method.kind === "propertyAccessExpression") {
           let receiver = yield* compileChild(this.#lowerExpressionTask(method.object));
-          if (expression === this.#barrierCall) {
-            this.#barrierCall = null;
-            // The receiver is evaluated once; the barrier and the call then use that value.
-            if (receiver.plan.kind !== "temporary" && receiver.plan.kind !== "preparedReference") {
-              receiver = this.#prepareReferenceExpression(receiver, method.object.span);
-            }
-            this.#emitPacingBarrier(receiver.plan, expression.span);
-          }
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
             receiver = this.#prepareReferenceExpression(receiver, method.object.span);
             this.instructions.push({
@@ -1708,7 +1663,7 @@ export class InstructionCompiler {
    * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
    * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
    * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
-   * any operand.
+   * any operand. It is said `instant`, so its field or buttons appear with it (owner decision on #829, 2026-10-11).
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -1738,7 +1693,7 @@ export class InstructionCompiler {
             span: copySpan(expression.question!.span),
           },
           skipPolicy: null,
-          pacing: "smart",
+          pacing: "instant",
           span: copySpan(expression.span),
         });
       }
@@ -1796,7 +1751,7 @@ export class InstructionCompiler {
           ...sayTemporaries,
           textTemporary,
           skipPolicy: null,
-          pacing: "smart",
+          pacing: "instant",
           span: copySpan(expression.span),
         };
         questionTemporaryIds = [
@@ -2078,7 +2033,7 @@ export class InstructionCompiler {
         ...sayTemporaries,
         textTemporary,
         skipPolicy: null,
-        pacing: "smart",
+        pacing: "instant",
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
@@ -2154,7 +2109,7 @@ export class InstructionCompiler {
         ...sayTemporaries,
         textTemporary,
         skipPolicy: null,
-        pacing: "smart",
+        pacing: "instant",
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
@@ -2973,15 +2928,6 @@ function unitOf(expression: UnitExpression): UnitPlan {
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
 }
-
-const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-/** Handle properties whose write waits for the previous message's pacing: media playback and camera placement. */
-const PACED_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
-  "position",
-  "remaining",
-  "volume",
-  "placement",
-]);
 
 function assembleExpression(
   expression: Expression,

@@ -157,15 +157,15 @@ test("a jump plays running audio on at 1× through cues, seeks, pauses, and resu
   const source = [
     'let music = playAudio async repeat "loop.mp3" {',
     "  at 0 s {",
-    '    say "start ${music.elapsed}"',
+    '    say "start ${music.elapsed}", instant',
     "  }",
     "  at 1 s {",
-    '    say "cue ${music.elapsed}"',
+    '    say "cue ${music.elapsed}", instant',
     "    music.position = 0 s",
     "  }",
     "}",
-    'timer async 1.5 s {\n  music.pause()\n  say "paused ${music.position}"\n}',
-    'timer async 2.5 s {\n  music.resume()\n  say "resumed ${music.position}"\n}',
+    'timer async 1.5 s {\n  music.pause()\n  say "paused ${music.position}", instant\n}',
+    'timer async 2.5 s {\n  music.resume()\n  say "resumed ${music.position}", instant\n}',
     'let e = showButton "Done"',
     "exit",
   ].join("\n");
@@ -415,7 +415,7 @@ test("+10 s works during chat pacing, also from a pending save, and not after th
   let answer = () => {};
   const { player, time, logged } = await mount(
     context,
-    'save 1 as "seen"\nsay "First", 20 s\nsay "Second"\nlet done = showButton "Done"\nexit',
+    'save 1 as "seen"\nsay "First", 20 s\nsay "Second", instant\nlet done = showButton "Done"\nexit',
     { autoSkip: false },
     {
       scope: "test",

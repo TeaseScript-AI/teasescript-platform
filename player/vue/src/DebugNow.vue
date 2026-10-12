@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import { playerDebugImageOrigin } from "../../debug-variables.js";
 import type { DebugStageImageStatus } from "../../presentation.js";
 import {
   playerRuntimeDebugNow,
@@ -95,15 +96,15 @@ const media = computed(() =>
   })),
 );
 const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
-// The statement that set the Stage image, from the value trace; unknown when it ran before the trace began or was
-// dropped from its history.
+// The statement that set the Stage image, from the value trace, or why the trace does not know it, as for a message.
 const imageOrigin = computed(() => {
   const trace = props.player.debugTrace.value;
   if (trace === null || props.player.session.value === null) return null;
-  const id = trace.stageImageRecord();
-  const location = id === null ? null : (trace.record(id)?.location ?? null);
-  if (location === null && stage.value.path === null) return null;
-  return { location: location === null ? null : `${location.path}:${location.line}` };
+  const origin = playerDebugImageOrigin(trace);
+  if (origin.kind === "unavailable")
+    return stage.value.path === null ? null : { location: null, reason: origin.reason };
+  const location = trace.record(origin.id)?.location ?? null;
+  return location === null ? null : { location: at(location), reason: null };
 });
 </script>
 
@@ -157,9 +158,10 @@ const imageOrigin = computed(() => {
           </Badge>
         </div>
         <p v-if="imageOrigin" class="text-muted-foreground" data-debug-now-image-origin>
-          Set by
-          <span v-if="imageOrigin.location" class="break-all font-mono">{{ imageOrigin.location }}</span>
-          <template v-else>: earlier history unavailable</template>
+          <template v-if="imageOrigin.location">
+            Set by <span class="break-all font-mono">{{ imageOrigin.location }}</span>
+          </template>
+          <template v-else>{{ imageOrigin.reason }}</template>
         </p>
       </section>
 

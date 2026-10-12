@@ -206,31 +206,30 @@ test("timer resume equivalence holds at every boundary in loops, calls, and befo
   assert.equal(result.events.at(-1)?.kind, "exit");
 });
 
-test("a timer coexists with an older background pacing gate and settles in deadline order", () => {
+test("a blocking timer after a paced say starts only when the say's reading time ends", () => {
   const compiled = plan('say "hello there"\ntimer 1 s\nsay "after"\nexit');
-  const started = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const timer = delayAction(started.snapshot);
-  assert.equal(started.snapshot.backgroundActions.length, 1);
-  const gate = started.snapshot.backgroundActions[0];
+  const reading = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const gate = reading.snapshot.foregroundAction;
   assert.ok(gate?.kind === "chatPacingGate");
-  assert.ok(gate.deadlineMs > timer.deadlineMs, "the pacing gate outlasts the one-second timer");
+  assert.deepEqual(reading.snapshot.backgroundActions, []);
 
   const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, started.snapshot)),
+    serializeCheckpoint(createCheckpoint(compiled, reading.snapshot)),
   );
-  const timerDue = observeTime(restored.plan, restored.snapshot, timer.deadlineMs);
-  assert.equal(timerDue.snapshot.lastSettlement?.actionId, timer.actionId);
-  const next = run(restored.plan, timerDue.snapshot);
-  assert.equal(next.snapshot.status, "waiting");
-  assert.equal(next.snapshot.foregroundAction?.kind, "chatPacingGate");
+  const gateDue = observeTime(restored.plan, restored.snapshot, gate.deadlineMs);
+  const started = run(restored.plan, gateDue.snapshot);
+  const timer = delayAction(started.snapshot);
+  assert.equal(timer.createdAtMs, gate.deadlineMs);
+  assert.equal(timer.deadlineMs, gate.deadlineMs + 1_000);
 
-  const gateDue = observeTime(restored.plan, next.snapshot, gate.deadlineMs);
-  const done = run(restored.plan, gateDue.snapshot);
+  const done = run(
+    restored.plan,
+    observeTime(restored.plan, started.snapshot, timer.deadlineMs).snapshot,
+  );
   assert.deepEqual(
     done.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["after"],
   );
-  assert.equal(done.events.at(-1)?.kind, "exit");
 });
 
 test("zero timers are immediate and create no action", () => {

@@ -191,8 +191,8 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
     ["let d = 1.5 s\nwait d\nexit", 1_500],
     ["let n = 3\nwait n ms\nexit", 3],
     ["wait 2 s\nexit", 2_000],
-    // A day is exactly 24 hours (ADR 0026).
-    ["wait 1 day\nexit", 86_400_000],
+    // A day is exactly 24 hours (ADR 0026). Held in a variable, it gets no TSV061 warning.
+    ["let day = 1 day\nwait day\nexit", 86_400_000],
   ] as const) {
     const result = runValidSource(source);
     assert.equal(result.snapshot.status, "waiting", source);

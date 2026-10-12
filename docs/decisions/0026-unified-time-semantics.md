@@ -175,6 +175,10 @@ the unit after its name, `timer(duration: r min, ...)`. In `timer 5..10 s` the u
 compile error that suggests the parentheses. The unit belongs to the duration itself: this is the owner's choice over a
 separate `unit: "seconds"` parameter.
 
+A `wait` or timer whose length is written in days or weeks, such as `wait 2 days`, compiles with a warning (owner
+decision, 2026-10-10): it counts scene time, which stops while the Player is closed, while such a length almost always
+means real time ([V30 §27](../specifications/accepted-syntaxes-v30.md#time)).
+
 Each consumer takes an exact duration D:
 
 | Consumer | Accepted D |
@@ -196,8 +200,7 @@ These parts of the #512 time proposal remain open:
   anchor);
 - `askDuration` and `askCalendarDuration`;
 - scheduling and `schedule(...)` ([V30 §36](../specifications/accepted-syntaxes-v30.md#36-scheduling));
-- `waitUntil`;
-- a warning for a `wait` or timer of days or weeks, which count scene time.
+- `waitUntil`.
 
 ## Consequences
 

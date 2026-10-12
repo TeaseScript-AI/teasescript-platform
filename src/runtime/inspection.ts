@@ -5,7 +5,6 @@ import type { SourceSpan } from "../source.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
-  RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
@@ -29,11 +28,6 @@ export interface RuntimeSettlementInspection {
   readonly sourceSpan: SourceSpan | null;
 }
 
-export interface RuntimePreparedSayInspection {
-  readonly output: RuntimePreparedSayOutputSnapshot;
-  readonly sourceSpan: SourceSpan | null;
-}
-
 export interface RuntimeStateInspection {
   readonly valid: true;
   readonly status: RuntimeStatus;
@@ -43,7 +37,6 @@ export interface RuntimeStateInspection {
   readonly chatPacingSettings: ChatPacingSettings;
   readonly foregroundAction: RuntimeActionInspection | null;
   readonly backgroundActions: readonly RuntimeActionInspection[];
-  readonly preparedSayOutput: RuntimePreparedSayInspection | null;
   readonly lastSettlement: RuntimeSettlementInspection | null;
 }
 
@@ -104,10 +97,6 @@ function buildInspection(plan: InstructionPlan, snapshot: RuntimeSnapshot): Runt
     backgroundActions: Object.freeze(
       snapshot.backgroundActions.map((action) => actionInspection(plan, action)),
     ),
-    preparedSayOutput:
-      snapshot.preparedSayOutput === null
-        ? null
-        : preparedSayInspection(plan, snapshot.preparedSayOutput),
     lastSettlement:
       snapshot.lastSettlement === null ? null : settlementInspection(plan, snapshot.lastSettlement),
   };
@@ -131,16 +120,6 @@ function settlementInspection(
   return deepFreeze({
     settlement: detached(settlement),
     sourceSpan: instructionSpan(plan, settlement.owningInstruction),
-  });
-}
-
-function preparedSayInspection(
-  plan: InstructionPlan,
-  output: RuntimePreparedSayOutputSnapshot,
-): RuntimePreparedSayInspection {
-  return deepFreeze({
-    output: detached(output),
-    sourceSpan: instructionSpan(plan, output.owningInstruction),
   });
 }
 

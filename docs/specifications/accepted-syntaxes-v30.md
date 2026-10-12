@@ -2022,8 +2022,8 @@ an optional `prefill:`, and an optional `hint:`. Both forms mean the same: `askT
 comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
 other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
 
-The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
-text shown in the field only
+The question is said in the chat by the asking speaker, as by `say` but with no reading time of its own, and the field
+opens with it (owner decision, 2026-10-11); `hint:` is help text shown in the field only
 ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). In a text or number
 field the hint shows only while the field is empty, so a prefill usually hides it; a date or time control shows the
 hint beside it, also with a prefill:
@@ -2693,8 +2693,8 @@ Rules:
 - With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
   button without a chat message.
 - The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-and-durations)),
-  measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
-  timeout.
+  measured in scene time like timers ([§27](#time)), without the time a block interrupted it
+  ([§27](#expiry-blocks)). When the timeout is reached, the returned duration equals the timeout.
 - If the caller does not need the elapsed time, the return value may be ignored.
 - A zero or negative timeout, a value that is not a duration, or a calendar duration, is an error. The compiler rejects
   a timeout it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime
@@ -2773,11 +2773,8 @@ A count is a whole number of at least one and a duration is exact and greater th
 `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
 indefinite repetition.
 
-On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`,
-`stopAudio`, and statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and
-camera placement writes, wait until the previous message's pacing has completed or been skipped, like a following
-`say`. `wait` and `timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical
-interrupt pacing and add no media wait.
+Like every statement, media and camera statements run only once the reading time of a paced message before them has
+ended or been skipped, also in timer and cue blocks ([message reading time](#message-presentation-defaults-and-overrides)).
 
 ### Camera view
 
@@ -3433,8 +3430,8 @@ playing audio or video. It may use top-level names, the variables of the code th
 ([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
-interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
-is inert while the block runs, so there are never two active story paths:
+interaction, `wait`, blocking timer, media, or a message's reading time. The interrupted action is inert while the
+block runs, so there are never two active story paths:
 
 - if the block completes normally, the interrupted action is presented again and the script continues where it
   left off;
@@ -3443,6 +3440,12 @@ is inert while the block runs, so there are never two active story paths:
 
 A `goto` from the block, also from a function that the block calls, discards the interrupted action and instruction
 in the same way.
+
+While a block runs, what the main path waits on stands still, and after a normal return it continues with the time it
+had left: a `wait`, a blocking timer and its visible countdown, a message's reading time, and the timeout of
+`showButton` or `askForm`. The elapsed time a `showButton` returns leaves out the time the block ran. Asynchronous
+timers and media keep running, and a wait for media to end ends with the media, also while a block runs (owner
+decision, 2026-10-11).
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
@@ -3479,26 +3482,21 @@ including on another device, the gap does not consume timer time and the timer c
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
+A `wait` or timer whose length is written in days or weeks gets warning `TSV061` on that length (owner decision,
+2026-10-10), because such a length almost always means real time. This covers the units `d`, `day`, `days`, `w`, `week`
+and `weeks`, also in a range or a sum, as in `timer (1..3) days` and `wait 1 day + 2 h`. A length held in a variable,
+read from a list or object, or returned by a call is not checked:
+
+```text
+wait 2 days     // TSV061: 'wait 2 days' counts only time while the Player is open, so closing the Player pauses it.
+```
+
 Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
 longer than that can never end; the compiler rejects one it can see, such as `wait 1e15 s`, and any other is a runtime
 error.
 
-A `wait` runs alongside the pacing of the message before it, so the script goes on after the longer of the two
-([`RUNTIME.md`](../RUNTIME.md#instant-0-s-and-wait)). Warning `TSV060` (owner decision, 2026-10-08), on the `wait`,
-marks one that therefore adds no time unless the player skips the message: a `wait` of a known non-zero duration that is
-the next statement after a `say` without its own pacing (`instant` or a duration), in the same block, and is shorter
-than the message's reading time at the default reading speed. That reading time is the shortest the message can take:
-the default smart pacing of its visible text when the compiler knows all of the text, and otherwise the base delay
-alone, as a value the compiler cannot know may change which markup the text holds and so hide any of the rest. Comments
-and blank lines are no statements. Not checked are a `wait` after another statement or a label, after a `say` that ends
-a branch or loop body, after a message used as a value, and one whose duration is not known:
-
-```text
-for i in 1..=10 {
-    say ".${i}."
-    wait 0.5 s      // TSV060: the message takes at least 1.5 seconds to read
-}
-```
+A `wait` after a paced message starts when the message's reading time ends, so it adds its whole duration; for exact
+timing, say the message `instant` (owner decision, 2026-10-11).
 
 ## 28. Permanent buttons
 **Status:** Accepted (inactive while the handler runs: Owner decision on #610; `persist:` on the command: Owner
@@ -3541,8 +3539,8 @@ The text follows the rules of other button labels ([§16](#lists-in-text)). Butt
 Click and handler behavior:
 
 - A click runs the handler once, like a timer expiry block ([§27](#expiry-blocks)): it interrupts at the next
-  deterministic runtime boundary, also while the main path waits on an interaction, `wait`, or media, and waits while a
-  paced message still blocks the chat or another block runs. The interrupted action returns when the handler finishes.
+  deterministic runtime boundary, also while the main path waits on an interaction, `wait`, media, or a message's
+  reading time, and waits while another block runs. The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
 - The handler shares the variables of the code that showed the button
@@ -3708,7 +3706,8 @@ Static analysis should warn, but not necessarily fail compilation, when:
 
 - statements are unreachable;
 - an `exit` is declared but unreachable;
-- a `wait` adds no time because the message before it takes longer to read (`TSV060`, [§27](#27-timers));
+- a `wait` or timer has a length written in days or weeks, which counts only time while the Player is open (`TSV061`,
+  [§27](#time));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
   or an unconditional top-level `goto` back to an earlier label of its file, whose loop is the statements between them.
   A `break`, `return`, `end`, `exit`, any other `goto`, a file `call`, or a call of an author, host, or library function
@@ -4279,7 +4278,14 @@ belong to the Player presentation design. These defaults do not introduce a new 
 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
-properties. The resulting presentation is captured with the message across pacing waits and checkpoint restore.
+properties. The resulting presentation is shown with the message.
+
+A paced `say`, with smart pacing or a positive duration, lasts its reading time, and the next statement runs only when
+the reading time ends or the player skips it (owner decision, 2026-10-11). Nothing after it runs meanwhile: no other
+message, question, button, form, media or camera change, message or permanent-button change, `wait`, timer, or other
+code. A timer, cue, or permanent-button block interrupts a reading time as it interrupts a `wait`
+([§27](#expiry-blocks)); permanent buttons already shown stay usable. `instant` and `0 s` show a message with no
+reading time, so `say "Hold.", instant` followed by `wait 30 s` takes exactly 30 seconds.
 
 ### Updatable messages
 
@@ -4315,7 +4321,7 @@ let strokes = [say("First", instant), say("Second", instant)]
 - **`text`.** Reading it gives the text as written, with its markup and after `${...}`, such as `"**Ready**"`. Assigning
   text, or appending with `+=`, replaces the message's text and parses it whole; the message keeps its speaker,
   presentation, and place in the conversation, and the conversation shows only its current text. The same text again
-  changes nothing, and `""` empties the message without removing it. A text write starts no pacing and waits for none;
+  changes nothing, and `""` empties the message without removing it. A text write starts no reading time of its own;
   use `wait` between changes. `text` takes only text: write `"Strokes: ${count}"` for a number. A handle has no other
   property, no methods, and no operators besides `==` and `!=`.
 - **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the

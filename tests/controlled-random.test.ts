@@ -30,12 +30,13 @@ import {
 } from "../src/runtime/random-control.js";
 import {
   createFreshRuntimeSession,
+  deserializeRuntimeSession,
   restoreRuntimeSession,
   RuntimeSessionError,
   type RuntimeSession,
 } from "../src/runtime/session.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { createCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
@@ -197,7 +198,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let items = ["x", "y"]',
         "let t = timer(duration: (1..=3) s, async: true, repeat: true) {",
-        '  say "tick ${items}"',
+        '  say "tick ${items}", instant',
         "}",
         "wait 4 s",
         "t.remaining = 0 s",
@@ -944,6 +945,40 @@ test("a run keeps its instruction budget across pauses", () => {
   assert.equal(JSON.stringify(paused.exportSnapshot()), JSON.stringify(plain.exportSnapshot()));
 });
 
+test("a late run restored from checkpoints at its paused draws keeps the budget per scene time", () => {
+  // Issue #841: each rest executes well within the budget, but one late run catches up more than the budget. The
+  // draws pause in instructions and, for the ranged timer, in catch-up between two rests.
+  const plan = compileValidPlan(
+    "let t = timer(duration: (1..=2) ms, async: true, repeat: true)\nrepeat 20 {\n  repeat 60 {}\n  let n = randomInteger(1..=2)\n  wait 5 ms\n}\nexit",
+  );
+  const budget = { instructionBudget: 500 };
+  const plain = createFreshRuntimeSession(plan, {});
+  const plainEvents = [...plain.run(budget).events, ...plain.observeTime(1000).events];
+  const caughtUp = plain.run(budget);
+  plainEvents.push(...caughtUp.events);
+  assert.ok(caughtUp.instructionsExecuted > budget.instructionBudget);
+  assert.equal(plain.view().status, "halted");
+
+  let paused = createFreshRuntimeSession(plan, {}, { randomControl: {} });
+  const pausedEvents: InterpreterEvent[] = [];
+  const settle = (operation: { readonly events: readonly InterpreterEvent[] }): void => {
+    pausedEvents.push(...operation.events);
+    for (let draw = paused.view().randomDraw; draw !== null; draw = paused.view().randomDraw) {
+      paused = deserializeRuntimeSession(serializeCheckpoint(paused.exportCheckpoint()), {
+        randomControl: {},
+      });
+      pausedEvents.push(
+        ...paused.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" }).events,
+      );
+    }
+  };
+  settle(paused.run(budget));
+  settle(paused.observeTime(1000));
+  settle(paused.run(budget));
+  assert.deepEqual(pausedEvents, plainEvents);
+  assert.equal(JSON.stringify(paused.exportSnapshot()), JSON.stringify(plain.exportSnapshot()));
+});
+
 test("restore rejects a pending draw that the engine could not have made", () => {
   const plan = compileValidPlan("let a = randomInteger(1..=6)\nexit");
   const session = createFreshRuntimeSession(plan, {}, { randomControl: {} });
@@ -982,7 +1017,7 @@ test("restore rejects a pending draw that the engine could not have made", () =>
 
 test("a paused step or single instruction finishes as that operation would have", () => {
   const plan = compileValidPlan(
-    'let a = randomInteger(1..=6)\nsay "${a}"\nlet b = randomInteger(1..=6)\nsay "${b}"\nexit',
+    'let a = randomInteger(1..=6)\nsay "${a}", instant\nlet b = randomInteger(1..=6)\nsay "${b}", instant\nexit',
   );
   const plain = createFreshRuntimeSession(plan, {});
   const paused = createFreshRuntimeSession(plan, {}, { randomControl: {} });

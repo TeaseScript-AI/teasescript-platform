@@ -659,7 +659,8 @@ export function playerRuntimeForeground(
 /**
  * Visible and mystery timers at the Player's session-time estimate, in creation order: a blocking timer (also while
  * an expiry block interrupts it) and every running or paused async timer. Hidden timers and `wait` produce no entry,
- * and a settled timer disappears with its action. A paused timer shows its frozen remaining time.
+ * and a settled timer disappears with its action. A paused timer, and a blocking timer while a block interrupts it,
+ * show their frozen remaining time.
  */
 export function playerRuntimeTimers(
   state: PlayerRuntimeState,
@@ -667,15 +668,18 @@ export function playerRuntimeTimers(
 ): readonly PlayerTimerPresentation[] {
   const now = Math.max(state.observedSessionTimeMs, currentSessionTimeMs);
   const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
-  const delays = [state.foregroundAction, state.suspendedAction];
-  for (const action of delays) {
+  const delays = [
+    { action: state.foregroundAction, at: now },
+    { action: state.suspendedAction, at: state.suspendedAtMs ?? now },
+  ];
+  for (const { action, at } of delays) {
     if (action?.kind !== "delay" || action.display === "hidden") continue;
     timers.push({
       actionId: action.actionId,
       id: `runtime-timer-${action.actionId}`,
       kind: action.display,
       ...(action.label === null ? {} : { name: action.label }),
-      remainingSeconds: Math.max(0, action.deadlineMs - now) / 1000,
+      remainingSeconds: Math.max(0, action.deadlineMs - at) / 1000,
       totalSeconds: (action.deadlineMs - action.createdAtMs) / 1000,
     });
   }
@@ -713,11 +717,8 @@ function timedDeadlines(
 ): number[] {
   const deadlines: number[] = [];
   if (state.status === "failed") return deadlines;
-  for (const action of [
-    state.foregroundAction,
-    ...state.backgroundActions,
-    state.suspendedAction,
-  ]) {
+  // An action a block suspended stands still, so it needs no observation until the block returns.
+  for (const action of [state.foregroundAction, ...state.backgroundActions]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
     } else if (
@@ -728,7 +729,7 @@ function timedDeadlines(
       deadlines.push(action.timer.deadlineMs);
     }
   }
-  // A button with a timeout times out only while it is presented; a suspended one waits for its block to return.
+  // A button with a timeout times out only while it is presented.
   const button = activePlayerRuntimeInteraction(state);
   const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
   if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
@@ -747,13 +748,13 @@ export function activePlayerRuntimeInteraction(
   return state.foregroundAction?.kind === "interaction" ? state.foregroundAction : null;
 }
 
+/** The reading time the script waits for, if any. */
 export function activePlayerRuntimePacingGate(
-  state: Pick<RuntimeSessionView, "status" | "foregroundAction" | "backgroundActions">,
+  state: Pick<RuntimeSessionView, "status" | "foregroundAction">,
 ): RuntimeChatPacingGateActionSnapshot | null {
   if (state.status === "failed") return null;
   const foreground = state.foregroundAction;
-  if (foreground?.kind === "chatPacingGate") return foreground;
-  return state.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
+  return foreground?.kind === "chatPacingGate" ? foreground : null;
 }
 
 /** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
@@ -764,9 +765,9 @@ export interface PlayerRuntimeDebugCountdown {
 
 /**
  * The deadline of the current foreground wait for Player Debug countdowns, from canonical state only: an authored
- * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or chat
- * pacing while no other foreground action owns progress or input. Suspended actions behind a running block never
- * count; that block's own foreground work does. A countdown ends only when its action settles or loses the foreground.
+ * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or a
+ * message's reading time. Suspended actions behind a running block never count; that block's own foreground work
+ * does. A countdown ends only when its action settles or loses the foreground.
  */
 export function playerRuntimeDebugCountdown(
   session: Pick<PlayerRuntimeSession, "plan" | "state">,
@@ -775,17 +776,14 @@ export function playerRuntimeDebugCountdown(
   if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
   const foreground = snapshot.foregroundAction;
   let countdown: PlayerRuntimeDebugCountdown | null = null;
-  if (foreground === null) {
-    const gate = activePlayerRuntimePacingGate(snapshot);
-    if (gate !== null) countdown = { kind: "pacing", deadlineMs: gate.deadlineMs };
-  } else if (foreground.kind === "interaction") {
+  if (foreground?.kind === "interaction") {
     const deadlineMs = interactionDeadlineMs(foreground);
     if (deadlineMs !== null) countdown = { kind: "button", deadlineMs };
-  } else if (foreground.kind === "delay") {
+  } else if (foreground?.kind === "delay") {
     const owner = session.plan.instructions[foreground.owningInstruction];
     if (owner?.kind === "wait" && owner.command === "wait")
       countdown = { kind: "wait", deadlineMs: foreground.deadlineMs };
-  } else if (foreground.kind === "chatPacingGate") {
+  } else if (foreground?.kind === "chatPacingGate") {
     countdown = { kind: "pacing", deadlineMs: foreground.deadlineMs };
   }
   return countdown === null ? null : Object.freeze(countdown);
@@ -827,7 +825,7 @@ export interface PlayerDebugTimer {
   readonly display: "hidden" | "visible" | "mystery";
   readonly label: string | null;
   readonly repeat: boolean;
-  /** `suspended`: a blocking timer whose time runs on while a block interrupts it. */
+  /** `suspended`: a blocking timer that stands still while a block interrupts it. */
   readonly state: "running" | "paused" | "suspended";
   readonly remainingMs: number;
   readonly startedAt: PlayerDebugSourceLocation;
@@ -951,7 +949,10 @@ export function playerRuntimeDebugNow(
       label: action.label,
       repeat: false,
       state: suspended ? "suspended" : "running",
-      remainingMs: Math.max(0, action.deadlineMs - now),
+      remainingMs: Math.max(
+        0,
+        action.deadlineMs - (suspended ? (snapshot.suspendedAtMs ?? now) : now),
+      ),
       startedAt: debugLocation(plan, action.owningInstruction),
     });
   }
@@ -1169,6 +1170,7 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
         kind: "value",
         pressed: false,
         state: value === null ? null : formValueText(value, presentation),
+        states: Object.freeze([]),
         optional: field.optional,
         editing,
         ...(field.background === undefined ? {} : { authoredFill: field.background }),
@@ -1186,6 +1188,7 @@ export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPres
       kind: field.kind === "boolean" ? "toggle" : "cycle",
       pressed: value === true,
       state: option?.text ?? null,
+      states: Object.freeze(field.options?.map((candidate) => candidate.text) ?? []),
       optional: false,
       editing: false,
       ...(authoredFill === undefined ? {} : { authoredFill }),
@@ -1343,10 +1346,10 @@ export function clearPlayerRuntimeFormField(
   return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
 }
 
-/** The forms that can still be answered: the presented one and one that a running block suspended. */
-export function playerRuntimeFormActionIds(state: PlayerRuntimeState): readonly number[] {
+/** The questions that can still be answered: the presented one and one that a running block suspended. */
+export function playerRuntimeInteractionActionIds(state: PlayerRuntimeState): readonly number[] {
   return [state.foregroundAction, state.suspendedAction].flatMap((action) =>
-    action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
+    action?.kind === "interaction" ? [action.actionId] : [],
   );
 }
 

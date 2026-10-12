@@ -229,46 +229,68 @@ test("an append reads the text before its value waits, so a change made meanwhil
   );
 });
 
-test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
+test("a text write after a paced say waits for its reading time and starts no pacing of its own", () => {
   const compiled = plan(
     lines('let line = say "Waiting", 2 s', 'line.text = "Ready"', 'say "Next", 1 s', "exit"),
   );
   const shown = run(compiled, createFreshRuntimeSnapshot(compiled));
-  // The next message still waits for the first one's two seconds.
   assert.equal(shown.snapshot.status, "waiting");
-  assert.deepEqual(messageTexts(shown.events), [["Waiting", "Ready"]]);
+  assert.deepEqual(messageTexts(shown.events), [["Waiting"]]);
   const gate = shown.snapshot.foregroundAction;
   assert.ok(gate?.kind === "chatPacingGate");
   assert.equal(gate.deadlineMs, 2_000);
+
+  const changed = run(compiled, observeTime(compiled, shown.snapshot, 2_000).snapshot);
+  assert.deepEqual(
+    changed.events.flatMap((event) =>
+      event.kind === "messageUpdated" || event.kind === "say"
+        ? [`${event.kind} ${event.text}`]
+        : [],
+    ),
+    ["messageUpdated Ready", "say Next"],
+  );
+  // The next message's second starts when the first message's reading time ends.
+  const next = changed.snapshot.foregroundAction;
+  assert.ok(next?.kind === "chatPacingGate");
+  assert.equal(next.deadlineMs, 3_000);
 });
 
-test("a say staged behind pacing gives its handle only once its message is shown", () => {
+test("a say value gives its handle when its message is shown and keeps it through its reading time", () => {
   const compiled = plan(
     lines('say "First", 1 s', 'let line = say "Second", 2 s', 'line.text += "!"', "exit"),
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.deepEqual(messageTexts(waiting.events), [["First"]]);
-  // The prepared output keeps the source of its text; no message is live and no handle exists yet.
-  assert.equal(waiting.snapshot.foregroundAction?.kind, "chatPacingGate");
   assert.deepEqual(waiting.snapshot.liveMessages, []);
-  const json = serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot));
-  assert.match(json, /"sourceText":"Second"/);
 
-  const released = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
+  const second = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
+  assert.deepEqual(messageTexts(second.events), [["Second"]]);
+  assert.equal(second.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(second.snapshot.liveMessages.length, 1);
+  const json = serializeCheckpoint(createCheckpoint(compiled, second.snapshot));
+
+  const released = run(compiled, observeTime(compiled, second.snapshot, 3_000).snapshot);
   const restored = deserializeCheckpoint(json);
-  const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 1_000).snapshot);
+  const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 3_000).snapshot);
   assert.deepEqual(resumed.events, released.events);
   assert.deepEqual(resumed.snapshot, released.snapshot);
-  assert.deepEqual(messageTexts(released.events), [["Second", "Second!"]]);
+  assert.equal(released.snapshot.status, "halted");
+  assert.deepEqual(
+    released.events.flatMap((event) => (event.kind === "messageUpdated" ? [event.text] : [])),
+    ["Second!"],
+  );
 });
 
-test("an instant say that supersedes earlier pacing gives its handle at once", () => {
+test("an instant say after a paced say waits for its reading time, then gives its handle at once", () => {
   const compiled = plan(
     lines('say "First", 1 s', 'let line = say "Now", instant', 'line.text += "!"', "exit"),
   );
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.deepEqual(messageTexts(result.events), [["First"], ["Now", "Now!"]]);
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(messageTexts(waiting.events), [["First"]]);
+  const result = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(messageTexts(result.events), [["Now", "Now!"]]);
 });
 
 test("message handles resume equivalently at every boundary, through waits, a timer block, and pacing", () => {
@@ -428,26 +450,6 @@ test("restore rejects live messages that are malformed, out of order, or missing
   const extra: RuntimeSnapshot = { ...waiting, liveMessages: [earlier, record] };
   assert.equal(validateRuntimeSnapshot(extra, compiled).valid, true);
   assert.deepEqual(observeTime(compiled, extra, 0).snapshot.liveMessages, [record]);
-});
-
-test("restore checks the source a staged say value keeps against its prepared text", () => {
-  const compiled = plan(lines('say "First", 1 s', 'let line = say "**Second**", 2 s', "exit"));
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
-  const gate = waiting.foregroundAction;
-  assert.ok(gate?.kind === "chatPacingGate" && gate.preparedOutput !== null);
-  assert.equal(gate.preparedOutput.sourceText, "**Second**");
-  const withoutSource = changed(
-    waiting,
-    (data) => delete data.foregroundAction.preparedOutput.sourceText,
-  );
-  assert.equal(validateRuntimeSnapshot(withoutSource.snapshot, compiled).valid, false);
-  // The source must be the one the prepared content was parsed from.
-  const otherSource = changed(
-    waiting,
-    (data) => (data.foregroundAction.preparedOutput.sourceText = "Second"),
-  );
-  assert.equal(validateRuntimeSnapshot(otherSource.snapshot, compiled).valid, false);
-  assert.equal(validateRuntimeSnapshot(changed(waiting, () => {}).snapshot, compiled).valid, true);
 });
 
 test("handles go with globals and callers across files, and a file's own handles end with it", () => {

@@ -1051,6 +1051,35 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
+test("a toggle with options and a cycle list every text they can show, so a press keeps their width", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let answers = askForm fields: {",
+      '  rope: true, access: { value: false, text: "Access", options: [{ value: false, text: "Off" }, { value: true, text: "On" }] },',
+      '  pace: { text: "Pace", options: [{ text: "Slow" }, { text: "Much faster" }, { text: "Fast" }] }',
+      "}",
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  const states = (form: ReturnType<typeof playerRuntimeForm>) =>
+    form!.fields.map((field) => [field.id, field.state, field.states]);
+  assert.deepEqual(states(playerRuntimeForm(session)), [
+    ["rope", null, []],
+    ["access", "Off", ["Off", "On"]],
+    ["pace", "Slow", ["Slow", "Much faster", "Fast"]],
+  ]);
+  const stepped = stepPlayerRuntimeFormField(
+    stepPlayerRuntimeFormField(session, "access")!.session,
+    "pace",
+  )!.session;
+  assert.deepEqual(states(playerRuntimeForm(stepped)), [
+    ["rope", null, []],
+    ["access", "On", ["Off", "On"]],
+    ["pace", "Much faster", ["Slow", "Much faster", "Fast"]],
+  ]);
+});
+
 test("a cycle whose options share its value is answered with the option it showed, line by line", () => {
   const session = createPlayerRuntimeSession(
     [

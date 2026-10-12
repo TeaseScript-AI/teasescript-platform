@@ -499,7 +499,7 @@ Shared required cases include:
 - cancellation and timeout according to the action kind;
 - invalid, duplicate, or late response;
 - duplicate delivery returning the same bounded `lastSettlement` for replayable completions;
-- timer lifecycle transitions and suspended-delay settlements preserving the previous replay settlement;
+- timer lifecycle transitions and suspended media-wait settlements preserving the previous replay settlement;
 - interrupted foreground completions returning `suspendedAction` without mutation;
 - active foreground/background lookup before settled, stale, or unknown classification;
 - an older active background action remaining valid after a newer action settles;
@@ -533,19 +533,20 @@ inspection, all four interaction completions and rejections, pacing skip, explic
 
 The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
-background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
-settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
-equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
+reading times that hold every later statement, including instant output, interactions, media, timers, and `wait`,
+typed/time settlement, timer, cue, and button blocks that interrupt a reading time, deterministic event ordering,
+checkpoint/JSON restore equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
 exhaustion and terminal transition atomicity. The dependency-free browser smoke script covers primary pointer/touch and
 eligible Space input, interactive-input priority, rejection feedback, canonical transcript rendering, checkpoint
 control reconstruction, and desktop/button versus narrow/dropdown presentation.
 
-Timer coverage starts with real `.tease` source and exercises elapsed units and cross-unit values, compound
-assignment, short/named forms, blocking and asynchronous presentation, handles, pause/resume/stop, current-round
-adjustment, repetition, and settled-operation warnings. Deterministic cases cover queued non-nested expiry
-interrupts, normal resume versus handler `exit`, suspended input rejection, suspended-delay ordering, pacing and
-result-handoff boundaries, and JSON checkpoint/restore equivalence. Late observation must give the same output,
-events, and snapshot as observing every deadline on time, for main-path waits and pacing as well as expiry blocks.
+Timer coverage starts with real `.tease` source and exercises elapsed units and cross-unit values, compound assignment,
+short/named forms, blocking and asynchronous presentation, handles, pause/resume/stop, current-round adjustment,
+repetition, and settled-operation warnings. Deterministic cases cover queued non-nested expiry interrupts, normal resume
+versus handler `exit`, suspended input rejection, an interrupted action standing still and resuming with its remaining
+time, pacing and result-handoff boundaries, and JSON checkpoint/restore equivalence. Late observation must give the same
+output, events, and snapshot as observing every deadline on time, for main-path waits and pacing as well as expiry
+blocks.
 
 Permanent button coverage starts with real `.tease` source and exercises clicks during waits and questions, queued,
 busy, removed, and early clicks, removal, and file-entry ownership across `call`, `end`, `goto`, and `exit`. The shared
@@ -559,7 +560,7 @@ through public validation/restore paths.
 Media coverage starts with real `.tease` source and exercises accepted and rejected forms, load/failure transitions,
 blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
-media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
+media and timers, cue blocks with self-handles, Stage replacement, playback projections, JSON
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each

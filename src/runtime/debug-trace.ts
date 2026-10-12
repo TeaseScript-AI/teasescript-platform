@@ -209,6 +209,11 @@ export interface RuntimeDebugTraceStatus {
    * `null` before the first operation.
    */
   readonly firstEventSequence: number | null;
+  /**
+   * Whether this epoch set the Stage image, with `showImage` or `hideImage`: without a `stageImageRecord()`, an image
+   * this epoch set had its record dropped, and any other was set before the epoch began.
+   */
+  readonly stageImageSet: boolean;
 }
 
 export interface RuntimeDebugTraceOptions {
@@ -385,9 +390,9 @@ interface Stage {
   readonly nextId: number;
   readonly decisionSerial: number;
   readonly draws: number;
-  readonly pendingOutput: TraceStore["pendingOutput"];
   readonly pendingStorage: TraceStore["pendingStorage"];
   readonly stageImageId: number | null;
+  readonly stageImageSet: boolean;
   readonly lastRandom: TraceRecord | null;
   readonly versions: Map<string, number | undefined>;
   readonly outputs: number[];
@@ -412,7 +417,7 @@ export class TraceStore {
   #versions = new Map<string, number>();
   #outputs = new Map<number, number>();
   #stageImageId: number | null = null;
-  pendingOutput: { readonly instruction: number; readonly deps: DebugDependencies } | null = null;
+  #stageImageSet = false;
   pendingStorage: {
     readonly actionId: number;
     readonly key: string;
@@ -502,7 +507,7 @@ export class TraceStore {
     this.#versions = new Map();
     this.#outputs = new Map();
     this.#stageImageId = null;
-    this.pendingOutput = null;
+    this.#stageImageSet = false;
     this.pendingStorage = null;
     this.#lastRandom = null;
     this.#stage = null;
@@ -522,6 +527,7 @@ export class TraceStore {
     this.#bytes = 0;
     this.#versions = new Map();
     this.#outputs = new Map();
+    this.#stageImageId = null;
     this.#stage = null;
     this.#decisions = [];
   }
@@ -1118,29 +1124,11 @@ export class TraceStore {
     this.#stage?.outputs.push(eventSequence);
   }
 
-  /** A `say` whose text waits behind pacing; it is emitted by a later operation. */
-  holdOutput(instruction: number, deps: DebugDependencies): void {
-    if (this.#failure !== null) return;
-    this.pendingOutput = { instruction, deps: copyDependencies(deps) };
-  }
-
-  /** Emits held output, or, when the trace did not see it prepared, output whose causes are unavailable. */
-  releaseOutput(eventSequence: number, instruction: number, text: string): void {
-    if (this.#failure !== null) return;
-    const pending = this.pendingOutput;
-    this.pendingOutput = null;
-    let deps: DebugDependencies;
-    if (pending?.instruction === instruction) deps = pending.deps;
-    else {
-      deps = emptyDependencies();
-      this.#readKey(deps, null, null, text);
-    }
-    this.output(eventSequence, text, deps);
-  }
-
   image(value: SerializableRuntimeValue): void {
     const id = this.write("image", null, "Stage image", value);
-    if (id !== null) this.#stageImageId = id;
+    // A record larger than the budget is dropped at once, so the image has none.
+    if (id !== null) this.#stageImageId = this.#find(id) === undefined ? null : id;
+    this.#stageImageSet = true;
   }
 
   /**
@@ -1153,9 +1141,9 @@ export class TraceStore {
       nextId: this.#nextId,
       decisionSerial: this.#decisionSerial,
       draws: this.#draws,
-      pendingOutput: this.pendingOutput,
       pendingStorage: this.pendingStorage,
       stageImageId: this.#stageImageId,
+      stageImageSet: this.#stageImageSet,
       lastRandom: this.#lastRandom,
       versions: new Map(),
       outputs: [],
@@ -1204,12 +1192,12 @@ export class TraceStore {
       for (const decision of this.#decisions)
         if (decision.id !== null && decision.id >= stage.nextId) decision.id = null;
       this.#draws = stage.draws;
-      this.pendingOutput = stage.pendingOutput;
       this.pendingStorage = stage.pendingStorage;
       this.#stageImageId =
         stage.stageImageId !== null && this.#find(stage.stageImageId) !== undefined
           ? stage.stageImageId
           : null;
+      this.#stageImageSet = stage.stageImageSet;
       this.#lastRandom =
         stage.lastRandom !== null && this.#find(stage.lastRandom.id) === stage.lastRandom
           ? stage.lastRandom
@@ -1447,6 +1435,7 @@ export class TraceStore {
       draws: this.#draws,
       rngAnchorState: this.#rngAnchorState,
       firstEventSequence: this.#firstEventSequence,
+      stageImageSet: this.#stageImageSet,
     });
   }
 }

@@ -19,12 +19,12 @@ import {
 } from "./temporal-captures.js";
 import type {
   RuntimeActionSettlementSnapshot,
+  RuntimeChatPacingGateActionSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimePendingActionSnapshot,
-  RuntimePreparedSayOutputSnapshot,
   InteractionResultValue,
 } from "./actions/model.js";
 import { cloneFormState, cloneFormUi } from "./actions/form.js";
@@ -41,7 +41,6 @@ import {
 import { interactionStringFits } from "../interaction-limits.js";
 import { isCanonicalTagList } from "../tags.js";
 import { cloneInteractionChoiceValue, cloneInteractionResult } from "../choice-values.js";
-import { cloneMessageMarkup } from "../message-markup.js";
 import { cloneImageUi } from "./actions/interaction.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
@@ -49,12 +48,7 @@ import { packagePathProblem } from "../project-paths.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
-  hasActivePacingGate,
-  hasPacingExecutionHistory,
-  isExplicitExitHaltState,
   validForegroundActionState,
-  validPreparedSayOutput,
-  validTopLevelPreparedSayOutputRelationship,
   validateInteractionResultHandoffState,
   validatePendingActionState,
 } from "./action-validation.js";
@@ -129,7 +123,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 72;
+export const RUNTIME_SNAPSHOT_VERSION = 73;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -162,7 +156,6 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextActionId",
   "lastSettlement",
   "interactionResultHandoff",
-  "preparedSayOutput",
   "settledTimers",
   "nextTimerId",
   "pendingTimerHandlers",
@@ -300,25 +293,29 @@ export interface RuntimeParameterStateSnapshot {
 }
 
 /**
- * An expiry block running as an interrupt. The interrupted foreground delay or interaction is inert here and is
- * restored, or settled when its deadline has passed, when the block returns normally.
+ * An expiry block running as an interrupt. The interrupted foreground action is inert and stands still from
+ * `startedAtMs`, the scene time the block started; when the block returns normally it is restored with the time it had
+ * left (owner decision on #829, 2026-10-11). Only a media wait still ends with its media meanwhile.
  */
 export type RuntimeTimerInterruptionSnapshot =
   | {
       readonly timerId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     }
   /** A media cue block owned by a media record instead of a timer. */
   | {
       readonly mediaId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     }
   /** The block of a clicked permanent button, which may have been removed since. */
   | {
       readonly buttonId: number;
       readonly dueAtMs: number;
+      readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
 
@@ -326,6 +323,7 @@ export type RuntimeTimerInterruptionSnapshot =
 export type RuntimeInterruptibleActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
+  | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
@@ -339,7 +337,7 @@ export interface RuntimeCallFrameSnapshot {
   readonly functionName: string;
   /** A user call site, or the timer statement for an expiry block. */
   readonly callSiteSpan: SourceSpan;
-  /** For an expiry block, the interrupted position, or the continuation once its suspended delay settled. */
+  /** For an expiry block, the interrupted position, or the continuation once its suspended media wait settled. */
   returnInstruction: number;
   /** `null` only for an expiry block, which returns no value. */
   readonly destinationTemporary: number | null;
@@ -426,7 +424,6 @@ export interface RuntimeSnapshot {
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
-  preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
   /**
    * Finished or stopped timers that a handle or a queued or running expiry block still reaches; a public operation drops
    * the others before it returns. Active timers are background actions.
@@ -650,7 +647,6 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextActionId: 1,
     lastSettlement: null,
     interactionResultHandoff: null,
-    preparedSayOutput: null,
     settledTimers: [],
     nextTimerId: 1,
     pendingTimerHandlers: [],
@@ -747,10 +743,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.interactionResultHandoff === null
         ? null
         : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
-    preparedSayOutput:
-      snapshot.preparedSayOutput === null
-        ? null
-        : clonePreparedSayOutput(snapshot.preparedSayOutput),
     settledTimers: snapshot.settledTimers.map((timer) => ({ ...timer })),
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({
@@ -840,11 +832,12 @@ function cloneInterruption(
     interruption.suspendedAction === null
       ? null
       : cloneForegroundAction(interruption.suspendedAction);
+  const { dueAtMs, startedAtMs } = interruption;
   return "mediaId" in interruption
-    ? { mediaId: interruption.mediaId, dueAtMs: interruption.dueAtMs, suspendedAction }
+    ? { mediaId: interruption.mediaId, dueAtMs, startedAtMs, suspendedAction }
     : "buttonId" in interruption
-      ? { buttonId: interruption.buttonId, dueAtMs: interruption.dueAtMs, suspendedAction }
-      : { timerId: interruption.timerId, dueAtMs: interruption.dueAtMs, suspendedAction };
+      ? { buttonId: interruption.buttonId, dueAtMs, startedAtMs, suspendedAction }
+      : { timerId: interruption.timerId, dueAtMs, startedAtMs, suspendedAction };
 }
 
 function cloneInteractionResultHandoff(
@@ -858,22 +851,6 @@ function cloneInteractionResultHandoff(
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
     result: cloneInteractionResult(handoff.result),
-  };
-}
-
-function clonePreparedSayOutput(
-  output: RuntimePreparedSayOutputSnapshot,
-): RuntimePreparedSayOutputSnapshot {
-  return {
-    owningInstruction: output.owningInstruction,
-    continuationInstruction: output.continuationInstruction,
-    speaker: output.speaker === null ? null : { ...output.speaker },
-    content: cloneMessageMarkup(output.content),
-    presentation: { ...output.presentation },
-    text: output.text,
-    ...(output.sourceText === undefined ? {} : { sourceText: output.sourceText }),
-    durationMs: output.durationMs,
-    skippable: output.skippable,
   };
 }
 
@@ -923,8 +900,6 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
       deadlineMs: action.deadlineMs,
       skippable: action.skippable,
       requestEventSequence: action.requestEventSequence,
-      preparedOutput:
-        action.preparedOutput === null ? null : clonePreparedSayOutput(action.preparedOutput),
     };
   return {
     kind: "interaction",
@@ -941,6 +916,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
     createdAtMs: action.createdAtMs,
+    ...(action.pausedMs === undefined ? {} : { pausedMs: action.pausedMs }),
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
     ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),
@@ -1262,6 +1238,9 @@ function validateCapturedRuntimeSnapshotDetails(
     activeLoopIdOf(value.loopFrames, callContextOwner(value.callFrames, Infinity)),
     value.nextInstruction,
     value.status,
+    value.status === "waiting" &&
+      isPlainRecord(value.foregroundAction) &&
+      value.foregroundAction.kind === "chatPacingGate",
     plan,
     errors,
   );
@@ -2351,9 +2330,9 @@ function validateFileCallFrame(
 }
 
 /**
- * An expiry-block frame records the interrupted position and, while it is still pending, the interrupted foreground
- * delay or interaction. That action is validated against the interrupted context: the caller's scopes, loops, call
- * frames, and temporaries at the recorded position.
+ * An expiry-block frame records the interrupted position, the scene time the block started, and, while it is still
+ * pending, the interrupted foreground action. That action is validated against the interrupted context: the caller's
+ * scopes, loops, call frames, and temporaries at the recorded position, at the time the block started.
  */
 function validateTimerHandlerFrame(
   frame: Record<string, unknown>,
@@ -2373,11 +2352,13 @@ function validateTimerHandlerFrame(
       ? "buttonId"
       : "timerId";
   if (
-    !hasExactKeys(interruption, [owner, "dueAtMs", "suspendedAction"]) ||
+    !hasExactKeys(interruption, [owner, "dueAtMs", "startedAtMs", "suspendedAction"]) ||
     !positiveSafeInteger(interruption[owner]) ||
     !validSessionTime(interruption.dueAtMs) ||
+    !validSessionTime(interruption.startedAtMs) ||
     !validSessionTime(now) ||
-    interruption.dueAtMs > now ||
+    interruption.dueAtMs > interruption.startedAtMs ||
+    interruption.startedAtMs > now ||
     !Array.isArray(frame.arguments) ||
     frame.arguments.length !== 0
   ) {
@@ -2397,19 +2378,22 @@ function validateTimerHandlerFrame(
   const loopBase = frame.loopBaseDepth;
   if (!nonNegativeSafeInteger(scopeBase) || !nonNegativeSafeInteger(loopBase)) return;
   const interruptedLoops = Array.isArray(loopFrames) ? loopFrames.slice(0, loopBase) : [];
+  const action = interruption.suspendedAction;
   validateCurrentTemporaryRequirements(
     frame.callerTemporaries,
     activeLoopIdOf(interruptedLoops, callContextOwner(callFrames, frameIndex)),
     resume,
     "running",
+    isPlainRecord(action) && action.kind === "chatPacingGate",
     plan,
     errors,
   );
   validateSelfHandleBinding(frame, interruption, frames, plan, errors);
-  const action = interruption.suspendedAction;
   if (action === null) return;
+  // The suspended action stands still from the block's start, so its time is checked as of then.
   const view = {
     ...snapshotValue,
+    currentSessionTimeMs: interruption.startedAtMs,
     nextInstruction: resume,
     frames: Array.isArray(frames) ? frames.slice(0, scopeBase) : frames,
     loopFrames: interruptedLoops,
@@ -2420,7 +2404,10 @@ function validateTimerHandlerFrame(
   };
   if (
     !isPlainRecord(action) ||
-    (action.kind !== "delay" && action.kind !== "interaction" && action.kind !== "mediaPlayback") ||
+    (action.kind !== "delay" &&
+      action.kind !== "interaction" &&
+      action.kind !== "chatPacingGate" &&
+      action.kind !== "mediaPlayback") ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");
@@ -2992,15 +2979,6 @@ function validateStatusConsistency(
   } else if (action !== null) {
     errors.push("Non-waiting runtime state must not contain a foreground action.");
   }
-  if (
-    value.preparedSayOutput !== null &&
-    !validPreparedSayOutput(value.preparedSayOutput, value, plan)
-  ) {
-    errors.push("Runtime prepared say output is malformed.");
-  }
-  if (!validTopLevelPreparedSayOutputRelationship(value, plan)) {
-    errors.push("Runtime prepared say output has impossible pacing-settlement provenance.");
-  }
   // Code runs in a context of the top of the call stack: a function's position is validated with its frame, a root
   // region's here. After exit, the position follows the exit wherever it stood.
   const context = serializedTopContext(value);
@@ -3033,9 +3011,8 @@ function validateStatusConsistency(
       errors.push("Ready runtime state contains execution progress.");
     }
     if (
-      value.preparedSayOutput !== null ||
-      hasActivePacingGate(value) ||
-      hasPacingExecutionHistory(value.lastSettlement)
+      isPlainRecord(value.lastSettlement) &&
+      value.lastSettlement.actionKind === "chatPacingGate"
     ) {
       errors.push("Ready runtime state must not contain pacing execution state.");
     }
@@ -3053,9 +3030,6 @@ function validateStatusConsistency(
     }
     if (plan !== undefined && !isLegalHaltPosition(value.nextInstruction, plan)) {
       errors.push("Halted runtime state is not at a legal halt position.");
-    }
-    if (isExplicitExitHaltState(value, plan) && hasActivePacingGate(value)) {
-      errors.push("Explicit exit runtime state must not retain active pacing work.");
     }
     if (
       Array.isArray(value.backgroundActions) &&
@@ -3136,11 +3110,16 @@ function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): b
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 
+/**
+ * The temporaries the next instruction reads must be present and those it writes absent. `readingTime` marks a say
+ * that waits for its own reading time: it has run already, so its handle is present.
+ */
 function validateCurrentTemporaryRequirements(
   temporaries: unknown,
   activeLoopId: number | null,
   nextInstruction: unknown,
   status: unknown,
+  readingTime: boolean,
   plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
@@ -3180,9 +3159,13 @@ function validateCurrentTemporaryRequirements(
   if (
     instruction.kind === "say" &&
     instruction.destinationTemporary !== undefined &&
-    present.has(instruction.destinationTemporary)
+    present.has(instruction.destinationTemporary) !== readingTime
   ) {
-    errors.push("Runtime say result destination is already occupied.");
+    errors.push(
+      readingTime
+        ? "Runtime say that waits for its reading time lacks its result."
+        : "Runtime say result destination is already occupied.",
+    );
   }
 }
 
@@ -3301,7 +3284,6 @@ const POSITION_HOLDERS = [
   "backgroundActions",
   "lastSettlement",
   "interactionResultHandoff",
-  "preparedSayOutput",
   "settledTimers",
   "settledMedia",
   "pendingTimerHandlers",
@@ -3310,7 +3292,7 @@ const POSITION_HOLDERS = [
 /**
  * The start of `main.tease` sets up the globals and speakers once, before anything else runs (ADR 0022 §6). While the
  * next instruction is in it, a session holds nothing but the globals and speakers set up so far: no call, loop,
- * temporary, action, timer, media, queued block, permanent button, settlement, prepared output, top-level variable,
+ * temporary, action, timer, media, queued block, permanent button, settlement, top-level variable,
  * default speaker, or Stage image, and no identity of those was ever allocated. Afterwards no saved position leads back
  * into it.
  */

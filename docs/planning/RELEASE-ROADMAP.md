@@ -178,15 +178,6 @@ subsystems may still have different maturity levels.
     [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md),
     [`RUNTIME.md`](../RUNTIME.md), [`TESTING.md`](../TESTING.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
-- [ ] **Incremental snapshot and checkpoint persistence**
-  - **Outcome:** Persist snapshots and checkpoints as deltas, so per-step persistence cost no longer scales with the
-    total retained state of a long session. Owner direction, 2026-10-08; the design is not chosen yet and must keep
-    checkpoint validation, restore equivalence and deterministic order intact.
-  - **Trigger:** Start once the syntax is fixed, or earlier if long-session measurements show persistence cost dominating
-    after the bounded-record work in #707 and #708.
-  - **Reference:** **Establish a runtime performance baseline and optimization plan**, [`RUNTIME.md`](../RUNTIME.md), and
-    [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md).
-
 - [ ] **Maintain a list of token burners**
   - **Outcome:** Keep [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md) current: large, optional, well-specified work packages the
     Owner can launch when spare weekly agent budget would otherwise expire. Owner direction, 2026-10-08.
@@ -240,6 +231,14 @@ subsystems may still have different maturity levels.
   - **Outcome:** Decide whether to check literal media paths against the package files at compile time and warn about
     a missing file.
     - A misspelled literal image path shows up only at runtime, as a missing-media warning.
+
+- [ ] **Consider: choose how numbers and other values are shown in text**
+  - **Outcome:** Decide whether a script can choose how a value is shown in text, such as a fixed number of decimals.
+    - Today `"${3.0} seconds"` shows "3 seconds", and `"${1 / 3}"` shows "0.3333333333333333". A script cannot show
+      "3.0 seconds".
+    - SexScript scripts wrote `String.format("%.1f seconds", t)`. The importer replaces that with a generated helper
+      (14 places in 10 converted units).
+  - **Reference:** Owner, 2026-10-12: not needed before the Beta, because the current output works.
 
 ## Release Candidate
 
