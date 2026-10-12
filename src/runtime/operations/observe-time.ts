@@ -25,6 +25,7 @@ import {
 import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
 import {
   expireTimerAction,
+  noteRoundEndedDuringBlock,
   timerHandlerAwaitsStorageWrite,
   timerHandlerDispatchable,
   timerSpan,
@@ -268,6 +269,7 @@ export function processDueWork(
           due.action.timer.deadlineMs!,
         );
         trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
+        const roundMs = due.action.timer.roundDurationMs;
         expireTimerAction(
           current,
           due.action,
@@ -277,6 +279,7 @@ export function processDueWork(
           trace,
           control,
         );
+        noteRoundEndedDuringBlock(current, due.action.timer.timerId, roundMs);
       } catch (error) {
         if (unit && error instanceof RandomSuspension)
           control.abortUnit(error, current, events, trace);

@@ -123,7 +123,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 73;
+export const RUNTIME_SNAPSHOT_VERSION = 74;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -303,6 +303,8 @@ export type RuntimeTimerInterruptionSnapshot =
       readonly dueAtMs: number;
       readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+      /** The length of the last round of its timer that ran out while the block ran, for `TSW018`; otherwise `null`. */
+      endedRoundMs: number | null;
     }
   /** A media cue block owned by a media record instead of a timer. */
   | {
@@ -837,7 +839,13 @@ function cloneInterruption(
     ? { mediaId: interruption.mediaId, dueAtMs, startedAtMs, suspendedAction }
     : "buttonId" in interruption
       ? { buttonId: interruption.buttonId, dueAtMs, startedAtMs, suspendedAction }
-      : { timerId: interruption.timerId, dueAtMs, startedAtMs, suspendedAction };
+      : {
+          timerId: interruption.timerId,
+          dueAtMs,
+          startedAtMs,
+          suspendedAction,
+          endedRoundMs: interruption.endedRoundMs,
+        };
 }
 
 function cloneInteractionResultHandoff(
@@ -2330,9 +2338,10 @@ function validateFileCallFrame(
 }
 
 /**
- * An expiry-block frame records the interrupted position, the scene time the block started, and, while it is still
- * pending, the interrupted foreground action. That action is validated against the interrupted context: the caller's
- * scopes, loops, call frames, and temporaries at the recorded position, at the time the block started.
+ * An expiry-block frame records the interrupted position, the scene time the block started, for a timer's block the
+ * length of a round that ran out meanwhile, and, while it is still pending, the interrupted foreground action. That
+ * action is validated against the interrupted context: the caller's scopes, loops, call frames, and temporaries at the
+ * recorded position, at the time the block started.
  */
 function validateTimerHandlerFrame(
   frame: Record<string, unknown>,
@@ -2351,8 +2360,14 @@ function validateTimerHandlerFrame(
     : Object.hasOwn(interruption, "buttonId")
       ? "buttonId"
       : "timerId";
+  // A timer's block also records the length of a round that ran out while it ran.
+  const keys = [owner, "dueAtMs", "startedAtMs", "suspendedAction"];
+  if (owner === "timerId") keys.push("endedRoundMs");
+  const endedRoundMs = interruption.endedRoundMs ?? null;
   if (
-    !hasExactKeys(interruption, [owner, "dueAtMs", "startedAtMs", "suspendedAction"]) ||
+    !hasExactKeys(interruption, keys) ||
+    (endedRoundMs !== null &&
+      !(typeof endedRoundMs === "number" && Number.isFinite(endedRoundMs) && endedRoundMs >= 0)) ||
     !positiveSafeInteger(interruption[owner]) ||
     !validSessionTime(interruption.dueAtMs) ||
     !validSessionTime(interruption.startedAtMs) ||

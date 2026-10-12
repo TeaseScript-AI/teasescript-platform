@@ -59,6 +59,8 @@ export interface RuntimeTimerSnapshot {
    * observation therefore yield identical values, and silent rounds can be skipped in one step.
    */
   anchoredRounds: number | null;
+  /** Whether `TSW018` was reported for this repeating timer, which happens once per timer. */
+  overrunReported: boolean;
 }
 
 /**
