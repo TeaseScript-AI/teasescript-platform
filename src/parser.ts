@@ -30,6 +30,7 @@ import type {
   PositionalArgument,
   Program,
   PropertyAccessExpression,
+  RangeExpression,
   SayParts,
   ShowButtonParts,
   ShowButtonStatement,
@@ -172,6 +173,7 @@ const parserDiagnosticCode = {
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
   invalidLoadForm: "TSP040",
+  mixedOtherwise: "TSP041",
   invalidTagQuery: "TST001",
 } as const;
 
@@ -2310,12 +2312,12 @@ class Parser {
     )
       return false;
     let depth = 0;
-    let previous: TokenKind = token.kind;
+    let previous = this.#current;
     for (let index = this.#current + 1; index < this.tokens.length; index += 1) {
       const kind = this.tokens[index]!.kind;
       if (kind === TokenKind.EndOfFile) return false;
-      if (kind === TokenKind.Newline && continuesExpression(previous)) continue;
-      previous = kind;
+      if (kind === TokenKind.Newline && this.#continuesAfter(previous)) continue;
+      previous = index;
       if (depth === 0) {
         if (kind === TokenKind.LeftBrace && index > this.#current + 1) return true;
         if (
@@ -2780,7 +2782,7 @@ class Parser {
   *#parseCaseTypeTestTask(): ParseTask<SwitchTypeTest | null> {
     const keyword = this.#advance();
     this.#skipContinuationNewlines();
-    const negated = this.#match(TokenKind.KeywordNot);
+    const negated = this.#matchNot();
     this.#skipContinuationNewlines();
     if (this.#atComparedValue()) {
       this.#reportToken(
@@ -3245,7 +3247,9 @@ class Parser {
 
   *#parseOr(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseAnd());
-    while (expression !== null && (this.#match(TokenKind.KeywordOr) || this.#matchSymbolicOr())) {
+    while (expression !== null) {
+      const operator = this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbolicOr();
+      if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseAnd());
       if (right === null) {
@@ -3255,14 +3259,18 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, "or");
+      expression = this.#binary(expression, right, "or", operator);
     }
     return expression;
   }
 
   *#parseAnd(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseNot());
-    while (expression !== null && this.#match(TokenKind.KeywordAnd)) {
+    while (expression !== null) {
+      const operator =
+        this.#matchOperator(TokenKind.KeywordAnd) ??
+        this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo", "and", "if a and b { ... }");
+      if (operator === null) break;
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseNot());
       if (right === null) {
@@ -3272,14 +3280,14 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, "and");
+      expression = this.#binary(expression, right, "and", operator);
     }
     return expression;
   }
 
   *#parseNot(): ParseTask<Expression | null> {
     const operators: Token[] = [];
-    while (this.#match(TokenKind.KeywordNot)) {
+    while (this.#matchNot()) {
       operators.push(this.#previous());
       this.#skipContinuationNewlines();
     }
@@ -3300,7 +3308,7 @@ class Parser {
   }
 
   *#parseComparison(): ParseTask<Expression | null> {
-    const left = yield* parseChild(this.#parseRange());
+    const left = yield* parseChild(this.#parseOtherwise());
     if (left === null) return null;
     let expression: Expression;
     if (this.#check(TokenKind.KeywordIs)) {
@@ -3308,7 +3316,7 @@ class Parser {
     } else if (isComparisonKind(this.#peek().kind)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseRange());
+      const right = yield* parseChild(this.#parseOtherwise());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -3316,7 +3324,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(left, right, binaryOperator(operator));
+      expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
       return left;
     }
@@ -3333,7 +3341,7 @@ class Parser {
         }
         this.#advance();
         this.#skipContinuationNewlines();
-        yield* parseChild(this.#parseRange());
+        yield* parseChild(this.#parseOtherwise());
       }
     }
     return expression;
@@ -3343,11 +3351,11 @@ class Parser {
   *#parseTypeTestTask(value: Expression): ParseTask<Expression> {
     this.#advance();
     this.#skipContinuationNewlines();
-    const negated = this.#match(TokenKind.KeywordNot);
+    const negated = this.#matchNot();
     this.#skipContinuationNewlines();
     const first = this.#peek();
     if (this.#atComparedValue()) {
-      const compared = yield* parseChild(this.#parseRange());
+      const compared = yield* parseChild(this.#parseOtherwise());
       this.#reportSpan(
         parserDiagnosticCode.invalidType,
         "'is' checks a type. Use '==' to compare values.",
@@ -3388,6 +3396,73 @@ class Parser {
     )
       return true;
     return typeName(token) === undefined && isExpressionStart(token);
+  }
+
+  /**
+   * `a otherwise b`, left-associative, between the ranges and the comparisons. An operand that is arithmetic or a range
+   * needs parentheses, because the fallback could be meant for its nearest value or for all of it (V30 §5, §18).
+   */
+  *#parseOtherwise(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseRange());
+    while (expression !== null) {
+      const word = this.#matchOperator(TokenKind.KeywordOtherwise);
+      const operator =
+        word ??
+        this.#matchSymbol(
+          TokenKind.Question,
+          "two",
+          "otherwise",
+          'let name = nickname otherwise "pet"',
+        );
+      if (operator === null) break;
+      this.#skipContinuationNewlines();
+      const right = yield* parseChild(this.#parseRange());
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a fallback value after 'otherwise'.",
+        );
+        return null;
+      }
+      // A `??` has its one error already (V30 §39); the parentheses follow once it is the word.
+      if (word !== null) this.#reportMixedOtherwise(expression, right, operator);
+      expression = this.#binary(expression, right, "otherwise", operator);
+    }
+    return expression;
+  }
+
+  /**
+   * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850). The
+   * message names both readings: the fallback for the nearest value, and for the whole operand. A sign before the
+   * fallback, as in `otherwise -1`, can be read only one way.
+   */
+  #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): void {
+    const leftMixed = isArithmetic(left) || isSign(left);
+    const rightMixed = isArithmetic(right);
+    if (!leftMixed && !rightMixed) return;
+    // The values next to `otherwise`: the last one of the left operand and the first one of the right operand.
+    let last = left;
+    while (isArithmetic(last) || isSign(last))
+      last = isSign(last) ? last.operand : last.kind === "binaryExpression" ? last.right : last.end;
+    let first = right;
+    while (isArithmetic(first))
+      first = first.kind === "binaryExpression" ? first.left : first.start;
+    let readings = ", as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'";
+    // Only a short expression is quoted, which also keeps a long chain from being written out for each error in it.
+    if (right.span.end.offset - left.span.start.offset <= 240) {
+      // The source text of an operand ends with that of its last value and starts with that of its first one.
+      const text = (expression: Expression) => this.#textOf(expression.span, expression.span);
+      const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
+      const nearest = `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`;
+      const all = `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`;
+      if ([nearest, all].every((reading) => reading.length <= 60 && !reading.includes("\n")))
+        readings = `: '${nearest}' or '${all}'`;
+    }
+    this.#reportSpan(
+      parserDiagnosticCode.mixedOtherwise,
+      `Put parentheses around what 'otherwise' belongs to${readings}.`,
+      operator,
+    );
   }
 
   *#parseRange(): ParseTask<Expression | null> {
@@ -3443,7 +3518,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
   }
@@ -3466,7 +3541,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
   }
@@ -4813,12 +4888,14 @@ class Parser {
     left: Expression,
     right: Expression,
     operator: BinaryExpression["operator"],
+    operatorSpan: SourceSpan,
   ): BinaryExpression {
     return Object.freeze({
       kind: "binaryExpression",
       operator,
       left,
       right,
+      operatorSpan: copySpan(operatorSpan),
       span: spanFrom(left.span, right.span),
     });
   }
@@ -5104,17 +5181,75 @@ class Parser {
     return this.#peek().kind === kind;
   }
 
+  /** The span of the word operator `kind` when it comes next, which it consumes, or `null`. */
+  #matchOperator(kind: TokenKind): SourceSpan | null {
+    return this.#match(kind) ? this.#previous().span : null;
+  }
+
+  /** `not`, or `!`, which is reported and read as `not` (V30 §39). */
+  #matchNot(): boolean {
+    return (
+      this.#match(TokenKind.KeywordNot) ||
+      this.#matchSymbol(TokenKind.Bang, "one", "not", "if not a { ... }") !== null
+    );
+  }
+
   /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
-  #matchSymbolicOr(): boolean {
-    if (!this.#check(TokenKind.Pipe)) return false;
-    const first = this.#advance();
-    const last = this.#match(TokenKind.Pipe) ? this.#previous() : first;
+  #matchSymbolicOr(): SourceSpan | null {
+    if (!this.#check(TokenKind.Pipe)) return null;
+    if (this.#peek(1).kind === TokenKind.Pipe)
+      return this.#matchSymbol(TokenKind.Pipe, "oneOrTwo", "or", "if a or b { ... }");
+    const span = this.#advance().span;
     this.#reportSpan(
       parserDiagnosticCode.symbolicOperator,
       "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
-      spanFrom(first.span, last.span),
+      span,
     );
-    return true;
+    return span;
+  }
+
+  /**
+   * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once and returns the
+   * symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns `null` when it does not come
+   * next. The symbol is one token of `kind`, as `!`, one or two, as `&` or `&&`, or two that touch, as `??`, which is
+   * not the `?` of a type.
+   */
+  #matchSymbol(
+    kind: TokenKind,
+    form: "one" | "oneOrTwo" | "two",
+    word: string,
+    example: string,
+  ): SourceSpan | null {
+    const first = this.#peek();
+    const second = this.#peek(1);
+    if (first.kind !== kind) return null;
+    const touching = second.kind === kind && second.span.start.offset === first.span.end.offset;
+    if (form === "two" && !touching) return null;
+    this.#advance();
+    const last = form !== "one" && second.kind === kind ? this.#advance() : first;
+    const symbol = last === first ? first.lexeme : first.lexeme + last.lexeme;
+    const span = spanFrom(first.span, last.span);
+    this.#reportSpan(
+      parserDiagnosticCode.symbolicOperator,
+      `TeaseScript writes '${word}' instead of '${symbol}': ${example}`,
+      span,
+    );
+    return span;
+  }
+
+  /**
+   * Whether the expression parser skips a newline after the token at `index`: a binary operator, the comma of a compact
+   * choice, or a symbol that it reads as a word operator, such as `&&` or the second `?` of `??`.
+   */
+  #continuesAfter(index: number): boolean {
+    const token = this.tokens[index]!;
+    const before = this.tokens[index - 1];
+    return (
+      continuesExpression(token.kind) ||
+      (token.kind === TokenKind.Question &&
+        before?.kind === TokenKind.Question &&
+        before.span.end.offset === token.span.start.offset)
+    );
   }
 
   #checkIdentifier(name: string): boolean {
@@ -5233,6 +5368,7 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
   TokenKind.KeywordFunction,
   TokenKind.KeywordReturn,
   TokenKind.KeywordIs,
+  TokenKind.KeywordOtherwise,
 ]);
 
 function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
@@ -5279,6 +5415,8 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.KeywordNull ||
     token.kind === TokenKind.KeywordSet ||
     token.kind === TokenKind.KeywordNot ||
+    // `!`, which the parser reads as `not` once it reported it.
+    token.kind === TokenKind.Bang ||
     token.kind === TokenKind.LeftParenthesis ||
     token.kind === TokenKind.LeftBracket ||
     token.kind === TokenKind.LeftBrace ||
@@ -5312,7 +5450,10 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
   );
 }
 
-/** Tokens after which the expression parser skips newlines: binary operators and the comma of a compact choice. */
+/**
+ * Tokens after which the expression parser skips newlines: binary operators, the comma of a compact choice, and the
+ * symbols it reads as `or`, `and`, and `not`.
+ */
 function continuesExpression(kind: TokenKind): boolean {
   return (
     isComparisonKind(kind) ||
@@ -5321,6 +5462,10 @@ function continuesExpression(kind: TokenKind): boolean {
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
     kind === TokenKind.KeywordNot ||
+    kind === TokenKind.KeywordOtherwise ||
+    kind === TokenKind.Pipe ||
+    kind === TokenKind.Ampersand ||
+    kind === TokenKind.Bang ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||
@@ -5329,6 +5474,21 @@ function continuesExpression(kind: TokenKind): boolean {
     kind === TokenKind.Slash ||
     kind === TokenKind.Percent
   );
+}
+
+const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Arithmetic or a range, which `otherwise` takes as an operand only in parentheses (owner decision on #850). */
+function isArithmetic(expression: Expression): expression is BinaryExpression | RangeExpression {
+  return (
+    expression.kind === "rangeExpression" ||
+    (expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator))
+  );
+}
+
+/** A sign before a value, as in `-x`, which `otherwise` takes as its left operand only in parentheses. */
+function isSign(expression: Expression): expression is UnaryExpression {
+  return expression.kind === "unaryExpression" && expression.operator !== "not";
 }
 
 function isComparisonKind(kind: TokenKind): boolean {

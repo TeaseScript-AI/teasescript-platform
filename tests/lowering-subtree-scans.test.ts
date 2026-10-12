@@ -103,6 +103,7 @@ function compileCountedBinaryChain(binaryCount: number, leafCallsUserFunction: b
         childReads += 1;
         return right;
       },
+      operatorSpan: span,
       span,
     };
   }

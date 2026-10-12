@@ -3,10 +3,10 @@ import type { SourceSpan } from "./source.js";
 import {
   isAssignable,
   openType,
+  PropertyTable,
   resolved,
   settle,
   union,
-  type PropertyTable,
   type StaticType,
 } from "./static-types.js";
 
@@ -113,7 +113,7 @@ function* detachedTask(typeToDetach: StaticType): CompileTask<StaticType> {
       return { kind: type.kind, element: yield* compileChild(detachedTask(type.element)) };
     case "object": {
       if (type.properties === null) return type;
-      const properties: PropertyTable = new Map();
+      const properties = new PropertyTable();
       for (const [name, value] of type.properties)
         properties.set(name, yield* compileChild(detachedTask(value)));
       return { kind: "object", properties };

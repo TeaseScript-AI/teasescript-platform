@@ -65,7 +65,13 @@ test("every load needs a default, and null says the value may be missing", () =>
   // With a declared type, a default of null makes the value optional, and a use needs a check.
   assert.deepEqual(
     errors('let visits: integer? = load("visits", default: null)\nsay visits + 1\nexit'),
-    [["TSV043", "'visits' may be null. Check it first: if visits != null { ... }", "visits"]],
+    [
+      [
+        "TSV043",
+        "'visits' may be null. Check it first: if visits != null { ... }, or give a fallback: visits otherwise 0",
+        "visits",
+      ],
+    ],
   );
   assert.deepEqual(
     codes(
@@ -87,7 +93,13 @@ test("every load needs a default, and null says the value may be missing", () =>
     errors(
       'let name = load("name", default: null)\nsay name + "!"\nlet given: string = load("name", default: "")\nexit',
     ),
-    [["TSV043", "'name' may be null. Check it first: if name != null { ... }", "name"]],
+    [
+      [
+        "TSV043",
+        `'name' may be null. Check it first: if name != null { ... }, or give a fallback: name otherwise ""`,
+        "name",
+      ],
+    ],
   );
 });
 

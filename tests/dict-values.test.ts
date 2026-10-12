@@ -654,7 +654,11 @@ test("get takes a default of any type, and its result joins the value type with 
   assert.deepEqual(
     diagnostics([...optional, "say s + 1", "let t: boolean = a", "exit"].join("\n")),
     [
-      ["TSV043", "'s' may be null. Check it first: if s != null { ... }", "s"],
+      [
+        "TSV043",
+        "'s' may be null. Check it first: if s != null { ... }, or give a fallback: s otherwise 0",
+        "s",
+      ],
       [
         "TSV041",
         "'t' is declared as boolean, so it cannot start as a whole number (integer) or null. To allow both, declare it as 'let t: boolean | integer | null = ...'.",

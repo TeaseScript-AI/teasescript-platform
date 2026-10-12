@@ -43,7 +43,7 @@ export function unknownFormTypeMessage(type: string): string {
 }
 
 /** The edit distance of two short texts, or 3 for any longer distance. */
-function editDistance(a: string, b: string): number {
+export function editDistance(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 2 || b.length > 16) return 3;
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
   for (let i = 1; i <= a.length; i += 1) {

@@ -1033,6 +1033,39 @@ test("and, or, and load defaults decide too, and blocks keep their own decisions
   assert.ok(said?.kind === "say" && !said.text.endsWith(" 0"), "the timer block ran");
 });
 
+test("an otherwise value is explained by the sides it read, and a fallback that asks decides", () => {
+  const played = traced(
+    [
+      "function hide(value) {",
+      "    return value",
+      "}",
+      "let nickname: string? = hide(null)",
+      'let saved: string? = hide("Al")',
+      "let first = saved otherwise nickname",
+      "let second = nickname otherwise saved",
+      'let asked = nickname otherwise askText "Name?"',
+      'say "${first} ${second} ${asked}"',
+      "exit",
+    ].join("\n"),
+    { answers: [() => ({ kind: "submittedText", submittedText: "Bo" })] },
+  );
+  assertComplete(played);
+  const declared = (name: string) =>
+    records(played.trace).find(
+      (candidate) => candidate.kind === "declaration" && candidate.target === name,
+    )!;
+  // A value that is not null is the only cause; a null value is a cause beside the fallback that replaced it.
+  const shown = (name: string) =>
+    causes(played.trace, declared(name)).map((cause) => `${cause.target} ${cause.preview}`);
+  assert.deepEqual(shown("first"), ['saved "Al"']);
+  assert.deepEqual(shown("second"), ["nickname null", 'saved "Al"']);
+  // The question of a fallback that ran names the decision that the value was null.
+  assert.deepEqual(
+    controlled(played.trace).filter((line) => line.startsWith("output")),
+    ['output  "Name?" <- 8:true'],
+  );
+});
+
 test("a long chain of unmatched cases keeps only the newest decisions it can name", () => {
   const cases = 600;
   const played = traced(

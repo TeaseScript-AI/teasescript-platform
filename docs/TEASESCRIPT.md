@@ -341,13 +341,16 @@ list and set elements, dict values, object properties, parameters, and function 
 decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
 variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
 `number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
-types they support, and on a union every member must support them; union types, type names, and `is` type tests are
-available, and tests, `!= null`, and assignments narrow plain variables; using a possibly null value where its non-null
-type is required is a compile error that names the check. A mismatch is `TSV041`, an unsupported operand `TSV043`,
-returns of different types, list elements of different types, or an `askChoice` of different value types outside a
-declared union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler
-cannot know, such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type
-is at least partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
+types they support, and on a union every member must support them; reading an object property that no object at its
+place can have is a compile error, decided at the end of the check from code anywhere in the project; union types, type
+names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain variables; using a possibly
+null value where its non-null type is required is a compile error that names the check and a fallback with
+`otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
+unsupported operand or such a property read `TSV043`, returns of different types, list elements of different types, or
+an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison
+warning `TSV046`, and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot
+know, such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type is at
+least partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

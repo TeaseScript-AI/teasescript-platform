@@ -33,6 +33,7 @@ export const TokenKind = {
   KeywordFunction: "keywordFunction",
   KeywordReturn: "keywordReturn",
   KeywordIs: "keywordIs",
+  KeywordOtherwise: "keywordOtherwise",
 
   LeftBrace: "leftBrace",
   RightBrace: "rightBrace",
@@ -47,6 +48,7 @@ export const TokenKind = {
   RangeInclusive: "rangeInclusive",
   Question: "question",
   Pipe: "pipe",
+  Ampersand: "ampersand",
   Plus: "plus",
   Minus: "minus",
   PlusEqual: "plusEqual",
@@ -56,6 +58,7 @@ export const TokenKind = {
   Percent: "percent",
   Equal: "equal",
   EqualEqual: "equalEqual",
+  Bang: "bang",
   BangEqual: "bangEqual",
   Less: "less",
   LessEqual: "lessEqual",

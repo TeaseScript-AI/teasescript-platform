@@ -2180,11 +2180,12 @@ class SemanticValidator {
         const mixed =
           (left === "numberLiteral" && right === "durationLiteral") ||
           (left === "durationLiteral" && right === "numberLiteral");
-        // Durations scale by numbers (`d * n`, `n * d`, `d / n`); every other mixed operator has no meaning.
+        // Durations scale by numbers (`d * n`, `n * d`, `d / n`); every other mixed operator has no meaning. A fallback
+        // may be of another type than the value (V30 §18).
         const scaling =
           expression.operator === "*" ||
           (expression.operator === "/" && left === "durationLiteral") ||
-          ["==", "!=", "and", "or"].includes(expression.operator);
+          ["==", "!=", "and", "or", "otherwise"].includes(expression.operator);
         if (mixed && !scaling) {
           this.#report(
             semanticCode.mixedDurationOperands,

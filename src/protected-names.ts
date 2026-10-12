@@ -36,6 +36,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "load",
   "delete",
   "is",
+  "otherwise",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([

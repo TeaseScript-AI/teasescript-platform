@@ -2630,6 +2630,7 @@ const binaryOperators = new Set([
   "and",
   "or",
   "in",
+  "otherwise",
 ]);
 
 function invalidPlan(

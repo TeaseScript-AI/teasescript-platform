@@ -218,8 +218,16 @@ test("possibly null lists and values of list functions need a check first", () =
       ].join("\n"),
     ),
     [
-      ["TSV043", "'samples' may be null. Check it first: if samples != null { ... }", "samples"],
-      ["TSV043", "'share' may be null. Check it first: if share != null { ... }", "share"],
+      [
+        "TSV043",
+        "'samples' may be null. Check it first: if samples != null { ... }, or give a fallback: samples otherwise ...",
+        "samples",
+      ],
+      [
+        "TSV043",
+        "'share' may be null. Check it first: if share != null { ... }, or give a fallback: share otherwise 0",
+        "share",
+      ],
     ],
   );
   assert.deepEqual(diagnostics("let samples: integer?[] = [1, null]\nsay sum(samples)\nexit"), [
@@ -322,7 +330,11 @@ test("take and takeLast return a new list of the first or last elements", () => 
       count,
     );
   assert.deepEqual(diagnostics("function f(m: integer?) {\n    say [1, 2].takeLast(m)\n}\nexit"), [
-    ["TSV043", "'m' may be null. Check it first: if m != null { ... }", "m"],
+    [
+      "TSV043",
+      "'m' may be null. Check it first: if m != null { ... }, or give a fallback: m otherwise 0",
+      "m",
+    ],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say [1, 2].takeLast(dynamic(-2))\nexit`), [
     "TSR057",
@@ -359,14 +371,14 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
     ["true true true true true", "0 2 1 null 2", "null 0 0 1", "walk", "not queued", "1"],
   );
   const check = (name: string) =>
-    `'${name}' may be null. Check it first: if ${name} != null { ... }`;
+    `'${name}' may be null. Check it first: if ${name} != null { ... }, or give a fallback: ${name} otherwise 0`;
   const cases: [string, [string, string, string][]][] = [
     [
       "let xs = [1, 2]\nsay xs[xs.indexOf(2)]\nexit",
       [
         [
           "TSV043",
-          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
           "xs.indexOf(2)",
         ],
       ],
@@ -462,7 +474,7 @@ test("get gives the element at an index, or its default for an index the list do
       [
         [
           "TSV041",
-          "'card' is declared as string, so it cannot start as text (string) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "'card' is declared as string, so it cannot start as text (string) or null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise \"\"",
           "deck.get(0, default: null)",
         ],
       ],
@@ -490,7 +502,13 @@ test("get gives the element at an index, or its default for an index the list do
     ],
     [
       `${deck}let at = deck.indexOf("king")\nsay deck.get(at, default: "")\nexit`,
-      [["TSV043", "'at' may be null. Check it first: if at != null { ... }", "at"]],
+      [
+        [
+          "TSV043",
+          "'at' may be null. Check it first: if at != null { ... }, or give a fallback: at otherwise 0",
+          "at",
+        ],
+      ],
     ],
     // The element of an inner empty list that nothing decided has no type to name.
     [
@@ -675,7 +693,7 @@ test("get with a null default gives the element type or null for lists of values
       [
         [
           "TSV041",
-          "'score' is declared as integer, so it cannot start as a whole number (integer) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "'score' is declared as integer, so it cannot start as a whole number (integer) or null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
           "scores.get(0, default: null)",
         ],
       ],
@@ -685,14 +703,20 @@ test("get with a null default gives the element type or null for lists of values
       [
         [
           "TSV041",
-          "'row' is declared as integer[], so it cannot start as a list (integer[]) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "'row' is declared as integer[], so it cannot start as a list (integer[]) or null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise ...",
           "rows.get(0, default: null)",
         ],
       ],
     ],
     [
       `${lists}let person = people.get(0, default: null)\nsay person.age\nexit`,
-      [["TSV043", "'person' may be null. Check it first: if person != null { ... }", "person"]],
+      [
+        [
+          "TSV043",
+          "'person' may be null. Check it first: if person != null { ... }, or give a fallback: person otherwise ...",
+          "person",
+        ],
+      ],
     ],
     // An element type that already holds null stays as written.
     [
@@ -700,7 +724,7 @@ test("get with a null default gives the element type or null for lists of values
       [
         [
           "TSV041",
-          "'n' is declared as integer, so it cannot start as null or a whole number (integer). Keep it in a variable and check it first, as in: if value != null { ... }",
+          "'n' is declared as integer, so it cannot start as null or a whole number (integer). Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
           "maybe.get(1, default: null)",
         ],
       ],
