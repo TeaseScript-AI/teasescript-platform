@@ -1,17 +1,23 @@
-import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
+import {
+  type InstructionPlan,
+  type PlanSourceLocation,
+  instructionSourcePath,
+  mainSourceSpan,
+} from "../../plan/model.js";
+import { formatDuration } from "../../duration.js";
 import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
-import { interruptRunning } from "../activations.js";
+import { interruptFrame, interruptRunning } from "../activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeTimerActionSnapshot,
   RuntimeTimerSettlementSnapshot,
 } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
-import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
+import type { ActionCompletedEvent, DeveloperWarningEvent, InterpreterEvent } from "../events.js";
 import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
 import type { RandomControl } from "../random-control.js";
-import type { RuntimeSnapshot } from "../state.js";
+import type { RuntimeSnapshot, RuntimeTimerInterruptionSnapshot } from "../state.js";
 import {
   expireTimerRound,
   settledTimerRecord,
@@ -120,8 +126,8 @@ function settleTimerAction(
 }
 
 /**
- * Ends the current round at `endedAtMs`: the scheduled deadline for natural expiry, or the current scene time for
- * an explicit `remaining` of zero. Queues the expiry block once and settles a timer that does not repeat.
+ * Ends the current round at `endedAtMs`: the scheduled deadline for natural expiry (`ranOut`), or the current scene time
+ * for an explicit `remaining` of zero. Queues the expiry block once and settles a timer that does not repeat.
  */
 export function expireTimerAction(
   snapshot: RuntimeSnapshot,
@@ -131,11 +137,15 @@ export function expireTimerAction(
   events: InterpreterEvent[],
   trace: TraceStore | null = null,
   control: RandomControl | null = null,
+  ranOut = false,
 ): void {
   const timer = action.timer;
+  const roundMs = timer.roundDurationMs;
   expireTimerRound(timer, endedAtMs, (range) =>
     drawWholeUnits(snapshot, action.owningInstruction, range, trace, control),
   );
+  // After the draw: a paused draw throws before this, and undoing its unit does not undo the frame.
+  noteRoundEndInBlock(snapshot, timer.timerId, ranOut ? roundMs : null);
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
   // shorter than the deadline's resolution may end at the same time without looping.
@@ -157,6 +167,57 @@ export function expireTimerAction(
     queueTimerHandler(snapshot, timer, timer.handlerFunctionId, endedAtMs);
   }
   if (timer.state === "finished") settleTimerAction(snapshot, action, span, events);
+}
+
+/**
+ * A round of `timerId` ended while that timer's own block runs. A round that began inside the block and ran out at its
+ * deadline (`ranOutMs`, its length) lay wholly inside it, so the block takes at least as long: the block keeps that
+ * length for `TSW018`. The round running as the block starts counts as inside only when the block's own expiry began
+ * it, and a round that a script ends early does not count. Either way the next round begins inside the block. Engine
+ * order and stored times decide this, without arithmetic, so floating-point rounding cannot change it.
+ */
+function noteRoundEndInBlock(
+  snapshot: RuntimeSnapshot,
+  timerId: number,
+  ranOutMs: number | null,
+): void {
+  const interruption = interruptFrame(snapshot)?.timerInterruption;
+  if (!interruption || !("timerId" in interruption) || interruption.timerId !== timerId) return;
+  if (ranOutMs !== null && interruption.currentRoundInBlock) interruption.endedRoundMs = ranOutMs;
+  interruption.currentRoundInBlock = true;
+}
+
+/**
+ * Developer warning `TSW018` as a timer's block returns normally, once per timer: a whole round of the timer ran out
+ * inside the block. Blocks never interrupt each other, so while this repeats, the next round is due at every return and
+ * the path the blocks interrupt cannot continue.
+ */
+export function reportBlockOverrun(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  interruption: RuntimeTimerInterruptionSnapshot,
+  events: InterpreterEvent[],
+): void {
+  if (!("timerId" in interruption)) return;
+  const roundMs = interruption.endedRoundMs;
+  if (roundMs === null) return;
+  // A stopped timer repeats no more.
+  const action = activeTimerAction(snapshot, interruption.timerId);
+  if (action === undefined || action.timer.overrunReported) return;
+  action.timer.overrunReported = true;
+  const span = timerSpan(plan, action.owningInstruction);
+  const location = `${instructionSourcePath(plan, action.owningInstruction)}:${span.start.line + 1}`;
+  assertEventSequenceCapacity(snapshot, 1);
+  events.push(
+    Object.freeze({
+      kind: "developerWarning",
+      sequence: takeSequence(snapshot, 1),
+      severity: "warning",
+      code: "TSW018",
+      message: `The timer at ${location} started its next round before its block had finished, because the block took at least as long as its period of ${formatDuration(roundMs)}. While this repeats, the script after the timer cannot continue. Make the block shorter than the period, or the period longer.`,
+      span,
+    } satisfies DeveloperWarningEvent),
+  );
 }
 
 /** `stop()`: cancels the timer and any of its expiry blocks that have not started. */

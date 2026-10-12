@@ -8,7 +8,7 @@ import type {
   RuntimeSnapshot,
 } from "../state.js";
 import { processDueWork } from "./observe-time.js";
-import { timerHandlerDispatchable } from "./timer-lifecycle.js";
+import { reportBlockOverrun, timerHandlerDispatchable } from "./timer-lifecycle.js";
 
 export { timerHandlerDispatchable };
 import { assertCounterCanAdvance, copySpan } from "./support.js";
@@ -68,6 +68,9 @@ export function startTimerHandler(
               dueAtMs: invocation.dueAtMs,
               startedAtMs,
               suspendedAction,
+              // The expiry that queued this block began its timer's current round, unless another block held it back.
+              currentRoundInBlock: invocation.dueAtMs === startedAtMs,
+              endedRoundMs: null,
             },
     callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
     scopeBaseDepth: snapshot.frames.length,
@@ -128,6 +131,7 @@ export function returnFromTimerHandler(
   for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   snapshot.nextInstruction = frame.returnInstruction;
   restoreSuspendedAction(snapshot, frame);
+  reportBlockOverrun(plan, snapshot, frame.timerInterruption!, events);
   // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.
   processDueWork(plan, snapshot, events, trace, control);
 }
