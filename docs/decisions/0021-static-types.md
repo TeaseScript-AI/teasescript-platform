@@ -35,9 +35,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 3. An empty list or set takes its element type from the first element added or assigned. A list or set literal has one
    element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`. The values of a dict
-   follow the same rules; the `default:` of `get(key, default: value)` may be of any type, and the result's type joins
-   it with the value type. A default of known type also decides a value type that no value decided yet, as a first
-   value does (V30 §40).
+   follow the same rules. The `default:` of a list or dict `get` may be of any type, and the result's type joins it with
+   the element or value type. A default of known type other than `null` also decides an element or value type that no
+   value decided yet, as a first value does (V30 §16, §40).
 4. An object property keeps the type of its first value. Assignment may still add a property, which then keeps its type.
 5. A function's result type comes from its `return` values; returns of different types are an error that names both.
    A function that can end without returning a value has an optional result. Annotated parameters and result types are
