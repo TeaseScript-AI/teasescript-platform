@@ -6,6 +6,7 @@ const modules = [
   "player/runtime-adapter.ts",
   "player/saved-data.ts",
   "player/vue/src/randomDrawPresentation.ts",
+  "player/vue/src/transcriptPresentation.ts",
   "player/vue/src/useDebugRandom.ts",
   "player/vue/src/useDebugRewind.ts",
   "player/vue/src/useDevelopmentTime.ts",

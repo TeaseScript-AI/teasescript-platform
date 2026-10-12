@@ -719,9 +719,9 @@ one each second and the same message at most once every five seconds, and not wh
 shown or spoken. Start, Continue, and states that Debug's rewind shows speak nothing of their history. The intervals are
 accessibility tuning of the Player, not limits a script can observe.
 
-A script message can also leave the conversation through its handle's `remove()` (#836). Its entry shows nothing from
-then on, also in history, after Continue, and in the states Debug's rewind shows, and the messages around it group as
-if it had never shown; the list positions it reports leave it out. It leaves at once, without an exit motion; while
+A script message can also leave the conversation through its handle's `remove()` (#836). From then on the transcript
+leaves it out, also in history, after Continue, and in the states Debug's rewind shows: it takes no row and no list
+position, and the messages around it group as if it had never shown. It leaves at once, without an exit motion; while
 following, the transcript glides as for a change of height. When it held focus, focus moves to the conversation
 without scrolling. The status region speaks the removal of a message that live play produces as
 `speaker: message removed`, by the same rules as a change.

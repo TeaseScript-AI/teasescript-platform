@@ -2136,6 +2136,8 @@ function appendTranscript(
   presentation: TemporalContext["presentation"],
 ) {
   const responseKinds = new Map<number, "choice" | "button" | "form">();
+  // The rows these events remove, sorted and merged into `removedRows` once, whatever order they come in.
+  const removedNow: number[] = [];
   // A submitted form's answer shows every field with its state, one per line (V30 askForm).
   const formSummaries = new Map<number, readonly FormSummaryLine[]>();
   for (const event of events) {
@@ -2191,9 +2193,7 @@ function appendTranscript(
           contentSequence: event.sequence,
           removed: true,
         });
-        let at = removedRows.length;
-        while (at > 0 && removedRows[at - 1]! > index!) at -= 1;
-        removedRows.splice(at, 0, index!);
+        removedNow.push(index!);
       }
     } else if (event.kind === "playerTranscript") {
       transcriptEntries.push(
@@ -2212,6 +2212,25 @@ function appendTranscript(
       );
     }
   }
+  if (removedNow.length > 0) mergeSortedRows(removedRows, removedNow);
+}
+
+/** Merges the distinct `added` rows, in any order, into the ascending `rows`, in place. */
+function mergeSortedRows(rows: number[], added: number[]): void {
+  added.sort((left, right) => left - right);
+  if (rows.length === 0 || added[0]! > rows.at(-1)!) {
+    for (const row of added) rows.push(row);
+    return;
+  }
+  const merged: number[] = [];
+  let next = 0;
+  for (const row of rows) {
+    while (next < added.length && added[next]! < row) merged.push(added[next++]!);
+    merged.push(row);
+  }
+  while (next < added.length) merged.push(added[next++]!);
+  rows.length = 0;
+  for (const row of merged) rows.push(row);
 }
 
 function appendRuntimeEvents(

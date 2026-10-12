@@ -16,6 +16,7 @@ import {
   recordContinueCapture,
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
@@ -1347,6 +1348,53 @@ test("a removed message keeps its row, marked removed, also through a restore an
   assert.deepEqual(restored.transcriptRemovedRows, [0, 1]);
   assert.deepEqual(playerRuntimeTranscript(session.events).entries, session.transcriptEntries);
   assert.deepEqual(restorePlayerRuntimeSession(restorePoint).transcriptRemovedRows, []);
+});
+
+test("the conversation leaves removed messages out of its positions and groups the messages around them", async () => {
+  const presentation: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/transcriptPresentation.ts",
+  );
+  for (const name of ["adjoins", "shownEntryIndex", "shownPosition"])
+    assert.equal(typeof presentation[name], "function", name);
+  // EVIDENCE: validation: Vite loaded the real source module and each export is callable.
+  const { adjoins, shownEntryIndex, shownPosition } = presentation as {
+    adjoins: (entries: readonly unknown[], index: number, other: number) => boolean;
+    shownEntryIndex: (removed: readonly number[], position: number) => number;
+    shownPosition: (removed: readonly number[], index: number) => number;
+  };
+  const session = createPlayerRuntimeSession(
+    [
+      'say "First", instant',
+      'let a = say "Gone A", instant',
+      'let b = say "Gone B", instant',
+      'say "Second", instant',
+      'let c = say "Gone C", instant',
+      "b.remove()",
+      "c.remove()",
+      "a.remove()",
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const entries = session.transcriptEntries;
+  const removed = session.transcriptRemovedRows;
+  assert.deepEqual(removed, [1, 2, 4]);
+  const shown = Array.from({ length: entries.length - removed.length }, (_, position) =>
+    shownEntryIndex(removed, position),
+  );
+  assert.deepEqual(
+    shown.map((index) => entries[index]?.text),
+    ["First", "Second"],
+  );
+  // Past the last shown entry, a position names no entry.
+  assert.equal(entries[shownEntryIndex(removed, shown.length)], undefined);
+  // A removed message's place is that of the next message the conversation shows.
+  assert.deepEqual(
+    entries.map((_, index) => shownPosition(removed, index)),
+    [0, 1, 1, 1, 2],
+  );
+  // First and Second adjoin, as if the removed messages between them had never been there.
+  assert.equal(adjoins(entries, shown[1]!, shown[0]!), true);
 });
 
 test("an answer whose run throws leaves the transcript as the Player showed it, and the next answer follows on", () => {
