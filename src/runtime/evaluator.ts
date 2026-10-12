@@ -121,6 +121,7 @@ import {
   stringLength,
 } from "./string-operations.js";
 import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
+import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
@@ -2984,7 +2985,15 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     const value = getSerializableProperty(object, name);
     if (value === undefined)
-      throw fault("TSR017", noObjectProperty(object, name, this.#optionalLabel(plan)), span);
+      throw fault(
+        "TSR017",
+        missingPropertyMessage(
+          this.#optionalLabel(plan),
+          name,
+          object.properties.map((property) => property.name),
+        ),
+        span,
+      );
     return value;
   }
 
@@ -4113,23 +4122,6 @@ function emptyCollection(
       : `Cannot read '${label}.${name}': '${label}' is empty. Check '${label}.length' first.`,
     span,
   );
-}
-
-/** A property an object, which the source may spell `label`, does not have, with the first ten it has. */
-function noObjectProperty(
-  object: SerializableRuntimeObject,
-  name: string,
-  label: string | null,
-): string {
-  const subject = label === null ? "This object" : `'${label}'`;
-  const names = object.properties.slice(0, 10).map((property) => `'${property.name}'`);
-  const more = object.properties.length - names.length;
-  if (names.length === 0) return `${subject} has no properties, so it has no '${name}'.`;
-  const listed =
-    names.length === 1
-      ? `Its only property is ${names[0]}`
-      : `Its properties are ${more > 0 ? `${names.join(", ")}, and ${more} more` : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`}`;
-  return `${subject} has no property '${name}'. ${listed}.`;
 }
 
 /** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */

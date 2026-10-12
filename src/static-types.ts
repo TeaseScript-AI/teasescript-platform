@@ -93,8 +93,44 @@ export function nextDecision(): number {
  * The properties of an object value with their types, each kept from its first value (ADR 0021 rule 1.4). `null`
  * stands for an object whose properties are unknown. A table belongs to one place, such as a variable or the elements
  * of a list, and grows when assignment adds a property.
+ *
+ * The script may run code in another order than the compiler checks it, so a table also records which objects may
+ * reach its place when the script runs, for the end of the check to tell which properties a read can find (#845, see
+ * {@link missingPropertyReads}).
  */
-export type PropertyTable = Map<string, StaticType>;
+export class PropertyTable extends Map<string, StaticType> {
+  /**
+   * The tables of other places whose objects may reach this place, such as the original of a copy, which may still gain
+   * a property later in checking order.
+   */
+  sources: Set<PropertyTable> | undefined = undefined;
+  /** Whether an object whose properties the compiler cannot know may reach this place, such as a loaded value. */
+  open = false;
+
+  constructor(entries?: Iterable<readonly [string, StaticType]>) {
+    super(entries);
+    lineage?.tables.push(this);
+  }
+}
+
+/**
+ * What the current check recorded for {@link missingPropertyReads}: every table it built, and the stores that met a slot
+ * still undecided, which are followed once the check knows what decided the slot. `null` outside a check.
+ */
+let lineage: {
+  readonly tables: PropertyTable[];
+  readonly flows: (readonly [StaticType, StaticType])[];
+} | null = null;
+
+/** Starts recording the property lineage of a check (see {@link PropertyTable}). */
+export function startPropertyLineage(): void {
+  lineage = { tables: [], flows: [] };
+}
+
+/** Records that objects of the place of `source` may reach the place of `target` (see {@link PropertyTable.sources}). */
+function feed(target: PropertyTable, source: PropertyTable): void {
+  if (target !== source) (target.sources ??= new Set()).add(source);
+}
 
 export const UNKNOWN_TYPE: StaticType = Object.freeze({ kind: "unknown" });
 const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
@@ -655,6 +691,7 @@ export function misfitProperty(target: StaticType, source: StaticType): Property
  * adds the value's new properties. Call it only after {@link isAssignable} accepted the value.
  */
 export function settle(target: StaticType, source: StaticType, at: SourceSpan): void {
+  flowInto(target, source);
   runCompileTask(settleTask(target, source, at));
 }
 
@@ -685,10 +722,14 @@ function* settleTask(
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     target.order = nextDecision();
-    // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
-    // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
-    if (target.heldUnknown !== undefined && decidedValue(value).kind === "never")
-      yield* compileChild(heldUnknownTask(value, target.heldUnknown));
+    if (target.heldUnknown !== undefined) {
+      // The slot may still hold the value the compiler cannot know when the script runs, with any properties.
+      openTables(value);
+      // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
+      // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
+      if (decidedValue(value).kind === "never")
+        yield* compileChild(heldUnknownTask(value, target.heldUnknown));
+    }
     return;
   }
   if (target.kind === "union") {
@@ -734,6 +775,172 @@ function* heldUnknownTask(type: StaticType, at: SourceSpan): CompileTask<void> {
 }
 
 /**
+ * Records what a value of `source`, stored in or passed to a place of `target`, may bring there (see
+ * {@link PropertyTable}): the objects of its tables, or objects with any properties. Only the first tables on each side
+ * are linked, through unions and collections; the end of the check derives what reaches the places of their
+ * properties. A slot still undecided is followed once the check knows what decided it, and holds no object if nothing
+ * did, unless a value the compiler cannot know reached it.
+ */
+export function flowInto(targetType: StaticType, sourceType: StaticType): void {
+  const seen = new Map<StaticType, Set<StaticType>>();
+  const pending: (readonly [StaticType, StaticType])[] = [[targetType, sourceType]];
+  while (pending.length > 0) {
+    const [targetPart, sourcePart] = pending.pop()!;
+    const target = resolved(targetPart);
+    const source = resolved(sourcePart);
+    const reached = seen.get(target) ?? new Set<StaticType>();
+    if (reached.has(source)) continue;
+    reached.add(source);
+    seen.set(target, reached);
+    if (target.kind === "union")
+      for (const member of target.members) pending.push([member, source]);
+    else if (source.kind === "union")
+      for (const member of source.members) pending.push([target, member]);
+    // An undecided place takes a copy of the value that decides it, which keeps its sources.
+    else if (target.kind === "open") continue;
+    else if (source.kind === "open") {
+      if (source.heldUnknown !== undefined) openTables(target);
+      else lineage?.flows.push([target, source]);
+    } else if (
+      source.kind === "unknown" ||
+      (source.kind === "object" && source.properties === null)
+    )
+      openTables(target);
+    else if (
+      target.kind === "object" &&
+      target.properties !== null &&
+      source.kind === "object" &&
+      source.properties !== null
+    )
+      feed(target.properties, source.properties);
+    else if (isCollection(target) && source.kind === target.kind)
+      pending.push([target.element, source.element]);
+  }
+}
+
+/**
+ * Records that objects whose properties the compiler cannot know may reach the places of a type's first tables, such
+ * as the value of a `load` (see {@link PropertyTable.open}). A slot still undecided is followed once the check knows
+ * what decided it.
+ */
+export function openTables(type: StaticType): void {
+  for (const part of firstParts(type))
+    if (part.kind === "object" && part.properties !== null) part.properties.open = true;
+    else if (part.kind === "open") lineage?.flows.push([part, UNKNOWN_TYPE]);
+}
+
+/** The parts of a type below its unions, lists, sets, and dicts, also through the types that decided slots. */
+function firstParts(type: StaticType): StaticType[] {
+  const found: StaticType[] = [];
+  const seen = new Set<StaticType>();
+  const pending = [type];
+  while (pending.length > 0) {
+    const part = resolved(pending.pop()!);
+    if (seen.has(part)) continue;
+    seen.add(part);
+    if (part.kind === "union") for (const member of part.members) pending.push(member);
+    else if (isCollection(part)) pending.push(part.element);
+    else found.push(part);
+  }
+  return found;
+}
+
+/** A read of a property that the tables of its object lacked when the read was checked. */
+export interface PropertyRead {
+  readonly name: string;
+  readonly tables: readonly PropertyTable[];
+}
+
+/** The tables whose objects may reach a table's place, or `open` when objects with any properties may. */
+interface PropertyClosure {
+  readonly tables: readonly PropertyTable[];
+  readonly open: boolean;
+}
+
+const OPEN_CLOSURE: PropertyClosure = Object.freeze({ tables: [], open: true });
+
+/**
+ * Ends the recording of a check and tells for each read whether an object at its place can have its property when the
+ * script runs (#845). It cannot when the property is in none of the tables whose objects may reach that place: the
+ * place's own, their sources, and, for a place inside a property of another, that property of every table whose objects
+ * may reach the other place. A read that no object can satisfy gives the properties its objects can have, in table
+ * order; any other gives `undefined`, also when objects whose properties the compiler cannot know may reach the place.
+ */
+export function missingPropertyReads(
+  reads: readonly PropertyRead[],
+): (readonly string[] | undefined)[] {
+  const recorded = lineage;
+  lineage = null;
+  if (recorded === null || reads.length === 0) return reads.map(() => undefined);
+  // What reached a slot that was still undecided reaches what decided it; the recording has ended, so a slot that is
+  // still undecided now is not followed again.
+  for (const [target, source] of recorded.flows) flowInto(target, source);
+  // The tables that keep each table's objects in a property, through unions and collections.
+  const holders = new Map<PropertyTable, (readonly [PropertyTable, string])[]>();
+  for (const table of recorded.tables)
+    for (const [name, type] of table)
+      for (const part of firstParts(type))
+        if (part.kind === "object" && part.properties !== null) {
+          const held = holders.get(part.properties) ?? [];
+          held.push([table, name]);
+          holders.set(part.properties, held);
+        }
+  const closures = new Map<PropertyTable, PropertyClosure>();
+  const active = new Set<PropertyTable>();
+  return reads.map((read) => {
+    const names = new Set<string>();
+    for (const table of read.tables) {
+      const closure = runCompileTask(closureTask(table, holders, closures, active));
+      if (closure.open) return undefined;
+      for (const reached of closure.tables) for (const name of reached.keys()) names.add(name);
+    }
+    return names.has(read.name) ? undefined : [...names];
+  });
+}
+
+function* closureTask(
+  table: PropertyTable,
+  holders: ReadonlyMap<PropertyTable, readonly (readonly [PropertyTable, string])[]>,
+  closures: Map<PropertyTable, PropertyClosure>,
+  active: Set<PropertyTable>,
+): CompileTask<PropertyClosure> {
+  const known = closures.get(table);
+  if (known !== undefined) return known;
+  // A place that its own property feeds, as in `node = node.next`, may hold any of its objects: no read is decided.
+  if (active.has(table)) return OPEN_CLOSURE;
+  active.add(table);
+  const tables = [table];
+  const found = new Set(tables);
+  const reach = (other: PropertyTable): void => {
+    if (found.has(other)) return;
+    found.add(other);
+    tables.push(other);
+  };
+  let open = false;
+  for (let next = 0; next < tables.length && !open; next += 1) {
+    const current = tables[next]!;
+    if (current.open) open = true;
+    for (const source of current.sources ?? []) reach(source);
+    for (const [holder, name] of holders.get(current) ?? []) {
+      const outer = yield* compileChild(closureTask(holder, holders, closures, active));
+      open ||= outer.open;
+      for (const kept of outer.tables) {
+        const value = kept.get(name);
+        if (value !== undefined)
+          for (const part of firstParts(value))
+            if (part.kind === "object" && part.properties !== null) reach(part.properties);
+            else if (part.kind === "unknown" || part.kind === "object") open = true;
+            else if (part.kind === "open" && part.heldUnknown !== undefined) open = true;
+      }
+    }
+  }
+  active.delete(table);
+  const closure = open ? OPEN_CLOSURE : { tables, open };
+  closures.set(table, closure);
+  return closure;
+}
+
+/**
  * A copy for a new place, such as a variable initialized from another variable: values are copied, so the new place
  * gets its own property tables and its own undecided slots.
  */
@@ -748,21 +955,25 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       // A copy keeps what the original saw: a first null stays a first null. It may hold what the original held when
       // it was taken, so it takes the type that decides the original, also when a later check finds it.
       type.observed = true;
-      return {
+      const copy: OpenType = {
         ...openType(),
         sawNull: type.sawNull,
         copiedFrom: type,
         ...(type.heldUnknown === undefined ? {} : { heldUnknown: type.heldUnknown }),
       };
+      // The objects that decide the original may reach the copy.
+      lineage?.flows.push([copy, type]);
+      return copy;
     case "list":
     case "set":
     case "dict":
       return { kind: type.kind, element: yield* compileChild(copyTask(type.element)) };
     case "object": {
       if (type.properties === null) return type;
-      const properties: PropertyTable = new Map();
+      const properties = new PropertyTable();
       for (const [name, value] of type.properties)
         properties.set(name, yield* compileChild(copyTask(value)));
+      feed(properties, type.properties);
       return { kind: "object", properties };
     }
     case "union": {
@@ -1212,9 +1423,10 @@ function* decidedTask(typeToDecide: StaticType): CompileTask<StaticType> {
     }
     case "object": {
       if (type.properties === null) return type;
-      const properties: PropertyTable = new Map();
+      const properties = new PropertyTable();
       for (const [name, value] of type.properties)
         properties.set(name, yield* compileChild(decidedTask(value)));
+      feed(properties, type.properties);
       return { kind: "object", properties };
     }
     default:
@@ -1357,10 +1569,13 @@ function* joinValuesTask(
 ): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
-    const properties: PropertyTable = owned.has(left.properties)
-      ? left.properties
-      : new Map(left.properties);
-    owned.add(properties);
+    let properties = left.properties;
+    if (!owned.has(properties)) {
+      properties = new PropertyTable(left.properties);
+      feed(properties, left.properties);
+      owned.add(properties);
+    }
+    feed(properties, right.properties);
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
       const joined =

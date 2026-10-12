@@ -12,6 +12,7 @@ import {
   members,
   nonNullType,
   NUMBER_TYPE,
+  PropertyTable,
   resolved,
   STRING_TYPE,
   union,
@@ -107,7 +108,7 @@ function listFunctionType(
         ys === undefined ? UNKNOWN_TYPE : ys === "duration" ? DURATION_TYPE : NUMBER_TYPE;
       return {
         kind: "object",
-        properties: new Map([
+        properties: new PropertyTable([
           ["slope", amount],
           ["intercept", amount],
           ["r2", NUMBER_TYPE],
