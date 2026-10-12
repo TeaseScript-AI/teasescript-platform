@@ -1,7 +1,9 @@
 say prose "Welcome.", instant
 // Each script that reads a key declares its type, the same in every file, with the other values its variables take.
 let progress: integer | string | null = load "story.progress", default: null
-progress = progress otherwise "new"
+if progress == null {
+  progress = "new"
+}
 save 1 as "story.progress"
 if askBoolean prose "Start the first chapter?" {
   goto "chapters/first.tease"

@@ -208,7 +208,8 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - A null test that only gives a variable or a property a default, `if (x == null) x = d`, once the package's passes
   read it, is `otherwise` (#850), which evaluates `d` only for a null, as the test did: right after an assignment of
   `x`, `x = e otherwise d`, where `d` neither reads `x` nor runs code that could, a call or an ask (it would see `x`
-  before the assignment); a test right after a storage read stays (a `load` takes the type of the variable it is
+  before the assignment); a test right after a storage read, or whose default reads storage, stays (a `load` takes the
+  type of the variable it is
   assigned to, and the compiler rejects `x otherwise d` of a computed key's value of unknown type where it accepts the
   test); elsewhere, also after a `let`, whose type comes from its first value,
   `x = x otherwise d`. A negative number before `otherwise` takes parentheses, `(-1) otherwise 3`.

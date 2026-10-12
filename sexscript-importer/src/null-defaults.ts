@@ -7,7 +7,7 @@ import { mapChildren } from "./variable-types.ts";
  * which evaluates `d` only where `x` is null, as the test did. Right after an assignment of `x`, the default joins it,
  * `x = e otherwise d`, where `d` neither reads `x` nor runs code that could (a call, or an ask, during which a button's
  * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. A test right after a
- * storage read stays as it is (hasLoad). Elsewhere the test becomes
+ * storage read, or whose default reads storage, stays as it is (hasLoad). Elsewhere the test becomes
  * `x = x otherwise d`, also after a `let`, whose variable's type comes from its first value, which `otherwise` would
  * make one without null.
  */
@@ -33,15 +33,25 @@ export function withNullDefaults(
       let before = result.length - 1;
       while (before >= 0 && result[before]!.kind === "comment") before -= 1;
       const assigned = result[before];
+      const after =
+        (assigned?.kind === "assign" &&
+          assigned.operator === "=" &&
+          samePath(assigned.target, found.path)) ||
+        (assigned?.kind === "let" &&
+          found.path.kind === "variable" &&
+          assigned.name === found.path.name);
+      // A storage read, the one tested or the default, keeps its test (hasLoad).
       if (
-        assigned?.kind === "assign" &&
-        assigned.operator === "=" &&
-        samePath(assigned.target, found.path) &&
-        !readsPath(found.value, found.path)
+        hasLoad(found.value) ||
+        (after &&
+          (assigned.kind === "assign" || assigned.kind === "let") &&
+          hasLoad(assigned.value))
       ) {
-        // A storage read keeps its test (hasLoad).
-        if (hasLoad(assigned.value)) result.push(item);
-        else result[before] = { ...assigned, value: otherwise(assigned.value, found.value) };
+        result.push(item);
+        continue;
+      }
+      if (assigned?.kind === "assign" && after && !readsPath(found.value, found.path)) {
+        result[before] = { ...assigned, value: otherwise(assigned.value, found.value) };
         continue;
       }
       result.push({
