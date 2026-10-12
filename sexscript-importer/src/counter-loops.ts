@@ -312,7 +312,7 @@ function isWhole(
 
 /**
  * Whether reading a bound has no effect and gives what the variables in it hold: variables, literals, their members,
- * items, and lengths, arithmetic, whole number built-ins, and the legacy item read, so not a random draw.
+ * items, and lengths, arithmetic, whole number built-ins, and the legacy and native item reads, so not a random draw.
  */
 function isSteadyBound(value: IrExpression): boolean {
   switch (value.kind) {
@@ -334,9 +334,18 @@ function isSteadyBound(value: IrExpression): boolean {
         Object.keys(value.named).length === 0 &&
         value.positional.every(isSteadyBound)
       );
+    case "methodCall":
+      return (
+        isListRead(value) && isSteadyBound(value.target) && value.arguments.every(isSteadyBound)
+      );
     default:
       return false;
   }
+}
+
+/** Whether a method call only reads a list's element with a default, `list.get(i, default: null)` (#844). */
+function isListRead(value: IrExpression): boolean {
+  return value.kind === "methodCall" && value.name === "get" && value.dict !== true;
 }
 
 /**
@@ -420,11 +429,13 @@ function keepsBound(
     const read =
       value.kind === "call" && value.name === "sexscriptLegacyItemAt"
         ? value.positional[0]
-        : (value.kind === "property" &&
-              !(value.name === "length" && value.target.kind === "variable")) ||
-            value.kind === "index"
-          ? value
-          : undefined;
+        : isListRead(value) && value.kind === "methodCall"
+          ? value.target
+          : (value.kind === "property" &&
+                !(value.name === "length" && value.target.kind === "variable")) ||
+              value.kind === "index"
+            ? value
+            : undefined;
     const root = read === undefined ? null : rootName(read);
     if (root !== null) held.add(root);
     return mapChildren(value, findHeld);
@@ -435,7 +446,7 @@ function keepsBound(
     if (value.kind === "methodCall" && value.target.kind === "variable") {
       if (lengths.has(value.target.name) && RESIZING_METHODS.has(value.name)) kept = false;
     }
-    if (value.kind === "methodCall") {
+    if (value.kind === "methodCall" && !isListRead(value)) {
       const root = rootName(value.target);
       if (root !== null && held.has(root)) kept = false;
     }

@@ -2230,6 +2230,7 @@ function lowerFileOnce(
     context.declaredWrites = declaredWrites(body, context.bindings);
     context.nullOnly = nullOnlyVariables(body, context);
     markSentinelReads(body, context);
+    markDecrements(body, context);
     context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
@@ -12587,7 +12588,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position can be one past the end of the list, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return useHelper(context, "itemAt", [target, index]);
+      return pastEndRead(target, index, indexNode, context);
     }
     if (!context.writeTargets.has(node) && pastShorterLiteral(indexNode, targetNode, context)) {
       addDiagnostic(
@@ -12597,7 +12598,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return useHelper(context, "itemAt", [target, index]);
+      return pastEndRead(target, index, indexNode, context);
     }
     // A position whose largest value, from numbers and random draws, reaches past the list literals the variable always
     // holds: `texts[roll - 1]` after `roll = 1 + getRandom(6)` over five texts (justalittlefun's fourth roll).
@@ -12613,7 +12614,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         "This position can reach past the end of the list written out, where Groovy read null; a helper reads null there too.",
         node.span,
       );
-      return useHelper(context, "itemAt", [target, index]);
+      return pastEndRead(target, index, indexNode, context);
     }
     // A variable that may hold a negative position, such as a -1 for "none yet": Groovy counted it from the end.
     if (
@@ -13693,6 +13694,91 @@ function isRepeatableIndex(node: AstNode): boolean {
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
 /** List positions that the code compares with null, which read past the end as null (see lowerIndex). */
 const nullComparedReads = new WeakSet<AstNode>();
+/**
+ * A list read that Groovy gave null past the end: `list.get(i, default: null)` where the position is never negative
+ * (#844), and otherwise the helper, which also counts a negative position from the end as Groovy did.
+ */
+function pastEndRead(
+  target: IrExpression,
+  index: IrExpression,
+  indexNode: AstNode,
+  context: LowerContext,
+): IrExpression {
+  if (!nonNegativePosition(indexNode, context))
+    return useHelper(context, "itemAt", [target, index]);
+  return {
+    kind: "methodCall",
+    target,
+    name: "get",
+    arguments: [index, { kind: "literal", value: null }],
+  };
+}
+
+/** The bindings that `--` counts down, by the file's binding keys (markDecrements). */
+const decrementedKeys = new WeakMap<BindingKeys, Set<string>>();
+
+/** Records the bindings of a file that `--` counts down. */
+function markDecrements(body: AstNode, context: LowerContext): void {
+  const decremented = new Set<string>();
+  walkAst(body, (node) => {
+    if ((node.kind === "postfix" || node.kind === "prefix") && text(node.operator) === "--") {
+      const key = bindingKey(asNode(node.expression) ?? asNode(node.value), context.bindings);
+      if (key !== null) decremented.add(key);
+    }
+  });
+  decrementedKeys.set(context.bindings, decremented);
+}
+
+/**
+ * Whether a list position is never negative: a whole number from 0; a size or length; a random draw below a bound
+ * that is never negative; a sum, product, or remainder of such values; or a variable, not a parameter, that is only set
+ * to such values, only counts up, and only adds such values.
+ */
+function nonNegativePosition(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const value = constantValue(node);
+  if (typeof value === "number") return Number.isInteger(value) && value >= 0;
+  const both = (left: AstNode | null, right: AstNode | null): boolean =>
+    left !== null &&
+    right !== null &&
+    nonNegativePosition(left, context, seen) &&
+    nonNegativePosition(right, context, seen);
+  if (node.kind === "binary") {
+    const operator = text(node.operator) ?? "";
+    const [left, right] = [asNode(node.left), asNode(node.right)];
+    if (operator === "+" || operator === "*") return both(left, right);
+    // A remainder has the sign of the number divided.
+    if (operator === "%") return left !== null && nonNegativePosition(left, context, seen);
+    return false;
+  }
+  if (node.kind === "property")
+    return ["size", "length"].includes(constantString(node.property) ?? "");
+  if (node.kind === "methodCall") {
+    const method = constantString(node.method) ?? "";
+    if (["size", "length"].includes(method)) return true;
+    const call = legacyApiCall(node, context);
+    const [bound] = call?.arguments ?? [];
+    return (
+      call?.name === "getRandom" && bound !== undefined && nonNegativePosition(bound, context, seen)
+    );
+  }
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  if (key === null || context.parameterBindings.has(key)) return false;
+  if (decrementedKeys.get(context.bindings)?.has(key) === true) return false;
+  // A value the variable gets from itself, `n = n + 1`, keeps what its other values show.
+  if (seen.has(key)) return true;
+  seen.add(key);
+  const values = [
+    ...(context.assignedValues.get(key) ?? []),
+    ...(context.compoundValues.get(key) ?? []),
+  ];
+  return values.length > 0 && values.every((item) => nonNegativePosition(item, context, seen));
+}
+
 /** List positions read into a variable that a loop's condition tests for null (markSentinelReads). */
 const sentinelReads = new WeakSet<AstNode>();
 

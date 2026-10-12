@@ -45,15 +45,6 @@ function sexscriptLegacyReceiveInteger(key, whenMissing = null) {
   }
   return sexscriptLegacyValue(numberValue)
 }
-function sexscriptLegacyItemAt(listValue, position) {
-  if position < 0 {
-    return listValue[listValue.length + position]
-  }
-  if position >= listValue.length {
-    return null
-  }
-  return listValue[position]
-}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -221,7 +212,7 @@ if best == null {
 let picks = ["a", "b"]
 picks[0] = load "game.pick${slot}", default: ""
 // NOTE SX_INDEX_PAST_END line 90: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-if sexscriptLegacyItemAt(picks, 0) == null {
+if picks.get(0, default: null) == null {
   say prose "No pick.", instant
 }
 let counts = [1, 2]
@@ -446,7 +437,7 @@ shelves[0][0] = load "game.shelf${slot}", default: ""
 shelves[0].add(load("game.extra${slot}", default: ""))
 // NOTE SX_INDEX_PAST_END line 211: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 // NOTE SX_INDEX_PAST_END line 211: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-if sexscriptLegacyItemAt(shelves[0], 0) == null or sexscriptLegacyItemAt(shelves[0], 1) == null {
+if shelves[0].get(0, default: null) == null or shelves[0].get(1, default: null) == null {
   say prose "Empty shelf.", instant
 }
 // A text parameter that a call passes a value of a type the importer cannot tell to holds it open.

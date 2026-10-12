@@ -1,13 +1,3 @@
-function sexscriptLegacyValue(value) {
-  return value
-}
-function sexscriptLegacyLoadInteger(key, whenMissing = null) {
-  let value = load key, default: null
-  if value == null {
-    return whenMissing
-  }
-  return sexscriptLegacyValue(toInteger(value))
-}
 // Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key
 // and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
 function sexscriptLegacySave(key, value) {
@@ -119,14 +109,19 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
   }
   return value
 }
-function sexscriptLegacyItemAt(listValue, position) {
-  if position < 0 {
-    return listValue[listValue.length + position]
+// NOTE SX_LOAD_KEY_DECLARED: Declares the types of storage keys whose reads keep null where none of them could declare it; nothing calls this function, so its reads never run.
+global function sexscriptLegacyKeyTypes {
+  let savedKink: integer? = load "club.level.kink", default: null
+}
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
   }
-  if position >= listValue.length {
-    return null
-  }
-  return listValue[position]
+  return sexscriptLegacyValue(toInteger(value))
 }
 // Legacy storage kept a list as one key per element, which a read of an element reads (DisciplineClinic's session toys).
 let toys = ["clamps", "whip", "cane"]
@@ -153,7 +148,7 @@ sexscriptLegacySave("club.days.1", 2)
 let days = sexscriptLegacyLoad("club.days", sexscriptLegacyValue(null))
 // NOTE SX_LENGTH_RECEIVER line 21: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_INDEX_PAST_END line 21: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-say prose "Days ${days.length} ${days[1]} ${sexscriptLegacyItemAt(days, 2) == null}", instant
+say prose "Days ${days.length} ${days[1]} ${days.get(2, default: null) == null}", instant
 // A key that holds a value first and gets elements later keeps its value for load(), as legacy did.
 sexscriptLegacySave("club.level", 3)
 sexscriptLegacySave("club.level.kink", 5)
@@ -162,11 +157,10 @@ say prose "Level ${sexscriptLegacyLoad("club.level", 0)} ${sexscriptLegacyLoadIn
 sexscriptLegacySave("club.toys", ["gag", null])
 // NOTE SX_LENGTH_RECEIVER line 28: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-let savedToys = sexscriptLegacyLoad("club.toys")
-say prose "Again ${sexscriptLegacyLoad("club.toys", []).length} ${sexscriptLegacyItemAt(savedToys, 1) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
+say prose "Again ${sexscriptLegacyLoad("club.toys", []).length} ${sexscriptLegacyLoad("club.toys", []).get(1, default: null) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
 // save(key, null) removes the key with all its elements.
 sexscriptLegacySave("club", null)
-let savedKink: integer? = load "club.level.kink", default: null
+let savedToys = sexscriptLegacyLoad("club.toys")
 // NOTE SX_LOAD_OPEN_NULL line 31: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
-say prose "Reset ${sexscriptLegacyLoad("club.toys") == null} ${savedKink == null} ${sexscriptLegacyLoad("club", sexscriptLegacyValue(null)) == null}", instant
+say prose "Reset ${savedToys == null} ${load("club.level.kink", default: null) == null} ${sexscriptLegacyLoad("club", sexscriptLegacyValue(null)) == null}", instant
 exit

@@ -2468,6 +2468,9 @@ function nullComparedLists(statements: readonly IrStatement[]): Set<string> {
         ? list.name
         : null;
     }
+    // A read past the end with a null default (#844), `list.get(i, default: null)`.
+    if (isNullDefaultRead(value) && isRecord(value.target) && value.target.kind === "variable")
+      return typeof value.target.name === "string" ? value.target.name : null;
     return null;
   };
   const isNull = (value: unknown): boolean =>
@@ -2492,6 +2495,19 @@ function nullComparedLists(statements: readonly IrStatement[]): Set<string> {
   return names;
 }
 
+/** Whether a value is a list read with a null default, `list.get(i, default: null)` (#844). */
+function isNullDefaultRead(value: Record<string, unknown>): boolean {
+  if (value.kind !== "methodCall" || value.name !== "get" || value.dict === true) return false;
+  const args = value.arguments;
+  return (
+    Array.isArray(args) &&
+    args.length === 2 &&
+    isRecord(args[1]) &&
+    args[1].kind === "literal" &&
+    args[1].value === null
+  );
+}
+
 /**
  * Whether `name` is one list in the program, declared once (no other variable, parameter, or loop variable has the
  * name), that the code only sets, sets elements of, and reads elements of straight into `==`, `!=`, or a text.
@@ -2514,6 +2530,8 @@ function onlyComparedElements(statements: readonly IrStatement[], name: string):
       Array.isArray(parent.positional) &&
       parent.positional[0] === variable
     )
+      return compares(outer, parent);
+    if (parent !== undefined && isNullDefaultRead(parent) && parent.target === variable)
       return compares(outer, parent);
     if (parent?.kind !== "index" || parent.target !== variable) return false;
     if (outer?.kind === "assign") return outer.target === parent && outer.operator === "=";

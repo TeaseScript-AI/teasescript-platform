@@ -45,15 +45,6 @@ function sexscriptLegacyTextSum(itemsValue3) {
   }
   return itemsValue3.join("")
 }
-function sexscriptLegacyItemAt(listValue, position) {
-  if position < 0 {
-    return listValue[listValue.length + position]
-  }
-  if position >= listValue.length {
-    return null
-  }
-  return listValue[position]
-}
 function sexscriptLegacyListText(valueValue2) {
   if valueValue2 is list or valueValue2 is set {
     let partsValue: string[] = []
@@ -189,7 +180,7 @@ say prose "Second ${[1, 2, 3][[1, 2, 3].length - 2]}", instant
 // A position compared with null reads null past the end, as Groovy did.
 let hand = ["Ace", "King"]
 // NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-if sexscriptLegacyItemAt(hand, 2) != null {
+if hand.get(2, default: null) != null {
   say prose "Third card", instant
 } else {
   say prose "Two cards", instant
@@ -255,7 +246,7 @@ while seats.length <= 1 {
 }
 seats[1] = "Ann"
 // NOTE SX_INDEX_PAST_END line 54: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-if sexscriptLegacyItemAt(seats, 0) == null {
+if seats.get(0, default: null) == null {
   say prose "Seat 0 is free", instant
 }
 // A write that reads the same position first needs no padding: the position exists already.
@@ -357,7 +348,7 @@ if askBoolean {
   finalists = ["Anna"]
 }
 // NOTE SX_INDEX_PAST_END line 107: This position is past the end of a shorter list this variable is set to elsewhere, where Groovy read null; a helper reads null there too.
-say prose "Final: ${finalists[0]} and ${sexscriptLegacyItemAt(finalists, 1)}", instant
+say prose "Final: ${finalists[0]} and ${finalists.get(1, default: null)}", instant
 // A list that starts empty and is set to a list of unknown length later is filled by position past its end too, as
 // OwlSays' owned implements.
 let owned = []

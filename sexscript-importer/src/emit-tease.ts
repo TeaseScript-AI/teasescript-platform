@@ -381,8 +381,8 @@ export function emitExpression(expression: IrExpression): string {
       return `${operand(expression.target, POSTFIX)}.${expression.name}`;
     case "methodCall": {
       const args = expression.arguments.map(emitExpression);
-      // A dict read with a default (#536).
-      if (expression.dict === true && expression.name === "get" && args.length === 2)
+      // A dict or list read with a default (#536, #844).
+      if (expression.name === "get" && args.length === 2)
         return `${operand(expression.target, POSTFIX)}.get(${args[0]}, default: ${args[1]})`;
       return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
     }

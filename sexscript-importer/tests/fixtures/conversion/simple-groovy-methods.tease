@@ -29,15 +29,6 @@ function sexscriptLegacyItems(value) {
   }
   return value
 }
-function sexscriptLegacyItemAt(listValue, positionValue2) {
-  if positionValue2 < 0 {
-    return listValue[listValue.length + positionValue2]
-  }
-  if positionValue2 >= listValue.length {
-    return null
-  }
-  return listValue[positionValue2]
-}
 function sexscriptLegacyTruth(value) {
   if value is boolean {
     return value
@@ -125,7 +116,7 @@ say prose spell(word), instant
 let positions = [" ", "otk"]
 let pick = sexscriptLegacyRandom(positions.length) + 1
 // NOTE SX_INDEX_PAST_END line 39: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
-if sexscriptLegacyItemAt(positions, pick) == "otk" {
+if positions.get(pick, default: null) == "otk" {
   say prose "Over my knee", instant
 }
 // Java replaceAll() with a regular expression that text operations express.
