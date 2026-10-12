@@ -3,7 +3,7 @@
  * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
  * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
- * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]
+ * Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--max-heap-mb N] [--seed N]
  *          [--workers 1|2] [--until-stalled]
  *          [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]
  *          [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]
@@ -18,11 +18,12 @@
  * `tools/explore-report.ts`; `--no-report` leaves it out), and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes. `--budget-ops N` is a work budget instead:
  * N runtime operations per unit, which makes a run's length and result deterministic unless `--budget-seconds` is also
- * given. `--until-stalled` runs each unit until it is done instead: exhausted, or on a plateau, no new code or condition
- * way in the second half of the run (see `ExploreOptions.untilStalled`), with safety caps only: two hours, and as many
- * states as three quarters of the heap hold at about 3 KB each, unless `--budget-seconds` or `--max-states` is given.
- * `search.stoppedBy` says whether the run finished (`exhausted`, `plateau`) or a cap cut it off (`budget`,
- * `operations`, `maxStates`), and `search.audit` how it ended: `complete`, `stalled`, `spiral`, or `capped`.
+ * given or the run reaches the heap cap. `--until-stalled` runs each unit until it is done instead: exhausted, or on a plateau, no new code or condition
+ * way in the second half of the run (see `ExploreOptions.untilStalled`), with safety caps only: two hours, unless
+ * `--budget-seconds` is given, and the heap cap. Every run stops when the search's heap passes `--max-heap-mb` (by
+ * default 60% of the V8 heap, the rest left for what is computed after the search). `search.stoppedBy` says whether the
+ * run finished (`exhausted`, `plateau`) or a cap cut it off (`budget`, `operations`, `maxStates`, `memory`), and
+ * `search.audit` how it ended: `complete`, `stalled`, `spiral`, or `capped`.
  *
  * Cell ranking, forward time (time goes forward as play), progress leads (progress toward a compared constant keeps its
  * lead), compared answers (typed asks are also answered with what the code compares the answer with), realignment
@@ -77,10 +78,10 @@ const HEAP_GROWING = "--heap-growing-percent";
 /** Until stalled, the default time cap per unit. */
 const UNTIL_STALLED_CAP_SECONDS = 2 * 60 * 60;
 /**
- * Until stalled, the heap a kept state takes, about (measured: 2.3 KB on SpankedHeroRPG at 148,621 states, without the
- * snapshot store, which lies outside the heap); the default state cap keeps three quarters of the heap for them.
+ * The share of the heap a search may use by default (`--max-heap-mb`): the rest is left for the coverage, traps, and
+ * report computed after it, which grow with the states too.
  */
-const STATE_BYTES = 3000;
+const SEARCH_HEAP_SHARE = 0.6;
 /** Missed ways the summary lists per unit, by the code behind them. */
 const WORKING_TOWARD_ROWS = 8;
 /** Session numbers shown one by one; the later ones are shown together. */
@@ -168,6 +169,7 @@ async function main(args: string[]): Promise<void> {
       "budget-ops": { type: "string" },
       "max-states": { type: "string" },
       "store-mb": { type: "string" },
+      "max-heap-mb": { type: "string" },
       seed: { type: "string", default: "1" },
       workers: { type: "string", default: "1" },
       out: { type: "string" },
@@ -224,9 +226,13 @@ async function main(args: string[]): Promise<void> {
   const maxStates =
     values["max-states"] === undefined
       ? untilStalled
-        ? Math.floor((getHeapStatistics().heap_size_limit * 3) / 4 / STATE_BYTES)
+        ? Number.MAX_SAFE_INTEGER
         : 20000
       : Number(values["max-states"]);
+  const maxHeapMb =
+    values["max-heap-mb"] === undefined
+      ? Math.floor((getHeapStatistics().heap_size_limit * SEARCH_HEAP_SHARE) / 1024 ** 2)
+      : Number(values["max-heap-mb"]);
   const storeMb = values["store-mb"] === undefined ? null : Number(values["store-mb"]);
   const seed = Number(values.seed);
   const workers = Number(values.workers);
@@ -243,6 +249,7 @@ async function main(args: string[]): Promise<void> {
     !Number.isSafeInteger(maxStates) ||
     maxStates < 1 ||
     (storeMb !== null && !(Number.isSafeInteger(storeMb) && storeMb >= 1)) ||
+    !(Number.isSafeInteger(maxHeapMb) && maxHeapMb >= 1) ||
     !Number.isSafeInteger(seed) ||
     (workers !== 1 && workers !== 2) ||
     !Number.isSafeInteger(rounds) ||
@@ -250,7 +257,7 @@ async function main(args: string[]): Promise<void> {
     (rounds > 1 && (values.corpus === undefined || untilStalled))
   ) {
     process.stderr.write(
-      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--seed N]\n" +
+      "Usage: node tools/explore.ts [--budget-seconds N] [--budget-ops N] [--max-states N] [--store-mb N] [--max-heap-mb N] [--seed N]\n" +
         "         [--workers 1|2] [--until-stalled]\n" +
         "         [--corpus <dir> [--rounds N]] [--[no-]cells] [--[no-]later] [--[no-]compared-answers]\n" +
         "         [--[no-]realign] [--[no-]progress-leads] [--[no-]conjunctive] [--[no-]guidance]\n" +
@@ -291,6 +298,7 @@ async function main(args: string[]): Promise<void> {
           maxStates,
           untilStalled,
           storeMb,
+          maxHeapMb,
           seed,
           corpus,
           report: values.report,
@@ -345,6 +353,8 @@ interface RunSettings {
   untilStalled: boolean;
   /** The snapshot store's limit in MiB, or null for the default. */
   storeMb: number | null;
+  /** The heap the search may use, in MiB (`ExploreOptions.maxHeapBytes`). */
+  maxHeapMb: number;
   seed: number;
   /** The corpus folder, or null without one. */
   corpus: string | null;
@@ -384,6 +394,7 @@ async function exploreUnits(
     maxStates,
     untilStalled,
     storeMb,
+    maxHeapMb,
     seed,
     corpus,
     report: playtest,
@@ -402,6 +413,7 @@ async function exploreUnits(
     if (budgetSeconds !== null) flags.push("--budget-seconds", String(budgetSeconds));
     if (budgetOps !== null) flags.push("--budget-ops", String(budgetOps));
     if (storeMb !== null) flags.push("--store-mb", String(storeMb));
+    flags.push("--max-heap-mb", String(maxHeapMb));
     if (untilStalled) flags.push("--until-stalled");
     if (corpus !== null) flags.push("--corpus", corpus);
     if (!playtest) flags.push("--no-report");
@@ -558,6 +570,7 @@ async function exploreUnit(
       maxStates: settings.maxStates,
       ...(settings.untilStalled ? { untilStalled: true } : {}),
       ...(settings.storeMb === null ? {} : { storeBytes: settings.storeMb * 1024 ** 2 }),
+      maxHeapBytes: settings.maxHeapMb * 1024 ** 2,
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
       diagnostics: unit.diagnostics,
       ...(settings.corpus === null ? {} : { corpus: stored?.entries ?? [] }),

@@ -1365,7 +1365,7 @@ function renderExplorer(entry: CatalogEntry): string {
     ...(report.states === null
       ? []
       : [
-          `The search ${report.stoppedBy === "exhausted" ? "reached every state" : report.stoppedBy === "plateau" || report.stoppedBy === "stalled" ? "stopped when more play reached nothing new" : report.stoppedBy === "maxStates" ? "was cut off at its state cap" : "was cut off at its budget"} after ${report.states} states.`,
+          `The search ${report.stoppedBy === "exhausted" ? "reached every state" : report.stoppedBy === "plateau" || report.stoppedBy === "stalled" ? "stopped when more play reached nothing new" : report.stoppedBy === "maxStates" ? "was cut off at its state cap" : report.stoppedBy === "memory" ? "was cut off at its memory limit" : "was cut off at its budget"} after ${report.states} states.`,
         ]),
     ...(coverage === null || coverage.visited === null || coverage.coverable === null
       ? []

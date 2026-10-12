@@ -1549,12 +1549,13 @@ function idFamily(holder: unknown, key: string): string | undefined {
 }
 
 /**
- * Two hashes of a snapshot. The state key leaves out only what no script can observe (see {@link UNOBSERVABLE_KEYS})
- * and renumbers the runtime's IDs, so two states with the same key behave alike; it keeps the clock, which scripts can
- * read. The loop key also leaves out every time (`…Ms`), the random state, and settled handles: a heuristic that
- * makes the iterations of a loop that waits, or picks at random, look alike.
+ * Two hashes of a snapshot, each the first 64 bits of a SHA-1, as a number: a run keeps one per state. The state key
+ * leaves out only what no script can observe (see {@link UNOBSERVABLE_KEYS}) and renumbers the runtime's IDs, so two
+ * states with the same key behave alike; it keeps the clock, which scripts can read. The loop key also leaves out every
+ * time (`…Ms`), the random state, and settled handles: a heuristic that makes the iterations of a loop that waits, or
+ * picks at random, look alike.
  */
-export function stateKeys(snapshot: Data): { readonly state: string; readonly loop: string } {
+export function stateKeys(snapshot: Data): { readonly state: bigint; readonly loop: bigint } {
   const ids = new Map<string, Set<number>>();
   const collect = (value: unknown, holder: unknown, key: string): void => {
     if (Array.isArray(value)) for (const item of value) collect(item, value, "");
@@ -1589,9 +1590,10 @@ export function stateKeys(snapshot: Data): { readonly state: string; readonly lo
           return value;
         }),
       )
-      .digest("base64");
+      .digest()
+      .readBigUInt64BE(0);
   // The loop key only for a state not seen before: a known state's is known.
-  let loop: string | null = null;
+  let loop: bigint | null = null;
   return {
     state: key(false),
     get loop() {
