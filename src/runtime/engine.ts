@@ -316,6 +316,19 @@ export function executeValidatedInstruction(
 /** How many instructions an operation executed so far, including one whose due work a draw then paused. */
 interface Progress {
   executed: number;
+  /** The scene time the budget counts at: catch-up that moves scene time starts the count again. */
+  budgetTimeMs: number;
+  /** The instructions executed at that scene time, including those before a draw paused the operation. */
+  counted: number;
+}
+
+function startProgress(snapshot: RuntimeSnapshot, counted: number): Progress {
+  return { executed: 0, budgetTimeMs: snapshot.currentSessionTimeMs, counted };
+}
+
+/** The instructions the budget counted at the state's scene time, which a paused draw keeps. */
+function budgetUsed(snapshot: RuntimeSnapshot, progress: Progress): number {
+  return snapshot.currentSessionTimeMs > progress.budgetTimeMs ? 0 : progress.counted;
 }
 
 /**
@@ -328,7 +341,9 @@ function executeCapturedInstruction(
   context: RuntimeExecutionContext,
   progress: Progress,
 ): void {
-  progress.executed += executeInstructionBoundary(plan, snapshot, context);
+  const executed = executeInstructionBoundary(plan, snapshot, context);
+  progress.executed += executed;
+  progress.counted += executed;
   if (
     snapshot.status !== "failed" &&
     // Work due exactly at the observed time also settles once execution waits or ends.
@@ -528,30 +543,44 @@ function driveRoot(
     instructionTraceFor(plan, options),
     control,
   );
-  const progress: Progress = { executed: 0 };
+  const progress = startProgress(snapshot, 0);
   try {
     if (root === "executeInstruction")
       executeCapturedInstruction(plan, snapshot, context, progress);
-    else runInstructions(plan, snapshot, context, progress, budget!, 0, root === "stepToEvent");
+    else runInstructions(plan, snapshot, context, progress, budget!, root === "stepToEvent");
   } catch (error) {
     if (!(error instanceof RandomSuspension)) throw error;
-    pauseAtDraw(snapshot, error, root, budget, progress.executed, context.events.length > 0);
+    pauseAtDraw(
+      snapshot,
+      error,
+      root,
+      budget,
+      budgetUsed(snapshot, progress),
+      context.events.length > 0,
+    );
   }
   return controlledResult(snapshot, context, progress.executed);
 }
 
-/** Runs instructions within `budget`, of which an operation that a draw paused used `used` before. */
+/**
+ * Runs instructions within `budget` per scene time. Scene time only moves while nothing can execute, so a loop that
+ * never waits stays at one scene time, while each deadline that a late observation catches up starts the count again,
+ * as observing that deadline on time would.
+ */
 function runInstructions(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
   progress: Progress,
   budget: number,
-  used: number,
   untilEvent: boolean,
 ): void {
   while (executionRunnable(snapshot) && !(untilEvent && context.events.length > 0)) {
-    if (used + progress.executed >= budget) {
+    if (snapshot.currentSessionTimeMs > progress.budgetTimeMs) {
+      progress.budgetTimeMs = snapshot.currentSessionTimeMs;
+      progress.counted = 0;
+    }
+    if (progress.counted >= budget) {
       failForBudget(plan, snapshot, context.events, budget);
       break;
     }
@@ -692,24 +721,15 @@ function resumeCaptured(
     instructionTraceFor(plan, options),
     control,
   );
-  const progress: Progress = { executed: 0 };
+  const progress = startProgress(snapshot, pending.instructionsUsed ?? 0);
   const budget = pending.instructionBudget;
-  const used = pending.instructionsUsed ?? 0;
   try {
     if (pending.unit === "instruction")
       executeCapturedInstruction(plan, snapshot, context, progress);
     else processDueWork(plan, snapshot, context.events, trace, control);
     control.assertReplayDone();
     if (pending.root === "run" || (pending.root === "stepToEvent" && !pending.eventsBefore))
-      runInstructions(
-        plan,
-        snapshot,
-        context,
-        progress,
-        budget!,
-        used,
-        pending.root === "stepToEvent",
-      );
+      runInstructions(plan, snapshot, context, progress, budget!, pending.root === "stepToEvent");
   } catch (error) {
     if (error instanceof RandomReplayDivergence)
       throw new RuntimeDataError("TSR101", error.message);
@@ -719,7 +739,7 @@ function resumeCaptured(
       error,
       pending.root,
       budget,
-      used + progress.executed,
+      budgetUsed(snapshot, progress),
       pending.eventsBefore || context.events.length > 0,
     );
   }
@@ -3253,8 +3273,8 @@ function failSnapshot(
 
 /**
  * Fails at the innermost loop of the running call, the likely cause; otherwise, as while waiting between timer blocks,
- * at the next instruction. The budget counts the whole invocation, including earlier loops and waits that catch-up
- * settled, so the message names the limit rather than the work of that loop.
+ * at the next instruction. The budget counts everything the operation executed at this scene time, including earlier
+ * loops and timer blocks, so the message names the limit rather than the work of that loop.
  */
 function failForBudget(
   plan: InstructionPlan,

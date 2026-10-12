@@ -30,12 +30,13 @@ import {
 } from "../src/runtime/random-control.js";
 import {
   createFreshRuntimeSession,
+  deserializeRuntimeSession,
   restoreRuntimeSession,
   RuntimeSessionError,
   type RuntimeSession,
 } from "../src/runtime/session.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { createCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
@@ -941,6 +942,37 @@ test("a run keeps its instruction budget across pauses", () => {
   while (paused.view().randomDraw !== null)
     paused.resumeRandomDraw({ drawId: paused.view().randomDraw!.drawId, outcome: "natural" });
   assert.equal(paused.view().failure?.code, "TSR037");
+  assert.equal(JSON.stringify(paused.exportSnapshot()), JSON.stringify(plain.exportSnapshot()));
+});
+
+test("a late run restored from checkpoints at its paused draws keeps the budget per scene time", () => {
+  // Issue #841: each rest executes well within the budget, but one late run catches up more than the budget. The
+  // draws pause in instructions and, for the ranged timer, in catch-up between two rests.
+  const plan = compileValidPlan(
+    "let t = timer(duration: (1..=2) ms, async: true, repeat: true)\nrepeat 20 {\n  repeat 60 {}\n  let n = randomInteger(1..=2)\n  wait 5 ms\n}\nexit",
+  );
+  const budget = { instructionBudget: 500 };
+  const plain = createFreshRuntimeSession(plan, {});
+  plain.run(budget);
+  plain.observeTime(1000);
+  assert.ok(plain.run(budget).instructionsExecuted > budget.instructionBudget);
+  assert.equal(plain.view().status, "halted");
+
+  let paused = createFreshRuntimeSession(plan, {}, { randomControl: {} });
+  const settle = (): void => {
+    for (let draw = paused.view().randomDraw; draw !== null; draw = paused.view().randomDraw) {
+      paused = deserializeRuntimeSession(serializeCheckpoint(paused.exportCheckpoint()), {
+        randomControl: {},
+      });
+      paused.resumeRandomDraw({ drawId: draw.drawId, outcome: "natural" });
+    }
+  };
+  paused.run(budget);
+  settle();
+  paused.observeTime(1000);
+  settle();
+  paused.run(budget);
+  settle();
   assert.equal(JSON.stringify(paused.exportSnapshot()), JSON.stringify(plain.exportSnapshot()));
 });
 
