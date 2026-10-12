@@ -1811,9 +1811,13 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 `items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
 `default:` is required and may be of any type. The result's type joins the element type and the default's type: for a
 `string[]`, `default: null` gives a `string?` ([§18](#18-null-and-optional-values)), and `default: 0` a
-`string | integer`. Like any argument, the default is evaluated before the lookup. The compiler checks the index as for
-`items[index]`, except that a negative index gives the default: an index that it can see is not a whole number, such as
-`0.5`, or may be `null`, is an error.
+`string | integer`, and for an `integer[][]`, `default: []` gives an `integer[]`, as in a list literal. A list or dict
+whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type other
+than `null`, as from a first stored value ([§40](#40-dictionaries)): after `let scores = []`,
+`scores.add(scores.get(0, default: 0) + 1)` makes `scores` an `integer[]`, and a later `scores.add("x")` is an error.
+Like any argument, the default is evaluated before the lookup. The compiler checks the index as for `items[index]`,
+except that a negative index gives the default: an index that it can see is not a whole number, such as `0.5`, or may
+be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]
@@ -5314,11 +5318,11 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key. As for a list
   ([§16](#reading-an-element-with-a-default)), its `default:` is required and may be of any type, and the result's
   type joins the value type and the default's type: on an `integer dict`, `default: null` gives an `integer?` and
-  `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A dict whose
-  value type no value decided yet, such as `dict{}`, takes it from a default of known type, as from a first stored
-  value, so after `let counts = dict{}`, `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an
-  `integer dict`. A list's `get` does not decide the element type. Like any argument, the default is evaluated before
-  the lookup.
+  `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A list or dict
+  whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type
+  other than `null`, as from a first stored value, so after `let counts = dict{}`,
+  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. Like any argument, the default is
+  evaluated before the lookup.
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
