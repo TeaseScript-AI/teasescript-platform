@@ -1901,7 +1901,7 @@ test("a message handle has one text property, takes text, and stays out of text,
     ["say line.speaker", "Message handles have no property 'speaker'. Use the text property."],
     [
       "line.stop()",
-      "Message handles have no method 'stop'. Change the message with its text property.",
+      "Message handles have no method 'stop'. Use remove(), or change the message with its text property.",
     ],
   ] as const)
     assert.deepEqual(codes(source), [["TSV043", message]], source);

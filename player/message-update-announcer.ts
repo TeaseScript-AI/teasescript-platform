@@ -17,7 +17,8 @@ export interface MessageUpdateAnnouncerOptions {
 
 interface PendingChange {
   speaker: string;
-  text: string;
+  /** The new visible text, or `null` once `remove()` took the message out of the conversation. */
+  text: string | null;
   /** The visible text the player last saw or heard before this change. */
   readonly before: string;
 }
@@ -38,8 +39,11 @@ export class MessageUpdateAnnouncer {
     this.#messageIntervalMs = options.messageIntervalMs ?? 5_000;
   }
 
-  /** Message `messageId` of `speaker` changed from the visible text `before` to `text`. */
-  update(messageId: number, speaker: string, before: string, text: string): void {
+  /**
+   * Message `messageId` of `speaker` changed from the visible text `before` to `text`, or, with `null`, left the
+   * conversation (#836).
+   */
+  update(messageId: number, speaker: string, before: string, text: string | null): void {
     const pending = this.#pending.get(messageId);
     if (pending === undefined) this.#pending.set(messageId, { speaker, text, before });
     else {
@@ -96,9 +100,11 @@ export class MessageUpdateAnnouncer {
       this.#spokenAt.set(messageId, now);
       this.#lastSpokenAt = now;
       this.#options.announce(
-        change.text === ""
-          ? `${change.speaker}: message cleared`
-          : `${change.speaker}: ${change.text}`,
+        change.text === null
+          ? `${change.speaker}: message removed`
+          : change.text === ""
+            ? `${change.speaker}: message cleared`
+            : `${change.speaker}: ${change.text}`,
       );
       break;
     }

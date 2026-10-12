@@ -97,6 +97,18 @@ test("a change back to the text last seen, or one that keeps the visible text, i
   assert.deepEqual(spoken, [[10_000, "Vera: message cleared"]]);
 });
 
+test("a removal is spoken as such, also after a change of the same message that is still queued", () => {
+  const { subject, spoken, advance } = announcer();
+  subject.update(1, "Vera", "Waiting", "Waiting.");
+  subject.update(1, "Vera", "Waiting", null);
+  subject.update(2, "Vera", "Ready", null);
+  advance(10_000);
+  assert.deepEqual(spoken, [
+    [0, "Vera: message removed"],
+    [1_000, "Vera: message removed"],
+  ]);
+});
+
 test("reset forgets every change and cancels the next announcement", () => {
   const { subject, spoken, advance, pending } = announcer();
   subject.update(1, "Vera", "a", "b");

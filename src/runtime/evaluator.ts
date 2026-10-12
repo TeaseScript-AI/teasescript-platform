@@ -48,6 +48,7 @@ import type { InstructionTraceCollector } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
   InterpreterEvent,
+  MessageRemovedEvent,
   MessageUpdatedEvent,
   OutputSpeaker,
 } from "./events.js";
@@ -1530,6 +1531,11 @@ export class Evaluator {
       }
       return;
     }
+    if (isMessageHandle(receiver) || isPermanentButton(receiver)) {
+      if (method !== "remove")
+        throw fault("TSR016", removableHandleMethodMessage(receiver, method), span);
+      return;
+    }
     if (typeof receiver === "string") {
       if (!STRING_METHODS.has(method))
         throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
@@ -2058,12 +2064,6 @@ export class Evaluator {
       if (name === "randomWeighted")
         return this.#randomWeighted(positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
-      if (name === "removePermanentButton") {
-        const removed = this.#removePermanentButton(positional, named, expression.span);
-        if (this.trace !== null && isPermanentButton(positional[0]!))
-          this.#writeState(positional[0], "removed", null, expression.span, "whole");
-        return removed;
-      }
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const hostBuiltin = !coreBuiltin && !platformPrelude;
@@ -2177,6 +2177,26 @@ export class Evaluator {
         this.#writeState(receiver, `${expression.callee.name}()`, null, expression.span, "timed");
       return called;
     }
+    if (expression.callee.kind === "property" && isPermanentButton(receiver)) {
+      const called = this.#callPermanentButton(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      if (this.trace !== null)
+        this.#writeState(receiver, "removed", null, expression.span, "whole");
+      return called;
+    }
+    if (expression.callee.kind === "property" && isMessageHandle(receiver))
+      return this.#callMessage(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
     if (expression.callee.kind === "property" && typeof receiver === "string") {
       const name = Object.keys(named)[0];
       if (name !== undefined)
@@ -2513,21 +2533,17 @@ export class Evaluator {
     }
   }
 
-  /** `removePermanentButton(button)` removes a shown button and its queued click; removing it again does nothing. */
-  #removePermanentButton(
+  /** `button.remove()` removes a shown button and its queued click; removing it again does nothing (#836). */
+  #callPermanentButton(
+    button: SerializablePermanentButtonHandle,
+    name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): null {
-    if (positional.length !== 1 || Object.keys(named).length !== 0)
-      throw fault("TSR028", "removePermanentButton takes one argument: the button.", span);
-    const button = positional[0]!;
-    if (!isPermanentButton(button))
-      throw fault(
-        "TSR058",
-        `removePermanentButton(...) takes the identifier that showPermanentButton gives, but this is ${describeRuntimeValue(button)}.`,
-        span,
-      );
+    if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
+    if (positional.length !== 0 || Object.keys(named).length !== 0)
+      throw fault("TSR028", "Permanent button remove() takes no arguments.", span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2789,8 +2805,46 @@ export class Evaluator {
   }
 
   /**
+   * `message.remove()` takes the message out of the conversation, which an event tells; its record keeps its text,
+   * marked removed. Removing it again does nothing, and no pacing starts (#836).
+   */
+  #callMessage(
+    handle: SerializableMessageHandle,
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): null {
+    if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
+    if (positional.length !== 0 || Object.keys(named).length !== 0)
+      throw fault("TSR028", "Message remove() takes no arguments.", span);
+    const index = this.#liveMessage(handle, span);
+    const record = this.snapshot.liveMessages[index]!;
+    if (record.removed === true) return null;
+    const sequence = takeSequence(this.snapshot);
+    this.events.push(
+      Object.freeze({
+        kind: "messageRemoved",
+        sequence,
+        messageId: handle.messageId,
+        span: copySpan(span),
+      } satisfies MessageRemovedEvent),
+    );
+    this.snapshot.liveMessages[index] = { ...record, removed: true };
+    this.trace?.messageRemoved(
+      stateKey("message", handle.messageId),
+      handle.messageId,
+      record.sourceText,
+      span,
+      sequence,
+    );
+    return null;
+  }
+
+  /**
    * `message.text = …` gives the shown message new text in place, which an event tells; the same text again changes
-   * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts.
+   * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts. A removed message
+   * keeps the text it had, as a stopped timer keeps its state, and the write reports developer warning `TSW010`.
    */
   #assignMessageProperty(
     handle: SerializableMessageHandle,
@@ -2811,7 +2865,16 @@ export class Evaluator {
         span,
       );
     const index = this.#liveMessage(handle, span);
-    if (this.snapshot.liveMessages[index]!.sourceText === value) return;
+    const record = this.snapshot.liveMessages[index]!;
+    if (record.removed === true) {
+      this.#warn(
+        "TSW010",
+        "This message was removed, so its text does not change. Show a new message with say instead.",
+        span,
+      );
+      return;
+    }
+    if (record.sourceText === value) return;
     const content = parseMessageMarkup(value);
     const sequence = takeSequence(this.snapshot);
     this.events.push(
@@ -3981,6 +4044,16 @@ function noArithmeticResult(
     `${label === null ? values : `${subject} is ${values}, which`} gives ${what} to represent. Use smaller values.`,
     expression.span,
   );
+}
+
+/** The message for a method that a message handle or a permanent button does not have: each has only `remove()`. */
+function removableHandleMethodMessage(
+  handle: SerializableMessageHandle | SerializablePermanentButtonHandle,
+  method: string,
+): string {
+  return isMessageHandle(handle)
+    ? `Message handles have no method '${method}'. Use remove(), or change the message with its text property.`
+    : `Permanent buttons have no method '${method}'. Use remove().`;
 }
 
 /** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */

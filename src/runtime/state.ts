@@ -178,12 +178,14 @@ const RUNTIME_SNAPSHOT_KEYS = [
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
 
 /**
- * A shown message a message handle can still change: the ID of its `say` event, and the markup source of its current
- * text, as that `say` or the latest `.text` write gave it. Its events carry the parsed text.
+ * A shown message a message handle can still reach: the ID of its `say` event, and the markup source of its current
+ * text, as that `say` or the latest `.text` write gave it. Its events carry the parsed text. `removed` marks a message
+ * that `remove()` took out of the conversation (#836): its text stays readable, and nothing changes it any more.
  */
 export interface RuntimeLiveMessageSnapshot {
   readonly messageId: number;
   readonly sourceText: string;
+  readonly removed?: true;
 }
 
 /**
@@ -3837,8 +3839,8 @@ function reachRecords(roots: Iterator<unknown>, unreached: UnreachedRecords): vo
 
 /**
  * The live message records: unique positive IDs of `say` events already emitted, in ascending order, each with its
- * markup source. Every message handle the state holds has one; a record no handle reaches is harmless and is dropped by
- * the next public operation.
+ * markup source and, once removed, `removed: true`. Every message handle the state holds has one; a record no handle
+ * reaches is harmless and is dropped by the next public operation.
  */
 function validateLiveMessages(
   value: unknown,
@@ -3855,7 +3857,10 @@ function validateLiveMessages(
   for (const message of value) {
     if (
       !isPlainRecord(message) ||
-      !hasExactKeys(message, ["messageId", "sourceText"]) ||
+      !(
+        hasExactKeys(message, ["messageId", "sourceText"]) ||
+        (hasExactKeys(message, ["messageId", "sourceText", "removed"]) && message.removed === true)
+      ) ||
       !positiveSafeInteger(message.messageId) ||
       message.messageId <= previous ||
       typeof nextEventSequence !== "number" ||
@@ -3863,7 +3868,7 @@ function validateLiveMessages(
       typeof message.sourceText !== "string"
     ) {
       errors.push(
-        "Runtime liveMessages must list emitted message IDs once each in ascending order, each with its text.",
+        "Runtime liveMessages must list emitted message IDs once each in ascending order, each with its text and, once removed, removed: true.",
       );
       return;
     }

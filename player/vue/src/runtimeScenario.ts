@@ -98,7 +98,7 @@ showPermanentButton "Count one" {
     wait 2 s
 }
 let hint = showPermanentButton "Give me a hint" {
-    removePermanentButton(hint)
+    hint.remove()
     say "Count out loud. That was your only hint.", instant
 }
 showPermanentButton "Pause", persist: true {

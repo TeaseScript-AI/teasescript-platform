@@ -2050,6 +2050,19 @@ class SemanticValidator {
               `'${name}' is a ${binding.kind}, not a callable function.`,
               expression.callee.span,
             );
+          } else if (name === "removePermanentButton") {
+            // A permanent button removes itself, as a timer stops itself (#836).
+            const [button] = expression.arguments;
+            const unwrapped = button === undefined ? undefined : unwrapParentheses(button.value);
+            this.#report(
+              semanticCode.unknownFunction,
+              `removePermanentButton(...) is replaced by the button's own remove(), like stop() on a timer. ${
+                unwrapped?.kind === "identifier" && expression.arguments.length === 1
+                  ? `Write '${unwrapped.name}.remove()'.`
+                  : "Call remove() on the button that showPermanentButton gave, as in 'button.remove()'."
+              }`,
+              expression.callee.span,
+            );
           } else if (RENAMED_BUILTINS.has(name)) {
             this.#report(
               semanticCode.unknownFunction,

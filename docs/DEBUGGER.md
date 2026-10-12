@@ -69,10 +69,12 @@ which appears when the host persists script storage.
   message as **Selected message**, which stays above the recent chat until another is chosen or **Back to recent chat**;
   the message is found by its event, never by its text, and one shown before the current recording began, or whose
   record was dropped, says so. A message whose text changed in place is explained by its latest change, the `.text`
-  write with its causes, also when it changes while selected. **Recent chat** lists the messages whose `say` or latest
-  change the trace recorded most recently, 20 at a time, newest message first, each once by the text it shows now; the newest is open until the player opens or closes one. A variable
-  that holds a message handle shows the message's current text beside its identity. An open message shows each value it displays (a placeholder that shows one value
-  gives way to it, and a variable, argument, or parameter that only passes the message on opens too), and each row
+  write with its causes, also when it changes while selected, and a removed message by its `remove()`, a
+  **Removed message** row with the text it had. **Recent chat** lists the messages whose `say` or latest change the
+  trace recorded most recently, 20 at a time, newest message first, each once by the text it shows now or its removal;
+  the newest is open until the player opens or closes one. A variable that holds a message handle shows the message's
+  current text beside its identity, as `<message 4 "Ready">`, or `<message 4 removed "Ready">` once removed. An open
+  message shows each value it displays (a placeholder that shows one value gives way to it, and a variable, argument, or parameter that only passes the message on opens too), and each row
   opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with
   its value then, its statement, and, for an earlier version of a variable, its value now; a record that appears again
   in the same tree links to its first row. Unknown origins say why (supplied by the host, Not recorded before Debug,
@@ -271,8 +273,9 @@ marks, the sequence and kind of the last 256 events, and what the Player itself 
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
 reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions with their `input`; session
-text adds the last 50 transcript messages, the Stage image's authored path, media sources, notice messages, and the
-Debug log while the Debug menu is on, and the events with their content: messages and their changes, the player's own
+text adds the last 50 transcript messages the chat shows, so not a removed one, the Stage image's authored path, media
+sources, notice messages, and the Debug log while the Debug menu is on, and the events with their content: messages and
+their changes and removals, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
 saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor

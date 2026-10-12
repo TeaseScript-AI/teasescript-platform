@@ -559,10 +559,7 @@ function analyseExpression(root: ExpressionPlan): {
           : node.callee.kind === "identifier"
             ? node.callee.name
             : null;
-      if (
-        (node.callee.kind === "property" && name !== null && MUTATING_CALLS.has(name)) ||
-        name === "removePermanentButton"
-      ) {
+      if (node.callee.kind === "property" && name !== null && MUTATING_CALLS.has(name)) {
         changes = true;
         // `pause()` may end a round that is already due, which draws the next one after the change.
         if (name === "pause") draw();

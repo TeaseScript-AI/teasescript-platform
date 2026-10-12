@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
@@ -26,12 +26,13 @@ import { runUntilExit } from "./helpers/run-until-exit.js";
  * value gives a `messageHandle`, whose `.text` reads and replaces the message's text.
  */
 
-/** The messages the events show, in order of creation, each with its texts in order. */
+/** The messages the events show, in order of creation, each with its texts in order, and `<removed>` once removed. */
 function messageTexts(events: readonly InterpreterEvent[]): string[][] {
   const messages = new Map<number, string[]>();
   for (const event of events) {
     if (event.kind === "say") messages.set(event.sequence, [event.text]);
     else if (event.kind === "messageUpdated") messages.get(event.messageId)!.push(event.text);
+    else if (event.kind === "messageRemoved") messages.get(event.messageId)!.push("<removed>");
   }
   return [...messages.values()];
 }
@@ -255,6 +256,125 @@ test("a text write after a paced say waits for its reading time and starts no pa
   assert.equal(next.deadlineMs, 3_000);
 });
 
+test("remove() takes a message out of the conversation; its text stays readable, and nothing changes it any more", () => {
+  const compiled = plan(
+    lines(
+      'let line = say "*Waiting*", instant',
+      "let other = line",
+      'say "Next", instant',
+      "line.remove()",
+      'say "${line.text} ${line == other}", instant',
+      'other.text = "Changed"',
+      "other.remove()",
+      "say line, instant",
+      "exit",
+    ),
+  );
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.equal(result.snapshot.status, "halted");
+  // Removing it again, through any copy, does nothing; a text write reports a developer warning and changes nothing.
+  assert.deepEqual(messageTexts(result.events), [
+    ["Waiting", "<removed>"],
+    ["Next"],
+    ["Waiting true"],
+    ["<message 1>"],
+  ]);
+  const removal = result.events.find((event) => event.kind === "messageRemoved");
+  assert.ok(removal?.kind === "messageRemoved");
+  assert.equal(removal.span.start.line, 3);
+  assert.deepEqual(
+    result.events.flatMap((event) =>
+      event.kind === "developerWarning"
+        ? [`${event.code} ${event.span.start.line} ${event.message}`]
+        : [],
+    ),
+    [
+      "TSW010 5 This message was removed, so its text does not change. Show a new message with say instead.",
+    ],
+  );
+});
+
+test("a removed message stays removed across a checkpoint, and its handle keeps its rules", () => {
+  const compiled = plan(
+    lines(
+      'let line = say "Waiting", instant',
+      "line.remove()",
+      "wait 1 s",
+      'line.text = "Changed"',
+      "line.remove()",
+      'say "${line.text}", instant',
+      "exit",
+    ),
+  );
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(waiting.snapshot.liveMessages, [
+    { messageId: 1, sourceText: "Waiting", removed: true },
+  ]);
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
+  );
+  assert.deepEqual(restored.snapshot, waiting.snapshot);
+  const direct = run(compiled, observeTime(compiled, waiting.snapshot, 1_000).snapshot);
+  const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 1_000).snapshot);
+  assert.deepEqual(resumed.events, direct.events);
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.deepEqual(
+    direct.events.map((event) => (event.kind === "say" ? event.text : event.kind)),
+    ["developerWarning", "Waiting", "exit"],
+  );
+});
+
+test("remove() after a paced say waits for its reading time and starts no pacing of its own", () => {
+  const compiled = plan(
+    lines('let line = say "Waiting", 2 s', "line.remove()", 'say "Next", 1 s', "exit"),
+  );
+  const shown = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(messageTexts(shown.events), [["Waiting"]]);
+  const removed = run(compiled, observeTime(compiled, shown.snapshot, 2_000).snapshot);
+  assert.deepEqual(
+    removed.events.flatMap((event) =>
+      event.kind === "messageRemoved" || event.kind === "say" ? [event.kind] : [],
+    ),
+    ["messageRemoved", "say"],
+  );
+  // The next message's second starts when the first message's reading time ends.
+  const next = removed.snapshot.foregroundAction;
+  assert.ok(next?.kind === "chatPacingGate");
+  assert.equal(next.deadlineMs, 3_000);
+});
+
+test("removing messages resumes equivalently at every boundary, also from a timer block during a reading time", () => {
+  assertRuntimeResumeEquivalent(
+    lines(
+      'let first = say "First", instant',
+      'let counter = say "Count: 0", instant',
+      "let count = 0",
+      'let tick = timer(duration: 1 s, async: true, display: "hidden", repeat: true) {',
+      "    count += 1",
+      "    if count == 2 {",
+      "        first.remove()",
+      "    }",
+      '    counter.text = "Count: ${count}"',
+      "}",
+      'say "A paced message while the timer runs.", 3 s',
+      "tick.stop()",
+      "counter.remove()",
+      'say "${first.text} ${counter.text}"',
+      "exit",
+    ),
+    { scenarioName: "removed messages" },
+  );
+});
+
+test("remove() takes no arguments", () => {
+  assert.deepEqual(
+    compileSource(
+      lines('let line = say "Waiting", instant', "line.remove(1)", "exit"),
+    ).diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`),
+    ["TSV043 Message remove() takes no arguments."],
+  );
+});
+
 test("a say value gives its handle when its message is shown and keeps it through its reading time", () => {
   const compiled = plan(
     lines('say "First", 1 s', 'let line = say "Second", 2 s', 'line.text += "!"', "exit"),
@@ -381,11 +501,20 @@ test("a write the compiler cannot check fails at runtime before it changes the m
     ["setText(line, 5)", "TSR050"],
     ['setColor(line, "red")', "TSR003"],
     ["say colorOf(line)", "TSR017"],
+    ['callOn(line, "stop")', "TSR016"],
+    ['callOn(line, "remove", 1)', "TSR028"],
   ] as const) {
     const compiled = plan(
       lines(
         "function setText(message, text) {",
         "    message.text = text",
+        "}",
+        "function callOn(message, method, argument = null) {",
+        '    if method == "stop" {',
+        "        message.stop()",
+        "    } else {",
+        "        message.remove(argument)",
+        "    }",
         "}",
         "function setColor(message, color) {",
         "    message.color = color",
@@ -438,6 +567,7 @@ test("restore rejects live messages that are malformed, out of order, or missing
     ["future ID", (data) => (data.liveMessages = [record, { messageId: 1_000, sourceText: "x" }])],
     ["not text", (data) => (data.liveMessages = [{ ...record, sourceText: 1 }])],
     ["extra field", (data) => (data.liveMessages = [{ ...record, text: "Waiting" }])],
+    ["removed not true", (data) => (data.liveMessages = [{ ...record, removed: false }])],
   ];
   for (const [name, change] of variants) {
     assert.equal(
@@ -446,6 +576,14 @@ test("restore rejects live messages that are malformed, out of order, or missing
       name,
     );
   }
+  // A removed message keeps a record marked so.
+  assert.equal(
+    validateRuntimeSnapshot(
+      changed(waiting, (data) => (data.liveMessages = [{ ...record, removed: true }])).snapshot,
+      compiled,
+    ).valid,
+    true,
+  );
   // A record no handle reaches is harmless; the next operation drops it.
   const extra: RuntimeSnapshot = { ...waiting, liveMessages: [earlier, record] };
   assert.equal(validateRuntimeSnapshot(extra, compiled).valid, true);

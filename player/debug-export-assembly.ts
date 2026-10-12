@@ -198,8 +198,16 @@ export async function assembleDebugExport(
     ? removeSecrets(events.map((event) => sessionTextEvent(event, choices)))
     : events.map((event) => ({ sequence: event.sequence, kind: event.kind }));
   if (choices.sessionText && session !== null) {
-    const transcript = session.transcriptEntries
-      .slice(-TRANSCRIPT_TAIL)
+    // The last messages as the conversation shows them: a removed one has left it, and its say and removal stay in the
+    // events.
+    const shown: PlayerTranscriptEntryPresentation[] = [];
+    const entries = session.transcriptEntries;
+    for (let index = entries.length - 1; index >= 0 && shown.length < TRANSCRIPT_TAIL; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.kind !== "message" || entry.removed !== true) shown.push(entry);
+    }
+    const transcript = shown
+      .reverse()
       .map((entry) => ({
         ...(entry.kind === "message" ? { speaker: entry.speakerId } : {}),
         text: entry.text,
@@ -403,6 +411,7 @@ function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) 
   switch (event.kind) {
     case "say":
     case "messageUpdated":
+    case "messageRemoved":
     case "playerTranscript":
     case "permanentButtonPressed":
     case "exit":

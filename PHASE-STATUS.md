@@ -37,12 +37,13 @@ accept syntax, architecture, or implementation details.
   with a Clear saved script data control.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
-  permanent buttons (`showPermanentButton`, `removePermanentButton`) whose clicks run their blocks like expiry interrupts;
+  permanent buttons (`showPermanentButton`, `button.remove()`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, where a paced
   `say` lasts its reading time before anything after it runs, with typed skip settlement. A `say` used as a value gives a `messageHandle`
-  whose `text` changes the message in place ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows,
-  announces politely, and Debug explains and rewinds.
+  whose `text` changes the message in place and whose `remove()` takes it out of the conversation
+  ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows, announces politely, and Debug explains and
+  rewinds.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
   and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and selection of files by
   their header tags (`goto tagged`, `call tagged`, `findScripts`), and blocking or asynchronous `playAudio`/`playVideo`

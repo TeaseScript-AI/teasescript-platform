@@ -50,6 +50,7 @@ import {
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
+  playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 
@@ -1301,6 +1302,51 @@ test("a message update replaces its row in place, keeping its identity, speaker,
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
   assert.equal(restorePlayerRuntimeSession(restorePoint).transcriptEntries[0]?.text, "Waiting.");
+});
+
+test("a removed message keeps its row, marked removed, also through a restore and in a kept session's transcript", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'let first = say "First", instant',
+      'let second = say "Second", instant',
+      'say "Third", instant',
+      "wait 1 s",
+      "second.remove()",
+      "first.remove()",
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const before = session.transcriptEntries.map((entry) => entry.id);
+  const restorePoint = createPlayerRuntimeRestorePoint(session);
+  assert.deepEqual(session.transcriptRemovedRows, []);
+
+  session = observePlayerRuntimeTime(session, 1_000)!.session;
+  // The rows keep their places, so the others keep theirs; the removal is the event Explain values explains.
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => [
+      entry.id,
+      entry.text,
+      entry.kind === "message" && entry.removed === true,
+    ]),
+    [
+      [before[0], "First", true],
+      [before[1], "Second", true],
+      [before[2], "Third", false],
+    ],
+  );
+  assert.deepEqual(session.transcriptRemovedRows, [0, 1]);
+  const removal = session.events.findLast((event) => event.kind === "messageRemoved");
+  const first = session.transcriptEntries[0];
+  assert.ok(first?.kind === "message");
+  assert.equal(first.contentSequence, removal?.sequence);
+
+  // A restore, and the transcript a kept session's events give, show the same rows.
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  assert.deepEqual(restored.transcriptRemovedRows, [0, 1]);
+  assert.deepEqual(playerRuntimeTranscript(session.events).entries, session.transcriptEntries);
+  assert.deepEqual(restorePlayerRuntimeSession(restorePoint).transcriptRemovedRows, []);
 });
 
 test("an answer whose run throws leaves the transcript as the Player showed it, and the next answer follows on", () => {

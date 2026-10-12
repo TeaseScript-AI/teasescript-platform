@@ -229,8 +229,9 @@ time continues with the time it had left once the block returns. For exact timin
 time comes first. `wait` remains separate and does not become a `say` option.
 
 Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
-pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
-it in parentheses, `say("text", pacing)`:
+pacing, and whose `remove()` takes the message out of the chat
+([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write it in
+parentheses, `say("text", pacing)`:
 
 ```tease
 let waiting = say "Waiting.", instant
@@ -238,6 +239,7 @@ repeat 2 {
     wait 1 s
     waiting.text += "."
 }
+waiting.remove()
 
 let count: integer = 0
 let strokes = say "Strokes: 0", instant

@@ -719,6 +719,13 @@ one each second and the same message at most once every five seconds, and not wh
 shown or spoken. Start, Continue, and states that Debug's rewind shows speak nothing of their history. The intervals are
 accessibility tuning of the Player, not limits a script can observe.
 
+A script message can also leave the conversation through its handle's `remove()` (#836). Its entry shows nothing from
+then on, also in history, after Continue, and in the states Debug's rewind shows, and the messages around it group as
+if it had never shown; the list positions it reports leave it out. It leaves at once, without an exit motion; while
+following, the transcript glides as for a change of height. When it held focus, focus moves to the conversation
+without scrolling. The status region speaks the removal of a message that live play produces as
+`speaker: message removed`, by the same rules as a change.
+
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Every
 accepted user activation/change on the long-lived control family also carries machine-readable canonical provenance. A

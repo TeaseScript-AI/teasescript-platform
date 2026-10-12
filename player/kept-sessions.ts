@@ -83,6 +83,7 @@ export interface KeptSessionUpdate {
 const EVENT_KINDS: ReadonlySet<unknown> = new Set<InterpreterEvent["kind"]>([
   "say",
   "messageUpdated",
+  "messageRemoved",
   "exit",
   "actionRequested",
   "actionCompleted",
@@ -222,6 +223,8 @@ function validEvent(event: Record<string, unknown>): boolean {
         isText(event["text"]) &&
         isSpan(event["span"])
       );
+    case "messageRemoved":
+      return isCount(event["messageId"]) && isSpan(event["span"]);
     case "exit":
       return isSpan(event["span"]);
     case "actionRequested": {

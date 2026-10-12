@@ -176,7 +176,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let b = showPermanentButton "Stop" {',
         "}",
-        "let gone = [removePermanentButton(b), randomInteger(1..=4)]",
+        "let gone = [b.remove(), randomInteger(1..=4)]",
         'say "${gone[1]}"',
         "exit",
       ].join("\n"),

@@ -5283,11 +5283,12 @@ class TypeChecker {
     const results = all.map((member) => memberMethodType(member, method));
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
-      const handles = all.every((member) => ["timer", "media"].includes(resolved(member).kind));
+      const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
+      const handles = all.every((member) => HANDLE_LABELS.has(resolved(member).kind));
       if (handles && expression.arguments.length > 0)
         this.#report(
           typeCode.invalidOperand,
-          `${resolved(all[0]!).kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
+          `${handle} ${method}() takes no arguments.`,
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
@@ -5359,7 +5360,9 @@ class TypeChecker {
                 failing.kind === "camera" ||
                 failing.kind === "messageHandle"
               ? handleMemberMessage(failing.kind, method, "call")
-              : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+              : failing.kind === "permanentButton"
+                ? `Permanent buttons have no method '${method}'. Use remove().`
+                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -5658,15 +5661,6 @@ class TypeChecker {
           this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
         }
         return INTEGER_TYPE;
-      case "removePermanentButton":
-        if (argument !== undefined && value !== undefined)
-          this.#reportUnless(
-            value,
-            (member) => member.kind === "permanentButton",
-            argument.value,
-            "removePermanentButton(...) takes the identifier that showPermanentButton gives",
-          );
-        return NULL_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -7937,7 +7931,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  if (value.kind === "camera" || value.kind === "messageHandle") return undefined;
+  // A message or a permanent button removes itself (#836).
+  if (value.kind === "messageHandle" || value.kind === "permanentButton")
+    return method === "remove" ? NULL_TYPE : undefined;
+  if (value.kind === "camera") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -8411,7 +8408,6 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["chance", BOOLEAN_TYPE],
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
-  ["removePermanentButton", NULL_TYPE],
 ]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
@@ -8506,6 +8502,14 @@ function mixDescription(first: StaticType, other: StaticType): string {
 /** The kinds of handle whose properties scripts read or assign. */
 type HandleKind = "timer" | "media" | "camera" | "messageHandle";
 
+/** The handles whose methods take no arguments, as their messages name them. */
+const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["timer", "Timer"],
+  ["media", "Media"],
+  ["messageHandle", "Message"],
+  ["permanentButton", "Permanent button"],
+]);
+
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
   handle: HandleKind,
@@ -8514,7 +8518,7 @@ function handleMemberMessage(
 ): string {
   if (handle === "messageHandle")
     return use === "call"
-      ? `Message handles have no method '${name}'. Change the message with its text property.`
+      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
       : `Message handles have no property '${name}'. Use the text property.`;
   if (handle === "camera")
     return use === "call"

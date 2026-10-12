@@ -57,6 +57,8 @@ const props = defineProps<{
   revision?: number;
   /** The revision through which the transcript shows directly, like history (`PlayerSessionHost.jumpedRevision`). */
   jumpedRevision?: number;
+  /** The indexes of the removed messages among `entries`, in ascending order. */
+  removedRows?: readonly number[];
   transcriptKey: string;
   /**
    * Brings scene time up to date before input and returns the published session; `null` when the session takes no
@@ -605,6 +607,7 @@ function submit(source: "input" | "button") {
           :speakers="speakers"
           :revision="revision ?? 0"
           :jumped-revision="jumpedRevision ?? -1"
+          :removed-rows="removedRows ?? []"
           :bottom-inset="bottomInset"
         >
           <template #foreground>
