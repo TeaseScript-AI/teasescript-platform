@@ -136,6 +136,11 @@ test("an ask's question may be shown as prose or a bubble, as by say, and stays 
     "prose center: Name?",
     "opens text",
   ]);
+  // Also when an option is a string with its own interpolation.
+  assert.deepEqual(questionShown('"${askText prose(align: "${"cen" + "ter"}") "Name?"}"'), [
+    "prose center: Name?",
+    "opens text",
+  ]);
 });
 
 test("an ask without a question says nothing and opens its input, in every kind of ask", () => {

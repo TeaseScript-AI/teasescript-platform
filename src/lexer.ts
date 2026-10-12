@@ -504,17 +504,23 @@ class Lexer {
 
   /**
    * The index of the `(` that the `)` at `index` closes, found back to the interpolation it stands in, or `null`. Only
-   * a quote right after a `)` asks, and the search goes back over that one group.
+   * a quote right after a `)` asks, and the search goes back over that one group, also over the complete
+   * interpolations of strings inside it, as in `prose(font: "${name}")`.
    */
   #openerOf(index: number): number | null {
     let depth = 0;
+    let interpolations = 0;
     for (let at = index; at >= 0; at -= 1) {
       const kind = this.#tokens[at]!.kind;
       if (kind === TokenKind.RightParenthesis) depth += 1;
       else if (kind === TokenKind.LeftParenthesis) {
         depth -= 1;
         if (depth === 0) return at;
-      } else if (kind === TokenKind.InterpolationStart) return null;
+      } else if (kind === TokenKind.InterpolationEnd) interpolations += 1;
+      else if (kind === TokenKind.InterpolationStart) {
+        if (interpolations === 0) return null;
+        interpolations -= 1;
+      }
     }
     return null;
   }
