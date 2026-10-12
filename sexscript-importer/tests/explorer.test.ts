@@ -3331,7 +3331,7 @@ test(
         '  if line == "${lineWrite}" {\n    done += 1\n  }\n}\nsay "Done."\nexit\n',
       // A grid square: a letter and a digit, each looked up in a text; the far corner is one of them.
       grid:
-        'let xs = "ABC"\nlet ys = "123"\nlet c = askText()\nlet x = -1\nlet y = -1\nwhile c.length != 2 or x < 0 or y < 0 {\n' +
+        'let xs = "ABC"\nlet ys = "123"\nlet c = askText()\nlet x = null\nlet y = null\nwhile c.length != 2 or x == null or y == null {\n' +
         "  c = askText()\n  if c.length == 2 {\n    x = xs.indexOf(c.substring(0, 1).uppercase())\n" +
         '    y = ys.indexOf(c.substring(1, 2))\n  }\n}\nif x == 2 and y == 2 {\n  say "Corner."\n}\nexit\n',
       // A character looked up after three compared texts, which do not crowd it out.
