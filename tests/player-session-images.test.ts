@@ -257,6 +257,18 @@ test("each image request that allows only the camera is reported as a Player not
     () => keys().includes("image-needs-camera"),
     "the new run's request was not reported",
   );
+  const message = () =>
+    host.notices.value.find((notice) => notice.key === "image-needs-camera")?.message;
+  assert.equal(message(), "This image request needs a camera, which cannot be used here.");
+  // A request the player may skip can still be answered, which the notice says.
+  host.prepare(() =>
+    createPlayerRuntimeSession("let pick = askImage(allowFile: false, allowSkip: true)\nexit"),
+  );
+  await host.activate();
+  await until(
+    () => message() === "The camera cannot be used here. Choose Skip to answer without an image.",
+    "the skippable request's notice does not name Skip",
+  );
   // A new session without such a request withdraws it.
   host.prepare(() => createPlayerRuntimeSession('let pick = askImage("Add an image")\nexit'));
   await host.activate();

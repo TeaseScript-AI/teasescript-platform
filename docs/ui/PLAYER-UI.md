@@ -885,8 +885,9 @@ be used and while the camera window a script shows holds the viewfinder. It is n
 composer does not skip. Skip, or its exact text submitted from the composer, answers the request with `null`, which
 the transcript records as the player message `Skip`; the viewfinder closes and a camera the request opened turns off,
 as after any answer. Skip waits while a chosen image is being checked. Other typed text shows the composer notice,
-which then also names Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.". A
-request without `allowSkip: true` shows no Skip.
+which then also names Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.", and the
+player notice of a request that allows only the camera, where none can be used, says "The camera cannot be used here.
+Choose Skip to answer without an image." A request without `allowSkip: true` shows no Skip.
 
 `askChoice` and `showButton` keep the composer enabled rather than visually disabling it:
 

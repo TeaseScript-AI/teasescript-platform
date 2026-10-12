@@ -103,6 +103,7 @@ import {
   type TemporalContext,
 } from "../../../src/index.js";
 import { serializableEquals } from "../../../src/runtime/serializable-values.js";
+import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
 import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
@@ -570,19 +571,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     observe: observeForInput,
     publish: (next) => (session.value = next),
   });
-  // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
-  // a session and an action, is reported once, so a dismissal holds only for the request it was given for.
+  // An image request that allows only the camera cannot be answered with an image where no camera can be used; one the
+  // player may skip says that Skip still answers it. Each such request, of a session and an action, is reported once, so
+  // a dismissal holds only for the request it was given for.
+  const cameraOnlyRequest = () => {
+    const request = session.value && activePlayerRuntimeInteraction(session.value.state);
+    return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered ? request : null;
+  };
   watch(
     () => {
-      const request = session.value && activePlayerRuntimeInteraction(session.value.state);
-      return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
-        ? `${generation.value}:${request.actionId}`
-        : null;
+      const request = cameraOnlyRequest();
+      return request === null ? null : `${generation.value}:${request.actionId}`;
     },
-    (cameraOnlyRequest) =>
-      cameraOnlyRequest === null
-        ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
-        : notices.publish(playerNotices.imageNeedsCamera()),
+    (reported) => {
+      const request = cameraOnlyRequest();
+      if (reported === null || request?.ui.kind !== "image")
+        notices.dismiss(playerNoticeKeys.imageNeedsCamera);
+      else
+        notices.publish(
+          playerNotices.imageNeedsCamera(request.ui.allowSkip ? IMAGE_SKIP_TEXT : null),
+        );
+    },
   );
   // A stopped session's captures and cameras end; its media goes with the media watcher above.
   watch(
