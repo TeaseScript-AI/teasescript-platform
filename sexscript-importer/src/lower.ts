@@ -10556,11 +10556,11 @@ function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string
   );
 }
 
+/** Legacy reads that give a whole number, or null for a missing key, which a boxed Integer[] element stores as it is. */
+const WHOLE_NUMBER_READS = new Set(["loadInteger", "receiveInteger"]);
+
 /** Methods whose results are whole numbers. */
 const WHOLE_NUMBER_METHODS = new Set([
-  // A whole number, or null for a missing key, which a boxed Integer[] element stores as it is (YAFOWC).
-  "loadInteger",
-  "receiveInteger",
   "size",
   "length",
   "getRandom",
@@ -10769,8 +10769,12 @@ function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<st
     }
     case "property":
       return !["size", "length"].includes(constantString(node.property) ?? "");
-    case "methodCall":
-      return !WHOLE_NUMBER_METHODS.has(constantString(node.method) ?? "");
+    case "methodCall": {
+      const name = constantString(node.method) ?? "";
+      // A legacy integer read, not a script's own function of that name (YAFOWC's `times[i] = needed`).
+      if (WHOLE_NUMBER_READS.has(name)) return legacyApiCall(node, context)?.name !== name;
+      return !WHOLE_NUMBER_METHODS.has(name);
+    }
     case "variable": {
       const key = bindingKey(node, context.bindings);
       if (key === null) return true;
@@ -13693,19 +13697,46 @@ const sentinelReads = new WeakSet<AstNode>();
 /**
  * Marks the list positions read into a variable that their loop's condition compares with null at a position the loop
  * counts up, `next = pick[ipick]` in `for (…; next != null; ipick++)` (Stay): Groovy read null past the end of the
- * list, which ended the loop. A Java array's position past its end failed in Groovy and is left alone.
+ * list, which ended the loop. Only a list proven to be a Groovy list: a Java array's position past its end failed.
  */
 function markSentinelReads(body: AstNode, context: LowerContext): void {
-  const javaArray = (list: AstNode): boolean => {
-    const key = bindingKey(list, context.bindings);
-    return (
-      key !== null &&
-      (context.assignedValues.get(key) ?? []).some(
-        (value) =>
-          value.kind === "array" ||
-          (value.kind === "cast" && /^\[|\[\]$/u.test(text(value.type) ?? "")),
-      )
-    );
+  // The closures a declaration names, with their parameters' names, and the calls of the file.
+  const closures = new Map<string, string[]>();
+  const calls: AstNode[] = [];
+  walkAst(body, (node) => {
+    const right = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = right?.kind === "closure" ? variableName(asNode(node.left)) : null;
+    if (right !== null && name !== null)
+      closures.set(
+        name,
+        (groovyParameters(right.parameters) ?? []).map((parameter) => parameter.name),
+      );
+    if (node.kind === "methodCall") calls.push(node);
+  });
+  // A Groovy list, not a Java array: a list literal, a variable only ever set to list literals, or a closure's
+  // parameter that every call of every closure with a parameter of its name passes such a list.
+  const groovyList = (list: AstNode, depth = 0): boolean => {
+    if (list.kind === "list") return true;
+    const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
+    if (key === null || depth > 2) return false;
+    if (!context.parameterBindings.has(key)) {
+      const values = context.assignedValues.get(key) ?? [];
+      return values.length > 0 && values.every((value) => value.kind === "list");
+    }
+    const name = variableName(list);
+    let passed = false;
+    for (const [closure, parameters] of closures) {
+      const position = parameters.indexOf(name ?? "");
+      if (position < 0) continue;
+      for (const call of calls) {
+        const parts = callParts(call);
+        if (parts?.name !== closure) continue;
+        const argument = parts.arguments[position];
+        if (argument === undefined || !groovyList(argument, depth + 1)) return false;
+        passed = true;
+      }
+    }
+    return passed;
   };
   walkAst(body, (node) => {
     const parts = nodeArray(asNode(node.collection)?.items);
@@ -13751,7 +13782,7 @@ function markSentinelReads(body: AstNode, context: LowerContext): void {
         list !== null &&
         index !== null &&
         counted.has(bindingKey(index, context.bindings) ?? "") &&
-        !javaArray(list)
+        groovyList(list)
       )
         sentinelReads.add(value);
     });

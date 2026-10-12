@@ -8,3 +8,10 @@ def days = ["monday", "friday"]
 def index = getRandom(2)
 save("club." + days[index] + ".visits", 1)
 show("Kink " + loadInteger("club.level.kink") + " " + loadInteger("club.punishment1.count"))
+// A list a script changes, also in a list it holds, and an object's field named length are no such parts.
+def names = [["safe", 1]]
+names[0][0] = "level"
+save("club." + names[0][0] + ".0", 5)
+def source = [length: "level"]
+def part = source.length
+save("club." + part + ".1", 6)

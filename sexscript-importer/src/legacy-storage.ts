@@ -263,20 +263,24 @@ function constantLists(statements: readonly IrStatement[]): Map<string, ListElem
     if (statement.kind === "let") assigned(statement.name, statement.value);
     if (statement.kind === "assign") {
       if (statement.target.kind === "variable") assigned(statement.target.name, statement.value);
-      else if (statement.target.kind === "index" && statement.target.target.kind === "variable")
-        open.add(statement.target.target.name);
+      else {
+        // A write by position, also into a list the list holds, `names[0][0] = …`.
+        let root: IrExpression = statement.target;
+        while (root.kind === "index") root = root.target;
+        if (root.kind === "variable") open.add(root.name);
+      }
     }
     if (statement.kind === "for") open.add(statement.variable);
     if (statement.kind === "function")
       for (const parameter of statement.parameters) open.add(parameter.name);
     mapOwnExpressions(statement, (value) => {
       eachExpression(value, (expression) => {
-        if (
-          expression.kind === "methodCall" &&
-          LIST_ADDS.has(expression.name) &&
-          expression.target.kind === "variable"
-        )
-          open.add(expression.target.name);
+        if (expression.kind === "methodCall" && LIST_ADDS.has(expression.name)) {
+          // Also a list the list holds, `names[0].add(…)`.
+          let root: IrExpression = expression.target;
+          while (root.kind === "index") root = root.target;
+          if (root.kind === "variable") open.add(root.name);
+        }
       });
       return value;
     });
@@ -345,7 +349,7 @@ const WHOLE_NUMBER_CALLS = new Set([
 
 /**
  * The names of a file that only ever hold whole numbers: every value of a variable of the name is a whole-number
- * literal, a sum, difference, product, or remainder of such values, the length of something, or the result of
+ * literal, a sum, difference, product, or remainder of such values, or the result of
  * randomInteger(), toInteger(), round(), floor(), ceil(), or legacy getRandom(), and every loop of the name counts through a range. A
  * parameter's name is none.
  */
@@ -387,7 +391,6 @@ function numericNames(statements: readonly IrStatement[]): Set<string> {
       return (
         ["+", "-", "*", "%"].includes(value.operator) && whole(value.left) && whole(value.right)
       );
-    if (value.kind === "property") return value.name === "length";
     if (value.kind === "call") return WHOLE_NUMBER_CALLS.has(value.name);
     return false;
   };

@@ -2005,6 +2005,41 @@ test(
   },
 );
 
+// A Java array's position past its end failed in Groovy, so a loop that tests what it reads from an array passed to
+// it for null reads strictly; only a Groovy list read past its end gave null (Stay's picks).
+test(
+  "a loop's null test reads a Java array passed to it strictly",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-sentinel-"));
+    try {
+      const sourcePath = path.join(directory, "picks.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def picks = { pick ->",
+          "  def next = 99",
+          "  for (def i = 0; next != null; i++) next = pick[i]",
+          "}",
+          "picks(new int[1])",
+          "def words = { items ->",
+          '  def next = "x"',
+          "  for (def i = 0; next != null; i++) next = items[i]",
+          "}",
+          'words(["a", "b"])',
+          "",
+        ].join("\n"),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {});
+      const tease = emitTease(program!);
+      assert.match(tease, /next = pick\[i\]/u);
+      assert.match(tease, /next = sexscriptLegacyItemAt\(items, i\)/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // The storage helpers list the keys they store; a key stored again keeps its place in that list, so that saving the same
 // keys over and over leaves the same storage.
 test(

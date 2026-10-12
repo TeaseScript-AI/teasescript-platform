@@ -16,23 +16,23 @@ function sexscriptLegacySave(key, value) {
   let prefix = "${key}."
   delete key
   if value is list or value is dict {
-    let names: string[] = [key]
+    let namesValue: string[] = [key]
     let values: list = [value]
     let position = 0
-    while position < names.length {
-      let name = names[position]
+    while position < namesValue.length {
+      let name = namesValue[position]
       let item = values[position]
       position += 1
       if item is list {
         let indexValue = 0
         for element in item {
-          names.add("${name}.${indexValue}")
+          namesValue.add("${name}.${indexValue}")
           values.add(element)
           indexValue += 1
         }
       } else if item is dict {
         for entry, inner in item {
-          names.add("${name}.${entry}")
+          namesValue.add("${name}.${entry}")
           values.add(inner)
         }
       } else {
@@ -77,24 +77,24 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
     let parts: string[] = []
     for name in stored {
       if name.startsWith(prefix) {
-        let part = name.substring(prefix.length)
-        let dot = part.indexOf(".")
+        let partValue = name.substring(prefix.length)
+        let dot = partValue.indexOf(".")
         if dot >= 0 {
-          part = part.substring(0, dot)
+          partValue = partValue.substring(0, dot)
         }
-        if not parts.contains(part) {
-          parts.add(part)
+        if not parts.contains(partValue) {
+          parts.add(partValue)
         }
       }
     }
     let numbered = true
-    for part in parts {
-      if part.length == 0 {
+    for partValue in parts {
+      if partValue.length == 0 {
         numbered = false
       }
       let position = 0
-      while position < part.length {
-        if not "0123456789".contains(part.substring(position, position + 1)) {
+      while position < partValue.length {
+        if not "0123456789".contains(partValue.substring(position, position + 1)) {
           numbered = false
         }
         position += 1
@@ -102,18 +102,18 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
     }
     if parts.length > 0 and numbered {
       let items: list = []
-      for part in parts {
-        let indexValue = toInteger(part)
+      for partValue in parts {
+        let indexValue = toInteger(partValue)
         while items.length <= indexValue {
           items.add(null)
         }
-        items[indexValue] = sexscriptLegacyLoad("${prefix}${part}")
+        items[indexValue] = sexscriptLegacyLoad("${prefix}${partValue}")
       }
       value = items
     } else if parts.length > 0 {
       let entries: dict = dict{}
-      for part in parts {
-        entries[part] = sexscriptLegacyLoad("${prefix}${part}")
+      for partValue in parts {
+        entries[partValue] = sexscriptLegacyLoad("${prefix}${partValue}")
       }
       value = entries
     }
@@ -127,7 +127,7 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
 // of a list that only ever holds texts written out, cannot be such an element: it stays a plain save.
 sexscriptLegacySave("club.level", 3)
 sexscriptLegacySave("club.level.kink", 5)
-save 2 as "club.punishmentsRemaining"
+sexscriptLegacySave("club.punishmentsRemaining", 2)
 for i in 0..=1 {
   save i + 1 as "club.punishment${i}.count"
 }
@@ -135,4 +135,11 @@ let days = ["monday", "friday"]
 let index = randomInteger(0..2)
 save 1 as "club.${days[index]}.visits"
 say prose "Kink ${sexscriptLegacyLoadInteger("club.level.kink")} ${sexscriptLegacyLoadInteger("club.punishment1.count")}", instant
+// A list a script changes, also in a list it holds, and an object's field named length are no such parts.
+let names: (string | integer)[][] = [["safe", 1]]
+names[0][0] = "level"
+sexscriptLegacySave("club.${names[0][0]}.0", 5)
+let source = { length: "level" }
+let part = source.length
+sexscriptLegacySave("club.${part}.1", 6)
 exit
