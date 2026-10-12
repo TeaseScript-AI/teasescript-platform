@@ -758,7 +758,7 @@ test("a refusal the host does not keep leaves the later publications recoverable
 test("a debugging tool's storage edit is recorded, so a replay applies it again", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'let name = askText "Name"\nlet visits = load("visits", default: 1)\nsay "Visit ${visits}"\nexit',
+    'let name = askText "Name"\nlet visits = load("visits", default: 1)\nsay "Visit ${visits}", instant\nexit',
     { recorder },
   );
   const edited = applyPlayerRuntimeStorageEdit(session, { key: "visits", value: 5 });

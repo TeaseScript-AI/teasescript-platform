@@ -133,6 +133,11 @@ export interface RuntimeSessionView {
   readonly backgroundActions: readonly RuntimePendingActionSnapshot[];
   /** The foreground action of the path a running timer, media, or button block interrupted, or `null`. */
   readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+  /**
+   * The scene time that block started, or `null` without one. The suspended action stands still from then, so its
+   * remaining time is what it had at this moment.
+   */
+  readonly suspendedAtMs: number | null;
   /** The default camera's view, or `null` before the first `showCamera`. */
   readonly cameraView: RuntimeCameraViewSnapshot | null;
   /** How many timer, media, and button blocks are queued to run. */
@@ -432,6 +437,7 @@ export class RuntimeSession {
         foregroundAction: state.foregroundAction,
         backgroundActions: state.backgroundActions,
         suspendedAction: interruptFrame(state)?.timerInterruption?.suspendedAction ?? null,
+        suspendedAtMs: interruptFrame(state)?.timerInterruption?.startedAtMs ?? null,
         cameraView: state.cameraView,
         queuedBlocks: state.pendingTimerHandlers.length,
         debugMode: state.debugMode,

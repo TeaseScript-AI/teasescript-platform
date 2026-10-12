@@ -102,7 +102,7 @@ The first implementation slice includes `backgroundActions` in the version-4 sch
 
 `lastSettlement` stores the most recent replayable action settlement. It contains bounded JSON-safe data for
 returning the canonical outcome when the same completion message is delivered again. Timer lifecycle transitions
-and suspended-delay settlements emit completion events without replacing this record; their rules are maintained
+and suspended media-wait settlements emit completion events without replacing this record; their rules are maintained
 in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 Conceptually it includes:
@@ -496,7 +496,7 @@ Every implemented pending-action kind requires shared state-machine coverage plu
 ### Deterministic background ordering
 
 Due timed work is ordered by deadline, then action ID. Handlers run one at a time without nesting.
-Timer interruption and suspended-delay processing are maintained in
+Timer interruption and the suspension of the interrupted action are maintained in
 [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 ## Implementation sequence

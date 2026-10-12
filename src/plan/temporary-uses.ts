@@ -95,9 +95,6 @@ export function requiredInstructionTemporaries(
       if (typeof instruction.display === "object") collect(instruction.display);
       if (instruction.label !== null) collect(instruction.label);
       break;
-    case "pacingBarrier":
-      if (instruction.receiver !== null) collect(instruction.receiver);
-      break;
     case "showPermanentButton":
       collect(instruction.text);
       break;

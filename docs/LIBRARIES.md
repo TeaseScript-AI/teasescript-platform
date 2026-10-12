@@ -247,9 +247,7 @@ baseDelayMs + max(
 
 All arithmetic and deadline construction is checked. There is no extra product reading-time cap, but ADR 0016 numeric and deadline limits still apply. Account changes do not modify an active or restored session.
 
-A positive gate is an ADR 0016 `chatPacingGate` action. It begins in `backgroundActions`, may move with the same identity into `foregroundAction` when a later prepared `say` must wait, and uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
-
-`showButton`, `askText`, `askNumber`, and `choose` settle and consume a background gate before creating their foreground interaction. `wait` does not consume it; both may coexist and use the persisted session-time coordinate.
+A positive gate is an ADR 0016 `chatPacingGate` action: the message's reading time, which the script waits for as the foreground action, so the next statement runs after it (owner decision on #829, 2026-10-11). It uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
 
 A skippable gate may be completed by a primary click/tap on Player background or other unused Player space or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
 
@@ -365,8 +363,7 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 
 The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `choose` plus ADR 0018
 `say` smart/exact pacing and skip policy. Positive pacing uses the resumable `chatPacingGate` lifecycle described above;
-`0`/`instant`, interaction consumption, `wait` coexistence, prepared output, and checkpoint/restore are implemented on
-that same deterministic runtime model. The Player presents these Standard interaction and pacing
+`0`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Player presents these Standard interaction and pacing
 controls through the framework-independent Player adapter. Editor/formatter/simulator support and final
 package/import/version/replacement design remain deferred. The production cross-origin Player/host protocol remains
 separate future work.

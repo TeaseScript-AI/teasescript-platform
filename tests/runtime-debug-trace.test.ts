@@ -663,9 +663,12 @@ test("a media block's own handle is its first variable", () => {
 test("stopAudio explains the state of each sound it stops, like stop() on its handle", () => {
   const trace = new RuntimeDebugContext();
   let session = createPlayerRuntimeSession(
-    ['let music = playAudio async "loop.mp3"', "stopAudio", 'say "${music.state}"', "exit"].join(
-      "\n",
-    ),
+    [
+      'let music = playAudio async "loop.mp3"',
+      "stopAudio",
+      'say "${music.state}", instant',
+      "exit",
+    ].join("\n"),
     { debugTrace: trace },
   );
   session = reportPlayerRuntimeMediaLoad(session, 1, {

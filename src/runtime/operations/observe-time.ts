@@ -1,10 +1,6 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
-import { interruptFrame, interruptRunning } from "../activations.js";
-import {
-  MAX_RUNTIME_SESSION_TIME_MS,
-  type RuntimeCallFrameSnapshot,
-  type RuntimeSnapshot,
-} from "../state.js";
+import { interruptRunning } from "../activations.js";
+import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../state.js";
 import {
   interactionDeadlineMs,
   type RuntimeActionSettlementSnapshot,
@@ -17,7 +13,6 @@ import {
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
-import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { skipSilentRounds } from "../timers.js";
 import {
   nextMediaEvent,
@@ -309,16 +304,9 @@ export function processDueWork(
       }
       const span = mediaSpan(plan, due.action.owningInstruction);
       applyMediaEvent(plan, current, due.action, event, events, span);
-    } else if (due.kind === "suspended") {
-      settleSuspendedDelay(plan, current, due.frame, due.action, events);
     } else if (due.action.kind === "interaction") {
       trace?.at(due.action.owningInstruction, current.currentSessionTimeMs);
       timeOutButton(plan, current, due.action, events, trace);
-    } else if (
-      due.action.kind === "chatPacingGate" &&
-      current.backgroundActions.includes(due.action)
-    ) {
-      settleBackgroundPacingGate(plan, current, due.action, "completed", events);
     } else {
       settleForegroundTimedAction(plan, current, due.action, events);
     }
@@ -354,13 +342,6 @@ type DueWork =
       readonly event: MediaTimelineEvent;
       readonly deadlineMs: number;
       readonly actionId: number;
-    }
-  | {
-      readonly kind: "suspended";
-      readonly frame: RuntimeCallFrameSnapshot;
-      readonly action: RuntimeDelayActionSnapshot;
-      readonly deadlineMs: number;
-      readonly actionId: number;
     };
 
 /** Media departures happen after other work at the same scene time; everything else is phase 0. */
@@ -380,10 +361,9 @@ function precedes(
 }
 
 /**
- * The earliest timed work due by the observed time, by `(deadline, phase, action ID)`. A due foreground delay waits
- * while an expiry block that became due earlier is queued: the block interrupts that delay first, and the delay then
- * settles as suspended work. A button with a timeout likewise waits behind such a block; while suspended it stays
- * inert and times out once the block returns.
+ * The earliest timed work due by the observed time, by `(deadline, phase, action ID)`. A due foreground delay, reading
+ * time, or button timeout waits while an expiry block that became due earlier is queued: the block interrupts it first,
+ * and it stands still until the block returns.
  */
 function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
   let earliest: DueWork | null = null;
@@ -426,8 +406,8 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
   const handlerRunning = interruptRunning(snapshot);
   const noQueuedBlockFirst = handlerRunning || snapshot.pendingTimerHandlers.length === 0;
   if (
-    foreground?.kind === "chatPacingGate" ||
-    (foreground?.kind === "delay" && noQueuedBlockFirst)
+    (foreground?.kind === "delay" || foreground?.kind === "chatPacingGate") &&
+    noQueuedBlockFirst
   ) {
     candidates.push({
       kind: "action",
@@ -447,14 +427,7 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
     });
   }
   for (const action of snapshot.backgroundActions) {
-    if (action.kind === "chatPacingGate") {
-      candidates.push({
-        kind: "action",
-        action,
-        deadlineMs: action.deadlineMs,
-        actionId: action.actionId,
-      });
-    } else if (action.kind === "timer" && action.timer.deadlineMs !== null) {
+    if (action.kind === "timer" && action.timer.deadlineMs !== null) {
       candidates.push({
         kind: "timer",
         action,
@@ -474,51 +447,7 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
       }
     }
   }
-  const frame = interruptFrame(snapshot);
-  if (frame !== undefined) {
-    const suspended = frame.timerInterruption?.suspendedAction;
-    if (suspended?.kind === "delay") {
-      candidates.push({
-        kind: "suspended",
-        frame,
-        action: suspended,
-        deadlineMs: suspended.deadlineMs,
-        actionId: suspended.actionId,
-      });
-    }
-  }
   return candidates;
-}
-
-/**
- * A delay interrupted by an expiry block still settles in deadline order and publishes `actionCompleted`. Its
- * continuation stays suspended and runs once when the block returns normally.
- */
-function settleSuspendedDelay(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  frame: RuntimeCallFrameSnapshot,
-  action: RuntimeDelayActionSnapshot,
-  events: InterpreterEvent[],
-): void {
-  const completionEventSequence = takeSequence(snapshot, 1);
-  const settlement = createDelaySettlement(
-    action,
-    completionEventSequence,
-    snapshot.currentSessionTimeMs,
-  );
-  frame.returnInstruction = action.continuationInstruction;
-  frame.timerInterruption = { ...frame.timerInterruption!, suspendedAction: null };
-  // Not retained as `lastSettlement`: the running block may own released prepared output whose provenance is the
-  // retained pacing settlement, and completions for a suspended action were already rejected as `suspendedAction`.
-  events.push(
-    Object.freeze({
-      kind: "actionCompleted",
-      sequence: completionEventSequence,
-      settlement,
-      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan)),
-    } satisfies ActionCompletedEvent),
-  );
 }
 
 function settleForegroundTimedAction(
@@ -535,13 +464,7 @@ function settleForegroundTimedAction(
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
   snapshot.status = "running";
-  if (action.kind === "chatPacingGate" && action.preparedOutput !== null) {
-    snapshot.preparedSayOutput = action.preparedOutput;
-    snapshot.nextInstruction = action.preparedOutput.owningInstruction;
-  } else if (action.kind === "delay") {
-    snapshot.nextInstruction = action.continuationInstruction;
-  }
-  // A gate promoted by a pacing barrier carries no prepared output; the barrier runs again and then advances.
+  snapshot.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",
@@ -586,7 +509,6 @@ function createPacingSettlement(
     completionEventSequence,
     deadlineMs: action.deadlineMs,
     completedAtMs,
-    releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
   });
 }
 

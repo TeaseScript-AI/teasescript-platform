@@ -175,7 +175,8 @@ test("a handed-off askInteger result must be a safe whole number", () => {
       `timer async 1 s { say "handler", 2 s }\n${ask}\nsay count, instant\nexit`,
     );
     let snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
-    snapshot = run(plan, observeTime(plan, snapshot, 1_000).snapshot).snapshot;
+    // The block's message holds it for two seconds; then the field comes back.
+    snapshot = run(plan, observeTime(plan, snapshot, 3_000).snapshot).snapshot;
     const replay = snapshot.lastSettlement;
     const action = snapshot.foregroundAction;
     assert.ok(action?.kind === "interaction" && replay?.actionKind === "chatPacingGate");

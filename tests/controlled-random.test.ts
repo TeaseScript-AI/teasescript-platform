@@ -198,7 +198,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let items = ["x", "y"]',
         "let t = timer(duration: (1..=3) s, async: true, repeat: true) {",
-        '  say "tick ${items}"',
+        '  say "tick ${items}", instant',
         "}",
         "wait 4 s",
         "t.remaining = 0 s",
@@ -1017,7 +1017,7 @@ test("restore rejects a pending draw that the engine could not have made", () =>
 
 test("a paused step or single instruction finishes as that operation would have", () => {
   const plan = compileValidPlan(
-    'let a = randomInteger(1..=6)\nsay "${a}"\nlet b = randomInteger(1..=6)\nsay "${b}"\nexit',
+    'let a = randomInteger(1..=6)\nsay "${a}", instant\nlet b = randomInteger(1..=6)\nsay "${b}", instant\nexit',
   );
   const plain = createFreshRuntimeSession(plan, {});
   const paused = createFreshRuntimeSession(plan, {}, { randomControl: {} });

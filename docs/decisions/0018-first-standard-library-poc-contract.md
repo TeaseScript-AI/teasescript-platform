@@ -33,7 +33,7 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
     choice text may activate `choose`; exact visible button text may activate `showButton`. Space in the empty composer
     does not activate `showButton`.
 13. `say` uses account-configured smart autoplay by default, supports exact durations, `0 s`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
-14. Every positive pacing gate is one ADR 0016 pending action. It begins as background work and may become the foreground action when it blocks a prepared later `say`.
+14. Every positive reading time is one ADR 0016 pending action, the foreground action: a paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision on #829, 2026-10-11).
 15. A skippable pacing gate may be completed by a primary click or tap on Player background or other unused Player space, or by Space while the focused composer is empty. Skip completes only the pacing gate.
 16. The normal Player application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
 17. A later deterministic speaker-aware typing indicator is desired but excluded from this POC.
@@ -238,8 +238,9 @@ let day = askDate hint: "Pick a day"
   in the order they are written. A prefill that asks itself therefore asks first. Then the question is said and the
   field opens. The question and the field have the same speaker; a nested ask without `as` uses the default speaker,
   as before.
-- The question is said as by `say`, with its markup, interpolation, and pacing: it waits behind earlier paced output,
-  and the field opens as soon as it is said. It accepts the values a field text accepts, so a list is an error
+- The question is said as by `say`, with its markup and interpolation but with no reading time of its own (owner
+  decision on #829, 2026-10-11): like any statement it waits for the reading time of earlier paced output, and the
+  field opens together with it. It accepts the values a field text accepts, so a list is an error
   (`TSV040`, or `TSR021` at runtime) rather than shown notation.
 - Without a question nothing is said; an explicit empty question is said like `say ""`.
 - The question is said once. A refused answer, a timer or button block that interrupts the field, and a restored
@@ -334,8 +335,9 @@ nearest `showButton` inside an object literal or call arguments. The timeout is 
 appears; the button captures its start and timeout in scene time, and checkpoint save/restore re-evaluates nothing.
 
 Reaching the timeout is normal completion, not cancellation: the button disappears without a player transcript
-message, and the result equals the timeout. A timer interrupt that suspends the button keeps it inert; when the
-timeout passes meanwhile, the button times out as soon as the interrupt returns.
+message, and the result equals the timeout. A timer, media, or button block that suspends the button keeps it inert,
+and its timeout stands still: after a normal return the button has the time it had left, and its elapsed result leaves
+out the time the block ran (owner decision on #829, 2026-10-11).
 
 ### `say`
 
@@ -368,7 +370,7 @@ Pacing values mean:
 - negative, non-finite, calendar, unsupported-magnitude, or deadline-overflow values: structured error before partial
   gate creation.
 
-`0 s` and `instant` also settle and bypass an earlier active pacing gate so the current message is actually immediate.
+`0 s` and `instant` show the message with no reading time of its own; like every statement, they run only after the reading time of an earlier paced message (owner decision on #829, 2026-10-11).
 
 ## Interaction data boundaries
 
@@ -576,34 +578,27 @@ When the calculated duration is `0`, the message creates no pacing action, actio
 
 ## Pacing gate as an ADR 0016 action
 
-A positive pacing gate is one pending-action kind conceptually named `chatPacingGate`. It uses ADR 0016 action identity, absolute deadline, active-first lookup, typed completion, bounded `lastSettlement`, event sequencing, checkpoint/restore, and continuation rules. It is not a second hidden pacing state machine.
+Owner decision on #829 (2026-10-11), replacing the background gate, its promotion for a prepared later `say`, its
+consumption by an interaction, its supersession by `instant` output, and its overlap with `wait`: a paced `say` lasts
+its reading time, and the next statement runs after it, unless the player skips it. Nothing after the `say` runs during
+its reading time: no other message, interaction, media, camera, message or permanent-button change, `wait`, timer, or
+code the player cannot see. Work started earlier keeps running, and permanent buttons already shown stay usable. A
+timer, cue, or permanent-button block interrupts a reading time as it interrupts a `wait`, and the reading time stands
+still until the block returns (decision 4 on #829, 2026-10-11). Exact timing is written with `instant`: `say "Hold.",
+instant` followed by `wait 30 s` takes exactly 30 seconds. Rejected: a `wait` that replaces the reading time, and
+invisible work that runs on during it.
 
-The first POC has at most one active pacing gate because it has one Standard chat target.
+A positive reading time is one pending-action kind conceptually named `chatPacingGate`. It uses ADR 0016 action identity, absolute deadline, active-first lookup, typed completion, bounded `lastSettlement`, event sequencing, checkpoint/restore, and continuation rules. It is not a second hidden pacing state machine. It is always the foreground action.
 
-### Initial message and background gate
+### Message and reading time
 
-A normal or positive-duration `say` evaluates its speaker, text, pacing, and skip policy once in normal source order.
-
-When no earlier gate blocks it:
+A normal or positive-duration `say` evaluates its speaker, text, pacing, and skip policy once in normal source order. Then, at one atomic instruction boundary:
 
 1. emit the text-output event;
-2. when the resulting duration is positive, allocate and store one `chatPacingGate` in `backgroundActions` with its absolute deadline and skip policy;
-3. emit `actionRequested` for that gate;
-4. continue unrelated non-blocking execution.
+2. when the resulting duration is positive, allocate one `chatPacingGate` with its absolute deadline and skip policy as the foreground action, and set runtime status to `waiting`;
+3. emit `actionRequested` for that gate.
 
-The text-output event precedes `actionRequested`. Both state changes occur at one atomic instruction boundary; no checkpoint may contain the emitted text without the positive gate that the same instruction established.
-
-### A later `say` becomes foreground-blocked
-
-When execution reaches a later normal or positive-duration `say` while the background pacing gate remains active:
-
-1. evaluate the later speaker, final text, pacing, skip policy, and deterministic RNG selections once;
-2. store that prepared output and its continuation in JSON-safe state;
-3. atomically move the same gate from `backgroundActions` to `foregroundAction` without changing its action ID or deadline;
-4. set runtime status to `waiting`;
-5. stop normal execution.
-
-The move does not emit a second `actionRequested`; the action was already requested when first created. The accepted invariant remains:
+The text-output event precedes `actionRequested`. No checkpoint may contain the emitted text without the positive gate that the same instruction established. The accepted invariant remains:
 
 ```text
 status == waiting
@@ -611,11 +606,11 @@ if and only if
 foregroundAction != null
 ```
 
-When that gate settles, `actionCompleted` is emitted before continuation. A later normal runtime entry emits the prepared text exactly once and establishes its next positive gate when applicable. Prepared text and RNG results are never reevaluated after waiting or restore.
+When the gate settles, `actionCompleted` is emitted before continuation, and the next statement runs during a later normal runtime entry.
 
 ### Time completion
 
-`observeTime(...)` may settle a due pacing gate while it is background work or while it is the foreground action blocking prepared output. It uses the same persisted `currentSessionTimeMs` and absolute-deadline semantics as `wait`.
+`observeTime(...)` settles a due gate with the same persisted `currentSessionTimeMs` and absolute-deadline semantics as `wait`.
 
 When one time observation settles multiple timed actions, deterministic ordering is:
 
@@ -630,56 +625,15 @@ A primary click/tap on otherwise unused Player space, or an eligible Space key w
 
 - a skippable active gate settles normally with a skip settlement;
 - an unskippable gate rejects the attempt without state mutation;
-- active foreground/background lookup occurs before settled, stale, or unknown classification;
+- active lookup occurs before settled, stale, or unknown classification;
 - a duplicate matching current `lastSettlement` returns `alreadySettled` without another event, output, RNG change, or continuation;
-- a foreground skip makes its prepared-output continuation eligible only for a later runtime entry.
+- the next statement runs only during a later runtime entry.
 
-Skip settles only the pacing gate. It does not skip arbitrary instructions, cancel input, complete `wait`, or create a player transcript message.
+Skip settles only the reading time. It does not skip arbitrary instructions, cancel input, complete `wait`, or create a player transcript message.
 
-### Consumption by a foreground interaction
+### Interactions, `instant`, and `wait`
 
-When execution reaches `showButton`, `askText`, `askNumber`, or `choose` while a pacing gate remains active as background work, one atomic instruction transition:
-
-1. settles the pacing gate with a typed `consumedByForegroundInteraction` settlement;
-2. removes it from `backgroundActions` and updates bounded `lastSettlement`;
-3. emits `actionCompleted` for the gate;
-4. creates the new interaction as the sole `foregroundAction`;
-5. sets status to `waiting`;
-6. emits `actionRequested` for the interaction.
-
-Event order is therefore:
-
-```text
-actionCompleted(chatPacingGate)
-actionRequested(interaction)
-```
-
-No checkpoint may expose an intermediate state with neither the old gate nor the new interaction.
-
-### `instant` and `0 s`
-
-When `say ..., 0 s` or `say ..., instant` executes while a pacing gate remains active as background work, one atomic instruction transition:
-
-1. settles the old gate with a typed `supersededByInstantOutput` settlement;
-2. emits `actionCompleted` for the old gate;
-3. emits the current text-output event;
-4. creates no new gate.
-
-If an earlier gate is already the foreground action blocking a prepared `say`, ordinary source execution cannot reach another `say`; the player or time must settle the foreground gate first.
-
-### Interaction with `wait`
-
-`wait` does not consume a pacing gate. A valid future snapshot may therefore contain:
-
-```text
-foregroundAction: delay
-backgroundActions: [chatPacingGate]
-status: waiting
-```
-
-A time observation may settle either or both according to deadline and action-ID ordering. The continuation after the foreground delay runs only during a later normal runtime entry.
-
-For:
+An interaction after a paced `say` is created when the reading time ends, so it appears then and its timeout counts from then. An ask says its own question without a reading time, so the question and its field or buttons appear together. `say ..., 0 s` and `say ..., instant` create no reading time. A `wait` after a paced `say` starts when the reading time ends; for:
 
 ```tease
 say as mistress "One"
@@ -687,7 +641,7 @@ wait 1 s
 say as mistress "Two"
 ```
 
-actual separation is the longer of the remaining `say` gate and the explicit one-second wait. The two durations are not automatically added.
+the separation is the reading time of "One" plus one second.
 
 Player-authored messages do not create `say` pacing gates. No compiler lookahead across branches, calls, or loops is used; only the path actually executed matters.
 
@@ -727,7 +681,7 @@ The composer is focused by default. Keyboard behavior is:
 
 The implementation must preserve ADR 0015 and ADR 0016:
 
-- action, prepared-output, captured-setting, and pacing state is JSON-safe and fully reconstructable;
+- action, captured-setting, and pacing state is JSON-safe and fully reconstructable;
 - output and action events remain typed and sequenced;
 - a pending interaction or pacing gate survives a JSON checkpoint round trip;
 - restore does not read a browser clock, silently settle time, or re-evaluate source expressions;
@@ -791,7 +745,7 @@ Implementation should be split into small issues, at minimum:
 1. **Default prelude and lowering boundary** — reserve selected names, add parser/semantic support for compact forms, and lower them without final package import syntax.
 2. **Generic foreground interaction runtime** — add the typed action union, any platform guards justified under ADR 0019, completion validation, transcript derivation, checkpoint/restore, events, and deterministic resume tests.
 3. **Basic Standard Library interactions and Standard UI** — implement `showButton`, `askText`, `askNumber`, and `choose`, dynamic button/dropdown presentation, composer integration, transcript behavior, accessibility defaults, and playground acceptance examples.
-4. **Smart-autoplay runtime and `say` composition** — implement validated captured account settings, `chatPacingGate`, background-to-foreground promotion, prepared output, exact/instant modes, speaker skip defaults, click/tap/Space completion, wait interaction, event ordering, and resume-equivalence tests.
+4. **Smart-autoplay runtime and `say` composition** — implement validated captured account settings, `chatPacingGate`, exact/instant modes, speaker skip defaults, click/tap/Space completion, event ordering, and resume-equivalence tests.
 5. **Editor metadata and diagnostics** — add completion, signature/hover guidance, compact-syntax formatting,
    duplicate/mixed-choice diagnostics, pacing diagnostics, bounded-data diagnostics, and protected-name diagnostics.
 6. **Vertical POC acceptance coverage** — demonstrate compile, run, invalid retry, over-limit rejection, checkpoint, JSON round trip, restore, transcript rendering, dynamic choice presentation, and deterministic completion across the selected APIs.
@@ -840,7 +794,5 @@ A player-facing pause command is not deferred; it is excluded by this accepted c
 - unused-space click/tap skipping and Space-to-advance require careful event precedence, input-method, and accessibility testing;
 - bounded-data guards add maintenance and test cost; under ADR 0019 each retained guard needs a justified local boundary, and semantically distinct boundaries are not coupled merely for consistency;
 - account pacing values become deterministic session inputs that must be persisted correctly;
-- populated background actions and background-to-foreground gate promotion require explicit schema versioning and
-  negative schema-validation tests;
-- prepared delayed output must preserve source evaluation and RNG results across checkpoint/restore;
+- the pacing action requires explicit schema versioning and negative schema-validation tests;
 - the first POC deliberately does not solve final library packaging, advanced input options, or multi-conversation provenance.

@@ -15,8 +15,8 @@ import {
 } from "../player/runtime-adapter.js";
 
 // Player Debug countdowns (DEBUGGER.md "Player Debug") name the current foreground wait from canonical state: an
-// authored `wait`, a presented timed `showButton`, or chat pacing while nothing else owns progress or input. Expected
-// deadlines follow from the source's durations.
+// authored `wait`, a presented timed `showButton`, or a message's reading time. Expected deadlines follow from the
+// source's durations.
 
 const W = (deadlineMs: number) => ({ kind: "wait" as const, deadlineMs });
 const B = (deadlineMs: number) => ({ kind: "button" as const, deadlineMs });
@@ -70,50 +70,51 @@ test("only a presented showButton with a timeout counts down, until it is presse
   assert.deepEqual(countdowns('let x = askText hint: "Answer"\nexit', [1_000]), [null, null]);
 });
 
-test("pacing counts down while nothing else owns the foreground", () => {
-  // Staged output, also unskippable; the second message's gate is consumed by the untimed button.
+test("every reading time counts down, and what follows a message counts down only after it", () => {
   assert.deepEqual(
-    countdowns('say "A", 5 s\nsay "B", 2 s\nshowButton "Go"\nexit', [1_000, 5_000]),
-    [P(5_000), P(5_000), null],
+    countdowns('say "A", 5 s\nsay "B", 2 s\nshowButton "Go"\nexit', [1_000, 5_000, 7_000]),
+    [P(5_000), P(5_000), P(7_000), null],
   );
   assert.deepEqual(countdowns('say unskippable "A", 5 s\nsay "B", 2 s\nexit', []), [P(5_000)]);
   assert.deepEqual(countdowns('say "A", instant\nshowButton "Go"\nexit', []), [null]);
-  // A wait owns the overlap, then the pacing that remains takes over; a real timer shows nothing meanwhile.
-  assert.deepEqual(countdowns('say "A", 5 s\nwait 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
-    W(2_000),
-    W(2_000),
-    P(5_000),
-  ]);
-  assert.deepEqual(countdowns('say "A", 5 s\ntimer 2 s\nsay "B", 2 s\nexit', [1_000, 2_000]), [
-    null,
-    null,
-    P(5_000),
-  ]);
-  // A timed button consumes the pacing before it.
-  assert.deepEqual(countdowns('say "A", 5 s\nshowButton "Go", timeout: 4 s\nexit', []), [B(4_000)]);
-  // A pending save owns progress although its pacing has not settled.
+  // A wait starts when the reading time ends; a blocking timer shows nothing meanwhile.
   assert.deepEqual(
-    countdowns('say "A", 5 s\nsave 1 as "x"\nshowButton "Go"\nexit', [], {
+    countdowns('say "A", 5 s\nwait 2 s\nsay "B", 2 s\nexit', [1_000, 5_000, 7_000]),
+    [P(5_000), P(5_000), W(7_000), P(9_000)],
+  );
+  assert.deepEqual(
+    countdowns('say "A", 5 s\ntimer 2 s\nsay "B", 2 s\nexit', [1_000, 5_000, 7_000]),
+    [P(5_000), P(5_000), null, P(9_000)],
+  );
+  // A timed button appears after the reading time, and its timeout counts from then.
+  assert.deepEqual(countdowns('say "A", 5 s\nshowButton "Go", timeout: 4 s\nexit', [5_000]), [
+    P(5_000),
+    B(9_000),
+  ]);
+  // A pending save owns progress once the reading time before it has ended.
+  assert.deepEqual(
+    countdowns('say "A", 5 s\nsave 1 as "x"\nshowButton "Go"\nexit', [5_000], {
       persistentScriptStorage: true,
     }),
-    [null],
+    [P(5_000), null],
   );
 });
 
-test("a block's own foreground work counts down while the action it interrupted waits hidden", () => {
+test("a block's own foreground work counts down while the action it interrupted stands still hidden", () => {
+  // The button had two of its three seconds left when the block started; it gets them back when the block returns.
   assert.deepEqual(
     countdowns(
       'timer async 1 s { wait 5 s }\nshowButton "Go", timeout: 3 s\nexit',
       [1_000, 3_000, 6_000],
     ),
-    [B(3_000), W(6_000), W(6_000), null],
+    [B(3_000), W(6_000), W(6_000), B(8_000)],
   );
   assert.deepEqual(
     countdowns(
       'timer async 1 s {\n  say "H", 5 s\n  say "I", 2 s\n}\nshowButton "Go", timeout: 3 s\nexit',
-      [1_000, 6_000],
+      [1_000, 6_000, 8_000],
     ),
-    [B(3_000), P(6_000), null],
+    [B(3_000), P(6_000), P(8_000), B(10_000)],
   );
   assert.deepEqual(
     countdowns(
@@ -133,7 +134,10 @@ test("a restored session counts down to the same deadline, and an ended or faile
     W(5_000),
   );
   assert.deepEqual(countdowns("exit", []), [null]);
-  assert.deepEqual(countdowns('say "A", 5 s\nlet x = 0\nlet y = 1 / x\nexit', []), [null]);
+  assert.deepEqual(countdowns('say "A", 5 s\nlet x = 0\nlet y = 1 / x\nexit', [5_000]), [
+    P(5_000),
+    null,
+  ]);
 });
 
 test("the countdown text rounds whole seconds up and says when a deadline elapsed before its action settled", () => {

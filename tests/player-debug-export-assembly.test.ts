@@ -57,6 +57,8 @@ function failedSession(answer = SECRET): {
   session = answerPlayerRuntimeImage(session, reference, {
     holds: (asked) => asked === reference,
   })!.session;
+  // The greeting is read before the division fails.
+  session = advancePlayerRuntimeTime(session, 60_000);
   assert.equal(session.state.status, "failed");
   return { session, recorder };
 }
@@ -324,6 +326,7 @@ test("session text shows what the player saw; values that were never said need t
     pendingPlayerRuntimeStorageWrite(session.state)!.actionId,
     true,
   ).session;
+  session = advancePlayerRuntimeTime(session, 60_000);
   assert.equal(session.state.status, "halted");
   const frozen = candidate(session, recorder);
   const exported = async (categories: readonly DebugCategory[]) => {
