@@ -4672,10 +4672,9 @@ class TypeChecker {
   }
 
   /**
-   * `a otherwise b otherwise c`, checked from the left (V30 §18). A fallback runs only when everything before it is
-   * null, so what it changes may or may not have happened afterwards. The result is not null unless the last fallback
-   * may be, and its type joins the value and the fallback as for a list `get` default. The first `otherwise` whose left
-   * side the compiler knows is never null gets warning TSV062, which names that fallback and those after it.
+   * `a otherwise b otherwise c`, checked from the left (V30 §18). The result is not null unless the last fallback may
+   * be, and its type joins the value and the fallback as for a list `get` default. The first `otherwise` whose left side
+   * the compiler knows is never null gets warning TSV062, which names that fallback and those after it.
    */
   *#otherwiseTask(
     root: Extract<Expression, { kind: "binaryExpression" }>,
@@ -4696,10 +4695,12 @@ class TypeChecker {
       // The result may be the value or the fallback itself, so it is a copy that later stores to either cannot share.
       const left = this.#capture(node.left);
       if (unused === null && neverNull(left)) unused = index;
+      // A fallback runs only when every value before it is null, so what it changes may or may not have happened
+      // afterwards, and after a value that is never null, it never runs, but is still checked.
       const start = this.#flow.mark();
       yield* compileChild(this.#expressionTask(node.right, scope));
       const changes = this.#flow.undo(start);
-      this.#flow.apply(this.#flow.join([new Map(), changes]));
+      if (unused === null) this.#flow.apply(this.#flow.join([new Map(), changes]));
       type = fallbackType(left, plainType(this.#capture(node.right)));
       // The root's own type is recorded by its caller.
       if (node !== root) this.#types.set(node, type);

@@ -93,6 +93,29 @@ exit`,
   );
 });
 
+test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
+  const source = (value: string) =>
+    `${HIDE}let count: integer? = hide(1)
+let other: integer? = hide(null)
+function reset {
+    count = null
+    return 0
+}
+if count != null {
+    let result = ${value} otherwise reset()
+    say count + 1
+}
+exit`;
+  assert.deepEqual(
+    diagnostics(source("other")).map((diagnostic) => diagnostic.slice(1, 3)),
+    [["TSV043", "'count' may be null. Check it first: if count != null { ... }"]],
+  );
+  assert.deepEqual(
+    diagnostics(source("count")).map((diagnostic) => diagnostic[1]),
+    ["TSV062"],
+  );
+});
+
 test("a chain gives the first value that is not null, from left to right", () => {
   const source = (nickname: string, saved: string) =>
     `${HIDE}let tried = []
