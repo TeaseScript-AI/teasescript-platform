@@ -1599,7 +1599,7 @@ test(
       );
       const output = emitTease(await convert(sourcePath));
       assert.doesNotMatch(output, /m\.get\(/u);
-      assert.match(output, /^if x == null \{$/mu);
+      assert.match(output, /^x = x otherwise 3$/mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

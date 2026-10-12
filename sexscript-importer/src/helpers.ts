@@ -216,7 +216,6 @@ export type HelperName =
   | "tokenize"
   | "split"
   | "concat"
-  | "position"
   | "listMax"
   | "listMin"
   | "listSum"
@@ -272,11 +271,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
     HELPERS[name].build(),
   );
   // The helpers written for Groovy's -1 of a missing position read it where they use one (positions.ts).
-  const used = new Set<HelperName>();
-  const statements = withPositions(built, used);
-  return used.has("position") && !needed.has("position")
-    ? helperStatements(new Set([...needed, "position"]))
-    : statements;
+  return withPositions(built);
 }
 
 /** Every helper definition, for analyses that need what the helpers return. */
@@ -297,7 +292,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "storedSave",
   "storedLoad",
   "button",
-  "position",
   "concat",
   "array",
   "menuOptions",
@@ -2303,17 +2297,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ]),
           ret(lit(null)),
         ],
-      ),
-  },
-  // Groovy indexOf() and lastIndexOf() gave -1 for a part or an element they did not find, where TeaseScript's give
-  // null (#840); a position used as a number reads -1 there (positions.ts).
-  position: {
-    name: "sexscriptLegacyPosition",
-    build: () =>
-      fn(
-        "sexscriptLegacyPosition",
-        ["position"],
-        [ifS(bin("==", v("position"), lit(null)), [ret(lit(-1))]), ret(v("position"))],
       ),
   },
   concat: {

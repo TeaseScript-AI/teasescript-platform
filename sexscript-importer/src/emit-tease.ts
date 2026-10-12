@@ -425,6 +425,19 @@ export function emitExpression(expression: IrExpression): string {
     case "typeTest":
       return `${operand(expression.value, COMPARISON + 1)} is ${expression.type}`;
     case "binary": {
+      if (expression.operator === "otherwise") {
+        // An operand that is arithmetic, a range, or another operator takes parentheses; a chain runs from the left,
+        // and a sign before the fallback reads one way (V30 §18 "Fallback with otherwise").
+        const left =
+          expression.left.kind === "binary" && expression.left.operator === "otherwise"
+            ? emitExpression(expression.left)
+            : operand(expression.left, POSTFIX);
+        const right =
+          expression.right.kind === "unary" && expression.right.operator === "-"
+            ? emitExpression(expression.right)
+            : operand(expression.right, POSTFIX);
+        return `${left} otherwise ${right}`;
+      }
       const level = precedence(expression);
       // Left-associative operators need parentheses for an equal-precedence right operand, and comparisons
       // may not be chained at all (V30 section 5).
@@ -615,6 +628,8 @@ const OR = 1;
 const AND = 2;
 const NOT = 3;
 const COMPARISON = 4;
+/** `otherwise` binds more strongly than comparisons and less than ranges and arithmetic (V30 §5, #850). */
+const OTHERWISE = 4.5;
 const RANGE = 5;
 const ADDITIVE = 6;
 const MULTIPLICATIVE = 7;
@@ -637,6 +652,8 @@ function precedence(expression: IrExpression): number {
         case "/":
         case "%":
           return MULTIPLICATIVE;
+        case "otherwise":
+          return OTHERWISE;
         default:
           return COMPARISON;
       }

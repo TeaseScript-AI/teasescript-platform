@@ -1,4 +1,3 @@
-import type { HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
@@ -6,24 +5,25 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 /** The TeaseScript methods that give the position of a part or an element, or null where there is none (#840). */
 const POSITIONS = new Set(["indexOf", "lastIndexOf"]);
 const COMPARISONS = new Set(["==", "!=", "<", "<=", ">", ">="]);
-/** The name of the helper that reads -1 for a missing position (helpers.ts `position`). */
-export const POSITION_HELPER = "sexscriptLegacyPosition";
 
 /**
  * Groovy indexOf() and lastIndexOf() gave -1 where nothing was found; TeaseScript's give null (#840). A comparison of
  * a position with a whole number becomes the null test it amounts to: `== -1` and `< 0` test for null, `!= -1`,
  * `>= 0`, and `> -1` for a position, and `== k` and `!= k` for k from 0 compare as they are. Any other use of a
- * position, another ordering too (`p > 0`), reads -1 for null (sexscriptLegacyPosition), the number Groovy gave.
- * `used` collects the helper where a statement needs it.
+ * position, another ordering too (`p > 0`), reads -1 for null, the number Groovy gave: `p otherwise -1` (#850).
  */
-export function withPositions(statements: IrStatement[], used: Set<HelperName>): IrStatement[] {
+export function withPositions(statements: IrStatement[]): IrStatement[] {
   const rewrite = (value: IrExpression): IrExpression => {
     const compared = comparison(value, rewrite);
     if (compared !== null) return compared;
     const next = mapChildren(value, rewrite);
     if (!isPosition(next)) return next;
-    used.add("position");
-    return { kind: "call", name: POSITION_HELPER, positional: [next], named: {} };
+    return {
+      kind: "binary",
+      operator: "otherwise",
+      left: next,
+      right: { kind: "literal", value: -1 },
+    };
   };
   const block = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => {

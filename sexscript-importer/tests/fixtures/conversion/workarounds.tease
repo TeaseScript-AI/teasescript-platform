@@ -1,9 +1,3 @@
-function sexscriptLegacyPosition(position) {
-  if position == null {
-    return -1
-  }
-  return position
-}
 // Workarounds where TeaseScript has no equivalent yet, each marked with a note: regular expressions and the
 // player's language.
 let text = " <b>Kneel</b> now <i>slave</i>"
@@ -11,8 +5,8 @@ let text = " <b>Kneel</b> now <i>slave</i>"
 let withoutTags = ""
 let rest = text
 while rest.contains("<") {
-  let open = sexscriptLegacyPosition(rest.indexOf("<"))
-  let close = sexscriptLegacyPosition(rest.substring(open).indexOf(">"))
+  let open = rest.indexOf("<") otherwise -1
+  let close = rest.substring(open).indexOf(">") otherwise -1
   if close < 0 {
     break
   }

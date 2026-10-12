@@ -2699,6 +2699,9 @@ export function expressionType(
         : UNKNOWN;
     }
     case "binary":
+      // `a otherwise b` gives `a` where it is not null, and `b` otherwise (V30 §18, #850).
+      if (value.operator === "otherwise")
+        return elementsType([nonNull(type(value.left)), type(value.right)]);
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
       return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
     case "call": {

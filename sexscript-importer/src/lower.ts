@@ -2357,7 +2357,7 @@ function lowerFileOnce(
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withLegacyImagePaths(texts, context.syntheticHelpers);
-  texts = withPositions(texts, context.syntheticHelpers);
+  texts = withPositions(texts);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);

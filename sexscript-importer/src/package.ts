@@ -45,6 +45,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
+import { withNullDefaults } from "./null-defaults.ts";
 import {
   expressionType,
   functionResultTypes,
@@ -1131,7 +1132,7 @@ export function lowerPackage(
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-      composed: programs,
+      composed: programs.map(withDefaults),
       main: null,
       paths: files.map(() => null),
     };
@@ -1207,15 +1208,30 @@ export function lowerPackage(
   const stored = withLegacyStorage(nullable, legacyMain === null ? 0 : legacyMain + 1);
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
   const chained = withoutRepeatedChainText(stored.slice(1), paths);
-  const [main, ...programs] =
+  const [main, ...programs] = (
     legacyMain === null
       ? withoutUnusedHelpers([stored[0]!, ...chained])
-      : [stored[0]!, ...withoutUnusedHelpers(chained)];
+      : [stored[0]!, ...withoutUnusedHelpers(chained)]
+  ).map(withDefaults);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
     main: legacyMain !== null ? { file: legacyMain } : { menu: main! },
     paths,
+  };
+}
+
+/**
+ * A program whose null tests that only give a default are `otherwise` (null-defaults.ts), once the passes over the whole
+ * package, which read those tests, such as the storage defaults, ran. The helpers stay as they are generated.
+ */
+function withDefaults(program: MigrationProgram): MigrationProgram {
+  return {
+    ...program,
+    statements: withNullDefaults(
+      program.statements,
+      (statement) => helperDefinitionOrder(statement) >= 0,
+    ),
   };
 }
 

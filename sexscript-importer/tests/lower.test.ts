@@ -1281,7 +1281,7 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   // Helper parameters and variables may not shadow the script's globals `items`, `index`, and `key`.
   assert.match(output, /for keyValue in keys \{/);
   // A list's indexOf is native; Groovy's -1 for a missing element is read where the position is used (#840).
-  assert.match(output, /let index = sexscriptLegacyPosition\(items\.indexOf\("b"\)\)/);
+  assert.match(output, /let index = items\.indexOf\("b"\) otherwise -1/);
   // No key may hold true, so the result may be null.
   assert.match(output, /let key: string\? = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });

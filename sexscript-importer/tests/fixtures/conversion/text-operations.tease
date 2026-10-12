@@ -1,9 +1,3 @@
-function sexscriptLegacyPosition(position) {
-  if position == null {
-    return -1
-  }
-  return position
-}
 function sexscriptLegacyFixed(value, digits, factor) {
   let scaled = round(value * factor)
   let minus = ""
@@ -23,7 +17,7 @@ function sexscriptLegacyFormat(pattern, values) {
   let rest = pattern
   let next = 0
   while rest.indexOf("%") != null {
-    let at = sexscriptLegacyPosition(rest.indexOf("%"))
+    let at = rest.indexOf("%") otherwise -1
     result += rest.substring(0, at)
     rest = rest.substring(at + 1)
     if rest.startsWith("%") {
@@ -132,7 +126,7 @@ if "Yes".lowercase() == "YES".lowercase() {
 }
 say prose "x".replace("x", "$&"), instant
 if typed.contains("this") {
-  say prose "At ${sexscriptLegacyPosition(typed.indexOf("this"))}", instant
+  say prose "At ${typed.indexOf("this") otherwise -1}", instant
 }
 // Groovy showed a whole list as [a, b].
 let items = ["kneel", "wait"]

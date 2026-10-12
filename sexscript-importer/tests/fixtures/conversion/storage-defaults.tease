@@ -150,9 +150,7 @@ function pickOutfit {
 }
 let savedOutfit: string? = load "game.outfit", default: null
 let outfit = sexscriptLegacyValue(savedOutfit)
-if outfit == null {
-  outfit = pickOutfit()
-}
+outfit = outfit otherwise pickOutfit()
 // A legacy text read of a computed key is text too.
 let names = ["a", "b"]
 for n in 0..2 {

@@ -1,20 +1,14 @@
-function sexscriptLegacyPosition(position) {
-  if position == null {
-    return -1
-  }
-  return position
-}
 function sexscriptLegacyCountText(text, part) {
   if part == "" {
     return text.length + 1
   }
   let count = 0
   let rest = text
-  let found = sexscriptLegacyPosition(rest.indexOf(part))
+  let found = rest.indexOf(part) otherwise -1
   while found >= 0 {
     count += 1
     rest = rest.substring(found + 1)
-    found = sexscriptLegacyPosition(rest.indexOf(part))
+    found = rest.indexOf(part) otherwise -1
   }
   return count
 }
