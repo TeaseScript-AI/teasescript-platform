@@ -57,6 +57,32 @@ test("a block that takes longer than its period, or exactly as long, reports TSW
   }
 });
 
+test("a block exactly as long as a period in fractional milliseconds reports it too", () => {
+  const source = [
+    "let n = 0",
+    "wait 1 s",
+    "let t = timer(duration: (2 / 3) s, async: true, repeat: true) {",
+    "  n += 1",
+    "  wait (2 / 3) s",
+    "  if n == 2 {",
+    "    t.stop()",
+    "  }",
+    "}",
+    "wait 1 s",
+    'say "Done after ${n} blocks", instant',
+    "exit",
+  ].join("\n");
+  // The first block starts as the first round ends, at 1 s plus a period, and returns as the second round ends: the
+  // return time less the start is a little shorter than the period in floating point, but the block is as long.
+  const { events } = assertRuntimeResumeEquivalent(source, { scenarioName: "fractional period" });
+  assert.deepEqual(
+    warnings(events).map(({ code, line }) => ({ code, line })),
+    [{ code: "TSW018", line: 3 }],
+  );
+  // One late observation gives the same.
+  assert.deepEqual(warnings(new Story(source).at(10_000).events), warnings(events));
+});
+
 test("a shorter block, a timer that does not repeat, and a block that leaves by goto or exit report nothing", () => {
   const sources = [
     ticking('say "Tick.", 1 s'),

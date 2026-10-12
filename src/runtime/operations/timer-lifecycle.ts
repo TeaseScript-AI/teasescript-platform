@@ -193,7 +193,8 @@ export function reportBlockOverrun(
 ): void {
   if (!("timerId" in interruption)) return;
   const roundMs = interruption.endedRoundMs;
-  if (roundMs === null || snapshot.currentSessionTimeMs - interruption.startedAtMs < roundMs)
+  // Added, not subtracted, as a wait's deadline is: a block exactly as long as the round then compares equal.
+  if (roundMs === null || snapshot.currentSessionTimeMs < interruption.startedAtMs + roundMs)
     return;
   // A stopped timer repeats no more.
   const action = activeTimerAction(snapshot, interruption.timerId);
