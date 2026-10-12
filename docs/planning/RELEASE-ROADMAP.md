@@ -232,6 +232,16 @@ subsystems may still have different maturity levels.
     a missing file.
     - A misspelled literal image path shows up only at runtime, as a missing-media warning.
 
+- [ ] **Accept a compile warning per case**
+  - **Outcome:** An author can accept one warning at one place with a comment on the line before it, naming the
+    warning's code and optionally a reason, such as `// accept TSV061: the tease really runs over two days` above
+    `wait 2 days`. The warning is then no longer reported there. Every other warning, including a new one on the same
+    line, is still shown. Errors cannot be accepted. An `accept` comment whose warning no longer occurs there is itself
+    reported, so stale acceptances do not linger.
+  - **Open for the design:** whether the comment may also stand at the end of the same line, and how Debug and the
+    editor show an accepted warning.
+  - **Reference:** Owner, 2026-10-12. There is no general switch to turn warnings off.
+
 - [ ] **Consider: choose how numbers and other values are shown in text**
   - **Outcome:** Decide whether a script can choose how a value is shown in text, such as a fixed number of decimals.
     - Today `"${3.0} seconds"` shows "3 seconds", and `"${1 / 3}"` shows "0.3333333333333333". A script cannot show
