@@ -2245,7 +2245,7 @@ function validateExpressionNode(
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' or list 'addAll' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
+            "Only a list or set 'add' or list 'addAll' call with one argument, or a list or dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );

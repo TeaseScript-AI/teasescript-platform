@@ -745,6 +745,21 @@ test("get takes a default of any type, and its result joins the value type with 
       '"x"',
     ],
   ]);
+  // A null default decides nothing, so a later value decides the value type alone.
+  assert.deepEqual(
+    says(
+      [
+        "let names = dict{}",
+        'say names.get("a", default: null)',
+        'names["b"] = "ann"',
+        "for key, name in names {",
+        "    say name.uppercase()",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["null", "ANN"],
+  );
   // Also where a test narrowed the dict; a dict whose value type is decided keeps its narrowing.
   assert.deepEqual(
     codes(

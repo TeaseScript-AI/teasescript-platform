@@ -492,14 +492,14 @@ test("get gives the element at an index, or its default for an index the list do
       `${deck}let at = deck.indexOf("king")\nsay deck.get(at, default: "")\nexit`,
       [["TSV043", "'at' may be null. Check it first: if at != null { ... }", "at"]],
     ],
-    // The element of an empty list that nothing decided has no type to name.
+    // The element of an inner empty list that nothing decided has no type to name.
     [
-      "let empty = []\nlet x = empty.get(0, default: 0)\nempty.add(x + 1)\nexit",
+      "let rows = [[]]\nfor v in rows.get(0, default: [0]) {\n    say v + 1\n}\nexit",
       [
         [
           "TSV043",
-          "'x' may be of a type that no value decided yet, such as an element of an empty list without a written type. Check it first: if x is integer { ... }",
-          "x",
+          "'v' may be of a type that no value decided yet, such as an element of an empty list without a written type. Check it first: if v is integer { ... }",
+          "v",
         ],
       ],
     ],
@@ -587,6 +587,53 @@ test("get joins an empty list default into the element type as a literal does", 
       ].join("\n"),
     ),
     ["2", "3", "11", "none"],
+  );
+});
+
+test("get decides the element type of an empty list from its default, as a first value does, but not from null", () => {
+  assert.deepEqual(
+    said(
+      [
+        // Counting needs no declared type.
+        "let scores = []",
+        "scores.add(scores.get(0, default: 0) + 1)",
+        "scores.add(scores.get(0, default: 0) + 1)",
+        "say scores",
+        // A null default decides nothing, so a later element decides the type alone, before or after the read.
+        "let i = 0",
+        "let names = []",
+        "say names.get(i, default: null)",
+        'names.add("ann")',
+        "for name in names {",
+        "    say name.uppercase()",
+        "}",
+        "let pets = []",
+        'pets.add("rex")',
+        "let pet = pets.get(i, default: null)",
+        "if pet != null {",
+        "    say pet.uppercase()",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["[1, 2]", "null", "ANN", "REX"],
+  );
+  assert.deepEqual(diagnostics('let l = []\nsay l.get(0, default: 0)\nl.add("x")\nexit'), [
+    [
+      "TSV041",
+      "'l' holds integer values (integer[]) since line 2, so it cannot contain text (string). To allow both, declare it as 'let l: (integer | string)[] = ...'.",
+      '"x"',
+    ],
+  ]);
+  // Parts of a deciding default that the compiler cannot know are checked against the type when the script runs.
+  assert.deepEqual(
+    failure(
+      `${DYNAMIC}let v = null\nv = dynamic("y")\nlet xs = []\nsay xs.get(0, default: [v])\nxs.add([1])\nexit`,
+    ),
+    [
+      "TSR058",
+      `An element of 'xs' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
+    ],
   );
 });
 
