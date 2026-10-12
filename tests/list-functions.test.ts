@@ -644,6 +644,17 @@ test("get with a null default gives the element type or null for lists of values
       `${lists}let person = people.get(0, default: null)\nsay person.age\nexit`,
       [["TSV043", "'person' may be null. Check it first: if person != null { ... }", "person"]],
     ],
+    // An element type that already holds null stays as written.
+    [
+      "let maybe: (null | integer)[] = [null, 1]\nlet n: integer = maybe.get(1, default: null)\nexit",
+      [
+        [
+          "TSV041",
+          "'n' is declared as integer, so it cannot start as null or a whole number (integer). Keep it in a variable and check it first, as in: if value != null { ... }",
+          "maybe.get(1, default: null)",
+        ],
+      ],
+    ],
   ];
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
 });
