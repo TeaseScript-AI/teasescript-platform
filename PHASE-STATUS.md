@@ -19,10 +19,11 @@ accept syntax, architecture, or implementation details.
   variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
   strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion, control flow,
   deterministic random, weighted choice, and distributions, rounding, numeric, exponential, logarithm, angle,
-  `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, and `takeLast`, `+` on two
-  texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and
-  set operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR
-  0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers shared
+  `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, `takeLast`, `indexOf`,
+  `lastIndexOf`, and `count`, `+` on two texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean`
+  conversions, list `addAll`, `sort`/`shuffle` and set operations, top-level user-defined functions, labels and
+  `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several `.tease` files compile into one
+  plan, with globals, global functions, and speakers shared
   by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets from
   `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and

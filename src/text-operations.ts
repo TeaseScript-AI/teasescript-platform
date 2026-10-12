@@ -19,7 +19,8 @@ export interface TextMember {
   readonly name: string;
   /** `null` for the `length` property; otherwise the method's parameters. */
   readonly parameters: readonly TextParameter[] | null;
-  readonly result: "string" | "integer" | "boolean" | "string[]";
+  /** `integer?` for a position that is `null` when the part does not occur. */
+  readonly result: "string" | "integer" | "integer?" | "boolean" | "string[]";
 }
 
 const part: TextParameter = { name: "part", kind: "text" };
@@ -39,8 +40,8 @@ export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
   member("contains", [part], "boolean"),
   member("startsWith", [part], "boolean"),
   member("endsWith", [part], "boolean"),
-  member("indexOf", [part], "integer"),
-  member("lastIndexOf", [part], "integer"),
+  member("indexOf", [part], "integer?"),
+  member("lastIndexOf", [part], "integer?"),
   member(
     "substring",
     [
