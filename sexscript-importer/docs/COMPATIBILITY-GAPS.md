@@ -204,13 +204,14 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `key.0`, `key.1`, ..., a map as `key.name`, and any other value under the key; generic `load(key)` of a key that was
   not stored itself rebuilt a list (element names all numbers, padded with null) or a map from them, while
   `loadString()` and the other typed reads read the key itself only (PropertiesWorker). Where a package's keys can be
-  one another's elements, compared by shape with a parameter's part taken from the calls, its saves, deletes, and
-  generic `load()` reads, and those of a key no shape resolves, go through two generated helpers in main.tease that do
-  the same (`sexscriptLegacySave`, `sexscriptLegacyLoad`), a null element stored as the text `"null"` as legacy did, and
-  list the keys they store under `sexscriptLegacy.storedKeys`, since TeaseScript storage has no listing (in the order first
-  stored: a key stored again keeps its place, so saving the same keys again leaves the same storage); typed reads and
-  other keys stay native. Not covered: data stored by an earlier conversion, which the list does not know; keys that
-  another package saves or reads; and an object with fixed properties, which is stored whole.
+  one another's elements, compared by shape with a parameter's part taken from the calls and the profile form's
+  answers saved under the keys it asked, its saves, deletes, and generic `load()` reads, and those of a key no shape
+  resolves, go through two generated helpers in main.tease that do the same (`sexscriptLegacySave`,
+  `sexscriptLegacyLoad`), a null element stored as the text `"null"` as legacy did, and list the keys they store under
+  `sexscriptLegacy.storedKeys`, since TeaseScript storage has no listing (in the order first stored: a key stored
+  again keeps its place, so saving the same keys again leaves the same storage); typed reads and other keys stay
+  native. Not covered: data stored by an earlier conversion, which the list does not know; keys that another package
+  saves or reads; and an object with fixed properties, which is stored whole.
 - Legacy `loadMap(key)` is `load(key)` cast to a map (sexscripts.jar 1.29.4), so `loadMap("intro")` read the
   profile's `intro.*` keys as one map and `loadMap("toys")` the owned-item flags. The profile's keys are no saves of
   the package, so such a read stays reported (`SX_STORAGE_MAP_SEMANTICS`; AI_Mistress, 3 sites, an online-only

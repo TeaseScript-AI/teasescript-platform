@@ -14,7 +14,8 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  *
  * Keys are compared by shape, their literal text with one name without a dot for each computed part
  * (`toy.availability.*`); a key that is a parameter, or a parameter's part of it (`"toy.$i"`), takes the shapes the calls
- * of its function give it, and a script variable that only its declaration sets to a text (`tempText`) that text. A
+ * of its function give it, a script variable that only its declaration sets to a text (`tempText`) that text, and a save
+ * that names the keys its key can be, as the profile form's answers do, those keys. A
  * key with no literal text at all is unknown and stays as it is, and so are the references of photos the conversion
  * keeps under their paths.
  */
@@ -25,6 +26,8 @@ export function withLegacyStorage(
 ): MigrationProgram[] {
   const calls = new Map<string, Array<{ call: CallExpression; caller: Scope }>>();
   const keys: Array<{ key: IrExpression; caller: Scope }> = [];
+  // The keys a save names as the ones its computed key can be, such as the profile form's answers (profile.ts).
+  const given = new Map<IrExpression, readonly string[]>();
   // The keys of the saves, deletes, and legacy `load()` reads, which the helpers would take over.
   const routable = new Set<IrExpression>();
   for (const program of programs) {
@@ -44,6 +47,8 @@ export function withLegacyStorage(
       if (statement.kind === "save" || statement.kind === "delete") {
         keys.push({ key: statement.key, caller });
         routable.add(statement.key);
+        if (statement.kind === "save" && statement.keys !== undefined)
+          given.set(statement.key, statement.keys);
       }
       mapOwnExpressions(statement, (value) => {
         eachExpression(value, (expression) => {
@@ -89,7 +94,7 @@ export function withLegacyStorage(
   // key that is only such a reference has none, and an unresolved key null.
   const known = new Map<IrExpression, string[] | null>();
   for (const { key, caller } of keys) {
-    const found = shapes(key, caller, 0, variableShapes);
+    const found = given.get(key) ?? shapes(key, caller, 0, variableShapes);
     known.set(key, found?.filter((shape) => !shape.startsWith(SENT_IMAGE_PREFIX)) ?? null);
   }
   const all = [...new Set([...known.values()].flatMap((found) => found ?? []))];
