@@ -7109,7 +7109,11 @@ class TypeChecker {
     );
   }
 
-  /** Notes a value that is changed in place, with the values it is part of, such as `p` in `p.toys.add(1)`. */
+  /**
+   * Notes a value that is changed in place, with the values it is part of as written, such as `p` in `p.toys.add(1)`.
+   * As for narrowing (see `rootName`), a step that gives a copy, such as a dict's `values`, counts too: leaving out a
+   * fallback is never wrong, while naming one where a change reaches the value would lose that change.
+   */
   #noteChanged(expression: Expression): void {
     for (let node = expression; ;) {
       this.#changed.add(node);
