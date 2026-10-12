@@ -2387,7 +2387,7 @@ export class Evaluator {
           if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
             throw fault(
               "TSR028",
-              "list.get(index, default: value) takes an index and a 'default:' value.",
+              "'list.get(index, default: value)' takes an index and a 'default:' value.",
               span,
             );
           const index = positional[0]!;

@@ -819,7 +819,7 @@ function getProblems(
     return [
       {
         kind: "invalidOperand",
-        message: "A set has no positions, so it has no get(). Use contains(...) instead.",
+        message: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
         span: property.span,
       },
     ];
@@ -840,8 +840,8 @@ function getProblems(
       kind: "argumentCount",
       message:
         positional === 1 && named.length === 0
-          ? "get(index, default: value) needs a 'default:' for an index the list does not have. Read an element that must exist as list[index]."
-          : "get(index, default: value) takes one index and a 'default:'.",
+          ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
+          : "'get(index, default: value)' takes one index and a 'default:'.",
       span: call.span,
     },
   ];

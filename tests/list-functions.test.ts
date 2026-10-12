@@ -504,14 +504,20 @@ test("get gives the element at an index, or its default for an index the list do
     ],
     [
       'say set["ace"].get(0, default: "")\nexit',
-      [["TSV043", "A set has no positions, so it has no get(). Use contains(...) instead.", "get"]],
+      [
+        [
+          "TSV043",
+          "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
+          "get",
+        ],
+      ],
     ],
     [
       `${deck}say deck.get(0)\nexit`,
       [
         [
           "TSV020",
-          "get(index, default: value) needs a 'default:' for an index the list does not have. Read an element that must exist as list[index].",
+          "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'.",
           "deck.get(0)",
         ],
       ],
@@ -521,7 +527,7 @@ test("get gives the element at an index, or its default for an index the list do
       [
         [
           "TSV020",
-          "get(index, default: value) takes one index and a 'default:'.",
+          "'get(index, default: value)' takes one index and a 'default:'.",
           'deck.get(0, "")',
         ],
       ],
@@ -544,7 +550,7 @@ test("get gives the element at an index, or its default for an index the list do
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic([1]).get(0)\nexit`), [
     "TSR028",
-    "list.get(index, default: value) takes an index and a 'default:' value.",
+    "'list.get(index, default: value)' takes an index and a 'default:' value.",
   ]);
 });
 
