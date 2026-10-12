@@ -9273,11 +9273,20 @@ function lowerCollectionStatement(
   };
   const reassign = (value: IrExpression): IrStatement[] =>
     parameterWrite() ?? [{ kind: "assign", target: list, operator: "=", value, span }];
+  // Collections.shuffle() shuffles the list in place, as TeaseScript shuffle() does.
   if (shuffledList !== undefined && call.arguments.length === 1) {
-    return reassign(useHelper(context, "shuffled", [list]));
+    const blocked = parameterWrite();
+    if (blocked !== null) return blocked;
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "methodCall", target: list, name: "shuffle", arguments: [] },
+        span,
+      },
+    ];
   }
-  if (call.name === "unique" && call.arguments.length === 0)
-    return reassign(useHelper(context, "unique", [list]));
+  // Groovy unique() keeps the first of equal elements in place; union() with no elements does so in a new list.
+  if (call.name === "unique" && call.arguments.length === 0) return reassign(unionOf(list));
   if (call.name === "sort" && call.arguments.length === 0) {
     // Groovy sort() sorts the list in place, as TeaseScript sort() does.
     const blocked = parameterWrite();
@@ -12668,6 +12677,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
+  const presence = textPresence(mapped, leftNode, rightNode, context);
+  if (presence !== undefined) return presence;
   // Groovy ordered null below every value, where TeaseScript stops at an ordering of null (TSR009).
   if (
     ["<", "<=", ">", ">="].includes(mapped) &&
@@ -14757,10 +14768,13 @@ function lowerObjectMethodCallExpression(
       case "clone":
       case "toArray":
         return target;
+      // Groovy max() and min() give null for an empty list, where TeaseScript's stop the script; a list of numbers that
+      // is never empty takes the native ones.
       case "max":
-        return useHelper(context, "listMax", [target]);
       case "min":
-        return useHelper(context, "listMin", [target]);
+        return nonEmptyNumberList(targetNode, context)
+          ? { kind: "call", name, positional: [target], named: {} }
+          : useHelper(context, name === "max" ? "listMax" : "listMin", [target]);
       case "sum": {
         // Groovy sum() adds numbers and joins texts, so a list of texts sums with the helper that joins them as Groovy
         // did, null elements included (ToyExpanded's number memory game).
@@ -14773,7 +14787,7 @@ function lowerObjectMethodCallExpression(
       }
       case "unique":
         // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
-        return useHelper(context, "unique", [target]);
+        return unionOf(target);
       case "join":
         // Groovy join() has no separator; TeaseScript's default separator is ", ".
         if (!joinableElements(targetNode, node, context)) return null;
@@ -22245,6 +22259,75 @@ function positiveWholeBound(
 
 function isTrueConstant(node: AstNode | null): boolean {
   return node?.kind === "constant" && node.value === true;
+}
+
+/**
+ * Whether a list holds numbers and is never empty: a list literal of numbers with at least one element, or a variable,
+ * not a parameter or loop variable, whose every value is one, which no method, operator, or write by position resizes,
+ * and which Groovy shared with no other variable.
+ */
+function nonEmptyNumberList(node: AstNode, context: LowerContext): boolean {
+  const numbers = (value: AstNode): boolean =>
+    value.kind === "list" &&
+    nodeArray(value.items).length > 0 &&
+    nodeArray(value.items).every((item) => onlyOf(inferType(item, context.types), NUMBER));
+  if (node.kind === "list") return numbers(node);
+  const key = node.kind === "variable" ? bindingKey(node, context.bindings) : null;
+  if (
+    key === null ||
+    context.parameterBindings.has(key) ||
+    context.aliasedLists.has(key) ||
+    context.resizedLists.has(key) ||
+    context.compoundValues.has(key)
+  )
+    return false;
+  const values = context.assignedValues.get(key) ?? [];
+  return values.length > 0 && values.every(numbers);
+}
+
+/**
+ * Groovy `text.count(part) > 0` (or `!= 0`) of a part that is not empty tests that the part occurs, `text.contains(part)`,
+ * and `== 0` that it does not; undefined for any other comparison.
+ */
+function textPresence(
+  operator: string,
+  left: AstNode | null,
+  right: AstNode | null,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  if (
+    left === null ||
+    right === null ||
+    left.kind !== "methodCall" ||
+    constantString(left.method) !== "count"
+  )
+    return undefined;
+  if (constantValue(right) !== 0 || ![">", "!=", "=="].includes(operator)) return undefined;
+  const receiver = asNode(left.object);
+  const args = nodeArray(asNode(left.arguments)?.items);
+  const part = args.length === 1 ? constantString(args[0]) : null;
+  if (receiver === null || part === null || part === "") return undefined;
+  const type = inferType(receiver, context.types);
+  if (!onlyOf(type, STRING | NULL) || (type & STRING) === 0) return undefined;
+  const text = lowerExpression(receiver, context);
+  if (text === null) return null;
+  const contains: IrExpression = {
+    kind: "methodCall",
+    target: text,
+    name: "contains",
+    arguments: [{ kind: "literal", value: part }],
+  };
+  return operator === "==" ? { kind: "unary", operator: "not", value: contains } : contains;
+}
+
+/** A list's elements without repeats, the first of equal ones kept in order: `list.union([])`. */
+function unionOf(list: IrExpression): IrExpression {
+  return {
+    kind: "methodCall",
+    target: list,
+    name: "union",
+    arguments: [{ kind: "list", items: [] }],
+  };
 }
 
 function isNullConstant(node: AstNode | undefined): boolean {

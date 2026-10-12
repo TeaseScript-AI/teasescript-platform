@@ -227,8 +227,6 @@ export type HelperName =
   | "menuOptions"
   | "min"
   | "random"
-  | "shuffled"
-  | "unique"
   | JavaHelperName;
 
 /** Parts of query parameter names whose values a notice hides (helper `maskUrl`, maskedUrl in lower.ts). */
@@ -295,8 +293,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "count",
   "concat",
   "array",
-  "shuffled",
-  "unique",
   "menuOptions",
   "listMax",
   "listMin",
@@ -1558,7 +1554,11 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ifS(
               bin(
                 "and",
-                bin("or", bin("==", v("name"), v("key")), call(v("name"), "startsWith", v("prefix"))),
+                bin(
+                  "or",
+                  bin("==", v("name"), v("key")),
+                  call(v("name"), "startsWith", v("prefix")),
+                ),
                 not(call(v("fresh"), "contains", v("name"))),
               ),
               [{ kind: "delete", key: v("name"), span: null }],
@@ -2346,64 +2346,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("items", { kind: "list", items: [] }),
           { kind: "repeat", count: v("size"), body: [add("items", v("value"))], span: null },
           ret(v("items")),
-        ],
-      ),
-  },
-  shuffled: {
-    // Fisher-Yates shuffle over a copy, using the deterministic session RNG.
-    name: "sexscriptLegacyShuffled",
-    build: () =>
-      fn(
-        "sexscriptLegacyShuffled",
-        ["items"],
-        [
-          letS("shuffled", v("items")),
-          letS("index", bin("-", prop(v("shuffled"), "length"), lit(1))),
-          {
-            kind: "while",
-            condition: bin(">", v("index"), lit(0)),
-            span: null,
-            body: [
-              letS("other", {
-                kind: "call",
-                name: "randomInteger",
-                positional: [range(v("index"), true)],
-                named: {},
-              }),
-              letS("swap", at(v("shuffled"), v("index"))),
-              set(at(v("shuffled"), v("index")), at(v("shuffled"), v("other"))),
-              set(at(v("shuffled"), v("other")), v("swap")),
-              set(v("index"), lit(1), "-="),
-            ],
-          },
-          ret(v("shuffled")),
-        ],
-      ),
-  },
-  unique: {
-    name: "sexscriptLegacyUnique",
-    build: () =>
-      fn(
-        "sexscriptLegacyUnique",
-        ["items"],
-        [
-          letS("unique", { kind: "list", items: [] }),
-          forS("item", v("items"), [
-            ifS(
-              {
-                kind: "unary",
-                operator: "not",
-                value: {
-                  kind: "methodCall",
-                  target: v("unique"),
-                  name: "contains",
-                  arguments: [v("item")],
-                },
-              },
-              [add("unique", v("item"))],
-            ),
-          ]),
-          ret(v("unique")),
         ],
       ),
   },

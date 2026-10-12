@@ -8,18 +8,6 @@ function sexscriptLegacyArray(size, valueValue) {
   }
   return itemsValue
 }
-function sexscriptLegacyShuffled(itemsValue2) {
-  let shuffled = itemsValue2
-  let index = shuffled.length - 1
-  while index > 0 {
-    let other = randomInteger(0..=index)
-    let swap = shuffled[index]
-    shuffled[index] = shuffled[other]
-    shuffled[other] = swap
-    index -= 1
-  }
-  return shuffled
-}
 function sexscriptLegacyMenuOptions(texts, first) {
   let options = []
   let position = first
@@ -29,39 +17,27 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return options
 }
-function sexscriptLegacyListMax(itemsValue3) {
-  if itemsValue3.length == 0 {
-    return null
-  }
-  let best = itemsValue3.first
-  for item in itemsValue3 {
-    if item > best {
-      best = item
-    }
-  }
-  return best
-}
-function sexscriptLegacyListSum(itemsValue4): integer? {
-  if itemsValue4.length == 0 {
+function sexscriptLegacyListSum(itemsValue2): integer? {
+  if itemsValue2.length == 0 {
     return null
   }
   let totalValue = 0
-  for item in itemsValue4 {
+  for item in itemsValue2 {
     totalValue += item
   }
   return totalValue
 }
-function sexscriptLegacyTextSum(itemsValue5) {
-  if itemsValue5.length == 0 {
+function sexscriptLegacyTextSum(itemsValue3) {
+  if itemsValue3.length == 0 {
     return null
   }
-  if itemsValue5.length == 1 {
-    return itemsValue5[0]
+  if itemsValue3.length == 1 {
+    return itemsValue3[0]
   }
-  if itemsValue5[0] == null {
-    return itemsValue5[0] + "${itemsValue5[1]}"
+  if itemsValue3[0] == null {
+    return itemsValue3[0] + "${itemsValue3[1]}"
   }
-  return itemsValue5.join("")
+  return itemsValue3.join("")
 }
 function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
@@ -126,11 +102,11 @@ function sexscriptLegacySplit(text, separator) {
   }
   return partsValue2
 }
-function sexscriptLegacyReversed(itemsValue6) {
+function sexscriptLegacyReversed(itemsValue4) {
   let result = []
-  let index = itemsValue6.length - 1
+  let index = itemsValue4.length - 1
   while index >= 0 {
-    result.add(itemsValue6[index])
+    result.add(itemsValue4[index])
     index -= 1
   }
   return result
@@ -174,7 +150,7 @@ for i in 0..items.length {
   let item = items[i]
   say prose "${i}: ${item}", instant
 }
-items = sexscriptLegacyShuffled(items)
+items.shuffle()
 items.removeAt(0)
 items.remove("wait")
 let pairs = [
@@ -184,7 +160,7 @@ let pairs = [
 pairs.remove([1, 2])
 let numbers = [5, 6]
 say prose "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}", instant
-say prose "Best: ${sexscriptLegacyListMax([3, 7, 5])}", instant
+say prose "Best: ${max([3, 7, 5])}", instant
 let bigger = max(total, 4)
 if items.length == 0 {
   say prose "Nothing left", instant

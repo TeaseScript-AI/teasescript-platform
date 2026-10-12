@@ -638,7 +638,7 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
       ),
   },
   // Java List.add(index, value): a new list of the elements before the position, the value, and the rest; a position
-  // outside 0 to the length failed in Java.
+  // outside 0 to the length failed in Java, and a position with a fraction found no add() in Groovy; take() rejects it.
   insert: {
     name: "sexscriptLegacyInsert",
     build: () =>
@@ -655,23 +655,16 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
               dict: true,
             }),
           ]),
-          letS("result", { kind: "list", items: [] }),
-          letS("position", lit(0)),
-          forS("item", v("items"), [
-            ifS(bin("==", v("position"), v("index")), [
-              {
-                kind: "expression",
-                expression: method(v("result"), "add", v("value")),
-                span: null,
-              },
-            ]),
-            { kind: "expression", expression: method(v("result"), "add", v("item")), span: null },
-            set("position", lit(1), "+="),
-          ]),
-          ifS(bin("==", v("index"), length(v("items"))), [
-            { kind: "expression", expression: method(v("result"), "add", v("value")), span: null },
-          ]),
-          ret(v("result")),
+          ret(
+            bin(
+              "+",
+              bin("+", method(v("items"), "take", v("index")), {
+                kind: "list",
+                items: [v("value")],
+              }),
+              method(v("items"), "takeLast", bin("-", length(v("items")), v("index"))),
+            ),
+          ),
         ],
       ),
   },

@@ -10,7 +10,7 @@
  * waits are what the fixture is about. A fixture whose `<name>.answers` exists asks: each line answers one ask in turn, a
  * text ask with its text and a choice with its option's position from 0, and `getString(question, fallback)` and
  * `getSelectedValue(question, options)` print the question and return the next answer. The output goes to
- * `<name>.out`. Java comes from the PATH, the Groovy JAR from SEXSCRIPT_GROOVY_JAR or the local Maven repository, as for
+ * `<name>.out`. Java comes from SEXSCRIPT_JAVA or the PATH, the Groovy JAR from SEXSCRIPT_GROOVY_JAR or the local Maven repository, as for
  * the parser.
  */
 import { spawnSync } from "node:child_process";
@@ -59,6 +59,9 @@ export function oracleFixtureNames(): string[] {
     .sort();
 }
 
+/** Groovy 2.5 runs on Java 8 to 17; a newer default Java fails on JDK classes, so SEXSCRIPT_JAVA can name another. */
+const JAVA = process.env.SEXSCRIPT_JAVA ?? "java";
+
 function groovyJar(): string {
   return (
     process.env.SEXSCRIPT_GROOVY_JAR ??
@@ -79,7 +82,7 @@ function record(name: string): { output: string; error: string | null } {
     // A script name that Groovy accepts as a class name.
     const script = path.join(directory, "oracle.groovy");
     writeFileSync(script, `${preamble}${source}`);
-    const result = spawnSync("java", ["-cp", groovyJar(), "groovy.ui.GroovyMain", script], {
+    const result = spawnSync(JAVA, ["-cp", groovyJar(), "groovy.ui.GroovyMain", script], {
       encoding: "utf8",
       timeout: 120_000,
     });

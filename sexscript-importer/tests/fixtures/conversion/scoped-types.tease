@@ -21,7 +21,7 @@ say prose "Hand: ${hand[0]}, ${title} has ${initials(title)} M", instant
 // Loop variables and iteration closure parameters take the elements of a proven list.
 let outfits = ["red bikini", "blue bikini top"]
 for outfit in outfits {
-  if outfit.split("bikini").length - 1 > 0 {
+  if outfit.contains("bikini") {
     say prose "Beach: ${outfit}", instant
   }
 }
