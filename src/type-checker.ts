@@ -5224,6 +5224,15 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // A list's `get` takes its index as indexing does, but gives its default for a negative one (#844). A member without
+    // `get`, such as null, is reported below instead, and a dict, which has one, here, as for indexing.
+    if (
+      method === "get" &&
+      expression.arguments[0]?.kind === "positionalArgument" &&
+      members(value).some(isList) &&
+      members(value).every((member) => memberMethodType(member, method) !== undefined)
+    )
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
     if (isDictReceiver(value) && DICT_METHODS.has(method)) {
@@ -5414,8 +5423,8 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, `take`, `takeLast`, a search, or a set operation on one list or set, as evaluated, and
-   * gives its result (V30 §16).
+   * Checks `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as evaluated,
+   * and gives its result (V30 §16).
    */
   #collectionMethodType(
     method: string,
@@ -5430,6 +5439,13 @@ class TypeChecker {
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
+    // The element, or the default, which may be of another type, so their types join (#844).
+    if (method === "get") {
+      const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
+      return problems.length > 0 || fallback === undefined
+        ? UNKNOWN_TYPE
+        : union([copyType(value.element), plainType(typeOf(fallback.value))]);
+    }
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -7954,6 +7970,9 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
       return value.kind === "list" ? optional(INTEGER_TYPE) : undefined;
     case "count":
       return value.kind === "list" ? INTEGER_TYPE : undefined;
+    // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
+    case "get":
+      return value.kind === "list" ? copyType(value.element) : undefined;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
     case "toSet":
       return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
