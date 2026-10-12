@@ -370,6 +370,11 @@ test("&&, ||, !, and ?? each give one error that names the word, and parsing goe
     ['let a = true\nif a || false { say "x" }\nexit', [or]],
     ['let a = true\nif !a { say "x" }\nexit', [not]],
     [`${HIDE}let a: integer? = hide(null)\nlet b = a ?? 0\nexit`, [otherwise]],
+    // Beside arithmetic, a sign, or a range, `??` needs parentheses too, which its one error leaves for later.
+    [
+      `${HIDE}let a: integer? = hide(null)\nsay a ?? 0 + 1\nsay -a ?? 0\nsay a ?? 1..=3\nsay a ??\n    0 * 2\nexit`,
+      [otherwise, otherwise, otherwise, otherwise],
+    ],
     // In an interpolation, a quote after the symbol starts a string, as after the word.
     [
       `${HIDE}let a: string? = hide(null)\nsay "\${a ?? "pet"} \${a || "x"} \${a && "y"} \${!a}"\nexit`,

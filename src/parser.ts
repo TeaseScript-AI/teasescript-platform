@@ -3405,8 +3405,9 @@ class Parser {
   *#parseOtherwise(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseRange());
     while (expression !== null) {
+      const word = this.#matchOperator(TokenKind.KeywordOtherwise);
       const operator =
-        this.#matchOperator(TokenKind.KeywordOtherwise) ??
+        word ??
         this.#matchSymbol(
           TokenKind.Question,
           "two",
@@ -3423,7 +3424,8 @@ class Parser {
         );
         return null;
       }
-      this.#reportMixedOtherwise(expression, right, operator);
+      // A `??` has its one error already (V30 §39); the parentheses follow once it is the word.
+      if (word !== null) this.#reportMixedOtherwise(expression, right, operator);
       expression = this.#binary(expression, right, "otherwise", operator);
     }
     return expression;
