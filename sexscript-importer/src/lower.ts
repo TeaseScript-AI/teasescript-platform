@@ -13713,30 +13713,43 @@ function markSentinelReads(body: AstNode, context: LowerContext): void {
       );
     if (node.kind === "methodCall") calls.push(node);
   });
-  // A Groovy list, not a Java array: a list literal, a variable only ever set to list literals, or a closure's
-  // parameter that every call of every closure with a parameter of its name passes such a list.
-  const groovyList = (list: AstNode, depth = 0): boolean => {
+  // The arguments of a call of a closure, `picks(…)` or `picks.call(…)`.
+  const passed = (call: AstNode, closure: string): AstNode[] | null => {
+    const parts = callParts(call);
+    if (parts?.name === closure) return parts.arguments;
+    return constantString(call.method) === "call" && variableName(asNode(call.object)) === closure
+      ? nodeArray(asNode(call.arguments)?.items)
+      : null;
+  };
+  // A Groovy list, not a Java array: a list literal, lists joined with `+`, a variable only ever set to such values,
+  // or a closure's parameter that every call of every closure with a parameter of its name passes one, and that the
+  // closure sets to nothing else.
+  const groovyList = (list: AstNode, seen = new Set<string>()): boolean => {
     if (list.kind === "list") return true;
-    const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
-    if (key === null || depth > 2) return false;
-    if (!context.parameterBindings.has(key)) {
-      const values = context.assignedValues.get(key) ?? [];
-      return values.length > 0 && values.every((value) => value.kind === "list");
+    if (list.kind === "binary" && list.operator === "+") {
+      const [left, right] = [asNode(list.left), asNode(list.right)];
+      return left !== null && right !== null && groovyList(left, seen) && groovyList(right, seen);
     }
+    const key = list.kind === "variable" ? bindingKey(list, context.bindings) : null;
+    if (key === null || seen.has(key) || seen.size > 8) return false;
+    seen.add(key);
+    const values = context.assignedValues.get(key) ?? [];
+    if (!values.every((value) => groovyList(value, seen))) return false;
+    if (!context.parameterBindings.has(key)) return values.length > 0;
     const name = variableName(list);
-    let passed = false;
+    let given = false;
     for (const [closure, parameters] of closures) {
       const position = parameters.indexOf(name ?? "");
       if (position < 0) continue;
       for (const call of calls) {
-        const parts = callParts(call);
-        if (parts?.name !== closure) continue;
-        const argument = parts.arguments[position];
-        if (argument === undefined || !groovyList(argument, depth + 1)) return false;
-        passed = true;
+        const arguments_ = passed(call, closure);
+        if (arguments_ === null) continue;
+        const argument = arguments_[position];
+        if (argument === undefined || !groovyList(argument, seen)) return false;
+        given = true;
       }
     }
-    return passed;
+    return given;
   };
   walkAst(body, (node) => {
     const parts = nodeArray(asNode(node.collection)?.items);

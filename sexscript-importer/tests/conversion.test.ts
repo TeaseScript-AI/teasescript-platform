@@ -2006,7 +2006,8 @@ test(
 );
 
 // A Java array's position past its end failed in Groovy, so a loop that tests what it reads from an array passed to
-// it for null reads strictly; only a Groovy list read past its end gave null (Stay's picks).
+// it, or set in it, for null reads strictly; only a Groovy list read past its end gave null (Stay's picks), also one
+// joined from lists or copied from another variable.
 test(
   "a loop's null test reads a Java array passed to it strictly",
   { skip: parserUnavailable },
@@ -2026,7 +2027,15 @@ test(
           '  def next = "x"',
           "  for (def i = 0; next != null; i++) next = items[i]",
           "}",
-          'words(["a", "b"])',
+          'def original = ["a"]',
+          'def copied = original + ["b"]',
+          "words(copied)",
+          "def slots = { cells ->",
+          "  cells = new int[1]",
+          "  def next = 99",
+          "  for (def i = 0; next != null; i++) next = cells[i]",
+          "}",
+          "slots.call([1])",
           "",
         ].join("\n"),
       );
@@ -2034,6 +2043,7 @@ test(
       const tease = emitTease(program!);
       assert.match(tease, /next = pick\[i\]/u);
       assert.match(tease, /next = sexscriptLegacyItemAt\(items, i\)/u);
+      assert.match(tease, /next = cells\[i\]/u);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
