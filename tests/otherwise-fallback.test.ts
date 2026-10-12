@@ -133,29 +133,114 @@ exit`;
   assert.deepEqual(sayTexts(source("null", "null")), ["pet 123"]);
 });
 
-test("otherwise binds tighter than arithmetic and comparisons, so the fallback belongs to its value", () => {
+test("otherwise beside arithmetic or a range needs parentheses, and one error names both readings", () => {
+  const cases: [string, string, string][] = [];
+  for (const operator of ["+", "-", "*", "/", "%"])
+    cases.push(
+      [
+        `a otherwise 3 ${operator} 2`,
+        `(a otherwise 3) ${operator} 2`,
+        `a otherwise (3 ${operator} 2)`,
+      ],
+      [
+        `3 ${operator} a otherwise 2`,
+        `3 ${operator} (a otherwise 2)`,
+        `(3 ${operator} a) otherwise 2`,
+      ],
+    );
+  cases.push(
+    ["-a otherwise 2", "-(a otherwise 2)", "(-a) otherwise 2"],
+    ["+a otherwise 2", "+(a otherwise 2)", "(+a) otherwise 2"],
+    ["a otherwise 1..=3", "(a otherwise 1)..=3", "a otherwise (1..=3)"],
+    ["1..a otherwise 3", "1..(a otherwise 3)", "(1..a) otherwise 3"],
+    // Both sides, a chain, and the issue's own example: the error quotes what was written.
+    ["2 * a otherwise 3 + 1", "2 * (a otherwise 3) + 1", "(2 * a) otherwise (3 + 1)"],
+    [
+      "a otherwise b otherwise 3 + 1",
+      "(a otherwise b otherwise 3) + 1",
+      "a otherwise b otherwise (3 + 1)",
+    ],
+    [
+      'path.lastIndexOf("/") otherwise -1 + 1',
+      '(path.lastIndexOf("/") otherwise -1) + 1',
+      'path.lastIndexOf("/") otherwise (-1 + 1)',
+    ],
+  );
+  for (const [written, nearest, all] of cases)
+    assert.deepEqual(
+      diagnostics(
+        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
+      ),
+      [
+        [
+          "error",
+          "TSP041",
+          `Put parentheses around what 'otherwise' belongs to: '${nearest}' or '${all}'.`,
+          "otherwise",
+        ],
+      ],
+      written,
+    );
+  // A reading too long to quote is named by an example.
+  assert.deepEqual(
+    diagnostics(
+      'let a: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\nexit',
+    ).map((diagnostic) => diagnostic[2]),
+    [
+      "Put parentheses around what 'otherwise' belongs to, as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'.",
+    ],
+  );
+});
+
+test("otherwise needs no parentheses beside comparisons, not, and, or, in a chain, and before a sign or a unit", () => {
   assert.deepEqual(
     sayTexts(
       `${HIDE}let path = "a/b/c"
 let count: integer? = hide(null)
 let nickname: string? = hide(null)
-let low: integer? = hide(null)
-say path.lastIndexOf("/") otherwise -1 + 1
-say "abc".lastIndexOf("/") otherwise -1 + 1
-say count otherwise 0 + 1
-say 2 * count otherwise 5
-say "Hello " + nickname otherwise "pet"
+let ready: boolean? = hide(null)
+let delay: duration? = hide(null)
+say path.lastIndexOf("/") otherwise -1
+say "abc".lastIndexOf("/") otherwise -1
 say nickname otherwise "pet" == "pet"
-say count otherwise 0 < 1 and nickname otherwise "" == ""
-let total = 0
-for step in low otherwise 1..=3 {
-    total += step
-}
-say total
+say count otherwise "none" is string
+say not ready otherwise false
+say ready otherwise true and count otherwise 0 == 0
+say ready otherwise false or nickname otherwise "" != ""
+say delay otherwise 5 s == 5 s
+say nickname otherwise count otherwise "you"
 say "\${nickname otherwise "you"} \${count otherwise 0}"
 exit`,
     ),
-    ["4", "0", "1", "10", "Hello pet", "true", "true", "6", "you 0"],
+    ["3", "-1", "true", "true", "true", "true", "false", "true", "you", "you 0"],
+  );
+});
+
+test("with parentheses, either reading compiles and runs as written", () => {
+  assert.deepEqual(
+    sayTexts(
+      `${HIDE}let five: integer? = hide(5)
+let known = hide(4)
+let none = hide(null)
+say (five otherwise 3) + 2
+say five otherwise (3 + 2)
+say (five otherwise 3) / 2
+say five otherwise (3 / 2)
+say 2 * (known otherwise 5)
+say (2 * known) otherwise 5
+say -(none otherwise 1)
+say (-known) otherwise 1
+let total = 0
+for step in (none otherwise 1)..=3 {
+    total += step
+}
+for step in none otherwise (1..=2) {
+    total += step * 10
+}
+say total
+exit`,
+    ),
+    ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "36"],
   );
 });
 

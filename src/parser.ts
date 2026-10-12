@@ -30,6 +30,7 @@ import type {
   PositionalArgument,
   Program,
   PropertyAccessExpression,
+  RangeExpression,
   SayParts,
   ShowButtonParts,
   ShowButtonStatement,
@@ -172,6 +173,7 @@ const parserDiagnosticCode = {
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
   invalidLoadForm: "TSP040",
+  mixedOtherwise: "TSP041",
   invalidTagQuery: "TST001",
 } as const;
 
@@ -3306,7 +3308,7 @@ class Parser {
   }
 
   *#parseComparison(): ParseTask<Expression | null> {
-    const left = yield* parseChild(this.#parseRange());
+    const left = yield* parseChild(this.#parseOtherwise());
     if (left === null) return null;
     let expression: Expression;
     if (this.#check(TokenKind.KeywordIs)) {
@@ -3314,7 +3316,7 @@ class Parser {
     } else if (isComparisonKind(this.#peek().kind)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseRange());
+      const right = yield* parseChild(this.#parseOtherwise());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -3339,7 +3341,7 @@ class Parser {
         }
         this.#advance();
         this.#skipContinuationNewlines();
-        yield* parseChild(this.#parseRange());
+        yield* parseChild(this.#parseOtherwise());
       }
     }
     return expression;
@@ -3353,7 +3355,7 @@ class Parser {
     this.#skipContinuationNewlines();
     const first = this.#peek();
     if (this.#atComparedValue()) {
-      const compared = yield* parseChild(this.#parseRange());
+      const compared = yield* parseChild(this.#parseOtherwise());
       this.#reportSpan(
         parserDiagnosticCode.invalidType,
         "'is' checks a type. Use '==' to compare values.",
@@ -3394,6 +3396,71 @@ class Parser {
     )
       return true;
     return typeName(token) === undefined && isExpressionStart(token);
+  }
+
+  /**
+   * `a otherwise b`, left-associative, between the ranges and the comparisons. An operand that is arithmetic or a range
+   * needs parentheses, because the fallback could be meant for its nearest value or for all of it (V30 §5, §18).
+   */
+  *#parseOtherwise(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseRange());
+    while (expression !== null) {
+      const operator =
+        this.#matchOperator(TokenKind.KeywordOtherwise) ??
+        this.#matchSymbol(
+          TokenKind.Question,
+          "two",
+          "otherwise",
+          'let name = nickname otherwise "pet"',
+        );
+      if (operator === null) break;
+      this.#skipContinuationNewlines();
+      const right = yield* parseChild(this.#parseRange());
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a fallback value after 'otherwise'.",
+        );
+        return null;
+      }
+      this.#reportMixedOtherwise(expression, right, operator);
+      expression = this.#binary(expression, right, "otherwise", operator);
+    }
+    return expression;
+  }
+
+  /**
+   * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850). The
+   * message names both readings: the fallback for the nearest value, and for the whole operand. A sign before the
+   * fallback, as in `otherwise -1`, can be read only one way.
+   */
+  #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): void {
+    const leftMixed = isArithmetic(left) || isSign(left);
+    const rightMixed = isArithmetic(right);
+    if (!leftMixed && !rightMixed) return;
+    // The values next to `otherwise`: the last one of the left operand and the first one of the right operand.
+    let last = left;
+    while (isArithmetic(last) || isSign(last))
+      last = isSign(last) ? last.operand : last.kind === "binaryExpression" ? last.right : last.end;
+    let first = right;
+    while (isArithmetic(first))
+      first = first.kind === "binaryExpression" ? first.left : first.start;
+    let readings = ", as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'";
+    // Only a short expression is quoted, which also keeps a long chain from being written out for each error in it.
+    if (right.span.end.offset - left.span.start.offset <= 240) {
+      // The source text of an operand ends with that of its last value and starts with that of its first one.
+      const text = (expression: Expression) => this.#textOf(expression.span, expression.span);
+      const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
+      const nearest = `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`;
+      const all = `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`;
+      if ([nearest, all].every((reading) => reading.length <= 60 && !reading.includes("\n")))
+        readings = `: '${nearest}' or '${all}'`;
+    }
+    this.#reportSpan(
+      parserDiagnosticCode.mixedOtherwise,
+      `Put parentheses around what 'otherwise' belongs to${readings}.`,
+      operator,
+    );
   }
 
   *#parseRange(): ParseTask<Expression | null> {
@@ -3455,7 +3522,7 @@ class Parser {
   }
 
   *#parseMultiplicative(): ParseTask<Expression | null> {
-    let expression = yield* parseChild(this.#parseOtherwise());
+    let expression = yield* parseChild(this.#parseUnaryArithmetic());
     while (
       expression !== null &&
       (this.#check(TokenKind.Star) ||
@@ -3464,7 +3531,7 @@ class Parser {
     ) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseOtherwise());
+      const right = yield* parseChild(this.#parseUnaryArithmetic());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -3473,36 +3540,6 @@ class Parser {
         return null;
       }
       expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
-    }
-    return expression;
-  }
-
-  /**
-   * `a otherwise b`, left-associative. It binds tighter than `*` and `+`, so that the fallback belongs to the value
-   * that may be null: `count otherwise 0 + 1` adds 1 to the count or to 0 (V30 §5, §18).
-   */
-  *#parseOtherwise(): ParseTask<Expression | null> {
-    let expression = yield* parseChild(this.#parseUnaryArithmetic());
-    while (expression !== null) {
-      const operator =
-        this.#matchOperator(TokenKind.KeywordOtherwise) ??
-        this.#matchSymbol(
-          TokenKind.Question,
-          "two",
-          "otherwise",
-          'let name = nickname otherwise "pet"',
-        );
-      if (operator === null) break;
-      this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseUnaryArithmetic());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected a fallback value after 'otherwise'.",
-        );
-        return null;
-      }
-      expression = this.#binary(expression, right, "otherwise", operator);
     }
     return expression;
   }
@@ -5435,6 +5472,21 @@ function continuesExpression(kind: TokenKind): boolean {
     kind === TokenKind.Slash ||
     kind === TokenKind.Percent
   );
+}
+
+const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Arithmetic or a range, which `otherwise` takes as an operand only in parentheses (owner decision on #850). */
+function isArithmetic(expression: Expression): expression is BinaryExpression | RangeExpression {
+  return (
+    expression.kind === "rangeExpression" ||
+    (expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator))
+  );
+}
+
+/** A sign before a value, as in `-x`, which `otherwise` takes as its left operand only in parentheses. */
+function isSign(expression: Expression): expression is UnaryExpression {
+  return expression.kind === "unaryExpression" && expression.operator !== "not";
 }
 
 function isComparisonKind(kind: TokenKind): boolean {
