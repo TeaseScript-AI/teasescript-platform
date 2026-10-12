@@ -851,13 +851,8 @@ export interface PropertyRead {
   readonly tables: readonly PropertyTable[];
 }
 
-/** The tables whose objects may reach a table's place, or `open` when objects with any properties may. */
-interface PropertyClosure {
-  readonly tables: readonly PropertyTable[];
-  readonly open: boolean;
-}
-
-const OPEN_CLOSURE: PropertyClosure = Object.freeze({ tables: [], open: true });
+/** For each table, the tables that keep its objects in a property, with that property. */
+type Holders = ReadonlyMap<PropertyTable, readonly (readonly [PropertyTable, string])[]>;
 
 /**
  * Ends the recording of a check and tells for each read whether an object at its place can have its property when the
@@ -875,7 +870,6 @@ export function missingPropertyReads(
   // What reached a slot that was still undecided reaches what decided it; the recording has ended, so a slot that is
   // still undecided now is not followed again.
   for (const [target, source] of recorded.flows) flowInto(target, source);
-  // The tables that keep each table's objects in a property, through unions and collections.
   const holders = new Map<PropertyTable, (readonly [PropertyTable, string])[]>();
   for (const table of recorded.tables)
     for (const [name, type] of table)
@@ -885,59 +879,89 @@ export function missingPropertyReads(
           held.push([table, name]);
           holders.set(part.properties, held);
         }
-  const closures = new Map<PropertyTable, PropertyClosure>();
-  const active = new Set<PropertyTable>();
+  const verdicts = new Map<string, Map<PropertyTable, Map<string, boolean>>>();
   return reads.map((read) => {
+    const known = verdicts.get(read.name) ?? new Map<PropertyTable, Map<string, boolean>>();
+    verdicts.set(read.name, known);
+    if (searchLineage(read.tables, read.name, holders, known)) return undefined;
     const names = new Set<string>();
-    for (const table of read.tables) {
-      const closure = runCompileTask(closureTask(table, holders, closures, active));
-      if (closure.open) return undefined;
-      for (const reached of closure.tables) for (const name of reached.keys()) names.add(name);
-    }
-    return names.has(read.name) ? undefined : [...names];
+    searchLineage(read.tables, read.name, holders, new Map(), names);
+    return [...names];
   });
 }
 
-function* closureTask(
-  table: PropertyTable,
-  holders: ReadonlyMap<PropertyTable, readonly (readonly [PropertyTable, string])[]>,
-  closures: Map<PropertyTable, PropertyClosure>,
-  active: Set<PropertyTable>,
-): CompileTask<PropertyClosure> {
-  const known = closures.get(table);
-  if (known !== undefined) return known;
-  // A place that its own property feeds, as in `node = node.next`, may hold any of its objects: no read is decided.
-  if (active.has(table)) return OPEN_CLOSURE;
-  active.add(table);
-  const tables = [table];
-  const found = new Set(tables);
-  const reach = (other: PropertyTable): void => {
-    if (found.has(other)) return;
-    found.add(other);
-    tables.push(other);
+/**
+ * Whether an object at the place of one of `tables` may have the property `name` when the script runs. The search
+ * goes through the places whose objects may reach that place, each as a table and the path of properties from its
+ * objects to the objects read: a source at the same path, the table that holds a table at a property, one property
+ * up, and down a property again. Objects whose properties the compiler cannot know, at any such place, may have it, and
+ * so may a place that the search reaches again at a longer path, as through `node = node.next`, since it may then hold
+ * its own nested objects. `known` keeps for each place it decides whether it may, so a later read of the same name
+ * searches no place twice. With `names`, the search collects the properties the objects read can have instead, and goes
+ * through every place.
+ */
+function searchLineage(
+  tables: readonly PropertyTable[],
+  name: string,
+  holders: Holders,
+  known: Map<PropertyTable, Map<string, boolean>>,
+  names?: Set<string>,
+): boolean {
+  const places: {
+    readonly table: PropertyTable;
+    readonly path: string[];
+    readonly from: number;
+  }[] = [];
+  const seen = new Map<PropertyTable, string[]>();
+  const decide = (table: PropertyTable, path: readonly string[], verdict: boolean): void => {
+    const paths = known.get(table) ?? new Map<string, boolean>();
+    paths.set(path.join("."), verdict);
+    known.set(table, paths);
   };
-  let open = false;
-  for (let next = 0; next < tables.length && !open; next += 1) {
-    const current = tables[next]!;
-    if (current.open) open = true;
-    for (const source of current.sources ?? []) reach(source);
-    for (const [holder, name] of holders.get(current) ?? []) {
-      const outer = yield* compileChild(closureTask(holder, holders, closures, active));
-      open ||= outer.open;
-      for (const kept of outer.tables) {
-        const value = kept.get(name);
-        if (value !== undefined)
-          for (const part of firstParts(value))
-            if (part.kind === "object" && part.properties !== null) reach(part.properties);
-            else if (part.kind === "unknown" || part.kind === "object") open = true;
-            else if (part.kind === "open" && part.heldUnknown !== undefined) open = true;
-      }
-    }
+  // The place `at` and every place that led to it may have the property.
+  const found = (at: number): true => {
+    for (let index = at; index >= 0; index = places[index]!.from)
+      decide(places[index]!.table, places[index]!.path, true);
+    return true;
+  };
+  // Adds a place reached from `from`, or tells that it, and so `from`, may have the property.
+  const reach = (table: PropertyTable, path: string[], from: number): boolean => {
+    const key = path.join(".");
+    const verdict = known.get(table)?.get(key);
+    if (verdict !== undefined) return verdict && found(from);
+    const keys = seen.get(table) ?? [];
+    if (keys.includes(key)) return false;
+    if (
+      keys.some((other) => key.length > other.length && (other === "" || key.endsWith(`.${other}`)))
+    )
+      return names === undefined && found(from);
+    keys.push(key);
+    seen.set(table, keys);
+    places.push({ table, path, from });
+    return false;
+  };
+  for (const table of tables) if (reach(table, [], -1)) return true;
+  for (let at = 0; at < places.length; at += 1) {
+    const { table, path } = places[at]!;
+    if (names !== undefined && path.length === 0)
+      for (const property of table.keys()) names.add(property);
+    else if (table.open || (path.length === 0 && table.has(name))) return found(at);
+    const value = path.length === 0 ? undefined : table.get(path[0]!);
+    for (const part of value === undefined ? [] : firstParts(value))
+      if (part.kind === "object" && part.properties !== null) {
+        if (reach(part.properties, path.slice(1), at)) return true;
+      } else if (
+        part.kind === "unknown" ||
+        part.kind === "object" ||
+        (part.kind === "open" && part.heldUnknown !== undefined)
+      )
+        return found(at);
+    for (const source of table.sources ?? []) if (reach(source, path, at)) return true;
+    for (const [holder, property] of holders.get(table) ?? [])
+      if (reach(holder, [property, ...path], at)) return true;
   }
-  active.delete(table);
-  const closure = open ? OPEN_CLOSURE : { tables, open };
-  closures.set(table, closure);
-  return closure;
+  if (names === undefined) for (const { table, path } of places) decide(table, path, false);
+  return false;
 }
 
 /**

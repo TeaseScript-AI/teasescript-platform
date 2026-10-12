@@ -121,20 +121,28 @@ test("a value the compiler cannot know may have any property", () => {
 });
 
 test("a property added by code the compiler checks later still reaches a read that runs after it", () => {
-  // A function body is checked after the top level; the copy is taken after the call when the script runs.
+  // A timer block is checked after the top level, and a function that only a block calls after the top level too, but
+  // both run during the wait, before the copies, the list, and the store are made.
+  const story = new Story(
+    'let a = { name: "a" }\nlet b = { name: "b" }\nlet s = { name: "s" }\nlet t = { p: { a: 1 } }\nlet d = { name: "d" }\ntimer async 1 s {\n    a.color = "red"\n    b.size = 2\n    s.p = { a: 2, b: 3 }\n    paint()\n}\nwait 2 s\nlet c = a\nlet items = [a, b]\nt = s\nlet e = d\nsay "${a.color} ${c.color} ${items[0].color} ${items[1].size} ${t.p.b} ${e.shade}"\nexit\nfunction paint {\n    d.shade = "dark"\n}',
+  ).at(10_000);
+  assert.equal(story.snapshot.failure, null);
   assert.deepEqual(
-    outcome(
-      'let d = { name: "x" }\nfunction paint {\n    d.color = "red"\n}\npaint()\nlet e = d\nsay e.color\nexit',
-    ),
-    { said: ["red"], failure: null },
+    story.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["red red red 2 3 dark"],
   );
-  // A property of a property, added to the object that is later stored whole.
-  assert.deepEqual(
-    outcome(
-      'let s = { name: "s" }\nlet t = { p: { a: 1 } }\nfunction grow {\n    s.p = { a: 2, b: 3 }\n}\ngrow()\nt = s\nsay "${t.p.b}"\nexit',
-    ),
-    { said: ["3"], failure: null },
-  );
+  // Another file is checked after `main.tease`, but runs at the `call`.
+  const project = compileProject([
+    {
+      path: "main.tease",
+      source:
+        'global door = { name: "main" }\ncall "paint.tease"\nlet copy = door\nsay "${door.color} ${copy.color}"\nexit',
+    },
+    { path: "paint.tease", source: 'door.color = "red"\nend' },
+  ]);
+  assert.deepEqual(project.diagnostics, []);
+  const ran = run(project.plan!, createImmediatePacingRuntimeSnapshot(project.plan!));
+  assert.deepEqual(sayTexts(ran), ["red red"]);
   // A call passes an object with more properties than the parameter's default has.
   assert.deepEqual(
     outcome(
@@ -142,21 +150,4 @@ test("a property added by code the compiler checks later still reaches a read th
     ),
     { said: ["red"], failure: null },
   );
-  // A timer block runs during the wait, before the copy and the list are made.
-  const story = new Story(
-    'let a = { name: "a" }\nlet b = { name: "b" }\ntimer async 1 s {\n    a.color = "red"\n    b.size = 2\n}\nwait 2 s\nlet c = a\nlet items = [a, b]\nsay "${a.color} ${c.color} ${items[0].color} ${items[1].size}"\nexit',
-  ).at(10_000);
-  assert.equal(story.snapshot.failure, null);
-  assert.deepEqual(
-    story.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["red red red 2"],
-  );
-  // A global function of another file.
-  const project = compileProject([
-    { path: "main.tease", source: 'global door = { name: "main" }\npaint()\nsay door.color\nexit' },
-    { path: "paint.tease", source: 'global function paint {\n    door.color = "red"\n}' },
-  ]);
-  assert.deepEqual(project.diagnostics, []);
-  const ran = run(project.plan!, createImmediatePacingRuntimeSnapshot(project.plan!));
-  assert.deepEqual(sayTexts(ran), ["red"]);
 });
