@@ -5,8 +5,8 @@ import { mapChildren } from "./variable-types.ts";
 /**
  * A null test that only gives a variable or a property a default, `if x == null { x = d }`, becomes `otherwise` (#850),
  * which evaluates `d` only where `x` is null, as the test did. Right after an assignment of `x`, the default joins it,
- * `x = e otherwise d`, where `d` reads neither `x` nor a function of the script, which could read it: the test read the
- * null that `e` gave, where `d` now runs before `x` changes. Elsewhere the test becomes `x = x otherwise d`, also after
+ * `x = e otherwise d`, where `d` neither reads `x` nor runs code that could (a call, or an ask, during which a button's
+ * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. Elsewhere the test becomes `x = x otherwise d`, also after
  * a `let`, whose variable's type comes from its first value, which `otherwise` would make one without null.
  */
 export function withNullDefaults(
@@ -95,7 +95,11 @@ function samePath(left: IrExpression, right: IrExpression): boolean {
   );
 }
 
-/** Whether a value reads the variable a path starts at, or calls a function of the script, which may read it. */
+/**
+ * Whether a value reads the variable a path starts at, or may run code that could read it: a call (of the script's
+ * functions, also through a helper that dispatches them, or of a helper), or an ask, a choice, a button, or a message,
+ * during which a permanent button's block may run.
+ */
 function readsPath(value: IrExpression, path: IrExpression): boolean {
   let root = path;
   while (root.kind === "property") root = root.target;
@@ -104,7 +108,7 @@ function readsPath(value: IrExpression, path: IrExpression): boolean {
   const visit = (node: IrExpression): IrExpression => {
     if (
       (node.kind === "variable" && node.name === name) ||
-      (node.kind === "call" && node.local === true)
+      ["call", "input", "choice", "listChoice", "button", "message"].includes(node.kind)
     )
       found = true;
     return mapChildren(node, visit);

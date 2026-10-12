@@ -21,3 +21,14 @@ def e = "start"
 e = found("miss")
 if (e == null) e = "none"
 show("E " + e)
+// A negative number before the fallback takes parentheses.
+def f = null
+f = -1
+if (f == null) f = 3
+show("F " + f)
+// A fallback that runs the script's code, here through a stored closure, still sees the null.
+def g = "old"
+def callbacks = [read: { -> "was " + g }]
+g = null
+if (g == null) g = callbacks.read()
+show("G " + g)

@@ -428,10 +428,17 @@ export function emitExpression(expression: IrExpression): string {
       if (expression.operator === "otherwise") {
         // An operand that is arithmetic, a range, or another operator takes parentheses; a chain runs from the left,
         // and a sign before the fallback reads one way (V30 §18 "Fallback with otherwise").
+        // A signed left operand, also a negative number, takes parentheses: `(-1) otherwise 3`.
+        const negative =
+          expression.left.kind === "literal" &&
+          typeof expression.left.value === "number" &&
+          expression.left.value < 0;
         const left =
           expression.left.kind === "binary" && expression.left.operator === "otherwise"
             ? emitExpression(expression.left)
-            : operand(expression.left, POSTFIX);
+            : negative
+              ? `(${emitExpression(expression.left)})`
+              : operand(expression.left, POSTFIX);
         const right =
           expression.right.kind === "unary" && expression.right.operator === "-"
             ? emitExpression(expression.right)
