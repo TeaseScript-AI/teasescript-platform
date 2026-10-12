@@ -5274,7 +5274,7 @@ They are not currently executable syntax. Media and timers are controlled throug
 `available when` is reserved for future requirements or suitability metadata and is not executable syntax.
 
 ## 40. Dictionaries
-**Status:** Accepted (#536)
+**Status:** Accepted (#536; any type for the `default:` of `get`: Owner decision, 2026-10-12)
 
 A dict is a lookup table from text keys to values of one type, for names known only when the script runs. An object
 ([§15](#15-objects)) is one thing with fixed properties, each with its own type.
@@ -5311,11 +5311,14 @@ for name, toy in toys { ... }           // the keys with a copy of each value
 - **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
   check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
   compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
-  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
-  is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
-  its result has the value type. Like any argument, the default is evaluated before the lookup. A list reads an
-  element with `get(index, default: value)`, whose default may be of any type
-  ([§16](#reading-an-element-with-a-default)).
+  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key. As for a list
+  ([§16](#reading-an-element-with-a-default)), its `default:` is required and may be of any type, and the result's
+  type joins the value type and the default's type: on an `integer dict`, `default: null` gives an `integer?` and
+  `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A dict whose
+  value type no value decided yet, such as `dict{}`, takes it from a default of known type, as from a first stored
+  value, so after `let counts = dict{}`, `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an
+  `integer dict`. A list's `get` does not decide the element type. Like any argument, the default is evaluated before
+  the lookup.
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an

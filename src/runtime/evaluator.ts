@@ -2513,7 +2513,8 @@ export class Evaluator {
     }
     const keyPlan = expression.arguments[0]!.value;
     const key = this.#dictKey(positional[0]!, keyPlan.span);
-    // A default the compiler could not know must be a value the dict could hold (ADR 0021 rule 1.7).
+    // A default that decided the value type, as the first value of an empty dict, must fit it also in the parts the
+    // compiler could not know (ADR 0021 rule 1.7).
     if (name === "get" && expression.typeCheck !== undefined)
       assertValueType(named.default!, expression.typeCheck, expression.arguments[1]!.value.span);
     switch (name) {

@@ -1,7 +1,8 @@
 # ADR 0021 — Static types: enforcement, unions, type tests, and narrowing
 
 **Status:** Accepted
-**Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07
+**Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
+`default:` of a dict `get` in rule 1.3: Owner decision, 2026-10-12
 
 ## Context
 
@@ -34,8 +35,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 3. An empty list or set takes its element type from the first element added or assigned. A list or set literal has one
    element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`. The values of a dict
-   follow the same rules; the `default:` of `get(key, default: value)` must fit them like a stored value, and the
-   result has the value type.
+   follow the same rules; the `default:` of `get(key, default: value)` may be of any type, and the result's type joins
+   it with the value type. A default of known type also decides a value type that no value decided yet, as a first
+   value does (V30 §40).
 4. An object property keeps the type of its first value. Assignment may still add a property, which then keeps its type.
 5. A function's result type comes from its `return` values; returns of different types are an error that names both.
    A function that can end without returning a value has an optional result. Annotated parameters and result types are
