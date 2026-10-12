@@ -303,7 +303,7 @@ within the budget, and replaces playing converted packages by hand to find crash
 `src/explorer-search.ts` searches, and `src/explorer-analysis.ts` reads the plan for directed search. Each pending
 action is a branch point. The options are every button and choice option; for a form, its starting values, each toggle
 switched (and all on, all off), each other option of a cycle, each typed field at its bounds, and cancel where the
-form offers it; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1` (and `0.5`
+form offers it, however many fields it has; and the default answer of a typed ask with boundary values of its type: `0`, `1`, `-1` (and `0.5`
 for `askNumber`), the text `x`, and dates and times at both ends of a day or year. `--large-answers` adds `1000000`,
 to probe how a script copes with a number far beyond its range; it is off by default, as a script that counts to an
 answer without a range check then plays on practically for ever, and that path takes the search's work

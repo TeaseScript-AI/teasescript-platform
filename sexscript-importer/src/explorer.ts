@@ -361,8 +361,6 @@ const MAX_AUTO_OPERATIONS = 1000;
 /** Said texts kept per step and per text, for trap samples and replay transcripts. */
 const KEPT_TEXTS = 3;
 const TEXT_LENGTH = 120;
-/** Form answers tried per form. */
-const MAX_FORM_OPTIONS = 16;
 
 /** What the player can see and do in a state, in short, for reports. */
 export interface Prompt {
@@ -1562,6 +1560,7 @@ function interactionOptions(
  * The answers tried for a form: its starting values; each toggle switched, and all toggles on and all off; each other
  * option of a cycle; each typed field at its boundaries (`min`, `max`, or the candidates of its type); and cancel
  * where the form offers it. A required typed field without a starting value gets its first candidate in every answer.
+ * They grow with the form's fields and options, and all of them are tried, however many the form has.
  */
 function formOptions(ui: Data, form: Data, large: boolean): ExplorerInput[] {
   const fields = list(ui.fields);
@@ -1615,13 +1614,11 @@ function formOptions(ui: Data, form: Data, large: boolean): ExplorerInput[] {
     }
   }
   const unique = new Map(answers.map((fields) => [JSON.stringify(fields), fields]));
-  const options: ExplorerInput[] = [...unique.values()]
-    .slice(0, MAX_FORM_OPTIONS - 1)
-    .map((fields) =>
-      Object.keys(fields).length === 0
-        ? { kind: "form", action: "submit" }
-        : { kind: "form", action: "submit", fields },
-    );
+  const options: ExplorerInput[] = [...unique.values()].map((fields) =>
+    Object.keys(fields).length === 0
+      ? { kind: "form", action: "submit" }
+      : { kind: "form", action: "submit", fields },
+  );
   if (isRecord(ui.cancel)) options.push({ kind: "form", action: "cancel" });
   return options;
 }

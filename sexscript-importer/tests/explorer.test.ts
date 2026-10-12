@@ -3375,6 +3375,35 @@ test(
 );
 
 test(
+  "a form gets every one of its answers, however many fields it has: here each of twenty toggles switched alone",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    const count = 20;
+    const texts = Array.from({ length: count }, (_, index) => `"Toy ${index}"`).join(", ");
+    const off = Array.from({ length: count }, () => "false").join(", ");
+    // A toggle's line needs it on and the next one off, which only switching it alone gives.
+    const checks = Array.from(
+      { length: count },
+      (_, index) =>
+        `if picked[${index}] and not picked[${(index + 1) % count}] {\n  say "Toy ${index} alone."\n}\n`,
+    ).join("");
+    const source = `let picked = askBooleans("Which toys?", texts: [${texts}], prefill: [${off}])\n${checks}exit\n`;
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 5000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+    });
+    assert.deepEqual([result.search.stoppedBy, result.coverage.percent], ["exhausted", 100]);
+  },
+);
+
+test(
   "with compared answers, an ask in a helper is answered with what the code compares the result of the call it comes from with",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
