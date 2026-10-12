@@ -29,7 +29,7 @@ import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
- * The buttons of a prepared `choose`, in order: one for each value or choice object, and one for each element of a
+ * The buttons of a prepared `askChoice`, in order: one for each value or choice object, and one for each element of a
  * list option or member of a set option, in insertion order. `options` holds what each authored option evaluated to,
  * and `values` the value written before its `:` (or `null`); every button of a list or set option returns that written
  * value.

@@ -309,7 +309,7 @@ test("session text shows what the player saw; values that were never said need t
   let session = createPlayerRuntimeSession(
     [
       'let secret = load("private", default: "")',
-      'let pick = choose [{ text: "Pick", value: secret }]',
+      'let pick = askChoice [{ text: "Pick", value: secret }]',
       'let typed = askText("Name", prefill: secret)',
       'save "kept" as secret',
       'say "Done"',
@@ -519,5 +519,27 @@ test("a changed message's text is session text, the chat tail shows its current 
   assert.deepEqual(everything.sections["transcriptTail"], [{ speaker: "narrator", text: SECRET }]);
   const events = JSON.stringify(everything.sections["eventsTail"]);
   assert.ok(events.includes('"kind":"messageUpdated"') && events.includes(SECRET));
+  assert.equal(replayDebugExport(parseDebugExport(await fileText(everything))).kind, "reproduced");
+});
+
+test("a removed message leaves the chat tail, its removal is session text, and its replay reproduces", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    [
+      'let line = say "Waiting", instant',
+      'say "Kept", instant',
+      "wait 1 s",
+      "line.remove()",
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+    { recorder },
+  );
+  session = advancePlayerRuntimeTime(session, 60_000);
+  assert.equal(session.state.status, "halted");
+  const frozen = candidate(session, recorder);
+  const everything = (await assembleDebugExport(frozen, all(frozen))).exported;
+  assert.deepEqual(everything.sections["transcriptTail"], [{ speaker: "narrator", text: "Kept" }]);
+  assert.ok(JSON.stringify(everything.sections["eventsTail"]).includes('"kind":"messageRemoved"'));
   assert.equal(replayDebugExport(parseDebugExport(await fileText(everything))).kind, "reproduced");
 });

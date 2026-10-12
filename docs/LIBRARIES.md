@@ -119,7 +119,7 @@ The exact identity fields, compatibility ranges, packaging format, and migration
 
 ADR 0018 selects this ordered author-facing sequence:
 
-1. `showButton`, `askText`, `askNumber`, and `choose` on one generic typed foreground-interaction primitive;
+1. `showButton`, `askText`, `askNumber`, and `askChoice` on one generic typed foreground-interaction primitive;
 2. `say` with deterministic smart autoplay and player-controlled gate completion.
 
 `wait` remains compiler/core-owned. Camera, files, media, background timers, persistence, custom UI, and LLM
@@ -134,7 +134,7 @@ The first POC Platform Standard Library is automatically available without an im
 showButton
 askText
 askNumber
-choose
+askChoice
 say
 escapeMarkup
 ```
@@ -147,7 +147,7 @@ Published community libraries and package-local libraries still require a later 
 
 The selected resumable helpers are fully lowered into explicit versioned plan instructions and JSON-safe state. A checkpoint contains the original plan and does not perform runtime lookup against a current or `latest` Standard Library implementation.
 
-The current implementation fully lowers the compact `showButton`, `askText`, `askNumber`, and `choose` forms plus the
+The current implementation fully lowers the compact `showButton`, `askText`, `askNumber`, and `askChoice` forms plus the
 ADR 0018 `say` pacing/skip slice into explicit versioned instructions and state. Dynamic interaction payloads are
 prepared explicitly before suspension, and result-bearing forms consume the short canonical interaction handoff into
 ordinary runtime state before later expression evaluation continues.
@@ -180,12 +180,12 @@ number
 choice
 ```
 
-`choose` is the source construct; `choice` is the internal interaction noun.
+`askChoice` is the source construct; `choice` is the internal interaction noun.
 
 The engine owns action identity, continuation, result destination, expected type, allowed values, completion validation, canonical transcript-result derivation, events, checkpoint/restore, and bounded duplicate settlement behavior. The Standard Library/compiler own author-facing defaults, compact syntax, Standard UI payload, localized feedback, and accessibility defaults.
 
 The interactions are mandatory and expose no cancellation result. `askText` and `askNumber` never return `null`, and
-`choose` returns `null` only as the value of a selected option; `showButton` used as a value returns its elapsed
+`askChoice` returns `null` only as the value of a selected option; `showButton` used as a value returns its elapsed
 waiting time ([V30 §21](specifications/accepted-syntaxes-v30.md#21-blocking-button)). Invalid input keeps the same
 action active.
 Timer interrupts and handler-exit cleanup follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
@@ -203,7 +203,7 @@ over-limit data without truncation or partial state mutation.
 `askDate`, `askTime`, and `askDateTime` return date and time values from the Player's controls
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)).
 
-`choose` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; mixed value types are kept only by a place declared with a union type.
+`askChoice` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; mixed value types are kept only by a place declared with a union type.
 
 A button or dropdown control supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
 
@@ -277,7 +277,7 @@ The first POC does not settle:
 - advanced parenthesized call forms;
 - detailed result objects with elapsed time or metadata;
 - the option name that selects a detailed return type;
-- custom compact `choose` field hints;
+- custom compact `askChoice` field hints;
 - any justified platform guards that later prove necessary;
 - exact dynamic choice-layout breakpoints;
 - the advanced accessibility override field;
@@ -361,7 +361,7 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 
 ## POC boundary
 
-The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `choose` plus ADR 0018
+The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `askChoice` plus ADR 0018
 `say` smart/exact pacing and skip policy. Positive pacing uses the resumable `chatPacingGate` lifecycle described above;
 `0`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Player presents these Standard interaction and pacing
 controls through the framework-independent Player adapter. Editor/formatter/simulator support and final

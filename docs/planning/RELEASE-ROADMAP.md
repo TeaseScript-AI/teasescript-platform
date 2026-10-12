@@ -44,9 +44,10 @@ Player/runtime boundaries, and the development tooling needed to exercise them.
 architecture may change substantially while correctness and the basic model are being proven.
 
 - [ ] **ADR 0018 Standard Library interactions and pacing**
-  - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `choose`, and
-    `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
-    detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
+  - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `askChoice`,
+    and `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support.
+    Keep the detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than
+    repeating them here.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 

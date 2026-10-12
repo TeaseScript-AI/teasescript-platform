@@ -480,7 +480,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   context.mock.method(Date, "now", () => utc("2026-10-04T16:00:00"));
   await host.loadScriptStorage();
   host.prepare(() =>
-    createPlayerRuntimeSession('let day = choose [toDate("2026-10-04")]\nsay day\nexit', {
+    createPlayerRuntimeSession('let day = askChoice [toDate("2026-10-04")]\nsay day\nexit', {
       ...host.scriptStorageOptions(),
       ...host.temporalCapture(),
     }),

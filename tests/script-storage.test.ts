@@ -864,7 +864,7 @@ test("compact interactions end at the save 'as', and a grouped load key leaves t
       'save askText as "bare"',
       'save askText "Your name?" as "name"',
       'save load "nick", default: askText "Nickname?" as "nick"',
-      'let pick = load((choose first: "a", second: "b"), default: "fallback")',
+      'let pick = load((askChoice first: "a", second: "b"), default: "fallback")',
       "exit",
     ].join("\n"),
   );
@@ -966,8 +966,8 @@ test("load takes its fallback as ', default:', and the earlier form names the fi
   ]);
   // The fix is named after a choice key and inside interpolation too.
   assert.equal(
-    diagnostics('let v = load choose a: "x", b: "y" default "z"')[0],
-    "TSP017 36 Write a fallback for load as 'load key, default: value', with a comma and a colon.",
+    diagnostics('let v = load askChoice a: "x", b: "y" default "z"')[0],
+    "TSP017 39 Write a fallback for load as 'load key, default: value', with a comma and a colon.",
   );
   assert.equal(
     diagnostics('let v = "${load "k" default "x"}"')[0],
@@ -1028,8 +1028,8 @@ test("a ', default:' belongs to the nearest load before it, and is an error afte
 
   // By the same rule, a compact choice takes `default:` as its own option label; grouping gives the fallback to load.
   for (const source of [
-    'let v = load choose a: "x", b: "y", default: "z"',
-    'let v = (load choose a: "x", b: "y"\n, default: "z")',
+    'let v = load askChoice a: "x", b: "y", default: "z"',
+    'let v = (load askChoice a: "x", b: "y"\n, default: "z")',
   ]) {
     let labelled = initializer(source);
     if (labelled.kind === "parenthesizedExpression") labelled = labelled.expression;
@@ -1037,7 +1037,7 @@ test("a ', default:' belongs to the nearest load before it, and is an error afte
     assert.ok(labelled.key.kind === "interactionExpression", source);
     assert.equal(labelled.key.options.length, 3, source);
   }
-  const choiceKey = initializer('let v = load((choose a: "x", b: "y"), default: "z")');
+  const choiceKey = initializer('let v = load((askChoice a: "x", b: "y"), default: "z")');
   assert.ok(choiceKey.kind === "loadExpression" && choiceKey.defaultValue !== null);
 });
 
@@ -1049,10 +1049,10 @@ test("compact interactions parse in every storage operand position", () => {
     'askText "Hint?"',
     "askNumber",
     'askNumber "Age?"',
-    'choose "a", "b"',
-    'choose default: "A", other: "B"',
+    'askChoice "a", "b"',
+    'askChoice default: "A", other: "B"',
     '(askText as mistress "Hint?")',
-    '(choose as mistress "a", "b")',
+    '(askChoice as mistress "a", "b")',
     '"${askText}"',
     "wrap(askNumber)",
     'timer(duration: 1 s, async: true, label: askText as mistress "Label?").state',

@@ -99,13 +99,13 @@ test("an unannotated integer variable is a number when one of its assignments ca
     ),
     [["TSV041", "speed"]],
   );
-  // A long chain widens in either order through every way a number flows on: arithmetic, a join such as `choose`, a
+  // A long chain widens in either order through every way a number flows on: arithmetic, a join such as `askChoice`, a
   // part of a collection or object built from it, a method that returns an element, and a function's result.
   const names = Array.from({ length: 2_000 }, (_, index) => `v${index}`);
   const declarations = names.map((name) => `let ${name} = 0`).join("\n");
   for (const copy of [
     (name: string) => `${name} + 1`,
-    (name: string) => `choose ${name}, 1`,
+    (name: string) => `askChoice ${name}, 1`,
     (name: string) => `{ n: ${name} }.n`,
     (name: string) => `[${name}].removeFirst()`,
     (name: string) => `read_${name}().first`,
@@ -1827,42 +1827,48 @@ test("a loop that may end through continue can still reach the function's end", 
 });
 
 test("a choice result has the type of its values, and an option without a written value returns itself", () => {
-  assert.deepEqual(codes("let n: integer = choose [5, 10, 15]\nn = 2.5\nexit"), [
+  assert.deepEqual(codes("let n: integer = askChoice [5, 10, 15]\nn = 2.5\nexit"), [
     ["TSV041", "2.5"],
   ]);
-  assert.deepEqual(codes("let n = choose 5, 10\nn = 20\nexit"), []);
-  assert.deepEqual(codes("let n: integer = choose set[5, 10]\nn = 2.5\nexit"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let n = askChoice 5, 10\nn = 20\nexit"), []);
+  assert.deepEqual(codes("let n: integer = askChoice set[5, 10]\nn = 2.5\nexit"), [
+    ["TSV041", "2.5"],
+  ]);
   // An empty list or set gives no buttons, so its written value is never the result.
-  assert.deepEqual(codes('let n: integer = choose 1.5: [], 2: ["Only"]\nexit'), []);
-  assert.deepEqual(codes('let n: integer = choose 1.5: set[], 2: ["Only"]\nexit'), []);
-  assert.deepEqual(codes("let n: string = choose 5, 10\nexit"), [["TSV041", "choose 5, 10"]]);
-  assert.deepEqual(codes('let n = choose 1: "One", 2.5: "Two"\nn = 0.5\nexit'), []);
-  assert.deepEqual(codes("let d = choose [1 min, 90 seconds]\nd = 5\nexit"), [["TSV041", "5"]]);
-  assert.deepEqual(codes('let n = choose [{ text: "Five", value: 5 }]\nn = "five"\nexit'), [
+  assert.deepEqual(codes('let n: integer = askChoice 1.5: [], 2: ["Only"]\nexit'), []);
+  assert.deepEqual(codes('let n: integer = askChoice 1.5: set[], 2: ["Only"]\nexit'), []);
+  assert.deepEqual(codes("let n: string = askChoice 5, 10\nexit"), [["TSV041", "askChoice 5, 10"]]);
+  assert.deepEqual(codes('let n = askChoice 1: "One", 2.5: "Two"\nn = 0.5\nexit'), []);
+  assert.deepEqual(codes("let d = askChoice [1 min, 90 seconds]\nd = 5\nexit"), [["TSV041", "5"]]);
+  assert.deepEqual(codes('let n = askChoice [{ text: "Five", value: 5 }]\nn = "five"\nexit'), [
     ["TSV041", '"five"'],
   ]);
-  assert.deepEqual(codes('let pets = ["pet", "toy"]\nlet pick = choose pets\npick = 3\nexit'), [
+  assert.deepEqual(codes('let pets = ["pet", "toy"]\nlet pick = askChoice pets\npick = 3\nexit'), [
     ["TSV041", "3"],
   ]);
-  assert.deepEqual(codes('let answer = choose back: "Back", "Corner"\nanswer = "other"\nexit'), []);
-  // A `null` value and an optional option keep their types.
-  assert.deepEqual(codes('let answer: integer = choose { text: "Nothing", value: null }\nexit'), [
-    ["TSV041", 'choose { text: "Nothing", value: null }'],
-  ]);
   assert.deepEqual(
-    codes("let value: integer? = null\nlet answer = choose value\nanswer = null\nexit"),
+    codes('let answer = askChoice back: "Back", "Corner"\nanswer = "other"\nexit'),
+    [],
+  );
+  // A `null` value and an optional option keep their types.
+  assert.deepEqual(
+    codes('let answer: integer = askChoice { text: "Nothing", value: null }\nexit'),
+    [["TSV041", 'askChoice { text: "Nothing", value: null }']],
+  );
+  assert.deepEqual(
+    codes("let value: integer? = null\nlet answer = askChoice value\nanswer = null\nexit"),
     [],
   );
   // A direct option is the value as it was evaluated: a later option's call does not change it.
   const fill = 'let token = null\nfunction fill {\n    token = 9\n    return "Ready"\n}\n';
-  assert.deepEqual(codes(`${fill}let answer: integer? = choose token, fill()\nexit`), [
-    ["TSV041", "choose token, fill()"],
+  assert.deepEqual(codes(`${fill}let answer: integer? = askChoice token, fill()\nexit`), [
+    ["TSV041", "askChoice token, fill()"],
   ]);
-  assert.deepEqual(codes(`${fill}let answer: string? = choose token, fill()\nexit`), []);
+  assert.deepEqual(codes(`${fill}let answer: string? = askChoice token, fill()\nexit`), []);
   // A computed choice object returns its value or text, whose type is not known here.
   assert.deepEqual(
     codes(
-      'let option = { text: "Yes" }\nlet answer: string = choose option\nlet other = choose [option]\nsay "${other}"\nexit',
+      'let option = { text: "Yes" }\nlet answer: string = askChoice option\nlet other = askChoice [option]\nsay "${other}"\nexit',
     ),
     [],
   );
@@ -1895,7 +1901,7 @@ test("a message handle has one text property, takes text, and stays out of text,
     ["say line.speaker", "Message handles have no property 'speaker'. Use the text property."],
     [
       "line.stop()",
-      "Message handles have no method 'stop'. Change the message with its text property.",
+      "Message handles have no method 'stop'. Use remove(), or change the message with its text property.",
     ],
   ] as const)
     assert.deepEqual(codes(source), [["TSV043", message]], source);

@@ -116,6 +116,8 @@ export interface PlayerRuntimeSession {
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
   readonly transcriptMessageRows: ReadonlyMap<number, number>;
+  /** The indexes of the removed messages in `transcriptEntries`, in ascending order. */
+  readonly transcriptRemovedRows: readonly number[];
   readonly transcriptRevision: number;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   /** Records the session's engine calls for a debug export; it never changes them. */
@@ -2079,6 +2081,7 @@ function emptySession(
     events: [],
     transcriptEntries: [],
     transcriptMessageRows: new Map(),
+    transcriptRemovedRows: [],
     transcriptRevision: 0,
     speakers: { ...DEFAULT_SPEAKERS },
   });
@@ -2104,7 +2107,7 @@ export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, new Map(), speakers, events, DEFAULT_TEMPORAL_CONTEXT.presentation);
+  appendTranscript(entries, new Map(), [], speakers, events, DEFAULT_TEMPORAL_CONTEXT.presentation);
   return { entries, speakers };
 }
 
@@ -2120,17 +2123,21 @@ export function playerRuntimeTranscriptMessage(
 }
 
 // Folds `events` into the transcript, in order: each message or answer appends its entry, keyed by the event that
-// created it, and the speakers they name; a message update replaces its message's entry with one showing the new text.
-// `rows` indexes the script messages. A choice, button, or form answer is marked by its settlement, which the same
+// created it, and the speakers they name; a message update replaces its message's entry with one showing the new text,
+// and a removal with one marked removed, which keeps its place. `rows` indexes the script messages, and `removedRows`
+// lists the removed ones in ascending order. A choice, button, or form answer is marked by its settlement, which the same
 // operation emits.
 function appendTranscript(
   transcriptEntries: PlayerTranscriptEntryPresentation[],
   rows: Map<number, number>,
+  removedRows: number[],
   speakers: Record<string, PlayerSpeakerPresentation>,
   events: readonly InterpreterEvent[],
   presentation: TemporalContext["presentation"],
 ) {
   const responseKinds = new Map<number, "choice" | "button" | "form">();
+  // The rows these events remove, sorted and merged into `removedRows` once, whatever order they come in.
+  const removedNow: number[] = [];
   // A submitted form's answer shows every field with its state, one per line (V30 askForm).
   const formSummaries = new Map<number, readonly FormSummaryLine[]>();
   for (const event of events) {
@@ -2176,6 +2183,18 @@ function appendTranscript(
           content: event.content,
           contentSequence: event.sequence,
         });
+    } else if (event.kind === "messageRemoved") {
+      // Its removal explains the message from then on; the runtime removes a message once.
+      const index = rows.get(event.messageId);
+      const entry = index === undefined ? undefined : transcriptEntries[index];
+      if (entry?.kind === "message" && entry.removed !== true) {
+        transcriptEntries[index!] = Object.freeze({
+          ...entry,
+          contentSequence: event.sequence,
+          removed: true,
+        });
+        removedNow.push(index!);
+      }
     } else if (event.kind === "playerTranscript") {
       transcriptEntries.push(
         Object.freeze({
@@ -2193,6 +2212,25 @@ function appendTranscript(
       );
     }
   }
+  if (removedNow.length > 0) mergeSortedRows(removedRows, removedNow);
+}
+
+/** Merges the distinct `added` rows, in any order, into the ascending `rows`, in place. */
+function mergeSortedRows(rows: number[], added: number[]): void {
+  added.sort((left, right) => left - right);
+  if (rows.length === 0 || added[0]! > rows.at(-1)!) {
+    for (const row of added) rows.push(row);
+    return;
+  }
+  const merged: number[] = [];
+  let next = 0;
+  for (const row of rows) {
+    while (next < added.length && added[next]! < row) merged.push(added[next++]!);
+    merged.push(row);
+  }
+  while (next < added.length) merged.push(added[next++]!);
+  rows.length = 0;
+  for (const row of merged) rows.push(row);
 }
 
 function appendRuntimeEvents(
@@ -2209,10 +2247,13 @@ function appendRuntimeEvents(
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript index for every session.
   const messageRows = session.transcriptMessageRows as Map<number, number>;
+  // EVIDENCE: emptySession creates an unfrozen adapter-owned list of removed rows for every session.
+  const removedRows = session.transcriptRemovedRows as number[];
   for (const event of events) retainedEvents.push(event);
   appendTranscript(
     transcriptEntries,
     messageRows,
+    removedRows,
     speakers,
     events,
     presentation ?? session.engine.temporalPresentation(session),

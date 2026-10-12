@@ -1162,7 +1162,7 @@ test("restore and attaching mid-run start a new epoch that names unrecorded hist
 function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSession {
   let session = createPlayerRuntimeSession(
     [
-      'let pick = choose a: "Apple", b: "Pear"',
+      'let pick = askChoice a: "Apple", b: "Pear"',
       'let name = askText "Name?"',
       'save name as "who"',
       'showPermanentButton "Bonus" {',

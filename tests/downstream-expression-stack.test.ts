@@ -69,7 +69,7 @@ test("downstream expression frames traverse each public stage and resume on a co
       assert.equal(groupedRun.snapshot.status,'halted');
       assert.equal(groupedRun.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,1);
       // Static choice analysis consumes the same accepted arithmetic trees.
-      const choice=compileSource('let selected=choose '+Array(depth).fill('1').join('+')+', 2\\nexit');
+      const choice=compileSource('let selected=askChoice '+Array(depth).fill('1').join('+')+', 2\\nexit');
       assert.deepEqual(choice.diagnostics,[]);
       const waiting=run(choice.plan,createFreshRuntimeSnapshot(choice.plan));assert.equal(waiting.snapshot.status,'waiting');
       assert.deepEqual(waiting.snapshot.foregroundAction.ui.options.map(option=>option.text),[String(depth),'2']);

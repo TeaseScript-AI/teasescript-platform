@@ -445,7 +445,7 @@ async function constrainedChoicesScenario(cdp) {
     (_, index) =>
       `c${index}: "Option ${index + 1}: select this alternative for the next part of the story"`,
   ).join(", ");
-  await replaceSourceAndRun(cdp, `let answer = choose ${options}\nexit`);
+  await replaceSourceAndRun(cdp, `let answer = askChoice ${options}\nexit`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
     await value(cdp, visible(".choice-buttons")),

@@ -110,7 +110,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    the test has no side effects.
 4. A right operand that is not a type is an error that explains that `is` checks a type and `==` compares values.
 5. The compiler warns about a test that is provably always true or always false, and only then. The same warning
-   covers `==` and `!=` with a value that the other side can never hold, such as a `choose` result compared with a
+   covers `==` and `!=` with a value that the other side can never hold, such as an `askChoice` result compared with a
    value no button returns (V30 §19).
 
 ### 5. Narrowing

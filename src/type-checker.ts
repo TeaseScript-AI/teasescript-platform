@@ -871,7 +871,7 @@ interface Place {
   readonly widening?: PlacePath | undefined;
   /**
    * Whether no type is written for the place: a variable or parameter without an annotation, or a property or element
-   * that one holds. Only a written union type keeps a `choose` of different value types (#511 C2).
+   * that one holds. Only a written union type keeps an `askChoice` of different value types (#511 C2).
    */
   readonly inferred?: "variable" | "part" | undefined;
   /** The source spelling of the place, such as `items` or `door.locked`, when it has one. */
@@ -1004,7 +1004,7 @@ class TypeChecker {
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
    */
   #mixedLiterals = new Map<Expression, readonly StaticType[]>();
-  /** `choose` expressions whose buttons return values of different types, which only a declared union may keep. */
+  /** `askChoice` expressions whose buttons return values of different types, which only a declared union may keep. */
   readonly #mixedChoices = new Map<Expression, StaticType>();
 
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
@@ -1951,7 +1951,7 @@ class TypeChecker {
       this.#reportMixedChoice(
         written,
         (type) =>
-          `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = choose ...'`,
+          `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = askChoice ...'`,
       );
     } else {
       type = declared!;
@@ -2186,7 +2186,7 @@ class TypeChecker {
     )
       this.#loadReceivers.set(loaded, variable.type);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-    // A mixed `choose` that C2 rejects for the other receivers needs no second message here.
+    // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
       if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
         this.#checkSpeakerProperty(speakerProperty, statement.value, value);
@@ -2490,7 +2490,7 @@ class TypeChecker {
         value,
       });
     if (isAssignable(place.type, value)) {
-      // A place without a written type, or whose type the value would decide, cannot keep a mixed `choose`.
+      // A place without a written type, or whose type the value would decide, cannot keep a mixed `askChoice`.
       if (place.inferred !== undefined || members(place.type).some((member) => !isKnown(member)))
         this.#reportMixedChoice(expression, (written) =>
           place.verb === "take" && place.label !== null
@@ -3431,7 +3431,7 @@ class TypeChecker {
           types.push(this.#capture(item));
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown. A
-        // `choose` that returns values of different types mixes them too.
+        // `askChoice` that returns values of different types mixes them too.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
         const choice = expression.elements.find((item) => this.#mixedChoices.has(unwrap(item)));
         let element = types.length === 0 ? openType() : joinTypes(known);
@@ -3475,7 +3475,7 @@ class TypeChecker {
         for (const property of expression.properties) {
           yield* compileChild(this.#expressionTask(property.value, scope));
           const value = this.#capture(property.value);
-          // A property is a place without a declared type, so it cannot keep a mixed `choose` (#511 C2).
+          // A property is a place without a declared type, so it cannot keep a mixed `askChoice` (#511 C2).
           this.#reportMixedChoice(property.value, () => ONE_TYPE_FIX);
           properties.set(property.name.name, freshPlaceType(value));
         }
@@ -4063,7 +4063,7 @@ class TypeChecker {
   }
 
   /**
-   * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
+   * What a cycle returns: each option's value, or the text of a choice object without one, as an `askChoice` button
    * returns it. Written choice objects are read one by one; for a computed one, whether it has a `value` is not
    * known, so either may be returned.
    */
@@ -4160,6 +4160,8 @@ class TypeChecker {
    * values must be valid, and written sources must leave the player a way to answer.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+    if (expression.presentation !== undefined)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     const sources: boolean[] = [];
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
@@ -4464,9 +4466,10 @@ class TypeChecker {
   }
 
   /**
-   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): a `choose` result compared
-   * with a value no button returns (#511 C5), or values of types that are never equal, such as text and a number, or a
-   * value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a literal `case`.
+   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): an `askChoice` result
+   * compared with a value no button returns (#511 C5), or values of types that are never equal, such as text and a
+   * number, or a value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a
+   * literal `case`.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -4508,8 +4511,8 @@ class TypeChecker {
 
   /**
    * Why a literal `case` value never matches what the switched value can still hold, or `undefined` when it may: the
-   * cases above took every value of its type, as `case is integer` before `case 5`, or a `choose` result never is it
-   * (#511 C5). The case compares with `==` (V30 §32).
+   * cases above took every value of its type, as `case is integer` before `case 5`, or an `askChoice` result never is
+   * it (#511 C5). The case compares with `==` (V30 §32).
    */
   #neverMatchingCaseValue(
     subjectExpression: Expression,
@@ -5280,11 +5283,12 @@ class TypeChecker {
     const results = all.map((member) => memberMethodType(member, method));
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
-      const handles = all.every((member) => ["timer", "media"].includes(resolved(member).kind));
+      const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
+      const handles = all.every((member) => HANDLE_LABELS.has(resolved(member).kind));
       if (handles && expression.arguments.length > 0)
         this.#report(
           typeCode.invalidOperand,
-          `${resolved(all[0]!).kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
+          `${handle} ${method}() takes no arguments.`,
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
@@ -5356,7 +5360,9 @@ class TypeChecker {
                 failing.kind === "camera" ||
                 failing.kind === "messageHandle"
               ? handleMemberMessage(failing.kind, method, "call")
-              : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+              : failing.kind === "permanentButton"
+                ? `Permanent buttons have no method '${method}'. Use remove().`
+                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -5655,15 +5661,6 @@ class TypeChecker {
           this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
         }
         return INTEGER_TYPE;
-      case "removePermanentButton":
-        if (argument !== undefined && value !== undefined)
-          this.#reportUnless(
-            value,
-            (member) => member.kind === "permanentButton",
-            argument.value,
-            "removePermanentButton(...) takes the identifier that showPermanentButton gives",
-          );
-        return NULL_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -6007,6 +6004,9 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    // The options of the question's mode are evaluated first, as for `say`.
+    if (expression.presentation !== null)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     if (expression.interactionKind === "form")
       return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind === "booleans")
@@ -6027,6 +6027,7 @@ class TypeChecker {
     }
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
+        if (operand === expression.presentation) continue;
         const type = yield* compileChild(this.#expressionTask(operand, scope));
         if (operand === expression.prefill)
           this.#checkInteractionPrefill(expression.interactionKind, operand, type);
@@ -6039,7 +6040,7 @@ class TypeChecker {
       }
       return interactionResultType(expression.interactionKind);
     }
-    // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
+    // `askChoice` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
     // button's value is also kept when the source shows it, so a comparison with another value can be checked (C5).
     const values: StaticType[] = [];
     let literals: (ScalarValue | null)[] | null = [];
@@ -6163,7 +6164,7 @@ class TypeChecker {
   }
 
   /**
-   * Reports a `choose` whose buttons return values of different types where its value would decide a type, such as
+   * Reports an `askChoice` whose buttons return values of different types where its value would decide a type, such as
    * an unannotated `let`, an inferred function result, or a parameter without a type (#511 C2).
    */
   #reportMixedChoice(expression: Expression, fix: (written: string) => string): void {
@@ -6171,7 +6172,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
+      `This askChoice returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
       expression.span,
     );
   }
@@ -7930,7 +7931,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  if (value.kind === "camera" || value.kind === "messageHandle") return undefined;
+  // A message or a permanent button removes itself (#836).
+  if (value.kind === "messageHandle" || value.kind === "permanentButton")
+    return method === "remove" ? NULL_TYPE : undefined;
+  if (value.kind === "camera") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -8276,7 +8280,7 @@ function mixesFamilies(type: StaticType): boolean {
   return families.size > 1;
 }
 
-/** A numeric value with `-` before it: the values a `choose` restricted it to change sign too. */
+/** A numeric value with `-` before it: the values an `askChoice` restricted it to change sign too. */
 function negatedValues(type: StaticType, operator: string): StaticType {
   if (operator !== "-" || type.kind !== "scalar" || type.values === undefined) return type;
   return withValues(
@@ -8404,7 +8408,6 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["chance", BOOLEAN_TYPE],
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
-  ["removePermanentButton", NULL_TYPE],
 ]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
@@ -8499,6 +8502,14 @@ function mixDescription(first: StaticType, other: StaticType): string {
 /** The kinds of handle whose properties scripts read or assign. */
 type HandleKind = "timer" | "media" | "camera" | "messageHandle";
 
+/** The handles whose methods take no arguments, as their messages name them. */
+const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["timer", "Timer"],
+  ["media", "Media"],
+  ["messageHandle", "Message"],
+  ["permanentButton", "Permanent button"],
+]);
+
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
   handle: HandleKind,
@@ -8507,7 +8518,7 @@ function handleMemberMessage(
 ): string {
   if (handle === "messageHandle")
     return use === "call"
-      ? `Message handles have no method '${name}'. Change the message with its text property.`
+      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
       : `Message handles have no property '${name}'. Use the text property.`;
   if (handle === "camera")
     return use === "call"

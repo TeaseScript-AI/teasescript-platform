@@ -45,23 +45,27 @@ export function useMessageUpdateAnnouncements(player: {
         seenEvents = session?.events.length ?? 0;
         seen = new Map();
         if (session !== null)
-          for (const [messageId, index] of session.transcriptMessageRows)
-            seen.set(messageId, session.transcriptEntries[index]!.text);
+          for (const [messageId, index] of session.transcriptMessageRows) {
+            const entry = session.transcriptEntries[index]!;
+            if (entry.kind !== "message" || entry.removed !== true) seen.set(messageId, entry.text);
+          }
         return;
       }
       const { events } = session;
       for (let index = seenEvents; index < events.length; index += 1) {
         const event = events[index]!;
         if (event.kind === "say") seen.set(event.sequence, event.text);
-        else if (event.kind === "messageUpdated") {
+        else if (event.kind === "messageUpdated" || event.kind === "messageRemoved") {
           const before = seen.get(event.messageId);
           if (before === undefined) continue;
-          seen.set(event.messageId, event.text);
+          const text = event.kind === "messageUpdated" ? event.text : null;
+          if (text === null) seen.delete(event.messageId);
+          else seen.set(event.messageId, text);
           const at = session.transcriptMessageRows.get(event.messageId);
           const row = at === undefined ? undefined : session.transcriptEntries[at];
           const speaker =
             row?.kind === "message" ? session.speakers[row.speakerId]?.name : undefined;
-          announcer.update(event.messageId, speaker ?? "", before, event.text);
+          announcer.update(event.messageId, speaker ?? "", before, text);
         }
       }
       seenEvents = events.length;

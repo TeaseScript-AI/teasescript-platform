@@ -222,10 +222,10 @@ test("display, choice, and speaker text checks look at every member of a union",
     ['function f(x: object | integer set) {\n    say "${x}"\n}\nexit', "TSV042"],
     ['function f(x: string | object) {\n    say "${[x]}"\n}\nexit', "TSV043"],
     [
-      'function f(x: string | integer[]) {\n    let answer = choose { text: "go", value: x }\n}\nexit',
+      'function f(x: string | integer[]) {\n    let answer = askChoice { text: "go", value: x }\n}\nexit',
       "TSV043",
     ],
-    ["function f(x: string | timer) {\n    let answer = choose x\n}\nexit", "TSV043"],
+    ["function f(x: string | timer) {\n    let answer = askChoice x\n}\nexit", "TSV043"],
     [
       "speaker vera {}\nfunction f(voice: speaker | object) {\n    voice.firstName = [1]\n}\nexit",
       "TSV040",
@@ -238,12 +238,12 @@ test("display, choice, and speaker text checks look at every member of a union",
     );
   // A union of collections gives buttons from either one, so the result has their element type.
   assert.deepEqual(
-    codes("function f(x: integer[] | integer set) {\n    let n: integer = choose x\n}\nexit"),
+    codes("function f(x: integer[] | integer set) {\n    let n: integer = askChoice x\n}\nexit"),
     [],
   );
   assert.deepEqual(
     codes(
-      'function f(x: integer[] | integer set) {\n    let selected = choose x\n    say "${selected.length}"\n}\nexit',
+      'function f(x: integer[] | integer set) {\n    let selected = askChoice x\n    say "${selected.length}"\n}\nexit',
     ),
     [["TSV043", "length"]],
   );
@@ -252,22 +252,22 @@ test("display, choice, and speaker text checks look at every member of a union",
   // The elements of a computed list are shown, or give buttons, one at a time.
   for (const source of [
     'function f(xs: (string | object)[]) {\n    say "${xs}"\n}\nexit',
-    "function f(xs: string[] | timer[]) {\n    let answer = choose xs\n}\nexit",
+    "function f(xs: string[] | timer[]) {\n    let answer = askChoice xs\n}\nexit",
   ])
     assert.deepEqual(codes(source), [["TSV043", "xs"]], source);
   // A value that may also be text or null names the test for it.
   for (const [source, test] of [
     ['function f(n: string | object[]) {\n    say "${n}"\n}\nexit', "string"],
-    ["function f(n: string | timer[]) {\n    let answer = choose n\n}\nexit", "string"],
+    ["function f(n: string | timer[]) {\n    let answer = askChoice n\n}\nexit", "string"],
     ['function f(n: object[]?) {\n    say "${n}"\n}\nexit', "null"],
-    ["function f(n: timer[]?) {\n    let answer = choose n\n}\nexit", "null"],
+    ["function f(n: timer[]?) {\n    let answer = askChoice n\n}\nexit", "null"],
   ] as const)
     assert.match(
       diagnostics(source)[0]?.[1] ?? "",
       new RegExp(`Check it first: if n is ${test} `),
       source,
     );
-  assert.deepEqual(codes("function f(xs: timer[]) {\n    let answer = choose xs\n}\nexit"), [
+  assert.deepEqual(codes("function f(xs: timer[]) {\n    let answer = askChoice xs\n}\nexit"), [
     ["TSV029", "xs"],
   ]);
 });

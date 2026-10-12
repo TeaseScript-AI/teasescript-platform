@@ -1124,6 +1124,30 @@ export class TraceStore {
     this.#stage?.outputs.push(eventSequence);
   }
 
+  /**
+   * A `remove()` that took the message whose state is `base`, with the text `text`, out of the conversation, emitted as
+   * event `eventSequence`: the output record of that event, which explains why the message no longer shows (#836).
+   */
+  messageRemoved(
+    base: string,
+    messageId: number,
+    text: string,
+    span: TraceSpan,
+    eventSequence: number,
+  ): void {
+    const id = this.write(
+      "mutation",
+      partKey(base, "whole"),
+      "message.removed",
+      text,
+      span,
+      Object.freeze({ kind: "output", eventSequence, messageId }),
+    );
+    if (id === null || this.#find(id) === undefined) return;
+    this.#outputs.set(eventSequence, id);
+    this.#stage?.outputs.push(eventSequence);
+  }
+
   image(value: SerializableRuntimeValue): void {
     const id = this.write("image", null, "Stage image", value);
     // A record larger than the budget is dropped at once, so the image has none.

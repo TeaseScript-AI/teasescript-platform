@@ -35,7 +35,7 @@ test("an instant say after a paced say waits for its reading time", () => {
 test("buttons, a choice, an ask, and a form after a paced say wait for its reading time", () => {
   for (const [source, question] of [
     ['showButton "Go"', null],
-    ['let pick = choose ["Red", "Blue"]', null],
+    ['let pick = askChoice ["Red", "Blue"]', null],
     ['let name = askText "Name?"', "Name?"],
     ['let ready = askBoolean "Ready?"', "Ready?"],
     ['let answers = askForm "Settings", fields: { n: { type: "integer", value: 1 } }', "Settings"],
@@ -113,7 +113,7 @@ test("a message change and permanent-button changes after a paced say wait for i
   assert.equal(buttons(shown.at(1_999)), 0);
   assert.equal(buttons(shown.at(2_000)), 1);
   const removed = new Story(
-    `let hint = showPermanentButton "Hint" {\n}\n${READ}\nremovePermanentButton(hint)\nwait 10 s\nexit`,
+    `let hint = showPermanentButton "Hint" {\n}\n${READ}\nhint.remove()\nwait 10 s\nexit`,
   );
   assert.equal(buttons(removed.at(1_999)), 1);
   assert.equal(buttons(removed.at(2_000)), 0);

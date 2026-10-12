@@ -394,6 +394,40 @@ test("a changed message is explained by its latest change, also in Recent chat, 
   assert.equal(row?.kind === "record" && row.text.now, shown);
 });
 
+test("a removed message is explained by its removal, also in Recent chat, and its handle says it was removed", () => {
+  const trace = new RuntimeDebugContext();
+  const session = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession(
+      [
+        'let line = say "Waiting", instant',
+        'say "Later", instant',
+        "line.remove()",
+        "wait 1 s",
+        "exit",
+      ].join("\n"),
+      { debugTrace: trace },
+    ),
+    500,
+  );
+  const first = session.transcriptEntries[0]!;
+  const message = playerRuntimeTranscriptMessage(session, first.id);
+  assert.equal(message?.removed, true);
+  const origin = playerDebugMessageOrigin(trace, message!.contentSequence!);
+  assert.ok(origin.kind === "record");
+  assert.deepEqual(summary(playerDebugTraceRows(trace, [origin.id], defaults())).slice(0, 1), [
+    'Removed message "Waiting"',
+  ]);
+  // Recent chat lists the removed message by its removal, its latest change, after the newer message.
+  assert.equal(trace.recentMessages(PLAYER_DEBUG_TRACE_PAGE)[1], origin.id);
+  const handle = playerDebugVariables(session.plan, playerRuntimeDebugVariables(session), trace)
+    .flatMap((group) => group.variables)
+    .find((variable) => variable.name === "line");
+  assert.equal(
+    handle?.value,
+    `<message ${first.id.replace("runtime-event-", "")} removed "Waiting">`,
+  );
+});
+
 test("Recent chat shows a message changed while Debug runs, also one said before", () => {
   const source = [
     'let line = say "Waiting", instant',

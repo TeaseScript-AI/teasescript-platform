@@ -78,6 +78,22 @@ test("a kept session read back from storage is used only when its events have th
     changed("playerTranscript", (event) => (event["text"] = 1)),
   ])
     assert.equal(keptSession(malformed), null, JSON.stringify(malformed));
+
+  // A message's removal names the message, which the transcript then leaves out (#836).
+  const removing = createPlayerRuntimeSession(
+    'let line = say "Hello", instant\nline.remove()\nshowButton "Next"\nexit',
+  );
+  const removal: Record<string, unknown>[] = JSON.parse(JSON.stringify(removing.events));
+  assert.ok(removal.some((event) => event["kind"] === "messageRemoved"));
+  assert.equal(keptSession(stored({ events: removal }))?.events.length, removal.length);
+  for (const change of [
+    (event: Record<string, unknown>) => delete event["messageId"],
+    (event: Record<string, unknown>) => (event["span"] = null),
+  ]) {
+    const events: Record<string, unknown>[] = JSON.parse(JSON.stringify(removal));
+    change(events.find((event) => event["kind"] === "messageRemoved")!);
+    assert.equal(keptSession(stored({ events })), null);
+  }
 });
 
 test("the store keeps one session per scope, extends it from a position, and discards it with its photos", async () => {

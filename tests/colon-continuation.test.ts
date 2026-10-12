@@ -24,7 +24,7 @@ const nextLines = {
 const sites = {
   speaker: (line: string | null) =>
     `speaker vera {\n    displayName:\n${line === null ? "" : `${line}\n}`}`,
-  choice: (line: string | null) => `let r = choose coast:\n${line ?? ""}`,
+  choice: (line: string | null) => `let r = askChoice coast:\n${line ?? ""}`,
   presentation: (line: string | null) =>
     `say prose(background:\n${line === null ? "" : `${line}) "Text"`}`,
   call: (line: string | null) => `let x = f(a:\n${line === null ? "" : `${line})`}`,
@@ -166,11 +166,11 @@ test("a missing value on the colon's own line keeps its single-line recovery", (
   for (const source of [
     "speaker vera {\n    displayName: exit\n}\nexit",
     'speaker vera {\n    displayName: title: "C"\n}',
-    "let r = choose coast: exit\nexit",
-    'let r = choose coast: b: "B"',
+    "let r = askChoice coast: exit\nexit",
+    'let r = askChoice coast: b: "B"',
     'say prose(background: align: "left") "T"',
     "let o = { a: b: 1 }",
-    "let r = choose coast:",
+    "let r = askChoice coast:",
   ]) {
     const colonLine = source.slice(0, source.indexOf(":")).split("\n").length - 1;
     assert.equal(parse(source).diagnostics[0]?.span.start.line, colonLine, source);
@@ -180,13 +180,13 @@ test("a missing value on the colon's own line keeps its single-line recovery", (
   const speaker = parse("speaker vera {\n    displayName: exit\n}\nexit");
   assert.deepEqual(root(speaker), ["TSP006", 1, 17]);
   assert.deepEqual(kinds(speaker), ["speakerDeclaration", "exitStatement"]);
-  const choice = parse("let r = choose coast: exit\nexit");
-  assert.deepEqual(root(choice), ["TSP030", 0, 22]);
+  const choice = parse("let r = askChoice coast: exit\nexit");
+  assert.deepEqual(root(choice), ["TSP030", 0, "let r = askChoice coast: ".length]);
   assert.deepEqual(kinds(choice), ["letStatement", "exitStatement", "exitStatement"]);
 
   // The end of the file directly after the colon reports the missing option, not a missing option list.
-  const atEnd = parse("let r = choose coast:");
-  assert.deepEqual(root(atEnd), ["TSP030", 0, 21]);
+  const atEnd = parse("let r = askChoice coast:");
+  assert.deepEqual(root(atEnd), ["TSP030", 0, "let r = askChoice coast:".length]);
   assert.match(atEnd.diagnostics[0]?.message ?? "", /after ':'/u);
   assert.deepEqual(kinds(atEnd), ["letStatement"]);
 });

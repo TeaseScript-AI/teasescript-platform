@@ -105,43 +105,49 @@ const HELP = Object.freeze({
     command: "askText" as const,
     summary:
       "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The asking speaker says the optional question in the chat before the field opens. An optional hint is shown in the field, not in the chat. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
-    syntax: "askText [as speaker] [question] [, prefill: answer] [, hint: text]",
+    syntax:
+      "askText [as speaker] [bubble(options)|prose(options)] [question] [, prefill: answer] [, hint: text]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
       "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
-    syntax: "askNumber [as speaker] [question] [, prefill: number] [, hint: text]",
+    syntax:
+      "askNumber [as speaker] [bubble(options)|prose(options)] [question] [, prefill: number] [, hint: text]",
   }),
   askInteger: Object.freeze({
     command: "askInteger" as const,
     summary:
       "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
-    syntax: "askInteger [as speaker] [question] [, prefill: integer] [, hint: text]",
+    syntax:
+      "askInteger [as speaker] [bubble(options)|prose(options)] [question] [, prefill: integer] [, hint: text]",
   }),
   askDate: Object.freeze({
     command: "askDate" as const,
     summary:
       "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
-    syntax: "askDate [as speaker] [question] [, prefill: date] [, hint: text]",
+    syntax:
+      "askDate [as speaker] [bubble(options)|prose(options)] [question] [, prefill: date] [, hint: text]",
   }),
   askTime: Object.freeze({
     command: "askTime" as const,
     summary:
       "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
-    syntax: "askTime [as speaker] [question] [, prefill: time] [, hint: text]",
+    syntax:
+      "askTime [as speaker] [bubble(options)|prose(options)] [question] [, prefill: time] [, hint: text]",
   }),
   askDateTime: Object.freeze({
     command: "askDateTime" as const,
     summary:
       "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
-    syntax: "askDateTime [as speaker] [question] [, prefill: datetime] [, hint: text]",
+    syntax:
+      "askDateTime [as speaker] [bubble(options)|prose(options)] [question] [, prefill: datetime] [, hint: text]",
   }),
-  choose: Object.freeze({
-    command: "choose" as const,
+  askChoice: Object.freeze({
+    command: "askChoice" as const,
     summary:
       "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element; an element may be a { value?, text, background? } object.",
-    syntax: "choose [as speaker] [value:] option, [value:] option, ...",
+    syntax: "askChoice [as speaker] [value:] option, [value:] option, ...",
   }),
   say: Object.freeze({
     command: "say" as const,
@@ -232,7 +238,7 @@ export function languageCompletions(
     items.push(command("askDate", "Compact date input expression"));
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
-    items.push(command("choose", "Compact choice expression"));
+    items.push(command("askChoice", "Compact choice expression"));
     items.push(command("showCamera", "Show the camera view and give its handle"));
     items.push(
       Object.freeze({
@@ -429,7 +435,7 @@ type CompactCommand =
   | "askDate"
   | "askTime"
   | "askDateTime"
-  | "choose"
+  | "askChoice"
   | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
 
@@ -440,7 +446,7 @@ const INTERACTION_COMMANDS = {
   date: "askDate",
   time: "askTime",
   datetime: "askDateTime",
-  choice: "choose",
+  choice: "askChoice",
 } as const satisfies Record<string, CompactCommand>;
 
 function compactCommandContext(
@@ -471,7 +477,7 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
     token.lexeme === "askDate" ||
     token.lexeme === "askTime" ||
     token.lexeme === "askDateTime" ||
-    token.lexeme === "choose"
+    token.lexeme === "askChoice"
   ) {
     return token.lexeme;
   }
@@ -605,18 +611,35 @@ function nearestOpenCompactCommand(
 
 /**
  * The position of the `(` that opens an ask's own arguments, as the parser reads it: at `after`, the token right after
- * the ask, or after its `as speaker`. It is -1 for another command or an ask without parentheses.
+ * the ask, or after its `as speaker` and the question's mode with its parentheses, as in `askText prose() (`. It is -1
+ * for another command or an ask without parentheses.
  */
 function askArgumentsOpener(
   command: CompactCommand,
   tokens: readonly Token[],
   after: number,
 ): number {
-  if (command === "say" || command === "showButton" || command === "choose") return -1;
-  const opener =
+  if (command === "say" || command === "showButton" || command === "askChoice") return -1;
+  let opener =
     tokens[after]?.kind === TokenKind.KeywordAs && tokens[after + 1]?.kind === TokenKind.Identifier
       ? after + 2
       : after;
+  const mode = tokens[opener];
+  if (
+    mode?.kind === TokenKind.Identifier &&
+    (mode.lexeme === "bubble" || mode.lexeme === "prose") &&
+    tokens[opener + 1]?.kind === TokenKind.LeftParenthesis
+  ) {
+    let depth = 0;
+    for (let index = opener + 1; index < tokens.length; index += 1) {
+      if (OPENING_DELIMITERS.has(tokens[index]!.kind)) depth += 1;
+      else if (CLOSING_DELIMITERS.has(tokens[index]!.kind)) depth -= 1;
+      if (depth === 0) {
+        opener = index + 1;
+        break;
+      }
+    }
+  }
   return tokens[opener]?.kind === TokenKind.LeftParenthesis ? opener : -1;
 }
 
@@ -635,7 +658,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askTime":
     case "askDateTime":
       return Object.freeze(["speaker", "question", "prefill", "hint"]);
-    case "choose":
+    case "askChoice":
       return Object.freeze(["speaker", "options"]);
     case "say":
       return Object.freeze(["speaker", "skip policy", "text", "pacing"]);
@@ -972,6 +995,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "callExpression":
       children.push({ kind: "expression", node: expression.callee });
+      if (expression.presentation !== undefined)
+        children.push({ kind: "expression", node: expression.presentation });
       for (const argument of expression.arguments)
         children.push({ kind: "expression", node: argument.value });
       return;
@@ -1061,6 +1086,10 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
     cursor = node.speaker.span.end.offset;
   }
   if (node.interactionKind !== "choice") {
+    if (node.presentation !== null) {
+      whitespaceEdit(source, cursor, node.presentation.span.start.offset, " ", edits);
+      cursor = node.presentation.span.end.offset;
+    }
     if (node.question !== null)
       whitespaceEdit(source, cursor, node.question.span.start.offset, " ", edits);
     return;

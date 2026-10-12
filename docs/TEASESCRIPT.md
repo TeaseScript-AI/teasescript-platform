@@ -11,7 +11,7 @@ Accepted post-V30 additions:
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
-- ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
+- ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `askChoice`, and `say` smart autoplay.
 - ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
 - ADR 0022 defines multi-file scripts: `goto` and `call` across files, globs, `script(...)` references, globals, and
   explicit endings with `end` and `exit`.
@@ -84,7 +84,7 @@ The broader parenthesized V30 APIs and their advanced parameters remain deferred
 implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)),
 and `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
-such as `showButton(...)` or `choose(...)`, is never interpreted as compact syntax; until those APIs are implemented,
+such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
 same diagnostic.
 
@@ -111,12 +111,24 @@ let moment = askDateTime "When are you free?"
 let name = askText("Your name?", prefill: "Ada")
 let more = askInteger as mistress ("How many?", prefill: 3) + 1
 
+let name = askText prose "Your name?"
+let count = askInteger as mistress prose(align: "center") "How many?"
+let name = askText prose() ("Your name?", prefill: "Ada")
+let picture = askImage prose ("Show me your setup")
+
 let ok = askBoolean as mistress "Ready?", yesText: "Sure!", noText: "No, thanks"
 ```
 
 The basic asks also take their arguments in parentheses, with the same meaning; the `)` ends the ask inside a larger
 expression, and `as speaker` comes before the parentheses
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
+
+Every ask that takes a question shows it as `say` shows a message: `bubble(options)` or `prose(options)` after
+`as speaker` and before the question chooses the mode, with the options of `say`, and without one the speaker's mode
+applies, a bubble by default. As for `say`, a mode before parentheses is written with its own, `askText prose() (...)`,
+since `askText prose("Name?")` asks the value of a call to `prose`; `askImage`, which always takes parentheses, also
+takes `askImage prose (...)`. `askChoice` has no question, so a question shown as prose is a `say prose` before it
+([V30 §20](specifications/accepted-syntaxes-v30.md#20-input-functions)).
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say` but with no reading time of its own, once, and the field opens with it. `hint:` is help text shown in the field
@@ -143,17 +155,17 @@ instruction without producing a result or binding. See [timer semantics](specifi
 
 ### Compact choices
 
-`choose` returns the value of the selected button. A value may be written before an option's `:`; an option without
+`askChoice` returns the value of the selected button. A value may be written before an option's `:`; an option without
 one returns itself, with its own type. A list or set option gives one button per element:
 
 ```tease
-let result = choose "Bratty", "Very submissive"
-let result = choose as mistress first: "Mystery", second: "Mystery"
-let result = choose 1: "Open the door", 2: "Walk away"
-let rounds = choose 5, 10, 15
+let result = askChoice "Bratty", "Very submissive"
+let result = askChoice as mistress first: "Mystery", second: "Mystery"
+let result = askChoice 1: "Open the door", 2: "Walk away"
+let rounds = askChoice 5, 10, 15
 let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
-let answer = choose back: "Back", offenses
-let rounds = choose 5, 10, 15, prefill: 10
+let answer = askChoice back: "Back", offenses
+let rounds = askChoice 5, 10, 15, prefill: 10
 ```
 
 A trailing `prefill:` preselects the first button with that value: it is marked, and Space in the empty composer
@@ -163,9 +175,9 @@ written value may be mixed; values of different types, such as text and numbers,
 a union type. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices)
 defines the complete option rules.
 
-`choose` is the author-facing construct. `choice` is the internal interaction/action noun.
+`askChoice` is the author-facing construct. `choice` is the internal interaction/action noun.
 
-Existing downstream interaction and validation guards remain boundary-local technical constraints; compact `choose` does not promote them into a TeaseScript source-capacity promise.
+Existing downstream interaction and validation guards remain boundary-local technical constraints; compact `askChoice` does not promote them into a TeaseScript source-capacity promise.
 
 Selecting a button or dropdown entry supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
 
@@ -217,8 +229,9 @@ time continues with the time it had left once the block returns. For exact timin
 time comes first. `wait` remains separate and does not become a `say` option.
 
 Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
-pacing ([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write
-it in parentheses, `say("text", pacing)`:
+pacing, and whose `remove()` takes the message out of the chat
+([Updatable messages](specifications/accepted-syntaxes-v30.md#updatable-messages)). Inside a list or call, write it in
+parentheses, `say("text", pacing)`:
 
 ```tease
 let waiting = say "Waiting.", instant
@@ -226,6 +239,7 @@ repeat 2 {
     wait 1 s
     waiting.text += "."
 }
+waiting.remove()
 
 let count: integer = 0
 let strokes = say "Strokes: 0", instant
@@ -265,7 +279,7 @@ Over-limit data is rejected deterministically without truncation or partial stat
 
 The broader parenthesized V30 input functions and `showButton` forms are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
 
-The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
+The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `askChoice` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
 
 ## Currently implemented language subset
 
@@ -330,10 +344,10 @@ variable, element, or property is a `number` when one of its assignments can sto
 types they support, and on a union every member must support them; union types, type names, and `is` type tests are
 available, and tests, `!= null`, and assignments narrow plain variables; using a possibly null value where its non-null
 type is required is a compile error that names the check. A mismatch is `TSV041`, an unsupported operand `TSV043`,
-returns of different types, list elements of different types, or a `choose` of different value types outside a declared
-union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler cannot know,
-such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type is at least
-partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
+returns of different types, list elements of different types, or an `askChoice` of different value types outside a
+declared union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler
+cannot know, such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type
+is at least partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

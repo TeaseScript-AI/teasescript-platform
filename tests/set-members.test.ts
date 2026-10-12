@@ -239,10 +239,10 @@ test("speakers and handles are set members by identity, like list elements, and 
   );
 });
 
-test("choose gives one button per member of a set of choice objects, like a list without duplicates", () => {
+test("askChoice gives one button per member of a set of choice objects, like a list without duplicates", () => {
   const source = [
     'let options = set[{ value: 1, text: "Kneel" }, { value: 1, text: "Kneel" }, { value: 2, text: "Beg" }]',
-    "let answer = choose options",
+    "let answer = askChoice options",
     "say [answer]",
     "exit",
   ].join("\n");

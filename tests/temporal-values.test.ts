@@ -180,9 +180,9 @@ test("say, interpolation, and format methods use the captured presentation; coll
   ]);
 });
 
-test("choose shows date options in the captured presentation and returns the chosen date", () => {
+test("askChoice shows date options in the captured presentation and returns the chosen date", () => {
   const { plan, result } = start(
-    'let picked = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay picked.toISO()\nexit',
+    'let picked = askChoice [toDate("2026-10-04"), toDate("2026-10-05")]\nsay picked.toISO()\nexit',
     AMSTERDAM,
   );
   const action = result.snapshot.foregroundAction;

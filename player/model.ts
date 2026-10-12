@@ -50,6 +50,11 @@ export interface PlayerMessagePresentation {
   readonly formSummary?: readonly PlayerFormSummaryLine[];
   /** A message of the later state Debug's rewind can restore, which the inspected state has not reached; shown grey. */
   readonly future?: true;
+  /**
+   * A script message that `remove()` took out of the conversation (#836). It keeps its place among the entries, so the
+   * others keep theirs, but the Player shows nothing of it.
+   */
+  readonly removed?: true;
 }
 
 export type PlayerFormSummaryLine =

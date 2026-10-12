@@ -27,7 +27,12 @@ import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } fro
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
-import { adjoins, resolveAppearance } from "./transcriptPresentation";
+import {
+  adjoins,
+  resolveAppearance,
+  shownEntryIndex,
+  shownPosition,
+} from "./transcriptPresentation";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 
 const props = defineProps<{
@@ -37,7 +42,20 @@ const props = defineProps<{
   /** The revision through which updates show directly, like history: what development time jumps published. */
   jumpedRevision?: number;
   bottomInset?: number;
+  /**
+   * The indexes of the removed messages among `entries`, in ascending order. The conversation leaves them out: its
+   * positions, which the virtual list counts, skip them.
+   */
+  removedRows?: readonly number[];
 }>();
+const NO_REMOVED_ROWS: readonly number[] = Object.freeze([]);
+function currentRemovedRows(): readonly number[] {
+  return props.removedRows ?? NO_REMOVED_ROWS;
+}
+// The index among the entries of the entry the conversation shows at `position`.
+function entryIndexAt(position: number): number {
+  return shownEntryIndex(currentRemovedRows(), position);
+}
 const avatarOrdinals = reactive(new Map<string, number>());
 let assignedEntries = props.entries;
 let assignedThrough = 0;
@@ -100,7 +118,7 @@ let entryKey = (_index: number): string => "";
 function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
   if (entries !== keyedEntries) {
     keyedEntries = entries;
-    entryKey = (index) => entries[index]!.id;
+    entryKey = (position) => entries[entryIndexAt(position)]!.id;
   }
   return entryKey;
 }
@@ -155,7 +173,7 @@ watch(
     const opening = previous.length === 0;
     firstNewEntry =
       following.value && props.entries === previous.entries && added.length > 0 && !opening
-        ? previous.length
+        ? shownPosition(currentRemovedRows(), previous.length)
         : null;
     if (
       initialPositioning ||
@@ -173,7 +191,9 @@ watch(
     liveUntil = performance.now() + LIVE_UPDATE_MS;
     entrances.admit(
       added.flatMap((entry) =>
-        entry.kind === "message" && entry.future !== true ? [entry.id] : [],
+        entry.kind === "message" && entry.future !== true && entry.removed !== true
+          ? [entry.id]
+          : [],
       ),
     );
   },
@@ -216,7 +236,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
     void props.revision; // The canonical adapter appends in place and publishes a revision.
     const entries = props.entries;
     return {
-      count: entries.length,
+      count: entries.length - currentRemovedRows().length,
       getScrollElement: () => scrollElement.value,
       getItemKey: itemKeyFor(entries),
       estimateSize: () => 140,
@@ -343,11 +363,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   paletteObserver?.disconnect();
 });
+// Each shown row with the index of its entry among `entries`, which removed messages may make larger than its position.
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
-    const entry = props.entries[item.index]!;
+    const index = entryIndexAt(item.index);
+    const entry = props.entries[index]!;
     return {
       item,
+      index,
       entry,
       appearance: resolveAppearance(entry, palette.value, enhancedContrast?.value),
     };
@@ -363,11 +386,12 @@ const showLatest = computed(
         : Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2)),
 );
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
-function continues(index: number) {
-  return adjoins(props.entries, index, index - 1);
+// Grouping compares the shown neighbours of the row at `position`: the messages around a removed one adjoin.
+function continues(position: number) {
+  return adjoins(props.entries, entryIndexAt(position), entryIndexAt(position - 1));
 }
-function continued(index: number) {
-  return adjoins(props.entries, index, index + 1);
+function continued(position: number) {
+  return adjoins(props.entries, entryIndexAt(position), entryIndexAt(position + 1));
 }
 const following = ref(true);
 let initialPositioning = true;
@@ -437,7 +461,12 @@ watch(
     const entry = scrollElement.value?.querySelector<HTMLElement>(
       `.transcript-entry[data-message-id="${CSS.escape(id)}"]`,
     );
-    if (entry === null || entry === undefined) return;
+    // A message that left the conversation, such as by `remove()`, has nothing left to focus, so focus moves to the
+    // conversation.
+    if (entry === null || entry === undefined) {
+      scrollElement.value?.focus({ preventScroll: true });
+      return;
+    }
     entry.tabIndex = -1;
     entry.addEventListener("blur", () => entry.removeAttribute("tabindex"), { once: true });
     entry.focus({ preventScroll: true });
@@ -540,7 +569,7 @@ onMounted(() => {
           >
             <div role="list">
               <article
-                v-for="{ item, entry, appearance } in rows"
+                v-for="{ item, index, entry, appearance } in rows"
                 :key="entry.id"
                 :ref="(element) => measureRow(element as HTMLElement | null, entry.id)"
                 :data-index="item.index"
@@ -551,16 +580,16 @@ onMounted(() => {
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
                 role="listitem"
                 :aria-posinset="item.index + 1"
-                :aria-setsize="entries.length"
+                :aria-setsize="entries.length - currentRemovedRows().length"
                 class="transcript-entry"
                 :data-continues="continues(item.index)"
                 :data-prose="appearance.placement !== null || undefined"
-                :data-future="future(item.index) || undefined"
+                :data-future="future(index) || undefined"
                 :style="{ transform: `translateY(${item.start}px)` }"
               >
                 <!-- Debug's rewind: the later messages a restored state has not reached, which Forward restores. -->
                 <p
-                  v-if="future(item.index) && !future(item.index - 1)"
+                  v-if="future(index) && !future(entryIndexAt(item.index - 1))"
                   class="future-label"
                   data-future-label
                 >

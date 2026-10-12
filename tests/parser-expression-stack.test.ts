@@ -20,7 +20,7 @@ test("general expression continuations parse valid and malformed nesting on a co
       ['index', 'items[', ']'],
       ['sets', 'set[0,', ']'],
       ['hint', 'askText ', ''],
-      ['choice', 'choose first:', ''],
+      ['choice', 'askChoice first:', ''],
     ];
     // One depth far beyond the old guard proves stack safety; smaller depths add no failure mode.
     const depth = 4096;
@@ -139,8 +139,8 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
       statements: ["letStatement", "exitStatement"],
     },
     {
-      expression: "choose first:choose second:",
-      diagnostics: [["TSP030", 40, 40]],
+      expression: "askChoice first:askChoice second:",
+      diagnostics: [["TSP030", 46, 46]],
       statements: ["letStatement", "exitStatement"],
     },
     {

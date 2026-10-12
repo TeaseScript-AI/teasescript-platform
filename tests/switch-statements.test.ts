@@ -199,7 +199,7 @@ test("a switch on a pending compact interaction resumes from a checkpoint", () =
   const scenarios = [
     {
       source: [
-        'switch choose "Stay", "Leave" {',
+        'switch askChoice "Stay", "Leave" {',
         '  case "Stay" { say "staying" }',
         '  case "Leave" { say "leaving" }',
         "}",
@@ -615,7 +615,7 @@ test("a case that lists null with other values takes null away from the cases af
 test("a range case that no choice value falls in is a never-matching warning", () => {
   const result = compileSource(
     [
-      'let pick = choose 0: "Toilet", 1: "Sleep", 2: "Break"',
+      'let pick = askChoice 0: "Toilet", 1: "Sleep", 2: "Break"',
       "switch pick {",
       '  case 0 { say "a" }',
       '  case 1..=2 { say "b" }',

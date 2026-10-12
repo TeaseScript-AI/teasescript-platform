@@ -45,7 +45,7 @@ test("completion exposes accepted compact commands and takePhoto", () => {
     "askDate",
     "askTime",
     "askDateTime",
-    "choose",
+    "askChoice",
     "showButton",
     "takePhoto",
     "showCamera",
@@ -93,6 +93,17 @@ test("formatting reaches a command inside a computed call target", () => {
     'call script(askText   "Room?")\nexit',
   );
   assert.equal(formatLanguageDocument(document).text, 'call script(askText "Room?")\nexit');
+});
+
+test("formatting spaces an ask's question mode and reaches the asks inside its options", () => {
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    'let name = askText   prose(font: askText   "Font?")   "Name?"\nlet pic = askImage prose(font: askText   "Font?") ("Image?")\nexit',
+  );
+  assert.equal(
+    formatLanguageDocument(document).text,
+    'let name = askText prose(font: askText "Font?") "Name?"\nlet pic = askImage prose(font: askText "Font?") ("Image?")\nexit',
+  );
 });
 
 test("editor help and formatting cover showButton used as a value with a timeout", () => {
@@ -164,7 +175,7 @@ test("formatter normalizes compact owned whitespace and is idempotent", () => {
     'speaker mistress { name: "Mistress" }',
     'showButton   as   mistress   "Continue"',
     'let answer = askText   as   mistress   "Type here"',
-    'let result = choose   first :   "A"  ,\n   second  : "B"',
+    'let result = askChoice   first :   "A"  ,\n   second  : "B"',
     'say as mistress skippable   "Good",   instant',
     "exit",
   ].join("\n");
@@ -172,7 +183,7 @@ test("formatter normalizes compact owned whitespace and is idempotent", () => {
   const first = formatLanguageDocument(document);
   assert.match(first.text, /showButton as mistress "Continue"/u);
   assert.match(first.text, /askText as mistress "Type here"/u);
-  assert.match(first.text, /choose first: "A", second: "B"/u);
+  assert.match(first.text, /askChoice first: "A", second: "B"/u);
   assert.match(first.text, /"Good", instant/u);
   const second = formatLanguageDocument(createLanguageDocument(document.uri, first.text));
   assert.equal(second.text, first.text);
@@ -183,7 +194,7 @@ test("formatter preserves strings, escapes, interpolation, comments, and choice 
   const source = [
     "// keep  comment spacing",
     'let prefix = "x  y"',
-    'let result = choose   first :   "A  ${prefix}"  ,   second  :  "B\\n  C"',
+    'let result = askChoice   first :   "A  ${prefix}"  ,   second  :  "B\\n  C"',
     "exit",
   ].join("\n");
   const result = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
@@ -191,7 +202,7 @@ test("formatter preserves strings, escapes, interpolation, comments, and choice 
   const formatted = result.text;
   assert.ok(formatted.includes("// keep  comment spacing"));
   assert.ok(formatted.includes('"x  y"'));
-  assert.ok(formatted.includes('choose first: "A  ${prefix}", second: "B\\n  C"'));
+  assert.ok(formatted.includes('askChoice first: "A  ${prefix}", second: "B\\n  C"'));
   assert.ok(formatted.indexOf("first:") < formatted.indexOf("second:"));
 });
 
@@ -215,8 +226,8 @@ test("formatter preserves block-string values and is idempotent", () => {
 test("formatter leaves malformed and incomplete source untouched", () => {
   for (const source of [
     "showButton",
-    "let x = choose",
-    'let x = choose "A",',
+    "let x = askChoice",
+    'let x = askChoice "A",',
     "let x = askText as",
   ]) {
     const result = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
@@ -252,6 +263,11 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText("Q", prefill: '), "prefill");
   assert.equal(activeSlot('askText("Q", hint: '), "hint");
   assert.equal(activeSlot('askText as mistress ("Q", prefill: '), "prefill");
+  // So do the parentheses after the question's mode and its own parentheses.
+  assert.equal(activeSlot('askText prose() ("Q", prefill: '), "prefill");
+  assert.equal(activeSlot('askText as mistress prose(align: "left") ("Q", hint: '), "hint");
+  assert.equal(activeSlot('let more = askText prose() ("Q") + '), null);
+  assert.equal(activeSlot('askText prose "Q", hint: '), "hint");
   assert.equal(activeSlot('askText("Q"'), "question");
   assert.equal(activeSlot('askText("Q", prefill: pick(hint: 1'), "prefill");
   assert.equal(activeSlot('say "${askText("Q", hint: '), "hint");
@@ -281,7 +297,7 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
     activeSlot('showButton "A", timeout: (askNumber "Seconds"), background: '),
     "background",
   );
-  assert.equal(activeSlot("choose as mistress "), "options");
+  assert.equal(activeSlot("askChoice as mistress "), "options");
   assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });
 
@@ -325,7 +341,7 @@ test("editor help reads only the statement the parser finds at the cursor", () =
   // An unfinished command also holds the line breaks after it, where the author completes it.
   assert.deepEqual(help('let answer = askText "Q",\n  ', "\nexit"), ["question", "askText"]);
   assert.deepEqual(help('let answer = askText "Q", hint:\n  ', "\nexit"), ["hint", "askText"]);
-  assert.deepEqual(help('let pick = choose [\n  "a",\n  '), ["options", "choose"]);
+  assert.deepEqual(help('let pick = askChoice [\n  "a",\n  '), ["options", "askChoice"]);
 });
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {

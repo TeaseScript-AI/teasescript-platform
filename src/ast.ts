@@ -658,6 +658,11 @@ export interface InteractionExpression {
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
+  /**
+   * How the question is shown: `bubble(...)` or `prose(...)` written before it, as for `say`, or `null` for the
+   * speaker's default. Only an ask with a question has one.
+   */
+  readonly presentation: ObjectLiteral | null;
   /** The question of a basic ask, said in the chat by its speaker before the field opens. */
   readonly question: Expression | null;
   /** The `hint:` text shown in the field only; its position against `prefill:` gives their evaluation order. */
@@ -679,7 +684,7 @@ export interface FormArgument {
   readonly value: Expression;
 }
 
-/** One compact `choose` option: an optional authored value before `:`, then its expression. */
+/** One compact `askChoice` option: an optional authored value before `:`, then its expression. */
 export interface InteractionChoiceOption {
   readonly kind: "interactionChoiceOption";
   readonly value: Identifier | NumberLiteral | null;
@@ -840,6 +845,8 @@ export interface IndexExpression {
 export interface CallExpression {
   readonly kind: "callExpression";
   readonly callee: Expression;
+  /** For `askImage bubble(...) (...)` or `askImage prose(...) (...)`, how its question is shown, as for `say`. */
+  readonly presentation?: ObjectLiteral;
   readonly arguments: readonly CallArgument[];
   /** `mixed`: positional arguments followed by named ones. */
   readonly argumentStyle: "none" | "positional" | "named" | "mixed";
