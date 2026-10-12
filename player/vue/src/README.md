@@ -37,7 +37,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   transcript and resets interaction-local state. Vue derives everything else from that session. Its
   `useRuntimeSceneClock.ts` maps browser time onto the session's scene time: it observes time at the next runtime
   deadline, before input (`RuntimeInteraction.vue` rejects input when the presented interaction changed), before a
-  checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. Starting or
+  checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. A late
+  observation without media progress catches up from event to event, a short task at a time, and input, host answers,
+  Debug controls, and hiding the page finish it first. Starting or
   restoring a session rebases the clock so no gap is consumed; see
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control on the start page (`SessionActivation.vue`, with the header's title and author) and

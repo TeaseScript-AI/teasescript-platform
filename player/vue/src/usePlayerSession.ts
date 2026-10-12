@@ -417,7 +417,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const loads = new MediaLoadQueue(
     () => clock.observe(),
     (mediaId, report) => {
-      const current = session.value;
+      // Like input, a load result finishes a catch-up under way first.
+      const current = clock.settle();
       if (!current) return "delivered";
       if (held.value) return "pending";
       const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
@@ -508,7 +509,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     { immediate: true },
   );
   // Media cues depend on measured progress, not on a deadline, so observe regularly while media is active.
-  const sampling = useIntervalFn(() => clock.observe(), MEDIA_SAMPLE_MS, { immediate: false });
+  const sampling = useIntervalFn(clock.catchUp, MEDIA_SAMPLE_MS, { immediate: false });
   // Pending load reports also keep observing, so the engine runs until it can accept them.
   watch(
     () => session.value !== null && (device.active || pendingLoadCount.value > 0),
@@ -704,9 +705,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
         if (disposed) return;
-        const latest = session.value;
         // The report must belong to the session that requested it, which has not stopped.
-        if (generation.value !== sessionGeneration || latest === null || stopped.value) return;
+        if (generation.value !== sessionGeneration || session.value === null || stopped.value)
+          return;
+        // The script goes on at the current scene time, so a catch-up under way finishes first.
+        const latest = clock.settle()!;
         if (pendingPlayerRuntimeStorageWrite(latest.state)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else {
@@ -836,13 +839,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
       savedDataRevision.value++;
-      while (
-        !retired() &&
-        !stopped.value &&
-        session.value !== null &&
-        pendingPlayerRuntimeStorageWrite(session.value.state) !== null
-      )
+      // A catch-up under way finishes first, so the edit applies no earlier than without it.
+      while (!retired() && !stopped.value) {
+        const current = clock.settle();
+        if (current === null || pendingPlayerRuntimeStorageWrite(current.state) === null) break;
         await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+      }
     } finally {
       scriptWritesStored.delete(stored);
     }
@@ -1296,6 +1298,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function setDebugMode(enabled: boolean) {
     if (enabled === debugMode) return;
+    // A catch-up under way finishes first, so the change comes no earlier than without it.
+    clock.settle();
     debugMode = enabled;
     if (enabled && room.value === "normal" && normalStorage !== undefined) void copyToDebugRoom();
     else applyDebugMode();
@@ -1325,8 +1329,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * on naturally.
    */
   function setRandomControl(control: RandomControlOptions | null) {
+    // A catch-up under way finishes with the control it started with.
+    const current = clock.settle();
     randomControl = control;
-    const current = session.value;
     if (current === null) return;
     applyRandomControl(current);
     if (control === null && current.state.randomDraw !== null)
@@ -1532,6 +1537,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const canRewind = computed(() => rewindReady.value && rewindWork.value === null);
   /** Begins a rewind step, if one may begin now; call the returned function once the step is done. */
   function beginRewindStep(): (() => void) | null {
+    // Back leaves the session as a catch-up under way finishes it.
+    clock.settle();
     if (!canRewind.value) return null;
     rewindWork.value = "step";
     let held = true;
