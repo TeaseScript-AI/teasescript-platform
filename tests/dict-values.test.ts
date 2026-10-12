@@ -436,6 +436,10 @@ test("execution resumed from a checkpoint at every step, also inside a call that
       '    say "tag ${text}"',
       "    return text",
       "}",
+      "function drop(key) {",
+      "    table.remove(key)",
+      '    return "gone"',
+      "}",
       // The receiver `table["b"]` is prepared before the call removes another key.
       'table["b"].n = bump("b")',
       'table[tag("c")] = { n: 0 }',
@@ -444,6 +448,8 @@ test("execution resumed from a checkpoint at every step, also inside a call that
       "}",
       "say table",
       'say table.get("z", default: { n: -1 })',
+      // The default, of another type, is evaluated before the lookup, which then misses the key it removed.
+      'say table.get("c", default: drop("c"))',
       "exit",
     ].join("\n"),
   );
@@ -547,29 +553,6 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   ]);
   assert.deepEqual(codes('let s: integer dict = dict{}\ns["a"] = 2.5\nexit'), [["TSV041", "2.5"]]);
 
-  // The default of get must be a value the dict can hold, and it decides an undecided value type.
-  assert.deepEqual(diagnostics('let c = dict{ a: 1 }\nsay c.get("a", default: "x")\nexit'), [
-    [
-      "TSV041",
-      "'c' holds integer values (integer dict), so it cannot default to text (string). To allow both, declare it as 'let c: (integer | string) dict = ...'.",
-      '"x"',
-    ],
-  ]);
-  assert.deepEqual(codes('let e = dict{}\nsay e.get("a", default: 0)\ne["b"] = "x"\nexit'), [
-    ["TSV041", '"x"'],
-  ]);
-  assert.deepEqual(says('let n = dict{ a: 1 }\nsay n.get("x", default: 0.5)\nsay n\nexit'), [
-    "0.5",
-    'dict{ "a": 1 }',
-  ]);
-  // A default the compiler cannot know is checked when the script runs, also where nothing stores the result.
-  assert.deepEqual(
-    failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))\nexit`),
-    [
-      "TSR058",
-      `A value of 'c' holds a whole number (integer), so it cannot take text (string) "x".`,
-    ],
-  );
   // The result is a copy of the default: it has the default's type, but its values are its own.
   assert.deepEqual(
     says(
@@ -644,6 +627,199 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   ]);
 });
 
+test("get takes a default of any type, and its result joins the value type with the default's type", () => {
+  // A null default gives an optional value, which a test narrows.
+  const optional = [
+    "let scores = dict{ anna: 3 }",
+    'let s = scores.get("bea", default: null)',
+    'let a = scores.get("anna", default: null)',
+  ];
+  assert.deepEqual(
+    says(
+      [
+        ...optional,
+        "if s != null {",
+        '    say "Score: ${s + 1}"',
+        "} else {",
+        '    say "No score"',
+        "}",
+        "if a != null {",
+        '    say "Score: ${a + 1}"',
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["No score", "Score: 4"],
+  );
+  assert.deepEqual(
+    diagnostics([...optional, "say s + 1", "let t: boolean = a", "exit"].join("\n")),
+    [
+      ["TSV043", "'s' may be null. Check it first: if s != null { ... }", "s"],
+      [
+        "TSV041",
+        "'t' is declared as boolean, so it cannot start as a whole number (integer) or null. To allow both, declare it as 'let t: boolean | integer | null = ...'.",
+        "a",
+      ],
+    ],
+  );
+  // A default of another type gives the union, which a type test narrows.
+  const either = ["let scores = dict{ anna: 3 }", 'let u = scores.get("bea", default: "none")'];
+  assert.deepEqual(
+    says([...either, "if u is string {", '    say "Text: ${u}"', "}", "exit"].join("\n")),
+    ["Text: none"],
+  );
+  assert.deepEqual(diagnostics([...either, "let t: boolean = u", "exit"].join("\n")), [
+    [
+      "TSV041",
+      "'t' is declared as boolean, so it cannot start as a whole number (integer) or text (string). To allow both, declare it as 'let t: boolean | integer | string = ...'.",
+      "u",
+    ],
+  ]);
+  // A default of another type is no error, so comparing it with a value of the dict's type is false (owner decision,
+  // 2026-10-12).
+  assert.deepEqual(
+    says(
+      [
+        "let scores = dict{ anna: 3 }",
+        'if scores.get("bea", default: "0") == 0 {',
+        '    say "No score yet"',
+        "} else {",
+        '    say "Text is never a number"',
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["Text is never a number"],
+  );
+  // A default that fits keeps the value type, and no default changes the type of a dict that has one.
+  assert.deepEqual(
+    says(
+      'let n = dict{ a: 1 }\nsay n.get("x", default: 0) + 1\nsay n.get("x", default: 0.5)\nexit',
+    ),
+    ["1", "0.5"],
+  );
+  assert.deepEqual(
+    codes(
+      'let n = dict{ a: 1 }\nsay n.get("x", default: 0.5)\nlet i: integer = n["a"]\nlet j: integer = n.get("x", default: 0)\nexit',
+    ),
+    [],
+  );
+  // The types join as in a literal: an empty list default takes the element type of the dict's lists.
+  assert.deepEqual(
+    says(
+      [
+        "let rounds: integer[] dict = dict{ warmup: [10, 20] }",
+        'for count in rounds.get("warmup", default: []) {',
+        "    say count + 1",
+        "}",
+        'say rounds.get("cooldown", default: []).length',
+        "exit",
+      ].join("\n"),
+    ),
+    ["11", "21", "0"],
+  );
+  // A dict whose value type no value decided yet takes it from the default, as from a first value, so counting and
+  // grouping need no declared type. A later value of another type is the usual error.
+  assert.deepEqual(
+    says(
+      [
+        "let counts = dict{}",
+        'for item in ["rope", "gag", "rope"] {',
+        "    counts[item] = counts.get(item, default: 0) + 1",
+        "}",
+        "say counts",
+        "let groups = dict{}",
+        'groups["r"] = groups.get("r", default: []) + ["rope"]',
+        'groups["g"] = groups.get("g", default: []) + ["gag"]',
+        'groups["r"] = groups.get("r", default: []) + ["rack"]',
+        "say groups",
+        "exit",
+      ].join("\n"),
+    ),
+    ['dict{ "rope": 2, "gag": 1 }', 'dict{ "r": ["rope", "rack"], "g": ["gag"] }'],
+  );
+  assert.deepEqual(diagnostics('let e = dict{}\nsay e.get("a", default: 0)\ne["b"] = "x"\nexit'), [
+    [
+      "TSV041",
+      "'e' holds integer values (integer dict) since line 2, so it cannot contain text (string). To allow both, declare it as 'let e: (integer | string) dict = ...'.",
+      '"x"',
+    ],
+  ]);
+  // A null default decides nothing, so a later value decides the value type alone.
+  assert.deepEqual(
+    says(
+      [
+        "let names = dict{}",
+        'say names.get("a", default: null)',
+        'names["b"] = "ann"',
+        "for key, name in names {",
+        "    say name.uppercase()",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["null", "ANN"],
+  );
+  // Also where a test narrowed the dict; a dict whose value type is decided keeps its narrowing.
+  assert.deepEqual(
+    codes(
+      'let e = dict{}\nif e is integer dict {\n    say e.get("a", default: 0)\n}\ne["b"] = "x"\nexit',
+    ),
+    [["TSV041", '"x"']],
+  );
+  assert.deepEqual(
+    says(
+      [
+        "function show(scores: (integer dict)?) {",
+        "    if scores != null {",
+        '        let s = scores.get("bea", default: "none")',
+        "        if s is string {",
+        '            say "${s} of ${scores.length}"',
+        "        }",
+        "    }",
+        "}",
+        "show(dict{ anna: 3 })",
+        "exit",
+      ].join("\n"),
+    ),
+    ["none of 1"],
+  );
+  // A default the compiler cannot know is not checked: the result is unknown, so a place checks it instead. Parts of
+  // a default that decides the value type are still checked against it.
+  assert.deepEqual(
+    says(
+      [
+        DYNAMIC,
+        "let c: integer dict = dict{}",
+        'say c.get("z", default: dynamic("x"))',
+        "let e = dict{}",
+        'let q = e.get("z", default: dynamic("y"))',
+        'e["k"] = 1',
+        "say q",
+        "function lookup(table) {",
+        '    return table.get("x", default: "none")',
+        "}",
+        "say lookup(dict{ a: 1 })",
+        "say lookup(dict{ x: 2 })",
+        "exit",
+      ].join("\n"),
+    ),
+    ["x", "y", "none", "2"],
+  );
+  // Also where a copy saw the dict undecided before.
+  for (const before of ["", "let copy = e\n"])
+    assert.deepEqual(
+      failure(
+        `${DYNAMIC}let v = null\nv = dynamic("y")\nlet e = dict{}\n${before}say e.get("z", default: [v])\ne["k"] = [1]\nexit`,
+      ),
+      [
+        "TSR058",
+        `A value of 'e' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
+      ],
+      before,
+    );
+});
+
 test("objects keep fixed properties, and dicts are not choices", () => {
   assert.deepEqual(
     diagnostics('let door = { name: "x" }\nlet k = "name"\nsay door[k]\nsay door["name"]\nexit'),
@@ -656,7 +832,9 @@ test("objects keep fixed properties, and dicts are not choices", () => {
       ],
     ],
   );
-  assert.deepEqual(codes('let pick = choose dict{ a: "x" }\nexit'), [["TSV029", 'dict{ a: "x" }']]);
+  assert.deepEqual(codes('let pick = askChoice dict{ a: "x" }\nexit'), [
+    ["TSV029", 'dict{ a: "x" }'],
+  ]);
   assert.deepEqual(codes("let dict = 1"), [["TSV001", "dict"]]);
 });
 

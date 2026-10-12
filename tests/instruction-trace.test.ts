@@ -266,7 +266,7 @@ test("stepToEvent and executeInstruction return the trace of what each call exec
 });
 
 const ASK = [
-  'let pick = choose a: "Apple", b: "Pear"',
+  'let pick = askChoice a: "Apple", b: "Pear"',
   'if pick == "b" {',
   '    say "pear"',
   "} else {",
@@ -369,10 +369,10 @@ test("an ask a timer block suspends resumes after it, also from a checkpoint res
   const plan = compile(
     [
       "timer async 1 s {",
-      '    let inner = choose x: "X", y: "Y"',
+      '    let inner = askChoice x: "X", y: "Y"',
       '    say "inner ${inner}"',
       "}",
-      'let outer = choose a: "A", b: "B"',
+      'let outer = askChoice a: "A", b: "B"',
       'if outer == "b" {',
       '    say "b"',
       "}",

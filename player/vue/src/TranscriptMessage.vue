@@ -29,7 +29,10 @@ const reportAvatarFailure = inject(speakerAvatarFailure, () => {});
 function avatarLoadingStatus(status: string) {
   if (status === "error" && speaker?.avatarImage !== undefined) reportAvatarFailure(speaker.avatarImage);
 }
-const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
+// The first message of a group names its speaker; a removed message before it can start a group or join one (#836).
+const name = computed(() =>
+  !player && !props.continues ? nameOf(props.speakers, props.entry) : "",
+);
 // While Debug runs, a script's message offers Explain values beside it, by click, tap or keyboard.
 const explain = inject(explainValues, null);
 const explainable = computed(

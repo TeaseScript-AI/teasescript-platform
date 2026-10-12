@@ -76,6 +76,126 @@ test("a basic ask says its question as its speaker, then opens its field with th
   }
 });
 
+/** Every ask that takes a question, written with `mode` before it, or with its question `message:` named. */
+function asksWithQuestion(mode: string): readonly string[] {
+  const before = mode === "" ? "" : `${mode} `;
+  // Before the parentheses of an ask, a mode is written with its own parentheses, as for a `say` value.
+  const beforeParentheses = mode === "" || mode.endsWith(")") ? before : `${mode}() `;
+  return [
+    ...ASKS.flatMap(([command]) => [
+      `${command} as mistress ${before}"Question?"`,
+      `${command} ${beforeParentheses}("Question?", hint: "Help")`,
+    ]),
+    `askBoolean ${before}"Question?", yesText: "Sure"`,
+    `askBoolean ${beforeParentheses}(message: "Question?")`,
+    `askForm ${before}"Question?", fields: { level: 5 }`,
+    `askBooleans ${before}"Question?", texts: ["A"], prefill: [true]`,
+    `askImage ${before}("Question?", hint: "Help")`,
+    `askImage ${before}(message: "Question?")`,
+  ];
+}
+
+/** The mode, alignment, and text of each message said before the ask opens, and the kind of its input. */
+function questionShown(ask: string): string[] {
+  const source = `${SPEAKERS}speaker guide\nlet answer = ${ask}\nexit`;
+  const plan = compileValidPlan(source);
+  const result = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { temporalContext: AMSTERDAM }),
+  );
+  const action = result.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction", source);
+  return [
+    ...result.events.flatMap((event) =>
+      event.kind === "say"
+        ? [`${event.presentation.kind} ${event.presentation.align ?? "-"}: ${event.text}`]
+        : [],
+    ),
+    `opens ${action.ui.kind}`,
+  ];
+}
+
+test("an ask's question may be shown as prose or a bubble, as by say, and stays a bubble by default", () => {
+  for (const [mode, shown] of [
+    ["", "bubble -"],
+    ["prose", "prose -"],
+    ['prose(align: "center")', "prose center"],
+    ["bubble", "bubble -"],
+  ] as const) {
+    for (const ask of asksWithQuestion(mode)) {
+      const said = questionShown(ask);
+      assert.deepEqual(said.slice(0, -1), [`${shown}: Question?`], ask);
+    }
+  }
+  // The question is said once, in its mode, and the input opens with it, also inside interpolation.
+  assert.deepEqual(questionShown('askNumber prose "How many?", prefill: 2'), [
+    "prose -: How many?",
+    "opens number",
+  ]);
+  assert.deepEqual(questionShown('"${askText as mistress prose(align: "center") "Name?"}"'), [
+    "prose center: Name?",
+    "opens text",
+  ]);
+  // Also when an option is a string with its own interpolation, which may hold another such ask, asked first.
+  assert.deepEqual(questionShown('"${askText prose(align: "${"cen" + "ter"}") "Name?"}"'), [
+    "prose center: Name?",
+    "opens text",
+  ]);
+  assert.deepEqual(
+    questionShown('"${askText prose(font: "${askText prose(align: "right") "Font?"}") "Name?"}"'),
+    ["prose right: Font?", "opens text"],
+  );
+});
+
+test("an ask without a question says nothing and opens its input, in every kind of ask", () => {
+  for (const ask of [
+    ...ASKS.flatMap(([command]) => [command, `${command}()`, `${command} hint: "Help"`]),
+    "askBoolean",
+    'askBoolean(yesText: "Sure")',
+    'askChoice "A", "B"',
+    "askForm fields: { level: 5 }",
+    'askBooleans texts: ["A"], prefill: [true]',
+    "askImage()",
+    'askImage(hint: "Help")',
+  ]) {
+    const said = questionShown(ask);
+    assert.equal(said.length, 1, `${ask}: ${said.join(", ")}`);
+    assert.match(said[0]!, /^opens /u, ask);
+  }
+});
+
+test("a mode needs a question, askChoice has none, and parentheses after the mode hold its options", () => {
+  const errors = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map(
+      (diagnostic) =>
+        `${diagnostic.code} ${diagnostic.span.start.column}-${diagnostic.span.end.column} ${diagnostic.message}`,
+    );
+  assert.deepEqual(errors('let name = askText prose hint: "Help"'), [
+    "TSP032 19-24 'prose' shows the question, but this askText has none. Write the question after 'prose', or leave 'prose' out.",
+  ]);
+  assert.deepEqual(errors("let answers = askForm bubble() (fields: { level: 5 })"), [
+    "TSP032 22-30 'bubble' shows the question, but this askForm has none. Write the question after 'bubble', or leave 'bubble' out.",
+  ]);
+  assert.deepEqual(errors('let picture = askImage prose (hint: "Help")'), [
+    "TSP032 23-28 'prose' shows the question, but this askImage has none. Write the question after 'prose', or leave 'prose' out.",
+  ]);
+  assert.deepEqual(errors('let picture = askImage prose "Show me"'), [
+    `TSP017 29-29 askImage takes its question in parentheses after 'prose', as in 'askImage prose ("Show me")'.`,
+  ]);
+  assert.deepEqual(errors('let pick = askChoice prose "A", "B"'), [
+    `TSP032 21-26 askChoice has no question, so it takes no 'prose'. Say the question before it, as in 'say prose "Which one?"'.`,
+  ]);
+  // As for `say`, parentheses right after the word that nothing follows make the question a call.
+  assert.deepEqual(errors('let name = askText prose ("Your name?")'), [
+    `TSV018 19-24 Unknown function 'prose'. To show the question as prose, write the question after 'prose' without parentheses around it, as in 'prose "Name?"', or give 'prose' its own parentheses first, as in 'prose() ("Name?")'.`,
+  ]);
+  // A variable of that name is still a question, and an unknown option is reported as for `say`.
+  assert.deepEqual(errors('let prose = "Your name?"\nlet name = askText prose, hint: "Help"'), []);
+  assert.deepEqual(errors('let name = askText prose(size: 3) "Your name?"'), [
+    "TSP004 29-29 Unknown prose presentation option 'size'.",
+  ]);
+});
+
 test("the question, hint, and prefill are evaluated once in written order before the question is said", () => {
   for (const [ask, order] of [
     [
@@ -211,6 +331,39 @@ test("a question resumes from a checkpoint at every boundary as without one, and
   ]);
   const final = uninterrupted.boundaries.at(-1)!;
   assert.equal(final.status, "halted");
+  uninterrupted.boundaries.slice(0, -1).forEach((boundary, index) => {
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, boundary)));
+    assert.deepEqual(restored.snapshot, boundary, `boundary ${index}`);
+    const resumed = drive(restored.plan, restored.snapshot);
+    assert.deepEqual(resumed.boundaries.at(-1), final, `boundary ${index}`);
+    assert.deepEqual(resumed.events, uninterrupted.events.slice(index), `boundary ${index}`);
+  });
+});
+
+test("a prose question keeps its mode from a checkpoint at every boundary, also while its question asks first", () => {
+  // The mode's options are evaluated before the question, so they are kept while the ask in the question waits.
+  const plan = compileValidPlan(
+    [
+      SPEAKERS,
+      'let name = askText as mistress prose(align: "center") ("Name ${askText("Inner?")}?", hint: "Type it")',
+      'say "Hello ${name}", instant',
+      "exit",
+    ].join("\n"),
+  );
+  const uninterrupted = drive(plan, createFreshRuntimeSnapshot(plan));
+  assert.deepEqual(
+    uninterrupted.events
+      .flat()
+      .flatMap((event) =>
+        event.kind === "say"
+          ? [
+              `${event.speaker?.identifier ?? "nobody"} ${event.presentation.kind} ${event.presentation.align ?? "-"}: ${event.text}`,
+            ]
+          : [],
+      ),
+    ["nobody bubble -: Inner?", "mistress prose center: Name Ada?", "nobody bubble -: Hello Bo"],
+  );
+  const final = uninterrupted.boundaries.at(-1)!;
   uninterrupted.boundaries.slice(0, -1).forEach((boundary, index) => {
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, boundary)));
     assert.deepEqual(restored.snapshot, boundary, `boundary ${index}`);

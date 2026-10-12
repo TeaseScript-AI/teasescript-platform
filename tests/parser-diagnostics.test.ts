@@ -178,7 +178,7 @@ test("a statement keeps a string whose interpolation failed, so nothing around i
     // A dropped string would add an error for its missing value to each of these.
     ['let value = 1 + "${1 < 2 < 3}"\nexit', "TSP020", ["letStatement", "exitStatement"]],
     [
-      'let pick = choose "${name nickname}", "Later"\nexit',
+      'let pick = askChoice "${name nickname}", "Later"\nexit',
       "TSP009",
       ["letStatement", "exitStatement"],
     ],

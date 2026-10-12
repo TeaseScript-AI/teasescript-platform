@@ -305,7 +305,7 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
 
 test("an open choice keeps the capture it was shown with through Continues, interrupts, and compaction", () => {
   const shown = session(
-    'let day = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay day\nexit',
+    'let day = askChoice [toDate("2026-10-04"), toDate("2026-10-05")]\nsay day\nexit',
   );
   // Continues at one boundary with nothing in between replace each other.
   continueAt(continueAt(shown, START + 10_000), START + 20_000);
@@ -326,7 +326,7 @@ test("an open choice keeps the capture it was shown with through Continues, inte
     session(
       [
         "timer async 50 ms { wait 100 ms\nsay getAbsoluteDateTime().toISO() }",
-        'let day = choose [toDate("2026-10-04")]',
+        'let day = askChoice [toDate("2026-10-04")]',
         "say day",
         "say getAbsoluteDateTime().toISO()",
         "exit",
@@ -360,7 +360,7 @@ function savedData(current: Session) {
 
 test("a checkpoint rejects captures out of recording order and an open choice without its capture", () => {
   const saved = runSession(
-    session('wait 1 s\nlet day = choose [toDate("2026-10-04")]\nsay day\nexit'),
+    session('wait 1 s\nlet day = askChoice [toDate("2026-10-04")]\nsay day\nexit'),
   );
   observe(saved, 1_000);
   apply(saved, observeTime(saved.plan, saved.snapshot, 1_500));
@@ -388,7 +388,9 @@ test("a checkpoint rejects captures out of recording order and an open choice wi
   }
 
   // A choice shown before a Continue at the same boundary cannot be validated with the later capture alone.
-  const relabeled = runSession(session('let day = choose [toDate("2026-10-04")]\nsay day\nexit'));
+  const relabeled = runSession(
+    session('let day = askChoice [toDate("2026-10-04")]\nsay day\nexit'),
+  );
   continueAt(relabeled, START + 10_000, NEUTRAL);
   const data = savedData(relabeled);
   data.snapshot.temporalCaptures.shift();

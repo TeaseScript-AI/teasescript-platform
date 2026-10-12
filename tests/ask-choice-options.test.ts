@@ -20,7 +20,7 @@ import { sayTexts } from "./helpers/runtime-events.js";
 
 const OFFENSES = [
   'let offenses = [{ value: "spank", text: "Spanking", background: "seagreen" }, { text: "Corner" }]',
-  'let answer = choose back: "Back", offenses, "Lines"',
+  'let answer = askChoice back: "Back", offenses, "Lines"',
   "say [answer]",
   "exit",
 ].join("\n");
@@ -84,6 +84,39 @@ function assertEachButtonResumes(source: string, expected: readonly (readonly [s
   });
 }
 
+test("choose is now askChoice: the earlier name is a compile error that names the fix, and is read as askChoice", () => {
+  const source = "let rounds = choose as mistress 5 10\nexit";
+  const start = source.indexOf("choose");
+  assert.deepEqual(
+    compileSource(source).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    [
+      [
+        "TSP032",
+        "'choose' is now called 'askChoice', like the other asks that wait for the player's answer. Write 'askChoice' instead.",
+        start,
+        start + "choose".length,
+      ],
+      // The options after it are read as those of an askChoice, so a missing comma is reported too.
+      [
+        "TSP031",
+        "Expected ',' or the end of the statement after a choice option.",
+        source.indexOf("10"),
+        source.indexOf("10") + 2,
+      ],
+    ],
+  );
+  // Names that only start with the word stay ordinary identifiers.
+  assert.deepEqual(
+    compileSource('let chooseOne = askChoice "A", "B"\nsay chooseOne\nexit').diagnostics,
+    [],
+  );
+});
+
 test("a list option gives one button per element, mixed with options with and without a written value", () => {
   const { plan, pending } = start(OFFENSES);
   assert.equal(pending.snapshot.status, "waiting");
@@ -111,7 +144,7 @@ test("a list option gives one button per element, mixed with options with and wi
 test("a list joined with + gives one button per element, in order", () => {
   const source = [
     'let options = ["Red", "Blue"]',
-    'let answer = choose ["Back"] + options',
+    'let answer = askChoice ["Back"] + options',
     "say [answer]",
     "exit",
   ].join("\n");
@@ -129,7 +162,7 @@ test("a list joined with + gives one button per element, in order", () => {
 
 test("buttons may return the same value, and each button completes as itself", () => {
   const source = [
-    'let answer = choose win: "Open a door", lose: "Open a door", lose: "Open a door"',
+    'let answer = askChoice win: "Open a door", lose: "Open a door", lose: "Open a door"',
     "say [answer]",
     "exit",
   ].join("\n");
@@ -154,7 +187,7 @@ test("buttons may return the same value, and each button completes as itself", (
 
   // Values that only turn out equal at runtime are allowed as well.
   const computed = start(
-    'let none = null\nlet answer = choose [{ text: "A", value: none }, { text: "B", value: none }]\nexit',
+    'let none = null\nlet answer = askChoice [{ text: "A", value: none }, { text: "B", value: none }]\nexit',
   );
   assert.equal(computed.pending.snapshot.status, "waiting");
   assert.deepEqual(
@@ -165,7 +198,7 @@ test("buttons may return the same value, and each button completes as itself", (
 
 test("a value written before a list option is the value of every button from that list", () => {
   const source = [
-    'let answer = choose win: "Open a door", lose: ["Open a door", "Open a door"]',
+    'let answer = askChoice win: "Open a door", lose: ["Open a door", "Open a door"]',
     "say [answer]",
     "exit",
   ].join("\n");
@@ -183,7 +216,7 @@ test("a value written before a list option is the value of every button from tha
 
   // Choice objects in the list take the written value too, and an empty list adds no buttons.
   const objects = start(
-    'let empty = []\nlet answer = choose k: [{ text: "A", background: "gold" }], k: "B", none: empty\nexit',
+    'let empty = []\nlet answer = askChoice k: [{ text: "A", background: "gold" }], k: "B", none: empty\nexit',
   );
   assert.deepEqual(
     buttons(objects.pending.snapshot).map((option) => [option.text, option.value]),
@@ -199,7 +232,7 @@ test("a set option gives one button per member, in insertion order, like a list"
     'let tags = set["b", "a", "b"]',
     'tags.add("c")',
     "let none = set[]",
-    "let answer = choose tags, key: set[1, 2], gone: none",
+    "let answer = askChoice tags, key: set[1, 2], gone: none",
     "say [answer]",
     "exit",
   ].join("\n");
@@ -222,7 +255,7 @@ test("a set option gives one button per member, in insertion order, like a list"
     ["2", '["key"]'],
   ]);
 
-  const result = compileSource("let x = choose set[]");
+  const result = compileSource("let x = askChoice set[]");
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
     [["TSV029", "A choice needs at least one button, but its option lists are empty."]],
@@ -231,14 +264,14 @@ test("a set option gives one button per member, in insertion order, like a list"
 
 test("an option returns its value with its own type", () => {
   const cases = [
-    ["let n = choose [5, 10, 15]", 1, "10", "[10]"],
-    ["let n = choose 5, 10", 1, "10", "[10]"],
-    ["let n = choose [1 min, 90 seconds]", 1, "1 minute 30 seconds", "[1 minute 30 seconds]"],
-    ["let n = choose true, false", 1, "false", "[false]"],
-    ["let n = choose null", 0, "null", "[null]"],
-    ['let n = choose [{ text: 5, background: "gold" }]', 0, "5", "[5]"],
-    ['let n = choose [{ text: "Five", value: 5 }]', 0, "Five", "[5]"],
-    ['let n = choose { text: "Nothing", value: null }', 0, "Nothing", "[null]"],
+    ["let n = askChoice [5, 10, 15]", 1, "10", "[10]"],
+    ["let n = askChoice 5, 10", 1, "10", "[10]"],
+    ["let n = askChoice [1 min, 90 seconds]", 1, "1 minute 30 seconds", "[1 minute 30 seconds]"],
+    ["let n = askChoice true, false", 1, "false", "[false]"],
+    ["let n = askChoice null", 0, "null", "[null]"],
+    ['let n = askChoice [{ text: 5, background: "gold" }]', 0, "5", "[5]"],
+    ['let n = askChoice [{ text: "Five", value: 5 }]', 0, "Five", "[5]"],
+    ['let n = askChoice { text: "Nothing", value: null }', 0, "Nothing", "[null]"],
   ] as const;
   for (const [source, index, text, said] of cases) {
     const { plan, pending } = start(`${source}\nsay [n]\nexit`);
@@ -250,10 +283,10 @@ test("an option returns its value with its own type", () => {
 });
 
 test("an empty option list contributes no buttons, and a choice without buttons is an error", () => {
-  const { pending } = start('let none = []\nlet answer = choose none, "Only"\nexit');
+  const { pending } = start('let none = []\nlet answer = askChoice none, "Only"\nexit');
   assert.deepEqual(buttons(pending.snapshot), [{ text: "Only", value: "Only" }]);
 
-  for (const source of ["let answer = choose []", 'let answer = choose [], []\nsay "x"']) {
+  for (const source of ["let answer = askChoice []", 'let answer = askChoice [], []\nsay "x"']) {
     const result = compileSource(source);
     assert.equal(result.plan, null, source);
     assert.deepEqual(
@@ -263,7 +296,7 @@ test("an empty option list contributes no buttons, and a choice without buttons 
     );
   }
 
-  const empty = start("let none = []\nlet answer = choose none, none\nexit");
+  const empty = start("let none = []\nlet answer = askChoice none, none\nexit");
   assert.equal(empty.pending.snapshot.status, "failed");
   assert.deepEqual(
     [empty.pending.snapshot.failure?.code, empty.pending.snapshot.failure?.message],
@@ -275,7 +308,7 @@ test("a retained choice settlement keeps the values its plan wrote", () => {
   const source = [
     'let text = "Keep"',
     'let more = ["A", "B"]',
-    "let pick = choose keep: text, more: more",
+    "let pick = askChoice keep: text, more: more",
     "wait 1 s",
     "exit",
   ].join("\n");
@@ -304,7 +337,7 @@ test("a retained choice settlement keeps the values its plan wrote", () => {
 });
 
 test("a computed choice counts a value equal to its button text once", () => {
-  const plan = compileValidPlan("let x = choose option\nexit", { globals: ["option"] });
+  const plan = compileValidPlan("let x = askChoice option\nexit", { globals: ["option"] });
   const pending = run(
     plan,
     createImmediatePacingRuntimeSnapshot(plan, {
@@ -319,7 +352,7 @@ test("list elements with interpolation select with a fixed seed, and checkpoint 
   const source = [
     'let pets = ["pet", "toy", "puppy"]',
     'let replies = ["Yes, ${pets}", "No, ${pets}"]',
-    'let answer = choose replies, "Maybe"',
+    'let answer = askChoice replies, "Maybe"',
     "say [answer]",
     "exit",
   ].join("\n");
@@ -355,87 +388,87 @@ test("list elements with interpolation select with a fixed seed, and checkpoint 
 test("choice options the compiler can see are checked when compiling", () => {
   const cases = [
     [
-      'let x = choose [["a"]]\nexit',
+      'let x = askChoice [["a"]]\nexit',
       "TSV029",
       "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
     [
-      'let x = choose a: { text: "A", value: "b" }',
+      'let x = askChoice a: { text: "A", value: "b" }',
       "TSV029",
       "This choice option has two values, one before ':' and one in its value property. Keep one.",
     ],
     [
-      'let x = choose a: [{ text: "A", value: "b" }]',
+      'let x = askChoice a: [{ text: "A", value: "b" }]',
       "TSV029",
       "This choice option has two values, one before ':' and one in its value property. Keep one.",
     ],
     [
-      'let x = choose [{ text: "A", value: ["b"] }]\nexit',
+      'let x = askChoice [{ text: "A", value: ["b"] }]\nexit',
       "TSV029",
       "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
     ],
     [
-      'let x = choose [{ text: "A", color: "red" }]',
+      'let x = askChoice [{ text: "A", color: "red" }]',
       "TSV029",
       "A choice object can only have 'value', 'text', and 'background', but this one has 'color'. Remove it.",
     ],
     [
-      "let x = choose [{ value: 1 }]",
+      "let x = askChoice [{ value: 1 }]",
       "TSV029",
       "A choice object needs a 'text' property to label its button.",
     ],
     [
-      'let x = choose [{ text: "A", value: 1..2 }]\nexit',
+      'let x = askChoice [{ text: "A", value: 1..2 }]\nexit',
       "TSV029",
       "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
     ],
     [
-      "let x = choose [{ text: {} }]\nexit",
+      "let x = askChoice [{ text: {} }]\nexit",
       "TSV042",
       "The text of a choice option cannot be an object.",
     ],
     [
-      'let x = choose [{ text: "A", background: ["red"] }]\nexit',
+      'let x = askChoice [{ text: "A", background: ["red"] }]\nexit',
       "TSV029",
       'A button background must be an opaque CSS colour, such as "#336699".',
     ],
     [
-      "let x = choose [1..2]\nexit",
+      "let x = askChoice [1..2]\nexit",
       "TSV029",
       "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
-      `let x = choose [${Array.from({ length: 4097 }, (_, index) => index).join(", ")}]\nexit`,
+      `let x = askChoice [${Array.from({ length: 4097 }, (_, index) => index).join(", ")}]\nexit`,
       "TSV029",
       "A choice can show at most 4096 buttons.",
     ],
     [
-      `let x = choose [${Array.from({ length: 4096 }, (_, index) => index).join(", ")}], 4096 + 1\nexit`,
+      `let x = askChoice [${Array.from({ length: 4096 }, (_, index) => index).join(", ")}], 4096 + 1\nexit`,
       "TSV029",
       "A choice can show at most 4096 buttons.",
     ],
     [
-      `let extra: integer? = 1\nlet x = choose [${Array.from({ length: 4096 }, (_, index) => index).join(", ")}], extra\nexit`,
+      `let extra: integer? = 1\nlet x = askChoice [${Array.from({ length: 4096 }, (_, index) => index).join(", ")}], extra\nexit`,
       "TSV029",
       "A choice can show at most 4096 buttons.",
     ],
     [
-      "speaker vera {}\nlet x = choose [vera]\nexit",
+      "speaker vera {}\nlet x = askChoice [vera]\nexit",
       "TSV029",
       "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
-      "speaker vera {}\nlet x = choose [{ text: vera }]\nexit",
+      "speaker vera {}\nlet x = askChoice [{ text: vera }]\nexit",
       "TSV042",
       "The text of a choice option cannot be a speaker.",
     ],
     [
-      'let names = ["a"]\nlet x = choose [names]\nexit',
+      'let names = ["a"]\nlet x = askChoice [names]\nexit',
       "TSV029",
       "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
     [
-      'let x = choose { text: "A", background: 1 second }',
+      'let x = askChoice { text: "A", background: 1 second }',
       "TSV029",
       'A button background must be an opaque CSS colour, such as "#336699".',
     ],
@@ -445,12 +478,12 @@ test("choice options the compiler can see are checked when compiling", () => {
       'A button background must be an opaque CSS colour, such as "#336699".',
     ],
     [
-      'speaker vera {}\nlet x = choose as vera speaker, "B"\nexit',
+      'speaker vera {}\nlet x = askChoice as vera speaker, "B"\nexit',
       "TSV029",
       "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
-      'let x = choose [set["B"]]\nexit',
+      'let x = askChoice [set["B"]]\nexit',
       "TSV029",
       "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
@@ -468,13 +501,13 @@ test("choice options the compiler can see are checked when compiling", () => {
 
 test("a choice of durations is a duration where the compiler checks numbers and durations", () => {
   assert.deepEqual(
-    compileSource('playAudio(file: "x.mp3", startAt: (choose { text: 1 second }))\nexit')
+    compileSource('playAudio(file: "x.mp3", startAt: (askChoice { text: 1 second }))\nexit')
       .diagnostics,
     [],
   );
   for (const source of [
-    "let x = (choose [{ text: -1 s }])..3\nexit",
-    'let x = (choose [{ text: "A", value: 1 s + 2 s }])..3\nexit',
+    "let x = (askChoice [{ text: -1 s }])..3\nexit",
+    'let x = (askChoice [{ text: "A", value: 1 s + 2 s }])..3\nexit',
   ]) {
     const result = compileSource(source);
     assert.equal(result.plan, null, source);
@@ -484,33 +517,36 @@ test("a choice of durations is a duration where the compiler checks numbers and 
       source,
     );
   }
-  assert.deepEqual(compileSource("let x = (choose 4 s / 2 s, 3)..5\nexit").diagnostics, []);
+  assert.deepEqual(compileSource("let x = (askChoice 4 s / 2 s, 3)..5\nexit").diagnostics, []);
 });
 
 test("choice options known only at runtime are checked before the choice opens", () => {
   const cases = [
     // `dynamic` hides the element's type, so one list may hold text and a list.
     [
-      'function dynamic(value) {\n    return value\n}\nlet o = [dynamic("a"), ["b"]]\nlet x = choose o\nexit',
+      'function dynamic(value) {\n    return value\n}\nlet o = [dynamic("a"), ["b"]]\nlet x = askChoice o\nexit',
       "not a list or set.",
     ],
-    ['let o = { text: "A", value: "a" }\nlet x = choose k: o\nexit', "Keep one."],
+    ['let o = { text: "A", value: "a" }\nlet x = askChoice k: o\nexit', "Keep one."],
     [
-      'function options {\n    return [{ text: "A", value: "a" }]\n}\nlet x = choose k: options()\nexit',
+      'function options {\n    return [{ text: "A", value: "a" }]\n}\nlet x = askChoice k: options()\nexit',
       "Keep one.",
     ],
     [
-      'let o = [{ value: "a" }]\nlet x = choose o\nexit',
+      'let o = [{ value: "a" }]\nlet x = askChoice o\nexit',
       "A choice object needs a 'text' property to label its button.",
     ],
-    ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o\nexit', "or a date or time value."],
+    [
+      'let o = [{ text: "A", value: ["a"] }]\nlet x = askChoice o\nexit',
+      "or a date or time value.",
+    ],
     // The compiler rejects a known set or range element itself; `dynamic` hides it until the choice opens.
     [
-      "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(set[1])]\nlet x = choose o\nexit",
+      "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(set[1])]\nlet x = askChoice o\nexit",
       "not a list or set.",
     ],
     [
-      "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(1..2)]\nlet x = choose o\nexit",
+      "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(1..2)]\nlet x = askChoice o\nexit",
       "a list, or a set.",
     ],
   ] as const;
@@ -522,7 +558,7 @@ test("choice options known only at runtime are checked before the choice opens",
     assert.equal(pending.snapshot.foregroundAction, null, source);
   }
 
-  const tooManyPlan = compileValidPlan("let x = choose o\nexit", { globals: ["o"] });
+  const tooManyPlan = compileValidPlan("let x = askChoice o\nexit", { globals: ["o"] });
   const tooMany = run(
     tooManyPlan,
     createImmediatePacingRuntimeSnapshot(tooManyPlan, {
@@ -536,14 +572,14 @@ test("choice options known only at runtime are checked before the choice opens",
 test("a computed list of choice objects returns their values, and a literal option list holds one type", () => {
   // The objects may return their value or their text, so the result type is not known here.
   const { plan, pending } = start(
-    'let options = [{ text: "One", value: 1 }]\nlet result: integer = choose options\nsay [result]\nexit',
+    'let options = [{ text: "One", value: 1 }]\nlet result: integer = askChoice options\nsay [result]\nexit',
   );
   assert.deepEqual(sayTexts(select(plan, pending.snapshot, 0).finished), ["[1]"]);
   // A literal list or set of options mixes types like any other literal (ADR 0021 rule 1.3).
   for (const source of [
-    'let result = choose [1, "A"]\nexit',
-    'let result = choose set[1, "A"]\nexit',
-    'let result = choose key: [1, "A"]\nexit',
+    'let result = askChoice [1, "A"]\nexit',
+    'let result = askChoice set[1, "A"]\nexit',
+    'let result = askChoice key: [1, "A"]\nexit',
   ])
     assert.deepEqual(
       compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
@@ -554,7 +590,7 @@ test("a computed list of choice objects returns their values, and a literal opti
 
 test("a choice that returns text and numbers needs a place declared with a union type", () => {
   // #511 C2: a declared union keeps every button's value, with its type.
-  const source = 'let rounds: integer | string = choose "None", [5, 10]\nsay [rounds]\nexit';
+  const source = 'let rounds: integer | string = askChoice "None", [5, 10]\nsay [rounds]\nexit';
   for (const [index, said] of [
     [0, '["None"]'],
     [1, "[5]"],
@@ -564,36 +600,38 @@ test("a choice that returns text and numbers needs a place declared with a union
   }
   assert.deepEqual(
     compileSource(
-      'function take(value: integer | string) {\n    say "x"\n}\ntake(choose "None", 5)\nexit',
+      'function take(value: integer | string) {\n    say "x"\n}\ntake(askChoice "None", 5)\nexit',
     ).diagnostics,
     [],
   );
   // Without a declared union, the message names the annotation to write.
   const message = (source: string) =>
     compileSource(source).diagnostics.map((d) => [d.code, d.message]);
-  assert.deepEqual(message('let rounds = choose "None", [5, 10]\nexit'), [
+  assert.deepEqual(message('let rounds = askChoice "None", [5, 10]\nexit'), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let rounds: string | integer = choose ...'.",
+      "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let rounds: string | integer = askChoice ...'.",
     ],
   ]);
-  assert.deepEqual(message('function pick {\n    return choose "None", 5\n}\nexit'), [
+  assert.deepEqual(message('function pick {\n    return askChoice "None", 5\n}\nexit'), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the result type, as in 'function pick(...): string | integer'.",
+      "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the result type, as in 'function pick(...): string | integer'.",
     ],
   ]);
   assert.deepEqual(
-    message('function take(value) {\n    say "x"\n}\ntake(choose "None", 5)\nexit'),
+    message('function take(value) {\n    say "x"\n}\ntake(askChoice "None", 5)\nexit'),
     [
       [
         "TSV044",
-        "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the parameter as 'value: string | integer'.",
+        "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the parameter as 'value: string | integer'.",
       ],
     ],
   );
   assert.deepEqual(
-    compileSource('let rounds = 5\nrounds = choose "None", 5\nexit').diagnostics.map((d) => d.code),
+    compileSource('let rounds = 5\nrounds = askChoice "None", 5\nexit').diagnostics.map(
+      (d) => d.code,
+    ),
     ["TSV041"],
   );
   // A property has no declared type, and an option that already holds a union mixes its result as well.
@@ -602,48 +640,50 @@ test("a choice that returns text and numbers needs a place declared with a union
       d.code,
       source.slice(d.span.start.offset, d.span.end.offset),
     ]);
-  assert.deepEqual(spans('let box = { answer: choose "a", 1 }\nexit'), [
-    ["TSV044", 'choose "a", 1'],
+  assert.deepEqual(spans('let box = { answer: askChoice "a", 1 }\nexit'), [
+    ["TSV044", 'askChoice "a", 1'],
   ]);
   const choices = 'let choices: (string | integer)[] = ["a", 1]\n';
-  assert.deepEqual(spans(`${choices}let answer = choose choices\nexit`), [
-    ["TSV044", "choose choices"],
+  assert.deepEqual(spans(`${choices}let answer = askChoice choices\nexit`), [
+    ["TSV044", "askChoice choices"],
   ]);
-  assert.deepEqual(spans(`${choices}let answer: string | integer = choose choices\nexit`), []);
+  assert.deepEqual(spans(`${choices}let answer: string | integer = askChoice choices\nexit`), []);
   // A copy of a value of a union type keeps the plain union, not the button values.
-  const answer = 'let answer: string | integer = choose "a", 1\n';
+  const answer = 'let answer: string | integer = askChoice "a", 1\n';
   assert.deepEqual(spans(`${answer}let copy = answer\ncopy = "z"\nexit`), []);
   assert.deepEqual(spans(`${answer}let copies = [answer]\ncopies.add("z")\nexit`), []);
   // Values of one union type join, whatever values each may be.
   assert.deepEqual(
-    spans(`${answer}let other: string | integer = choose "b", 2\nlet both = [answer, other]\nexit`),
+    spans(
+      `${answer}let other: string | integer = askChoice "b", 2\nlet both = [answer, other]\nexit`,
+    ),
     [],
   );
   // A place whose type is not written needs a written union, also when it already holds a union, and options of
   // unknown type do not hide the known ones.
-  assert.deepEqual(message(`${answer}let copied = answer\ncopied = choose "b", 2\nexit`), [
+  assert.deepEqual(message(`${answer}let copied = answer\ncopied = askChoice "b", 2\nexit`), [
     [
       "TSV044",
-      "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare it as 'let copied: string | integer = ...'.",
+      "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare it as 'let copied: string | integer = ...'.",
     ],
   ]);
   // A parameter without a type, also where a test narrowed it, a value of unknown type, and a property of an `object`
   // have no written type either; the caller's declared union does not declare the parameter.
   const values = 'let values: (string | integer)[] = ["old"]\n';
   for (const source of [
-    `function probe(p) {\n    if p is (string | integer)[] {\n        p.add(choose "new", 2)\n    }\n}\n${values}probe(values)\nexit`,
-    `function probe(p) {\n    if p is (string | integer)[][] {\n        p.first.add(choose "new", 2)\n    }\n}\nexit`,
-    `function probe(p) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)\nexit`,
-    `function probe(p) {\n    p[0] = choose "new", 2\n}\nexit`,
-    `function probe(p) {\n    p.answer = choose "new", 2\n}\nexit`,
-    `${values}let box: object = { values: values }\nbox.values.add(choose "new", 2)\nexit`,
-    'function probe(p: speaker | object) {\n    p.firstName = choose "new", 2\n}\nexit',
+    `function probe(p) {\n    if p is (string | integer)[] {\n        p.add(askChoice "new", 2)\n    }\n}\n${values}probe(values)\nexit`,
+    `function probe(p) {\n    if p is (string | integer)[][] {\n        p.first.add(askChoice "new", 2)\n    }\n}\nexit`,
+    `function probe(p) {\n    p.add(askChoice "new", 2)\n}\n${values}probe(values)\nexit`,
+    `function probe(p) {\n    p[0] = askChoice "new", 2\n}\nexit`,
+    `function probe(p) {\n    p.answer = askChoice "new", 2\n}\nexit`,
+    `${values}let box: object = { values: values }\nbox.values.add(askChoice "new", 2)\nexit`,
+    'function probe(p: speaker | object) {\n    p.firstName = askChoice "new", 2\n}\nexit',
   ])
-    assert.deepEqual(spans(source), [["TSV044", 'choose "new", 2']], source);
+    assert.deepEqual(spans(source), [["TSV044", 'askChoice "new", 2']], source);
   // A function called before the speaker it stores into is declared is checked once the speaker is, so the store goes to
   // a speaker, which shows the value as text.
   const early =
-    'function change(active = false) {\n    if active {\n        voice.firstName = choose "new", 2\n    }\n}\nchange()\nspeaker voice { firstName: "Old" }\nchange(true)\nsay voice.firstName\nexit';
+    'function change(active = false) {\n    if active {\n        voice.firstName = askChoice "new", 2\n    }\n}\nchange()\nspeaker voice { firstName: "Old" }\nchange(true)\nsay voice.firstName\nexit';
   assert.deepEqual(spans(early), []);
   for (const [index, said] of [
     [0, "new"],
@@ -655,23 +695,23 @@ test("a choice that returns text and numbers needs a place declared with a union
   // A speaker shows its text property as text.
   assert.deepEqual(
     spans(
-      'function probe(p: speaker | object) {\n    if p is speaker {\n        p.firstName = choose "new", 2\n    }\n}\nexit',
+      'function probe(p: speaker | object) {\n    if p is speaker {\n        p.firstName = askChoice "new", 2\n    }\n}\nexit',
     ),
     [],
   );
   assert.deepEqual(
     spans(
-      `function probe(p: (string | integer)[]) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)\nexit`,
+      `function probe(p: (string | integer)[]) {\n    p.add(askChoice "new", 2)\n}\n${values}probe(values)\nexit`,
     ),
     [],
   );
   for (const options of ['v, "a", 1', '"a", v, 1', '"a", 1, v'])
     assert.deepEqual(
-      message(`function pick(v) {\n    let answer = choose ${options}\n}\nexit`),
+      message(`function pick(v) {\n    let answer = askChoice ${options}\n}\nexit`),
       [
         [
           "TSV044",
-          "This choose returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let answer: string | integer = choose ...'.",
+          "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare a union type, as in 'let answer: string | integer = askChoice ...'.",
         ],
       ],
       options,
@@ -683,7 +723,9 @@ test("comparing a choice result with a value no button returns is a warning", ()
   const warnings = (source: string) =>
     compileSource(source).diagnostics.map((d) => [d.severity, d.code, d.message]);
   assert.deepEqual(
-    warnings('let answer = choose "spank", "lines"\nif answer == "Open" {\n    say "x"\n}\nexit'),
+    warnings(
+      'let answer = askChoice "spank", "lines"\nif answer == "Open" {\n    say "x"\n}\nexit',
+    ),
     [
       [
         "warning",
@@ -694,7 +736,7 @@ test("comparing a choice result with a value no button returns is a warning", ()
   );
   assert.deepEqual(
     warnings(
-      'let answer = choose spank: "Spanking", lines: "Lines"\nlet other = answer != "Lines"\nexit',
+      'let answer = askChoice spank: "Spanking", lines: "Lines"\nlet other = answer != "Lines"\nexit',
     )[0],
     [
       "warning",
@@ -703,20 +745,20 @@ test("comparing a choice result with a value no button returns is a warning", ()
     ],
   );
   for (const source of [
-    'let answer = choose "spank", "lines"\nif answer == "spank" {\n    say "x"\n}\nexit',
-    'let answer = choose "spank", "lines"\nanswer = "Open"\nif answer == "Open" {\n    say "x"\n}\nexit',
-    "let n = choose [5, 10]\nlet five = n == 5.0\nexit",
-    'let pets = ["pet", "toy"]\nlet pick = choose pets\nlet other = pick == "x"\nexit',
+    'let answer = askChoice "spank", "lines"\nif answer == "spank" {\n    say "x"\n}\nexit',
+    'let answer = askChoice "spank", "lines"\nanswer = "Open"\nif answer == "Open" {\n    say "x"\n}\nexit',
+    "let n = askChoice [5, 10]\nlet five = n == 5.0\nexit",
+    'let pets = ["pet", "toy"]\nlet pick = askChoice pets\nlet other = pick == "x"\nexit',
   ])
     assert.deepEqual(warnings(source), [], source);
   // The possible values survive copies, returns, and `-`, and a test or a wider variable keeps them where they apply.
-  const answer = 'let answer = choose "a", "b"\n';
+  const answer = 'let answer = askChoice "a", "b"\n';
   for (const source of [
     `${answer}let copy = "init"\ncopy = answer\nlet same = copy == "z"\nexit`,
-    'function pick {\n    return choose "a", "b"\n}\nlet answer = pick()\nlet same = answer == "z"\nexit',
+    'function pick {\n    return askChoice "a", "b"\n}\nlet answer = pick()\nlet same = answer == "z"\nexit',
     `${answer}let same = answer == null\nexit`,
-    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == 1\nexit",
-    "let n = choose 1, 2\nlet same = n == 3\nn = 1.5\nexit",
+    "let n = askChoice 1, 2\nlet negative = -n\nlet same = negative == 1\nexit",
+    "let n = askChoice 1, 2\nlet same = n == 3\nn = 1.5\nexit",
   ])
     assert.deepEqual(
       warnings(source).map(([severity, code]) => [severity, code]),
@@ -731,19 +773,19 @@ test("comparing a choice result with a value no button returns is a warning", ()
       d.message,
     ]);
   assert.deepEqual(
-    warned("let n = choose 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}\nexit"),
+    warned("let n = askChoice 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}\nexit"),
     [["TSV046", "n == 1.0", "'n' is always 1.5 here, so this comparison is always false."]],
   );
-  assert.deepEqual(warned("let n = choose 1.0, 2.0\nlet whole = n is integer\nexit"), [
+  assert.deepEqual(warned("let n = askChoice 1.0, 2.0\nlet whole = n is integer\nexit"), [
     ["TSV046", "n is integer", "'n' is always 1 or 2 here, so this test is always true."],
   ]);
-  // Durations compare by length, never with numbers, also inside one union, and `choose null` is null.
+  // Durations compare by length, never with numbers, also inside one union, and `askChoice null` is null.
   for (const source of [
-    "let d = choose 1 s, 2 s\nlet same = d == 3 s\nexit",
-    "let d = choose 1 s, 2 s\nlet same = d == 1000\nexit",
-    "let n = choose 1000, 2000\nlet same = n == 1 s\nexit",
-    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2 s\nexit",
-    'let answer = choose null\nlet same = answer == "z"\nexit',
+    "let d = askChoice 1 s, 2 s\nlet same = d == 3 s\nexit",
+    "let d = askChoice 1 s, 2 s\nlet same = d == 1000\nexit",
+    "let n = askChoice 1000, 2000\nlet same = n == 1 s\nexit",
+    "let value: duration | integer = askChoice 1 s, 2000\nlet same = value == 2 s\nexit",
+    'let answer = askChoice null\nlet same = answer == "z"\nexit',
   ])
     assert.deepEqual(
       warnings(source).map(([severity, code]) => [severity, code]),
@@ -751,11 +793,11 @@ test("comparing a choice result with a value no button returns is a warning", ()
       source,
     );
   assert.match(
-    warnings("let d = choose 1 s, 2 s\nlet same = d == 3 s\nexit")[0]?.[2] ?? "",
+    warnings("let d = askChoice 1 s, 2 s\nlet same = d == 3 s\nexit")[0]?.[2] ?? "",
     /1 second or 2 seconds/,
   );
   assert.deepEqual(
-    warned("let value: duration | integer = choose 1 s, 2\nlet same = value == 3 s\nexit"),
+    warned("let value: duration | integer = askChoice 1 s, 2\nlet same = value == 3 s\nexit"),
     [
       [
         "TSV046",
@@ -767,7 +809,7 @@ test("comparing a choice result with a value no button returns is a warning", ()
   // A literal `case` compares with `==` as well; a case that some button returns, and a range, are not warned about.
   assert.deepEqual(
     warned(
-      'let answer = choose "spank", "lines"\nswitch answer {\n    case "Open" {\n        say "x"\n    }\n    case "spank" {\n        say "y"\n    }\n}\nexit',
+      'let answer = askChoice "spank", "lines"\nswitch answer {\n    case "Open" {\n        say "x"\n    }\n    case "spank" {\n        say "y"\n    }\n}\nexit',
     ),
     [
       [
@@ -778,27 +820,27 @@ test("comparing a choice result with a value no button returns is a warning", ()
     ],
   );
   assert.deepEqual(
-    warned('let n = choose 1, 2\nswitch n {\n    case 1..3 {\n        say "x"\n    }\n}\nexit'),
+    warned('let n = askChoice 1, 2\nswitch n {\n    case 1..3 {\n        say "x"\n    }\n}\nexit'),
     [],
   );
   for (const source of [
-    "let d = choose 1 s, 2 s\nlet same = d == 1000 ms\nexit",
-    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 1000 ms\nexit",
-    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2000\nexit",
-    'let answer = choose null\nanswer = "z"\nlet same = answer == "z"\nexit',
-    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == -1\nexit",
-    'let n = choose 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}\nexit',
+    "let d = askChoice 1 s, 2 s\nlet same = d == 1000 ms\nexit",
+    "let value: duration | integer = askChoice 1 s, 2000\nlet same = value == 1000 ms\nexit",
+    "let value: duration | integer = askChoice 1 s, 2000\nlet same = value == 2000\nexit",
+    'let answer = askChoice null\nanswer = "z"\nlet same = answer == "z"\nexit',
+    "let n = askChoice 1, 2\nlet negative = -n\nlet same = negative == -1\nexit",
+    'let n = askChoice 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}\nexit',
   ])
     assert.deepEqual(warnings(source), [], source);
   assert.deepEqual(
-    warnings('let n = choose 1, 2\nlet items = ["a", "b", "c"]\nsay items[n]\nn = 1.5\nexit').map(
-      ([, code]) => code,
-    ),
+    warnings(
+      'let n = askChoice 1, 2\nlet items = ["a", "b", "c"]\nsay items[n]\nn = 1.5\nexit',
+    ).map(([, code]) => code),
     ["TSV043"],
   );
   // The warning does not change what runs.
   const plan = compileSource(
-    'let answer = choose "spank", "lines"\nsay "${answer == "Open"}"\nexit',
+    'let answer = askChoice "spank", "lines"\nsay "${answer == "Open"}"\nexit',
   ).plan;
   assert.ok(plan !== null);
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));

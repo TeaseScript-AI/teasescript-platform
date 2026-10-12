@@ -44,9 +44,10 @@ Player/runtime boundaries, and the development tooling needed to exercise them.
 architecture may change substantially while correctness and the basic model are being proven.
 
 - [ ] **ADR 0018 Standard Library interactions and pacing**
-  - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `choose`, and
-    `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
-    detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
+  - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `askChoice`,
+    and `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support.
+    Keep the detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than
+    repeating them here.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 
@@ -231,6 +232,16 @@ subsystems may still have different maturity levels.
   - **Outcome:** Decide whether to check literal media paths against the package files at compile time and warn about
     a missing file.
     - A misspelled literal image path shows up only at runtime, as a missing-media warning.
+
+- [ ] **Accept a compile warning per case**
+  - **Outcome:** An author can accept one warning at one place with a comment on the line before it, naming the
+    warning's code and optionally a reason, such as `// accept TSV061: the tease really runs over two days` above
+    `wait 2 days`. The warning is then no longer reported there. Every other warning, including a new one on the same
+    line, is still shown. Errors cannot be accepted. An `accept` comment whose warning no longer occurs there is itself
+    reported, so stale acceptances do not linger.
+  - **Open for the design:** whether the comment may also stand at the end of the same line, and how Debug and the
+    editor show an accepted warning.
+  - **Reference:** Owner, 2026-10-12. There is no general switch to turn warnings off.
 
 - [ ] **Consider: choose how numbers and other values are shown in text**
   - **Outcome:** Decide whether a script can choose how a value is shown in text, such as a fixed number of decimals.

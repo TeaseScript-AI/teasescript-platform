@@ -176,7 +176,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       [
         'let b = showPermanentButton "Stop" {',
         "}",
-        "let gone = [removePermanentButton(b), randomInteger(1..=4)]",
+        "let gone = [b.remove(), randomInteger(1..=4)]",
         'say "${gone[1]}"',
         "exit",
       ].join("\n"),
@@ -577,7 +577,7 @@ test("while a draw is paused, every other host operation changes nothing", () =>
       'let b = showPermanentButton "B" {',
       "}",
       "let t = timer(duration: (1..=2) s, async: true, repeat: true)",
-      'let answer = choose "A", "B"',
+      'let answer = askChoice "A", "B"',
       "wait 10 s",
       "exit",
     ].join("\n"),
