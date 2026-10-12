@@ -311,14 +311,15 @@ answer without a range check then plays on practically for ever, and that path t
 compares with near the ask (within 40 instructions of it, in its function, or of where a call that leads to it
 returns, in the caller's; three per type, the nearest first) adds a candidate, or `c - 1`, `c`, and `c + 1` for a number. With compared answers (on by
 default, off with `--no-compared-answers`), a text or number ask is also answered with the values, in the state at the ask, of what the code compares its answer
-with (a variable, or a property, index, or sum of variables, or a text with such values in it, found through the data
+with (a variable, or a property, index, or sum of variables, or a text with such texts or whole numbers in it, found through the data
 flow, the nearest first), such as the line a script asks the player to type: three at most, and `v - 1`, `v`, and
 `v + 1` for a number `v`. A text ask is also answered for what the code reads of its answer, also when it compares that
 with a constant, past changes of letter case: for a compared length `n` (`name.length < 3`), `x` repeated `n - 1`, `n`,
 and `n + 1` times; for a compared part at a position (`why.substring(0, 2) == "i "`), that part there, after `x`s, and
 also followed by `xxx`; and for characters of the answer looked up in a text (`letters.indexOf(c.substring(0, 1))`, as
-in a grid square such as `A1`), every combination of those texts' characters at their positions, at most 64, else the
-first ones together, the second ones, and so on. Nearness
+in a grid square such as `A1`), every combination of those texts' characters at their positions, else the first ones
+together, the second ones, and so on; positions and lengths up to 64, and 64 such answers per ask in all, those for
+lengths and parts first. Nearness
 counts the instructions strictly between that compare, so code without comparisons (a list, a loop of `say`s, a wait)
 does not reorder candidates within the window; and directed search (below)
 also answers asks whose prompt the code computes (`askText "Type: ${line}"`), which it otherwise leaves out. A button whose result the

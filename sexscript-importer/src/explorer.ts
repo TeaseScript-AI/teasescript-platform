@@ -1240,7 +1240,9 @@ const MAX_SHAPED_LENGTH = 64;
  * are read from their innermost binding. For a text ask, also answers made of `x` for what the code reads of the answer
  * (`comparedWith`): a compared length `n` as `n - 1`, `n`, and `n + 1` characters; a compared part at a position, there,
  * also followed by more characters; and characters looked up in texts, each combination of those texts' characters at
- * their positions (at most {@link MAX_SHAPED_ANSWERS}, else the first, second, ... character of each).
+ * their positions (else the first, second, ... character of each); positions and lengths up to
+ * {@link MAX_SHAPED_LENGTH}, and {@link MAX_SHAPED_ANSWERS} such answers in all, those for lengths and parts first.
+ * For a number ask, a compared length is a compared number.
  */
 function comparedValues(
   expressions: readonly unknown[],
@@ -1258,29 +1260,45 @@ function comparedValues(
       shape.kind === "answerSlice" ||
       shape.kind === "answerLookup"
     ) {
-      if (integer !== null) continue;
       const value = valueOf(shape.value, bindings, true);
+      // A number has no length: a compared `length` of a number ask's answer is a property of a value that holds it.
+      if (integer !== null) {
+        if (shape.kind !== "answerLength" || found.size >= MAX_COMPARED_VALUES) continue;
+        if (typeof value === "number" && (!integer || Number.isSafeInteger(value)))
+          for (const near of [value - 1, value, value + 1]) found.add(String(near));
+        continue;
+      }
       const start = Number(shape.start);
       if (shape.kind === "answerLength" && typeof value === "number")
         for (const length of [value - 1, value, value + 1])
           if (Number.isSafeInteger(length) && length >= 1 && length <= MAX_SHAPED_LENGTH)
             shaped.add("x".repeat(length));
-      if (shape.kind === "answerSlice" && typeof value === "string" && value !== "") {
+      if (
+        shape.kind === "answerSlice" &&
+        typeof value === "string" &&
+        value !== "" &&
+        start <= MAX_SHAPED_LENGTH
+      ) {
         shaped.add("x".repeat(start) + value);
         shaped.add(`${"x".repeat(start)}${value}xxx`);
       }
-      if (shape.kind === "answerLookup" && typeof value === "string" && value !== "") {
+      if (
+        shape.kind === "answerLookup" &&
+        typeof value === "string" &&
+        value !== "" &&
+        start < MAX_SHAPED_LENGTH
+      ) {
         const characters = lookups.get(start) ?? new Set<string>();
         for (const character of value) characters.add(character);
         lookups.set(start, characters);
       }
       continue;
     }
+    if (found.size >= MAX_COMPARED_VALUES) continue;
     const value = valueOf(expression, bindings, true);
     if (integer === null && typeof value === "string" && value.trim() !== "") found.add(value);
     if (integer !== null && typeof value === "number" && (!integer || Number.isSafeInteger(value)))
       for (const near of [value - 1, value, value + 1]) found.add(String(near));
-    if (found.size >= MAX_COMPARED_VALUES) break;
   }
   for (const answer of lookedUpAnswers(lookups)) shaped.add(answer);
   return [...found, ...[...shaped].slice(0, MAX_SHAPED_ANSWERS)];

@@ -3334,6 +3334,13 @@ test(
         'let xs = "ABC"\nlet ys = "123"\nlet c = askText()\nlet x = -1\nlet y = -1\nwhile c.length != 2 or x < 0 or y < 0 {\n' +
         "  c = askText()\n  if c.length == 2 {\n    x = xs.indexOf(c.substring(0, 1).uppercase())\n" +
         '    y = ys.indexOf(c.substring(1, 2))\n  }\n}\nif x == 2 and y == 2 {\n  say "Corner."\n}\nexit\n',
+      // A character looked up after three compared texts, which do not crowd it out.
+      after:
+        'let one = "one"\nlet two = "two"\nlet three = "three"\nlet letters = "ABCD"\nlet a = askText()\n' +
+        'if a == one {\n  say "1."\n}\nif a == two {\n  say "2."\n}\nif a == three {\n  say "3."\n}\n' +
+        'if letters.indexOf(a.substring(0, 1)) == 3 {\n  say "D."\n}\nexit\n',
+      // A number ask's answer kept as a `length` property is compared as a number.
+      held: 'let target = 22\nlet result = { length: askInteger() }\nif result.length == target {\n  say "Hit."\n}\nexit\n',
     };
     for (const [name, source] of Object.entries(sources)) {
       const result = run(source);
@@ -3343,6 +3350,11 @@ test(
         name,
       );
     }
+    // A part far past any answer it offers is left alone.
+    const far = run(
+      'let a = askText()\nif a.length > 600000000 and a.substring(600000000, 600000001) == "z" {\n  say "Far."\n}\nexit\n',
+    );
+    assert.equal(far.search.stoppedBy, "exhausted");
   },
 );
 
