@@ -492,6 +492,17 @@ test("get gives the element at an index, or its default for an index the list do
       `${deck}let at = deck.indexOf("king")\nsay deck.get(at, default: "")\nexit`,
       [["TSV043", "'at' may be null. Check it first: if at != null { ... }", "at"]],
     ],
+    // The element of an empty list that nothing decided has no type to name.
+    [
+      "let empty = []\nlet x = empty.get(0, default: 0)\nempty.add(x + 1)\nexit",
+      [
+        [
+          "TSV043",
+          "'x' may be of a type that no value decided yet, such as an element of an empty list without a written type. Check it first: if x is integer { ... }",
+          "x",
+        ],
+      ],
+    ],
     [
       'function pick(c: string[] | string dict) {\n    say c.get(0, default: "")\n}\nexit',
       [
