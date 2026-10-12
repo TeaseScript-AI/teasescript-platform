@@ -144,7 +144,7 @@ let total = score +
 let result =
     calculateDamage(player, weapon)
 
-let answer = choose stay:
+let answer = askChoice stay:
     "Stay", leave: "Leave"
 ```
 
@@ -1650,7 +1650,7 @@ Other text fields, such as a button label, an ask question, an input hint, the `
 or a speaker's name or title, do not select from a list. A list there is a compile error when the compiler can see it,
 such as a list literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"`
 and `list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error
-when the compiler can see it. A list as a whole `choose` option instead gives one button per element
+when the compiler can see it. A list as a whole `askChoice` option instead gives one button per element
 ([§19](#19-choices)).
 
 To choose a specific element, use its index:
@@ -1981,12 +1981,14 @@ can instead get a default, as in `load("level", default: 1)`.
 ## 19. Choices
 **Status:** Accepted
 
-`choose` shows one button per option and returns the value of the selected button. A button shows its text; its value
-is what `choose` returns. Options are comma-separated; the interaction itself (presentation, typed answers,
-transcript) is defined in [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#choose).
+`askChoice` shows one button per option and returns the value of the selected button. A button shows its text; its
+value is what `askChoice` returns. Options are comma-separated; the interaction itself (presentation, typed answers,
+transcript) is defined in [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askchoice). It was named
+`choose` until the owner decision on #830 (2026-10-11), so that every request that waits for the player's answer starts
+with `ask`; `choose` stays protected, and each use is a compile error that names `askChoice`.
 
 ```text
-let action = choose open: "Open the door", leave: "Walk away"
+let action = askChoice open: "Open the door", leave: "Walk away"
 
 if action == "open" {
     openDoor()
@@ -1997,8 +1999,8 @@ An option may have a value written before `:`. An identifier returns text and a 
 `integer` or a `number` as written. An option without a written value returns itself, with its own type:
 
 ```text
-let answer = choose back: "Back", "Spanking", "Lines"   // "back", "Spanking", or "Lines"
-let rounds = choose 5, 10                               // 5 or 10, an integer
+let answer = askChoice back: "Back", "Spanking", "Lines"   // "back", "Spanking", or "Lines"
+let rounds = askChoice 5, 10                               // 5 or 10, an integer
 ```
 
 A list used as an option gives one button per element, in order; a set gives one button per member, in insertion order,
@@ -2009,9 +2011,9 @@ the value of every button from it:
 
 ```text
 let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
-let answer = choose back: "Back", offenses   // "back", "spank", or "Corner"
-let n = choose [5, 10, 15]                   // n is an integer
-let door = choose win: "Open a door", lose: ["Open a door", "Open a door"]   // 3 buttons; the last two return "lose"
+let answer = askChoice back: "Back", offenses   // "back", "spank", or "Corner"
+let n = askChoice [5, 10, 15]                   // n is an integer
+let door = askChoice win: "Open a door", lose: ["Open a door", "Open a door"]   // 3 buttons; the last two return "lose"
 ```
 
 Rules:
@@ -2025,8 +2027,8 @@ Rules:
   compile error that names the union to declare:
 
   ```text
-  let rounds: integer | string = choose "None", [5, 10]   // "None", 5, or 10
-  let other = choose "None", [5, 10]                      // compile error: declare 'let other: string | integer'
+  let rounds: integer | string = askChoice "None", [5, 10]   // "None", 5, or 10
+  let other = askChoice "None", [5, 10]                      // compile error: declare 'let other: string | integer'
   ```
 
 - When the source shows every button's value, the result is known to be one of them until the variable is assigned
@@ -2035,18 +2037,18 @@ Rules:
   warning:
 
   ```text
-  let answer = choose "spank", "lines"
+  let answer = askChoice "spank", "lines"
   if answer == "Open" { ... }   // warning: 'answer' is always "spank" or "lines" here
   ```
 
 - The elements of a list option are values or choice objects, not lists or sets.
 - A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
   written before its option's `:`, also as an element of a list or set option.
-- An empty list or set contributes no buttons. A `choose` without any button is an error: a compile error when it is
-  visible in the source, such as `choose []`, and a runtime error otherwise.
-- Buttons may repeat a value or a text: `choose win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
+- An empty list or set contributes no buttons. An `askChoice` without any button is an error: a compile error when it is
+  visible in the source, such as `askChoice []`, and a runtime error otherwise.
+- Buttons may repeat a value or a text: `askChoice win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
   three buttons. A selected button is identified by its position, so each returns its own value.
-- `choose` does not return a result object.
+- `askChoice` does not return a result object.
 
 ### Preselected button
 
@@ -2055,10 +2057,10 @@ Rules:
 A trailing `prefill:`, at most once and after the options, preselects the button whose value it gives:
 
 ```text
-let action = choose stay: "Stay", leave: "Leave", prefill: "leave"
-let rounds = choose 5, 10, 15, prefill: 10
+let action = askChoice stay: "Stay", leave: "Leave", prefill: "leave"
+let rounds = askChoice 5, 10, 15, prefill: 10
 let level = load("level", default: null)
-let next = choose 6, 7, 8, 9, prefill: level
+let next = askChoice 6, 7, 8, 9, prefill: level
 ```
 
 - The button is identified by the value it returns, compared as `==` compares values, not by its text: write
@@ -2068,8 +2070,8 @@ let next = choose 6, 7, 8, 9, prefill: level
 - A preselected button is marked, and Space in the empty message field activates it
   ([PLAYER-UI.md](../ui/PLAYER-UI.md#foreground-interaction-presentation)); it is never chosen by itself. Without
   `prefill:` no button is preselected.
-- `prefill` is reserved after the options of a compact `choose`, so no option can be labelled `prefill:`; write such a
-  button as `{ value: "prefill", text: "..." }`.
+- `prefill` is reserved after the options of a compact `askChoice`, so no option can be labelled `prefill:`; write such
+  a button as `{ value: "prefill", text: "..." }`.
 
 ## 20. Input functions
 **Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
@@ -2097,8 +2099,8 @@ The question, `prefill:`, and `hint:` are evaluated once, in the order they are 
 the two options may be written in either order.
 The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
 accepts what a field text accepts, so a list is an error. Without a question nothing is said. In the head of `if`,
-`while`, `repeat`, `for`, or `switch`, the `{` of the block ends a compact ask or `choose`, so `if askBoolean { ... }`
-asks without a question.
+`while`, `repeat`, `for`, or `switch`, the `{` of the block ends a compact ask or `askChoice`, so
+`if askBoolean { ... }` asks without a question.
 
 ### Text input
 
@@ -2243,7 +2245,7 @@ let answer = askBoolean(
 compact and parenthesized forms mean the same, `as speaker` comes before the arguments, and the question, which may
 instead be named `message:`, is said once by the asking speaker before the buttons open. The question and the button
 texts are evaluated once, in written order, and accept what a field text accepts. `prefill: true` or `prefill: false`
-preselects the Yes or No button as `choose` preselects one ([§19](#preselected-button)): it is marked and Space
+preselects the Yes or No button as `askChoice` preselects one ([§19](#preselected-button)): it is marked and Space
 activates it, but it is never chosen by itself. Without `prefill:` neither button is preselected. As for another ask's
 prefill, one that is `null` or blank text when the buttons open preselects none, and any other value that is not `true`
 or `false` is a runtime error before they open.
@@ -2325,8 +2327,8 @@ Rules:
 
 - A toggle shows its label with a check mark. With `options:` it shows the option of its state instead: choice objects,
   exactly one with `value: false` and one with `value: true`, in either order. `{ type: "boolean" }` starts `false`.
-- A cycle's `options:` are values or choice objects as for `choose` ([§19](#19-choices)), whose values are not `null` and
-  share one type. A press shows the next option and wraps around; `value:` starts at the first option equal to it.
+- A cycle's `options:` are values or choice objects as for `askChoice` ([§19](#19-choices)), whose values are not `null`
+  and share one type. A press shows the next option and wraps around; `value:` starts at the first option equal to it.
 - Every field may set `background:`; the `background:` of a toggle's or cycle's shown option wins. Author colours keep
   their contrast rule ([§37](#authored-colours)).
 - A typed field (`integer`, `number`, `text`, or a date or time) opens in the composer with its value, which Enter keeps
@@ -2483,7 +2485,7 @@ Rules:
   when the input opens; an invalid one is a runtime error, and the input does not open.
 - `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
 - Restoring a checkpoint shows the original prefill again; edits the player had not submitted are dropped.
-- `askBoolean` preselects the button of its prefill, as `choose` does with `prefill:`
+- `askBoolean` preselects the button of its prefill, as `askChoice` does with `prefill:`
   ([§19](#preselected-button)); a preselected button is never chosen by itself. File, folder, image, video, and audio
   pickers have no prefill because a browser cannot preset a file input. Multi-field inputs take a `prefill:` list.
 - An ask's earlier `default:`, or `defaults:` of a multi-field input, is a compile error that names the fix, such as
@@ -3292,10 +3294,10 @@ load("a", default: 0) + 1
 
 The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
 belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, or a
-labelled option of a compact `choose`; after a compact ask it is the ask's earlier name of `prefill:`, an error
+labelled option of a compact `askChoice`; after a compact ask it is the ask's earlier name of `prefill:`, an error
 ([Prefilled answers](#prefilled-answers)). Group the inner construct, or use a parenthesized ask, to give the fallback
 to `load`, as in `load(askText("Key?"), default: "none")` or
-`load((choose a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
+`load((askChoice a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
 `default`. Inside `()`, `[]`, and object literals, where a line
 break does not end an expression, the comma may also start the next line. Group a compact `load`, as in
 `(load "k", default: null) == null`, before combining its result with another expression. Without parentheses,
@@ -3699,8 +3701,8 @@ Rules:
 - `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it; the path
   and the name are text. Plain text is not a jump target. A reference is a value: it can be stored in variables, lists,
   dicts, sets, and globals, saved with `save`, and compared with `==` by path and label. It shows as the call that makes
-  it, such as `script("rooms/hall.tease", label: "start")`, has no properties or methods, and is not a `choose` value.
-  A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
+  it, such as `script("rooms/hall.tease", label: "start")`, has no properties or methods, and is not an `askChoice`
+  value. A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
 - A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
   the package, a missing file, a missing literal label, a glob, and a `goto` or `fallback` to a file of declarations
   only are compile errors. Any other reference is checked when a transfer uses it, a computed `fallback` when the
@@ -3872,8 +3874,8 @@ function describe(answer: integer | string?) {
   - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
     range on text.
 - Compile warnings: a case that can never match because of what the switched value can hold, such as a type case that
-  no value left by the cases above passes, `case 5` after `case is integer`, or `case "maybe"` on a `choose` that only
-  returns `"yes"` or `"no"`.
+  no value left by the cases above passes, `case 5` after `case is integer`, or `case "maybe"` on an `askChoice` that
+  only returns `"yes"` or `"no"`.
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted
@@ -4974,7 +4976,6 @@ set
 true
 false
 null
-choose
 speaker
 say
 as
@@ -5082,6 +5083,7 @@ schedule
 cancelSchedule
 askText
 askNumber
+askChoice
 askInteger
 askBoolean
 askDate
@@ -5125,6 +5127,7 @@ This protected list may grow when new engine APIs are added. Editor autocomplete
 
 The earlier names `timestamp`, `getTimestamp`, and `toTimestamp` stay protected: each use is a compile error that names
 `absoluteDateTime`, `getAbsoluteDateTime`, or `toAbsoluteDateTime` ([ADR 0026](../decisions/0026-unified-time-semantics.md)).
+So does `choose`, which names `askChoice` ([§19](#19-choices)).
 
 ### Debug mode
 **Status:** Accepted (Owner decision, 2026-10-07)
@@ -5281,7 +5284,7 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
   that names the fix: select one value with `toys[key]`, or show every value with `toys.values.join()`. A dict is not a
-  text field or a `choose` option; it may be a set member ([§16](#16-lists)).
+  text field or an `askChoice` option; it may be a set member ([§16](#16-lists)).
 - **Copies and storage:** dicts are copied like lists ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)),
   and `keys` and `values` are new lists. Storage ([§25](#25-persistent-storage-and-keys)) and checkpoints keep a dict
   with its entry order.
