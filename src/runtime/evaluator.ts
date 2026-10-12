@@ -1324,7 +1324,7 @@ export class Evaluator {
         return;
       }
       if (isMessageHandle(object)) {
-        this.#assignMessageProperty(object, target.name, value, target.span);
+        this.#assignMessageProperty(object, target.name, value, target.span, target.object);
         return;
       }
       throw this.#noAssignableProperties(target.object, object, target.span);
@@ -2844,13 +2844,15 @@ export class Evaluator {
   /**
    * `message.text = …` gives the shown message new text in place, which an event tells; the same text again changes
    * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts. A removed message
-   * keeps the text it had, as a stopped timer keeps its state, and the write reports developer warning `TSW010`.
+   * keeps the text it had, as a stopped timer keeps its state, and the write reports developer warning `TSW010`, whose
+   * advice names `receiver` as written, or `line` for a receiver without a name.
    */
   #assignMessageProperty(
     handle: SerializableMessageHandle,
     name: string,
     value: SerializableRuntimeValue,
     span: SourceSpan,
+    receiver: ExpressionPlan,
   ): void {
     if (name !== "text")
       throw fault(
@@ -2867,9 +2869,10 @@ export class Evaluator {
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) {
+      const label = this.#receiverLabel(receiver) ?? "line";
       this.#warn(
         "TSW010",
-        "This message was removed, so its text does not change. Show a new message with say instead.",
+        `This message was removed, so its text does not change. Show a new message with say instead. To keep a message you want to change later, empty it with '${label}.text = ""' instead of removing it.`,
         span,
       );
       return;

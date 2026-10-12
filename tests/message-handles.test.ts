@@ -265,6 +265,8 @@ test("remove() takes a message out of the conversation; its text stays readable,
       "line.remove()",
       'say "${line.text} ${line == other}", instant',
       'other.text = "Changed"',
+      "let all = [other]",
+      'all[0].text = "Changed"',
       "other.remove()",
       "say line, instant",
       "exit",
@@ -272,7 +274,8 @@ test("remove() takes a message out of the conversation; its text stays readable,
   );
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(result.snapshot.status, "halted");
-  // Removing it again, through any copy, does nothing; a text write reports a developer warning and changes nothing.
+  // Removing it again, through any copy, does nothing; a text write changes nothing and reports a developer warning,
+  // whose advice names the handle as written, or `line` without a name.
   assert.deepEqual(messageTexts(result.events), [
     ["Waiting", "<removed>"],
     ["Next"],
@@ -289,7 +292,8 @@ test("remove() takes a message out of the conversation; its text stays readable,
         : [],
     ),
     [
-      "TSW010 5 This message was removed, so its text does not change. Show a new message with say instead.",
+      `TSW010 5 This message was removed, so its text does not change. Show a new message with say instead. To keep a message you want to change later, empty it with 'other.text = ""' instead of removing it.`,
+      `TSW010 7 This message was removed, so its text does not change. Show a new message with say instead. To keep a message you want to change later, empty it with 'line.text = ""' instead of removing it.`,
     ],
   );
 });
