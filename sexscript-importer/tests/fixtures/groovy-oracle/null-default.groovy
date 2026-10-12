@@ -32,3 +32,9 @@ def callbacks = [read: { -> "was " + g }]
 g = null
 if (g == null) g = callbacks.read()
 show("G " + g)
+// A storage read keeps its assignment, which gives it the variable's type, and the default follows it.
+def h = 0
+def who = "x"
+h = load("count." + who)
+if (h == null) h = 4
+show("H " + (h - 1))

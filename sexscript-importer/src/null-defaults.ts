@@ -6,8 +6,10 @@ import { mapChildren } from "./variable-types.ts";
  * A null test that only gives a variable or a property a default, `if x == null { x = d }`, becomes `otherwise` (#850),
  * which evaluates `d` only where `x` is null, as the test did. Right after an assignment of `x`, the default joins it,
  * `x = e otherwise d`, where `d` neither reads `x` nor runs code that could (a call, or an ask, during which a button's
- * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. Elsewhere the test becomes `x = x otherwise d`, also after
- * a `let`, whose variable's type comes from its first value, which `otherwise` would make one without null.
+ * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes. A storage read in `e`
+ * keeps its own assignment, which gives it the variable's declared type (V30 §25). Elsewhere the test becomes
+ * `x = x otherwise d`, also after a `let`, whose variable's type comes from its first value, which `otherwise` would
+ * make one without null.
  */
 export function withNullDefaults(
   statements: IrStatement[],
@@ -35,7 +37,8 @@ export function withNullDefaults(
         assigned?.kind === "assign" &&
         assigned.operator === "=" &&
         samePath(assigned.target, found.path) &&
-        !readsPath(found.value, found.path)
+        !readsPath(found.value, found.path) &&
+        !hasLoad(assigned.value)
       ) {
         result[before] = { ...assigned, value: otherwise(assigned.value, found.value) };
         continue;
@@ -93,6 +96,20 @@ function samePath(left: IrExpression, right: IrExpression): boolean {
     left.dict === right.dict &&
     samePath(left.target, right.target)
   );
+}
+
+/**
+ * Whether a value reads storage: a `load` reads its key as the declared type of the variable it is assigned to (V30 §25),
+ * which it would no longer be as an operand of `otherwise`.
+ */
+function hasLoad(value: IrExpression): boolean {
+  let found = false;
+  const visit = (node: IrExpression): IrExpression => {
+    if (node.kind === "load") found = true;
+    return mapChildren(node, visit);
+  };
+  visit(value);
+  return found;
 }
 
 /**
