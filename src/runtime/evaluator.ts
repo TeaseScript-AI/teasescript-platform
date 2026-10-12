@@ -2231,8 +2231,9 @@ export class Evaluator {
         expression.span,
         expression.typeCheck === undefined
           ? null
-          : // Plan validation accepts a type check only on an `add` or `addAll` call with one argument here.
-            { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
+          : // Plan validation accepts a type check only on an `add` or `addAll` call with one argument, or a `get` call
+            // with a `default:`, here; it checks the last argument.
+            { check: expression.typeCheck, span: expression.arguments.at(-1)!.value.span },
       );
     }
     const callee = expression.callee.kind === "literal" ? null : planLabel(expression.callee);
@@ -2243,7 +2244,10 @@ export class Evaluator {
     );
   }
 
-  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
+  /**
+   * `added` is the check of an element that `add` inserts, or of a `get` default that decided the element type of an
+   * empty list, from the compiler (ADR 0021 rule 1.7).
+   */
   #callCollection(
     receiver: SerializableRuntimeValue,
     receiverPlan: ExpressionPlan,
@@ -2410,6 +2414,9 @@ export class Evaluator {
               "'list.get(index, default: value)' takes an index and a 'default:' value.",
               span,
             );
+          // A default that decided the element type, as the first element of an empty list, must fit it also in the
+          // parts the compiler could not know (ADR 0021 rule 1.7).
+          if (added !== null) assertValueType(named.default!, added.check, added.span);
           const index = positional[0]!;
           return typeof index === "number" &&
             Number.isInteger(index) &&

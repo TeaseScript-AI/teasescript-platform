@@ -745,6 +745,21 @@ test("get takes a default of any type, and its result joins the value type with 
       '"x"',
     ],
   ]);
+  // A null default decides nothing, so a later value decides the value type alone.
+  assert.deepEqual(
+    says(
+      [
+        "let names = dict{}",
+        'say names.get("a", default: null)',
+        'names["b"] = "ann"',
+        "for key, name in names {",
+        "    say name.uppercase()",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["null", "ANN"],
+  );
   // Also where a test narrowed the dict; a dict whose value type is decided keeps its narrowing.
   assert.deepEqual(
     codes(
@@ -791,15 +806,18 @@ test("get takes a default of any type, and its result joins the value type with 
     ),
     ["x", "y", "none", "2"],
   );
-  assert.deepEqual(
-    failure(
-      `${DYNAMIC}let v = null\nv = dynamic("y")\nlet e = dict{}\nsay e.get("z", default: [v])\ne["k"] = [1]\nexit`,
-    ),
-    [
-      "TSR058",
-      `A value of 'e' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
-    ],
-  );
+  // Also where a copy saw the dict undecided before.
+  for (const before of ["", "let copy = e\n"])
+    assert.deepEqual(
+      failure(
+        `${DYNAMIC}let v = null\nv = dynamic("y")\nlet e = dict{}\n${before}say e.get("z", default: [v])\ne["k"] = [1]\nexit`,
+      ),
+      [
+        "TSR058",
+        `A value of 'e' holds a list (integer?[]), so it cannot take a list with text (string) "y" at [0].`,
+      ],
+      before,
+    );
 });
 
 test("objects keep fixed properties, and dicts are not choices", () => {

@@ -2890,6 +2890,54 @@ class TypeChecker {
   }
 
   /**
+   * Lets the `default:` of a list or dict `get` decide an element or value type that no value decided yet, as a first
+   * stored value would (V30 §16, §40), so that `counts.get(key, default: 0) + 1` counts. A default of unknown type
+   * decides nothing, and neither does a null default, so the type never starts as only null for a collection that holds
+   * no null (#831). Parts of the default that the compiler cannot know are checked when the script runs. A test may
+   * narrow a variable whose own type is still undecided, which the default then decides. Where a read saw the type
+   * undecided before, a later check starts with the type this default decided, and the default stays its first value.
+   */
+  *#defaultDecidesTask(
+    call: CallExpression,
+    collectionExpression: Expression,
+    receiver: StaticType,
+    defaultExpression: Expression,
+    fallback: StaticType,
+    scope: Scope,
+    kind: "list" | "dict",
+  ): CompileTask<void> {
+    const node = unwrap(collectionExpression);
+    const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
+    const own = entry?.kind === "variable" ? entry.variable.type : receiver;
+    const decides = (type: StaticType): boolean => {
+      const shared = elementStoreType(type);
+      return (
+        undecidedValues(type) ||
+        (shared !== undefined && findDecidedSlot(shared) === defaultExpression.span)
+      );
+    };
+    if (!decides(receiver) && !decides(own)) return;
+    if (!isKnown(fallback) || decidedValue(fallback).kind === "never") return;
+    const collection = this.#elementReceiver(collectionExpression, scope, receiver, fallback);
+    yield* compileChild(
+      this.#storeElementTask(
+        collection,
+        collectionExpression,
+        defaultExpression,
+        fallback,
+        scope,
+        "default to",
+      ),
+    );
+    this.#recordRuntimeCheck(
+      call,
+      elementStoreType(collection) ?? UNKNOWN_TYPE,
+      elementLabel(expressionLabel(collectionExpression), kind),
+      fallback,
+    );
+  }
+
+  /**
    * Keeps of what is known about a narrowed variable only which of its declared members it may hold, such as that it is
    * not null, and forgets what a store may change, such as the type of its elements.
    */
@@ -5227,6 +5275,28 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
+    // anything reads the element.
+    const listDefault = expression.arguments[1];
+    if (
+      method === "get" &&
+      expression.arguments.length === 2 &&
+      expression.arguments[0]!.kind === "positionalArgument" &&
+      listDefault?.kind === "namedArgument" &&
+      listDefault.name.name === "default" &&
+      members(nonNullType(value)).every(isList)
+    )
+      yield* compileChild(
+        this.#defaultDecidesTask(
+          expression,
+          callee.object,
+          receiver,
+          listDefault.value,
+          values[1]!,
+          scope,
+          "list",
+        ),
+      );
     // A list's `get` takes its index as indexing does, but gives its default for a negative one (#844). A member without
     // `get`, such as null, is reported below instead, and a dict, which has one, here, as for indexing.
     if (
@@ -5251,33 +5321,18 @@ class TypeChecker {
       if (method === "get" && defaultArgument !== undefined) {
         // The result may be the default itself, so it is a copy that later stores to either cannot share.
         fallback = this.#capture(defaultArgument.value);
-        // The default may be of any type, and the result joins it with the value type (V30 §40). Only a value type that
-        // no value decided yet, such as that of `dict{}`, takes a default the compiler knows as a first stored value
-        // would, so that `counts.get(key, default: 0) + 1` counts; parts of it that the compiler cannot know are
-        // checked when the script runs. A default of unknown type decides nothing and makes the result unknown. A test
-        // may narrow a variable whose own value type is still undecided, which the default then decides.
-        const node = unwrap(callee.object);
-        const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
-        const own = entry?.kind === "variable" ? entry.variable.type : value;
-        if ((undecidedValues(value) || undecidedValues(own)) && isKnown(fallback)) {
-          const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
-          yield* compileChild(
-            this.#storeElementTask(
-              collection,
-              callee.object,
-              defaultArgument.value,
-              fallback,
-              scope,
-              "default to",
-            ),
-          );
-          this.#recordRuntimeCheck(
+        // The default may be of any type, and the result joins it with the value type (V30 §40).
+        yield* compileChild(
+          this.#defaultDecidesTask(
             expression,
-            elementStoreType(collection) ?? UNKNOWN_TYPE,
-            elementLabel(expressionLabel(callee.object), "dict"),
+            callee.object,
+            receiver,
+            defaultArgument.value,
             fallback,
-          );
-        }
+            scope,
+            "dict",
+          ),
+        );
       }
     } else if (
       (method === "contains" || method === "remove") &&
@@ -5456,12 +5511,20 @@ class TypeChecker {
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
-    // The element, or the default, which may be of another type, so their types join (#844).
+    // The element, or the default, which may be of another type, so their types join (#844). Where the default has a
+    // part that no value decided yet, such as `[]`, they join as in a literal, so that part takes the element type, as
+    // for a dict (#853). An element type that is still undecided, such as where a null default decided nothing, keeps
+    // the plain union.
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
-      return problems.length > 0 || fallback === undefined
-        ? UNKNOWN_TYPE
-        : union([copyType(value.element), plainType(typeOf(fallback.value))]);
+      if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
+      const element = copyType(value.element);
+      const other = plainType(typeOf(fallback.value));
+      const undecided = (type: StaticType): boolean =>
+        containsType(type, (part) => part.kind === "open");
+      const joined =
+        undecided(other) && !undecided(element) ? joinTypes([element, other]) : undefined;
+      return joined ?? union([element, other]);
     }
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
@@ -7486,8 +7549,8 @@ function hasUndecidedElements(type: StaticType): boolean {
 }
 
 /**
- * Whether no value decided the value type of a dict receiver yet, as for `dict{}` or `dict{ a: null }`, so that a first
- * value decides it.
+ * Whether no value decided the element type of a list or the value type of a dict receiver yet, as for `[]`, `dict{}`,
+ * or `dict{ a: null }`, so that a first value decides it.
  */
 function undecidedValues(type: StaticType): boolean {
   const shared = elementStoreType(type);
