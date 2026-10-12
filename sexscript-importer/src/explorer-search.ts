@@ -1854,7 +1854,12 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   });
   if (options.comparedAnswers === true) {
     session.scopedReads = true;
-    for (const [ask, expressions] of comparedWith(flow, instructions, "asks"))
+    for (const [ask, expressions] of comparedWith(
+      flow,
+      instructions,
+      "asks",
+      session.comparedElsewhere,
+    ))
       session.comparedWith.set(ask, expressions);
   }
   for (const [button, expressions] of comparedWith(flow, instructions, "timed"))

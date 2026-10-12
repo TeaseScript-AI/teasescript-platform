@@ -1633,6 +1633,12 @@ export class DataFlow {
     return this.#functionOf.get(index) ?? 0;
   }
 
+  /** The code an instruction is in: its function's ID, or for a file's own code, -1 less the file's index. */
+  unitAt(index: number): number {
+    const owner = this.functionAt(index);
+    return owner !== 0 ? owner : -1 - this.#fileAt(index);
+  }
+
   /**
    * What a temporary may hold at an instruction, with the index of the store that put it there: the expression of the
    * nearest store of it before the instruction, and of earlier stores too while a jump between the earlier store and the
@@ -3204,6 +3210,7 @@ export function comparedWith(
   flow: DataFlow,
   instructions: readonly Data[],
   kind: "asks" | "timed",
+  split?: Map<number, ComparedElsewhere>,
 ): Map<number, unknown[]> {
   const typed = (index: number) => {
     const instruction = record(instructions[index]);
@@ -3224,12 +3231,59 @@ export function comparedWith(
   /**
    * Per interaction, at most {@link MAX_COMPARED} expressions found, by shape. A timed button's are the first ones after
    * it. A typed ask's are those nearest it, those in its own function first: a name other code also uses (`answer`)
-   * brings in theirs.
+   * brings in theirs. With `split`, a typed ask's found in other code are kept apart (see {@link ComparedElsewhere}).
    */
-  const found = new Map<
+  const found = new Map<number, Map<string, Ranked>>();
+  const elsewhere = new Map<
     number,
-    Map<string, { expression: unknown; rank: readonly [number, number] }>
+    { others: Map<string, Ranked>; after: Map<number, Map<string, Ranked>> }
   >();
+  /**
+   * The calls by the code they are in: the function called, where the call returns to, the temporary that takes its
+   * result, and the variable or property of one ({@link memberPath}) the instruction it returns to gives that result
+   * to, if any.
+   */
+  const calls = new Map<
+    number,
+    { callee: number; returns: number; result: number; member: string | null }[]
+  >();
+  instructions.forEach((instruction, index) => {
+    if (instruction.kind !== "callFunction" || typeof instruction.functionId !== "number") return;
+    const unit = flow.unitAt(index);
+    const returns = Number(instruction.returnInstruction);
+    const result = Number(instruction.destinationTemporary);
+    const next = record(instructions[returns]);
+    const value = record(next.value);
+    const member =
+      value.kind !== "temporary" || value.temporaryId !== result
+        ? null
+        : next.kind === "declareBinding" && typeof next.name === "string"
+          ? next.name
+          : next.kind === "assign"
+            ? memberPath(next.target, instructions, returns)
+            : null;
+    calls.set(unit, [
+      ...(calls.get(unit) ?? []),
+      { callee: instruction.functionId, returns, result, member },
+    ]);
+  });
+  /** The functions whose calls can lead into each function, itself included, by the function's ID. */
+  const leading = new Map<number, Set<number>>();
+  const leadingInto = (target: number): Set<number> => {
+    const known = leading.get(target);
+    if (known !== undefined) return known;
+    const into = new Set([target]);
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const [unit, made] of calls)
+        if (unit > 0 && !into.has(unit) && made.some((call) => into.has(call.callee))) {
+          into.add(unit);
+          grown = true;
+        }
+    }
+    leading.set(target, into);
+    return into;
+  };
   const worse = (left: readonly [number, number], right: readonly [number, number]) =>
     left[0] - right[0] || left[1] - right[1];
   // How near a comparison is to an ask counts the instructions with a comparison between them, so that code without
@@ -3247,7 +3301,8 @@ export function comparedWith(
     const shape = kind === "asks" ? answerShape(answer) : null;
     if (shape !== null) {
       if (readable(other, false))
-        for (const source of sources(answer, at)) keep(source, { ...shape, value: other }, at);
+        for (const source of sources(answer, at))
+          keep(source, { ...shape, value: other }, at, answer);
       return;
     }
     if (!readable(other)) return;
@@ -3263,25 +3318,59 @@ export function comparedWith(
             left: other,
             right: { kind: "literal", value: unit / 1000 },
           };
-    for (const source of sources(answer, at)) keep(source, compared, at);
+    for (const source of sources(answer, at)) keep(source, compared, at, answer);
   };
-  /** Keeps an expression compared with an interaction's result, the {@link MAX_COMPARED} nearest per interaction. */
-  const keep = (source: number, compared: unknown, at: number) => {
-    const known =
-      found.get(source) ??
-      new Map<string, { expression: unknown; rank: readonly [number, number] }>();
-    found.set(source, known);
+  /**
+   * Keeps an expression compared with an interaction's result (read as `answer`), the {@link MAX_COMPARED} nearest per
+   * interaction.
+   */
+  const keep = (source: number, compared: unknown, at: number, answer: unknown) => {
     const key = JSON.stringify(compared, (name, item: unknown) =>
       name === "span" ? undefined : item,
     );
+    const known = (): Map<string, Ranked> => {
+      const kept = found.get(source) ?? new Map<string, Ranked>();
+      found.set(source, kept);
+      return kept;
+    };
     if (kind === "timed") {
-      if (known.size < MAX_COMPARED) known.set(key, { expression: compared, rank: [0, 0] });
+      if (known().size < MAX_COMPARED) known().set(key, { expression: compared, rank: [0, 0] });
       return;
     }
-    const rank = [
-      flow.functionAt(at) === flow.functionAt(source) ? 0 : 1,
-      between(at, source),
-    ] as const;
+    const own = flow.functionAt(at) === flow.functionAt(source);
+    if (split !== undefined && !own) {
+      const apart = elsewhere.get(source) ?? { others: new Map(), after: new Map() };
+      elsewhere.set(source, apart);
+      // Code that calls into the ask's function: kept by each such call, for when the ask comes from that call.
+      const into = flow.functionAt(source) === 0 ? null : leadingInto(flow.functionAt(source));
+      // The calls there whose result the comparison reads: the variable or property it is given to, or a part of that,
+      // or the result itself.
+      const read = membersIn(answer);
+      const held = temporariesIn(answer);
+      const through = (calls.get(flow.unitAt(at)) ?? []).filter(
+        (call) =>
+          into?.has(call.callee) === true &&
+          ((call.member !== null &&
+            [...read].some((path) => path === call.member || path.startsWith(`${call.member}.`))) ||
+            held.includes(call.result)),
+      );
+      for (const call of through) {
+        const after = apart.after.get(call.returns) ?? new Map<string, Ranked>();
+        apart.after.set(call.returns, after);
+        keepRanked(after, key, compared, [0, between(at, call.returns)]);
+      }
+      if (through.length === 0) keepRanked(apart.others, key, compared, [1, between(at, source)]);
+      return;
+    }
+    keepRanked(known(), key, compared, [own ? 0 : 1, between(at, source)]);
+  };
+  /** Keeps `compared` among `known` if it is among the {@link MAX_COMPARED} best ranked. */
+  const keepRanked = (
+    known: Map<string, Ranked>,
+    key: string,
+    compared: unknown,
+    rank: readonly [number, number],
+  ) => {
     const before = known.get(key);
     if (before !== undefined) {
       if (worse(rank, before.rank) < 0) known.set(key, { expression: compared, rank });
@@ -3322,7 +3411,7 @@ export function comparedWith(
       readable(callee.object, false)
     )
       for (const source of sources(looked, at))
-        keep(source, { kind: "answerLookup", start: part.start, value: callee.object }, at);
+        keep(source, { kind: "answerLookup", start: part.start, value: callee.object }, at, looked);
     if (
       value.kind === "call" &&
       callee.kind === "property" &&
@@ -3349,14 +3438,74 @@ export function comparedWith(
     )
       results.set(instruction.temporaryId, held);
   });
-  return new Map(
-    [...found].map(([ask, expressions]) => [
-      ask,
-      [...expressions.values()]
-        .sort((left, right) => worse(left.rank, right.rank))
-        .map(({ expression }) => expression),
-    ]),
-  );
+  const ordered = (expressions: Map<string, Ranked>) =>
+    [...expressions.values()]
+      .sort((left, right) => worse(left.rank, right.rank))
+      .map(({ expression }) => expression);
+  for (const [ask, apart] of elsewhere)
+    split?.set(ask, {
+      others: ordered(apart.others),
+      after: new Map([...apart.after].map(([returns, after]) => [returns, ordered(after)])),
+    });
+  return new Map([...found].map(([ask, expressions]) => [ask, ordered(expressions)]));
+}
+
+/**
+ * A variable, or a property of one by name (`got.first`), as text, also through the reference the compiler prepares
+ * for an assignment target before instruction `at` (as {@link targetName}); null for anything else.
+ */
+function memberPath(expression: unknown, instructions?: readonly Data[], at = 0): string | null {
+  const value = record(expression);
+  if (value.kind === "identifier" && typeof value.name === "string") return value.name;
+  if (value.kind === "preparedReference" && typeof value.temporaryId === "number" && instructions)
+    for (let index = at - 1; index >= 0 && index >= at - PREPARED_REACH; index -= 1) {
+      const instruction = instructions[index]!;
+      if (
+        instruction.kind === "prepareReference" &&
+        instruction.destinationTemporary === value.temporaryId
+      )
+        return memberPath(instruction.expression, instructions, index);
+    }
+  if (value.kind !== "property" || typeof value.name !== "string") return null;
+  const object = memberPath(value.object, instructions, at);
+  return object === null ? null : `${object}.${value.name}`;
+}
+
+/** The variables and properties of them an expression reads ({@link memberPath}), the longest of each chain. */
+function membersIn(expression: unknown): Set<string> {
+  const found = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const path = memberPath(value);
+    if (path !== null) {
+      found.add(path);
+      return;
+    }
+    for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+  };
+  walk(expression);
+  return found;
+}
+
+/** An expression kept for an interaction, and how near it is (lower is nearer). */
+interface Ranked {
+  expression: unknown;
+  rank: readonly [number, number];
+}
+
+/**
+ * What the code outside a typed ask's function compares its answer with ({@link comparedWith}): in code that calls into
+ * the ask's function, `after` each such call, by where the call returns to, those nearest that place; and in other code,
+ * `others`, those nearest the ask. An ask in a helper several places call gets the expressions of the call it comes
+ * from, not those of the other callers.
+ */
+export interface ComparedElsewhere {
+  others: unknown[];
+  after: Map<number, unknown[]>;
 }
 
 /** Whether an instruction compares (`<`, `==`, ...) or tests text (`contains`, ...), as {@link comparedWith} reads it. */

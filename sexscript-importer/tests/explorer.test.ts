@@ -3375,6 +3375,76 @@ test(
 );
 
 test(
+  "with compared answers, an ask in a helper is answered with what the code compares the result of the call it comes from with",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Five places call one helper that asks, each comparing the answer with its own variable: more than an ask keeps.
+    const callers = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `let goal${index} = ${11 * (index + 1)}\nfunction caller${index} {\n  let got = pick()\n` +
+        `  if got == goal${index} {\n    say "Hit ${index}."\n  }\n}\n`,
+    ).join("");
+    const source = `function pick {\n  return askInteger prefill: 0\n}\n${callers}${Array.from(
+      { length: 5 },
+      (_, index) => `caller${index}()\n`,
+    ).join("")}exit\n`;
+    const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    assert.ok(isRecord(plan));
+    const result = explore(engine, plan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 20_000,
+      sources: new Map([["main.tease", source]]),
+      diagnostics: [],
+      comparedAnswers: true,
+    });
+    assert.deepEqual([result.search.stoppedBy, result.coverage.percent], ["exhausted", 100]);
+    // Two calls in one function: each answer gets what its own result is compared with.
+    const twice =
+      "let low = 11\nlet high = 99\nfunction pick {\n  return askInteger prefill: 0\n}\nfunction both {\n" +
+      '  let first = pick()\n  let second = pick()\n  if first == low {\n    say "Low."\n  }\n' +
+      '  if second == high {\n    say "High."\n  }\n}\nboth()\nexit\n';
+    const compiled = engine.compileProject([{ path: "main.tease", source: twice }], {
+      builtins: [],
+    }).plan;
+    assert.ok(isRecord(compiled));
+    const each = explore(engine, compiled, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 20_000,
+      sources: new Map([["main.tease", twice]]),
+      diagnostics: [],
+      comparedAnswers: true,
+    });
+    assert.deepEqual([each.search.stoppedBy, each.coverage.percent], ["exhausted", 100]);
+    // So does each property a call's result is given to.
+    const fields = twice
+      .replace(
+        "  let first = pick()\n  let second = pick()\n",
+        "  let got = { first: 0, second: 0 }\n  got.first = pick()\n  got.second = pick()\n",
+      )
+      .replace("if first == low", "if got.first == low")
+      .replace("if second == high", "if got.second == high");
+    const fieldPlan = engine.compileProject([{ path: "main.tease", source: fields }], {
+      builtins: [],
+    }).plan;
+    assert.ok(isRecord(fieldPlan));
+    const byField = explore(engine, fieldPlan, {
+      seed: 1,
+      budgetMs: 60_000,
+      maxStates: 20_000,
+      sources: new Map([["main.tease", fields]]),
+      diagnostics: [],
+      comparedAnswers: true,
+    });
+    assert.deepEqual([byField.search.stoppedBy, byField.coverage.percent], ["exhausted", 100]);
+  },
+);
+
+test(
   "with compared answers, a typed ask is also answered with what the code compares the answer with in that state, such as the line to type",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {

@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
-import { exactMilliseconds, type ClockDifference, type Constants } from "./explorer-analysis.ts";
+import {
+  exactMilliseconds,
+  type ClockDifference,
+  type ComparedElsewhere,
+  type Constants,
+} from "./explorer-analysis.ts";
 import { repositoryBuildUrl } from "./repository-build.ts";
 
 /**
@@ -501,6 +506,12 @@ export class Session {
    */
   readonly comparedWith = new Map<number, readonly unknown[]>();
   /**
+   * What code outside a typed ask's function compares its answer with, by the ask's instruction
+   * (`ComparedElsewhere`): at an ask, those after the calls the state is in, the innermost first, follow its own
+   * function's, and those of code that calls into it in no way come last.
+   */
+  readonly comparedElsewhere = new Map<number, ComparedElsewhere>();
+  /**
    * The player may think before pressing a button that the code times (see {@link thinkTimes}): the expressions a
    * timed button's result is compared with, by its instruction (`(showButton "Done") / 1 s > count`); and the
    * differences of clock reads compared with constants (`clockDifferences`), for the buttons between the two reads.
@@ -648,7 +659,7 @@ export class Session {
       );
       const ask = typeof action.owningInstruction === "number" ? action.owningInstruction : null;
       const directed = ask === null ? [] : (this.directedAnswers.get(ask) ?? []);
-      const expressions = ask === null ? undefined : this.comparedWith.get(ask);
+      const expressions = ask === null ? undefined : this.#comparedAt(runtime, ask);
       const compared =
         expressions === undefined || state === undefined
           ? []
@@ -986,6 +997,21 @@ export class Session {
       ways.add(from * 2 + way);
     }
     return fresh;
+  }
+
+  /** The expressions a typed ask's answer is compared with, as the calls the state is in lead to it. */
+  #comparedAt(runtime: Runtime, ask: number): readonly unknown[] | undefined {
+    const own = this.comparedWith.get(ask);
+    const elsewhere = this.comparedElsewhere.get(ask);
+    if (elsewhere === undefined) return own;
+    return [
+      ...(own ?? []),
+      ...runtime
+        .callReturnInstructions()
+        .toReversed()
+        .flatMap((returns) => elsewhere.after.get(returns) ?? []),
+      ...elsewhere.others,
+    ];
   }
 
   /**

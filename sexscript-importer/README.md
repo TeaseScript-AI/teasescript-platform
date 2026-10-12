@@ -313,7 +313,10 @@ returns, in the caller's; three per type, the nearest first) adds a candidate, o
 default, off with `--no-compared-answers`), a text or number ask is also answered with the values, in the state at the ask, of what the code compares its answer
 with (a variable, or a property, index, or sum of variables, or a text with such texts or whole numbers in it, found through the data
 flow, the nearest first), such as the line a script asks the player to type: three at most, and `v - 1`, `v`, and
-`v + 1` for a number `v`. A text ask is also answered for what the code reads of its answer, also when it compares that
+`v + 1` for a number `v`. An ask in a function that several places call gets what the code compares the result of
+the calls it comes from with (the result itself, or the variable or property the call gives it to, or a part of
+that), the innermost call first,
+after its own function's and before other code's, not what other calls' code compares. A text ask is also answered for what the code reads of its answer, also when it compares that
 with a constant, past changes of letter case: for a compared length `n` (`name.length < 3`), `x` repeated `n - 1`, `n`,
 and `n + 1` times; for a compared part at a position (`why.substring(0, 2) == "i "`), that part there, after `x`s, and
 also followed by `xxx`; and for characters of the answer looked up in a text (`letters.indexOf(c.substring(0, 1))`, as
