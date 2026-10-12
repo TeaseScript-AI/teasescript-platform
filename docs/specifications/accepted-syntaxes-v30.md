@@ -4422,7 +4422,8 @@ let strokes = [say("First", instant), say("Second", instant)]
   time of its own and waits for the reading time of an earlier message, as any statement does. After it, the handle
   behaves as a stopped timer's does ([§27](#handles)): `text` still reads the text the message had, a text write
   changes nothing and reports developer warning `TSW010`, and `remove()` again does nothing. The handle keeps its
-  identity, so `==` and `say line` work as before.
+  identity, so `==` and `say line` work as before. To keep a message that you want to change later, empty it with
+  `line.text = ""` instead.
 - **Identity.** Every copy of a handle, in a variable, collection, argument, or the variables a block shares, names the
   same message, and `==` compares messages, not texts. Until removed, a message stays changeable while a handle to it
   remains, also an older or another speaker's message, and across `goto`, `call`, and `end` through a global, a caller,
