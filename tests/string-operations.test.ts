@@ -54,10 +54,10 @@ test("text operations return new values and leave the original unchanged", () =>
       "Ada lovelace|ADA LOVELACE|mixed",
       "[ada lovelace  ] [  ada lovelace]",
       "true false true true",
-      "4 -1 lovelace ada",
+      "4 null lovelace ada",
       "AdA lovelAce",
       "0 0",
-      "9 -1 ababab||",
+      "9 null ababab||",
       "007 7-- long xyzxyab",
     ],
   );
@@ -76,6 +76,62 @@ test("lengths and positions count code points", () => {
       ].join("\n"),
     ),
     ["3 2 😀 b", "a|😀|b", "2 3 😀a😀x 3", "2"],
+  );
+});
+
+test("indexOf and lastIndexOf give null for a part that does not occur, so a position needs a check", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${"abc".indexOf("x") == null} ${"abc".lastIndexOf("x") == null} ${"abcb".indexOf("b")} ${"abcb".lastIndexOf("b")}"',
+        // Text from elsewhere, such as what a message shows, gives the same results.
+        'let line = say "Hello", instant',
+        'say "${line.text.indexOf("x")} ${line.text.lastIndexOf("l")}"',
+        'let path = "games/quiz/start"',
+        'let slash = path.lastIndexOf("/")',
+        "if slash != null {",
+        "    say path.substring(slash + 1)",
+        "}",
+        'let dot = path.indexOf(".")',
+        "if dot == null {",
+        '    say "no extension"',
+        "} else {",
+        "    say path.substring(dot)",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["true true 1 3", "Hello", "null 3", "start", "no extension"],
+  );
+  const check = (name: string) =>
+    `'${name}' may be null. Check it first: if ${name} != null { ... }`;
+  assert.deepEqual(
+    [
+      'let path = "a/b"\nsay path.substring(0, path.indexOf("/"))\nexit',
+      'let path = "a/b"\nlet slash = path.indexOf("/")\nsay path.substring(slash + 1)\nexit',
+      'let path = "a/b"\nlet slash = path.lastIndexOf("/")\nsay path.repeat(slash)\nexit',
+      'let path = "a/b"\nlet slash: integer = path.indexOf("/")\nexit',
+      'function find(part: string?) {\n    say "a/b".contains(part)\n}\nexit',
+    ].map((source) => diagnostics(source)),
+    [
+      [
+        [
+          "TSV043",
+          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          'path.indexOf("/")',
+        ],
+      ],
+      [["TSV043", check("slash"), "slash"]],
+      [["TSV043", check("slash"), "slash"]],
+      [
+        [
+          "TSV041",
+          "'slash' is declared as integer, so it cannot start as a whole number (integer) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          'path.indexOf("/")',
+        ],
+      ],
+      [["TSV043", check("part"), "part"]],
+    ],
   );
 });
 
@@ -134,7 +190,7 @@ test("positions stay on code points for combining marks, expanding case, and lon
     { emoji: "a😀", low: "\udE00", high: "\ud800" },
   );
   assert.equal(result.snapshot.failure, null);
-  assert.deepEqual(sayTexts(result), ["-1 -1 false false 1 a😀 true", "3 5"]);
+  assert.deepEqual(sayTexts(result), ["null null false false 1 a😀 true", "3 5"]);
 });
 
 test("misuse the compiler can see is a compile error that names the fix", () => {
@@ -439,7 +495,8 @@ test("text operations have static result types", () => {
       [
         'let t = "a,b"',
         "let size: integer = t.length",
-        'let at: integer = t.indexOf("b") + t.lastIndexOf("a")',
+        'let at: integer? = t.indexOf("b")',
+        'let last: integer? = t.lastIndexOf("a")',
         'let found: boolean = t.contains("a") and t.startsWith("a") and t.endsWith("b")',
         'let parts: string[] = t.split(",")',
         'let joined: string = "${parts.join(" ")}${t.trim()}${t.repeat(2)}${t.padStart(5, "0")}"',
@@ -451,7 +508,7 @@ test("text operations have static result types", () => {
   assert.deepEqual(diagnostics('let t = "a"\nlet at: string = t.indexOf("a")\nexit'), [
     [
       "TSV041",
-      "'at' is declared as string, so it cannot start as a whole number (integer). To show it as text, write \"${value}\".",
+      "'at' is declared as string, so it cannot start as a whole number (integer) or null. To allow both, declare it as 'let at: string | integer | null = ...'.",
       't.indexOf("a")',
     ],
   ]);

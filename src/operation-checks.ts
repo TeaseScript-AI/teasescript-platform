@@ -26,10 +26,13 @@ import {
   isScalar,
   members,
   nonNullType,
+  NULL_TYPE,
   NUMBER_TYPE,
   resolved,
   STRING_TYPE,
   TIME_TYPE,
+  typeName,
+  union,
   ABSOLUTE_DATE_TIME_TYPE,
   type StaticType,
 } from "./static-types.js";
@@ -112,6 +115,9 @@ export function memberProblems(
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
       return takeProblems(name, undefined, property, call, typeOf);
+    // Only lists have `count`, and a list's `indexOf` and `lastIndexOf` take any value, so only one argument without a
+    // name is checked.
+    if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
     const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
     if (!member?.parameters) return [];
     return name === "contains"
@@ -172,14 +178,17 @@ function argumentProblems(
       problems.push({ kind: "invalidOperand", message, span: value.span });
     };
     const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
-    if (!isAssignable(text ? STRING_TYPE : INTEGER_TYPE, type)) {
-      problems.push({
-        kind: "invalidOperand",
-        message: argumentTypeMessage(member, parameter, describeValue(type)),
-        span: value.span,
-        ...(text ? {} : { widened: value }),
-        fix: argumentFix(parameter, argumentKind(type)),
-      });
+    const needed = text ? STRING_TYPE : INTEGER_TYPE;
+    if (!isAssignable(needed, type)) {
+      problems.push(
+        nullCheckProblem(value, type, needed) ?? {
+          kind: "invalidOperand",
+          message: argumentTypeMessage(member, parameter, describeValue(type)),
+          span: value.span,
+          ...(text ? {} : { widened: value }),
+          fix: argumentFix(parameter, argumentKind(type)),
+        },
+      );
       continue;
     }
     if (text) {
@@ -625,21 +634,28 @@ export function rootName(expression: Expression): string | null {
   return node.kind === "identifier" ? node.name : null;
 }
 
-/** The list methods that reorder a list in place, and the set operations of lists and sets (V30 §16, ADR 0013). */
+/** The list methods that search for a value: its first or last position, or how often it occurs (V30 §16). */
+export const LIST_SEARCHES: ReadonlySet<string> = new Set(["indexOf", "lastIndexOf", "count"]);
+
+/**
+ * The list methods that reorder a list in place, take part of it, or search it, and the set operations of lists and
+ * sets (V30 §16, ADR 0013).
+ */
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "sort",
   "shuffle",
   "take",
   "takeLast",
+  ...LIST_SEARCHES,
   "intersection",
   "union",
   "difference",
 ]);
 
 /**
- * Compile-time problems with `sort`, `shuffle`, `intersection`, `union`, or `difference` on a list or set: argument
- * names and count, reordering a set, elements `sort` cannot order, and a set operation's argument that is neither a
- * list nor a set.
+ * Compile-time problems with `sort`, `shuffle`, `take`, `takeLast`, a search, `intersection`, `union`, or `difference`
+ * on a list or set: argument names and count, reordering, taking from, or searching a set, elements `sort` cannot
+ * order, and a set operation's argument that is neither a list nor a set.
  */
 export function collectionMethodProblems(
   name: string,
@@ -648,6 +664,7 @@ export function collectionMethodProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  if (LIST_SEARCHES.has(name)) return searchProblems(name, receiverType, property, call);
   if (name === "take" || name === "takeLast")
     return takeProblems(name, receiverType, property, call, typeOf);
   const reorders = name === "sort" || name === "shuffle";
@@ -735,8 +752,10 @@ function takeProblems(
     ];
   const count = call.arguments[0]!.value;
   const type = typeOf(count);
+  const nullable = nullCheckProblem(count, type, INTEGER_TYPE);
+  if (nullable !== undefined) return [nullable];
   const known = staticNumber(count);
-  // The first kind the count may be that is not a whole number, such as null in `integer?`.
+  // The first kind the count may be that is not a whole number, such as the number in `number?`.
   const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
   const message =
     other !== undefined
@@ -745,6 +764,86 @@ function takeProblems(
         ? `${name}() needs a whole number of at least 0, not ${known}.`
         : undefined;
   return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
+}
+
+/** Problems with `indexOf`, `lastIndexOf`, or `count`: a list method of one value of any type (V30 §16). */
+function searchProblems(
+  name: string,
+  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
+  property: Identifier,
+  call: CallExpression,
+): OperationProblem[] {
+  if (receiverType?.kind === "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message:
+          name === "count"
+            ? "A set holds each member once, so it has no count(). Use contains(...) instead."
+            : `A set has no positions, so it has no ${name}(). Copy it into a list with toList() first.`,
+        span: property.span,
+      },
+    ];
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}() takes its value without a name. Remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  if (call.arguments.length !== 1)
+    return [
+      {
+        kind: "argumentCount",
+        message: `${name}() takes 1 argument (value), received ${call.arguments.length}.`,
+        span: call.span,
+      },
+    ];
+  return [];
+}
+
+/**
+ * The message for a value that may be of a member type an operation does not support, naming the test that makes it
+ * safe: `!= null` for null, which also narrows it. Only a plain variable narrows, so a property or element is first
+ * kept in a variable.
+ */
+export function mayBeMessage(
+  expression: Expression,
+  failing: StaticType,
+  passing: readonly StaticType[],
+): string {
+  const node = withoutParentheses(expression);
+  const label = node.kind === "identifier" ? node.name : null;
+  const test = failing.kind === "null" ? "!= null" : `is ${typeName(union(passing))}`;
+  return label === null
+    ? `This value may be ${describeValue(failing)}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
+    : `'${label}' may be ${describeValue(failing)}. Check it first: if ${label} ${test} { ... }`;
+}
+
+/**
+ * For an argument that may be null and is otherwise of the `needed` type, the problem that names the null check
+ * (owner decision on #504 Q1), such as for a position from `indexOf`.
+ */
+function nullCheckProblem(
+  value: Expression,
+  type: StaticType,
+  needed: StaticType,
+): OperationProblem | undefined {
+  const all = members(type);
+  const passing = all.filter((member) => member.kind !== "null");
+  if (
+    passing.length === 0 ||
+    passing.length === all.length ||
+    !passing.every((member) => isAssignable(needed, member))
+  )
+    return undefined;
+  return {
+    kind: "invalidOperand",
+    message: mayBeMessage(value, NULL_TYPE, passing),
+    span: value.span,
+  };
 }
 
 /** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */

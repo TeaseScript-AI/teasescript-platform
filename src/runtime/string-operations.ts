@@ -150,15 +150,16 @@ export function callStringMethod(
       return text.startsWith(texts[0]!) && isCodePointBoundary(text, texts[0]!.length);
     case "endsWith":
       return text.endsWith(texts[0]!) && isCodePointBoundary(text, text.length - texts[0]!.length);
+    // A part that does not occur has no position: null (#840).
     case "indexOf": {
       const offset = firstMatch(text, texts[0]!);
-      return offset < 0 ? -1 : codePointCount(text, offset);
+      return offset < 0 ? null : codePointCount(text, offset);
     }
     case "lastIndexOf": {
       if (texts[0] === "") return stringLength(text);
       let offset = -1;
       for (const match of literalMatches(text, texts[0]!, true)) offset = match;
-      return offset < 0 ? -1 : codePointCount(text, offset);
+      return offset < 0 ? null : codePointCount(text, offset);
     }
     case "substring": {
       const length = stringLength(text);
