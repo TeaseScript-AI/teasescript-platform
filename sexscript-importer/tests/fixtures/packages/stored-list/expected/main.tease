@@ -2,15 +2,8 @@
 // and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
 global function sexscriptLegacySave(key, value) {
   let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
-  let kept: string[] = []
+  let fresh: string[] = []
   let prefix = "${key}."
-  for name in stored {
-    if name == key or name.startsWith(prefix) {
-      delete name
-    } else {
-      kept.add(name)
-    }
-  }
   delete key
   if value is list or value is dict {
     let names: string[] = [key]
@@ -38,12 +31,25 @@ global function sexscriptLegacySave(key, value) {
         } else {
           save item as name
         }
-        kept.add(name)
+        fresh.add(name)
       }
     }
   } else if value != null {
     save value as key
-    kept.add(key)
+    fresh.add(key)
+  }
+  let kept: string[] = []
+  for name in stored {
+    if (name == key or name.startsWith(prefix)) and not fresh.contains(name) {
+      delete name
+    } else {
+      kept.add(name)
+    }
+  }
+  for name in fresh {
+    if not stored.contains(name) {
+      kept.add(name)
+    }
   }
   save kept as "sexscriptLegacy.storedKeys"
 }

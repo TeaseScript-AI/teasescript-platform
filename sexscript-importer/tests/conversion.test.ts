@@ -2005,6 +2005,48 @@ test(
   },
 );
 
+// The storage helpers list the keys they store; a key stored again keeps its place in that list, so that saving the same
+// keys over and over leaves the same storage.
+test(
+  "a key saved again keeps its place among the stored keys",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-stored-order-"));
+    try {
+      const sourcePath = path.join(directory, "club.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'save("club.toys", ["gag", "cane"])',
+          'save("club.level", 3)',
+          'save("club.level.kink", 5)',
+          'save("club.toys", ["whip", "rope"])',
+          'show(loadString("club.toys.0"))',
+          "",
+        ].join("\n"),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {});
+      const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
+      assert.ok(typeof runtime === "object" && runtime !== null);
+      // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts).
+      const { compileSource, createFreshRuntimeSnapshot, run } = runtime as PacedRuntime;
+      const { plan } = compileSource(emitTease(program!));
+      assert.ok(plan !== undefined);
+      const step = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1 }));
+      assert.equal(step.snapshot.status, "halted");
+      const stored = step.snapshot.scriptStorage?.find(
+        (entry) => entry.key === "sexscriptLegacy.storedKeys",
+      );
+      assert.deepEqual(stored?.value, {
+        kind: "list",
+        items: ["club.toys.0", "club.toys.1", "club.level", "club.level.kink"],
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   "an input's question shows what it read before its pre-filled value was computed",
   { skip: parserUnavailable },
@@ -2043,6 +2085,7 @@ interface PacedEvent {
 }
 interface PacedSnapshot {
   status: string;
+  scriptStorage?: ReadonlyArray<{ key: string; value: unknown }>;
   currentSessionTimeMs?: number;
   backgroundActions?: ReadonlyArray<{ deadlineMs?: number }>;
   foregroundAction?: {

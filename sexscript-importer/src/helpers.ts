@@ -1472,7 +1472,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     build: () => parsedLoad("sexscriptLegacyLoadFloat", "toNumber"),
   },
   // PropertiesWorker.save: removes the key and its elements, then stores a list as key.0, key.1, ..., a dict as
-  // key.name, and any other value under the key itself; null stores nothing.
+  // key.name, and any other value under the key itself; null stores nothing. The key list keeps its order: a name stored
+  // again keeps its place, and only a new name is added at the end.
   storedSave: {
     name: STORED_SAVE,
     build: () => ({
@@ -1481,15 +1482,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["key", "value"],
         [
           storedKeys(),
-          typedLet("kept", "string[]", { kind: "list", items: [] }),
+          typedLet("fresh", "string[]", { kind: "list", items: [] }),
           letS("prefix", template(v("key"), ".")),
-          forS("name", v("stored"), [
-            ifS(
-              bin("or", bin("==", v("name"), v("key")), call(v("name"), "startsWith", v("prefix"))),
-              [{ kind: "delete", key: v("name"), span: null }],
-              [add("kept", v("name"))],
-            ),
-          ]),
           { kind: "delete", key: v("key"), span: null },
           // A plain value is stored under the key as it is, which keeps the key readable in a plain save.
           ifS(
@@ -1542,7 +1536,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
                             [{ kind: "save", key: v("name"), value: lit("null"), span: null }],
                             [{ kind: "save", key: v("name"), value: v("item"), span: null }],
                           ),
-                          add("kept", v("name")),
+                          add("fresh", v("name")),
                         ],
                       ),
                     ],
@@ -1554,10 +1548,26 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             [
               ifS(bin("!=", v("value"), lit(null)), [
                 { kind: "save", key: v("key"), value: v("value"), span: null },
-                add("kept", v("key")),
+                add("fresh", v("key")),
               ]),
             ],
           ),
+          // The key's former elements that this save did not store again are removed.
+          typedLet("kept", "string[]", { kind: "list", items: [] }),
+          forS("name", v("stored"), [
+            ifS(
+              bin(
+                "and",
+                bin("or", bin("==", v("name"), v("key")), call(v("name"), "startsWith", v("prefix"))),
+                not(call(v("fresh"), "contains", v("name"))),
+              ),
+              [{ kind: "delete", key: v("name"), span: null }],
+              [add("kept", v("name"))],
+            ),
+          ]),
+          forS("name", v("fresh"), [
+            ifS(not(call(v("stored"), "contains", v("name"))), [add("kept", v("name"))]),
+          ]),
           { kind: "save", key: lit(STORED_KEYS), value: v("kept"), span: null },
         ],
       ),

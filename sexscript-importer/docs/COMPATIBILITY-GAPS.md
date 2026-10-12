@@ -207,7 +207,8 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   one another's elements, compared by shape with a parameter's part taken from the calls, its saves, deletes, and
   generic `load()` reads, and those of a key no shape resolves, go through two generated helpers in main.tease that do
   the same (`sexscriptLegacySave`, `sexscriptLegacyLoad`), a null element stored as the text `"null"` as legacy did, and
-  list the keys they store under `sexscriptLegacy.storedKeys`, since TeaseScript storage has no listing; typed reads and
+  list the keys they store under `sexscriptLegacy.storedKeys`, since TeaseScript storage has no listing (in the order first
+  stored: a key stored again keeps its place, so saving the same keys again leaves the same storage); typed reads and
   other keys stay native. Not covered: data stored by an earlier conversion, which the list does not know; keys that
   another package saves or reads; and an object with fixed properties, which is stored whole.
 - Legacy `loadMap(key)` is `load(key)` cast to a map (sexscripts.jar 1.29.4), so `loadMap("intro")` read the
