@@ -67,6 +67,7 @@ import {
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { withLegacyImagePaths } from "./image-paths.ts";
+import { withPositions } from "./positions.ts";
 import {
   type CapturedLocal,
   liftableCaptures,
@@ -2353,6 +2354,7 @@ function lowerFileOnce(
   );
   texts = withElapsedDurations(texts, diagnostics, shared);
   texts = withLegacyImagePaths(texts, context.syntheticHelpers);
+  texts = withPositions(texts, context.syntheticHelpers);
   texts = withoutBlankText(texts, diagnostics, mixin === null);
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
@@ -14872,15 +14874,15 @@ function lowerObjectMethodCallExpression(
     const args = lowerArguments(argumentsNodes, context);
     return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
-  if (name === "indexOf" && argumentsNodes.length === 1) {
+  // Groovy indexOf(value), lastIndexOf(value), and count(value) find and count the elements equal to the value, as
+  // TeaseScript's do; a missing element's -1 is read where the position is used (withPositions).
+  if (
+    (name === "indexOf" || name === "lastIndexOf" || name === "count") &&
+    argumentsNodes.length === 1 &&
+    argumentsNodes[0]!.kind !== "closure"
+  ) {
     const args = lowerArguments(argumentsNodes, context);
-    if (args === null) return null;
-    return useHelper(context, "indexOf", [target, args[0]!]);
-  }
-  if (name === "count" && argumentsNodes.length === 1 && argumentsNodes[0]!.kind !== "closure") {
-    // Groovy count(value) counts the elements equal to the value.
-    const args = lowerArguments(argumentsNodes, context);
-    return args === null ? null : useHelper(context, "count", [target, args[0]!]);
+    return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
   if (
     name === "remove" &&
@@ -15037,15 +15039,6 @@ function unprovenReceiverOperation(
     case "contains":
     case "indexOf":
       if (argumentsNodes.length !== 1 || !(mayBeList || mayBeText)) return undefined;
-      if (name === "indexOf" && mayBeList && mayBeText) {
-        addDiagnostic(
-          context,
-          "SX_INDEX_OF_RECEIVER",
-          "warning",
-          "Groovy indexOf() found a text in text or an element in a list; this receiver is not proven to be text, and if it holds a list, indexOf() stops the script, since TeaseScript lists have no indexOf.",
-          node.span,
-        );
-      }
       break;
     case "join":
       if (argumentsNodes.length > 1 || !mayBeList) return undefined;
@@ -15094,13 +15087,11 @@ function unprovenReceiverOperation(
   const args = lowerArguments(argumentsNodes, context);
   if (target === null || args === null) return null;
   switch (name) {
+    // Text and lists have indexOf; a missing position's -1 is read where it is used (withPositions).
     case "indexOf":
-      // Text has indexOf; a list that cannot be text needs the helper.
-      return mayBeText
-        ? call("indexOf", args, target)
-        : useHelper(context, "indexOf", [target, args[0]!]);
+      return call("indexOf", args, target);
     case "count":
-      return useHelper(context, "count", [target, args[0]!]);
+      return call("count", args, target);
     case "min":
       return useHelper(context, "listMin", [target]);
     case "max":

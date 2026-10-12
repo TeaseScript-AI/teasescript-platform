@@ -70,11 +70,7 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
     let parts: string[] = []
     for name in stored {
       if name.startsWith(prefix) {
-        let part = name.substring(prefix.length)
-        let dot = part.indexOf(".")
-        if dot >= 0 {
-          part = part.substring(0, dot)
-        }
+        let part = name.substring(prefix.length).split(".")[0]
         if not parts.contains(part) {
           parts.add(part)
         }

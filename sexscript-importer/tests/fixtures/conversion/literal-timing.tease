@@ -1,13 +1,19 @@
+function sexscriptLegacyPosition(position) {
+  if position == null {
+    return -1
+  }
+  return position
+}
 function sexscriptLegacyPlainText(value) {
   let text = "${value}".replace("**", "").replace("~~", "").replace("[u]", "").replace("[/u]", "").replace("[/color]", "")
-  let start = text.indexOf("[color=")
+  let start = sexscriptLegacyPosition(text.indexOf("[color="))
   while start >= 0 {
-    let endValue = text.indexOf("]")
+    let endValue = sexscriptLegacyPosition(text.indexOf("]"))
     if endValue < start {
       return text.replace("*", "")
     }
     text = "${text.substring(0, start)}${text.substring(endValue + 1)}"
-    start = text.indexOf("[color=")
+    start = sexscriptLegacyPosition(text.indexOf("[color="))
   }
   return text.replace("*", "")
 }

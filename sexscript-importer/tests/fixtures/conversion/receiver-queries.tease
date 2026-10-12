@@ -1,11 +1,8 @@
-function sexscriptLegacyCount(items, value) {
-  let matches = 0
-  for item in items {
-    if item == value {
-      matches += 1
-    }
+function sexscriptLegacyPosition(position) {
+  if position == null {
+    return -1
   }
-  return matches
+  return position
 }
 function sexscriptLegacyListMin(items) {
   if items.length == 0 {
@@ -28,14 +25,13 @@ function describe(items) {
   return items.join(", ")
 }
 function zeros(scores) {
-  return sexscriptLegacyCount(scores, 0)
+  return scores.count(0)
 }
 function lowest(scores) {
   return sexscriptLegacyListMin(scores)
 }
 function colon(line) {
-  // NOTE SX_INDEX_OF_RECEIVER line 6: Groovy indexOf() found a text in text or an element in a list; this receiver is not proven to be text, and if it holds a list, indexOf() stops the script, since TeaseScript lists have no indexOf.
-  return line.indexOf(":")
+  return sexscriptLegacyPosition(line.indexOf(":"))
 }
 let tags = ["red", "blue"]
 say prose "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}", instant

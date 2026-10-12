@@ -1,11 +1,8 @@
-function sexscriptLegacyCount(items, value) {
-  let matches = 0
-  for item in items {
-    if item == value {
-      matches += 1
-    }
+function sexscriptLegacyPosition(position) {
+  if position == null {
+    return -1
   }
-  return matches
+  return position
 }
 function sexscriptLegacyCountText(text, part) {
   if part == "" {
@@ -13,11 +10,11 @@ function sexscriptLegacyCountText(text, part) {
   }
   let count = 0
   let rest = text
-  let found = rest.indexOf(part)
+  let found = sexscriptLegacyPosition(rest.indexOf(part))
   while found >= 0 {
     count += 1
     rest = rest.substring(found + 1)
-    found = rest.indexOf(part)
+    found = sexscriptLegacyPosition(rest.indexOf(part))
   }
   return count
 }
@@ -28,7 +25,7 @@ if outfit.split("bikini").length - 1 > 1 {
 }
 say prose "Words: ${outfit.split(" ").length - 1 + 1}", instant
 let rolls = [6, 2, 6]
-say prose "Sixes: ${sexscriptLegacyCount(rolls, 6)}", instant
+say prose "Sixes: ${rolls.count(6)}", instant
 // "aa" overlaps itself: Groovy counts 2 in "aaa", the parts between occurrences only 1.
 say prose "Pairs: ${sexscriptLegacyCountText("aaa", "aa")}", instant
 exit

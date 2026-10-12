@@ -1278,10 +1278,10 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.deepEqual(program.diagnostics, []);
   const output = emitTease(program);
   assert.match(output, /function sexscriptLegacyLoadFirstTrue\(keys\)/);
-  // Helper parameters may not shadow the script's globals `items`, `index`, and `key`.
-  assert.match(output, /function sexscriptLegacyIndexOf\(itemsValue, value\)/);
+  // Helper parameters and variables may not shadow the script's globals `items`, `index`, and `key`.
   assert.match(output, /for keyValue in keys \{/);
-  assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
+  // A list's indexOf is native; Groovy's -1 for a missing element is read where the position is used (#840).
+  assert.match(output, /let index = sexscriptLegacyPosition\(items\.indexOf\("b"\)\)/);
   // No key may hold true, so the result may be null.
   assert.match(output, /let key: string\? = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });

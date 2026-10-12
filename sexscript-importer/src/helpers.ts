@@ -1,5 +1,6 @@
 import { isRecord } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import { withPositions } from "./positions.ts";
 import {
   JAVA_HELPER_ORDER,
   JAVA_HELPERS,
@@ -215,8 +216,7 @@ export type HelperName =
   | "tokenize"
   | "split"
   | "concat"
-  | "count"
-  | "indexOf"
+  | "position"
   | "listMax"
   | "listMin"
   | "listSum"
@@ -268,7 +268,15 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
     needed.add("value");
   for (const name of needed)
     for (const dependency of javaHelperDependencies(name)) needed.add(dependency);
-  return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
+  const built = HELPER_ORDER.filter((name) => needed.has(name)).map((name) =>
+    HELPERS[name].build(),
+  );
+  // The helpers written for Groovy's -1 of a missing position read it where they use one (positions.ts).
+  const used = new Set<HelperName>();
+  const statements = withPositions(built, used);
+  return used.has("position") && !needed.has("position")
+    ? helperStatements(new Set([...needed, "position"]))
+    : statements;
 }
 
 /** Every helper definition, for analyses that need what the helpers return. */
@@ -289,8 +297,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "storedSave",
   "storedLoad",
   "button",
-  "indexOf",
-  "count",
+  "position",
   "concat",
   "array",
   "menuOptions",
@@ -1600,11 +1607,18 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             typedLet("parts", "string[]", { kind: "list", items: [] }),
             forS("name", v("stored"), [
               ifS(call(v("name"), "startsWith", v("prefix")), [
-                letS("part", call(v("name"), "substring", prop(v("prefix"), "length"))),
-                letS("dot", call(v("part"), "indexOf", lit("."))),
-                ifS(bin(">=", v("dot"), lit(0)), [
-                  set(v("part"), call(v("part"), "substring", lit(0), v("dot"))),
-                ]),
+                // The element's own name, up to a dot of its elements.
+                letS(
+                  "part",
+                  at(
+                    call(
+                      call(v("name"), "substring", prop(v("prefix"), "length")),
+                      "split",
+                      lit("."),
+                    ),
+                    lit(0),
+                  ),
+                ),
                 ifS(not(call(v("parts"), "contains", v("part"))), [add("parts", v("part"))]),
               ]),
             ]),
@@ -2291,36 +2305,15 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  indexOf: {
-    name: "sexscriptLegacyIndexOf",
+  // Groovy indexOf() and lastIndexOf() gave -1 for a part or an element they did not find, where TeaseScript's give
+  // null (#840); a position used as a number reads -1 there (positions.ts).
+  position: {
+    name: "sexscriptLegacyPosition",
     build: () =>
       fn(
-        "sexscriptLegacyIndexOf",
-        ["items", "value"],
-        [
-          letS("index", lit(0)),
-          forS("item", v("items"), [
-            ifS(bin("==", v("item"), v("value")), [ret(v("index"))]),
-            set(v("index"), lit(1), "+="),
-          ]),
-          ret(lit(-1)),
-        ],
-      ),
-  },
-  // Groovy count(value) on a list counts the elements equal to the value.
-  count: {
-    name: "sexscriptLegacyCount",
-    build: () =>
-      fn(
-        "sexscriptLegacyCount",
-        ["items", "value"],
-        [
-          letS("matches", lit(0)),
-          forS("item", v("items"), [
-            ifS(bin("==", v("item"), v("value")), [set(v("matches"), lit(1), "+=")]),
-          ]),
-          ret(v("matches")),
-        ],
+        "sexscriptLegacyPosition",
+        ["position"],
+        [ifS(bin("==", v("position"), lit(null)), [ret(lit(-1))]), ret(v("position"))],
       ),
   },
   concat: {

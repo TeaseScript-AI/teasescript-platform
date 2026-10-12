@@ -8,6 +8,12 @@ function sexscriptLegacyLoadInteger(keyValue, whenMissing = null) {
   }
   return sexscriptLegacyValue(toInteger(value))
 }
+function sexscriptLegacyPosition(position) {
+  if position == null {
+    return -1
+  }
+  return position
+}
 // A variable being assigned never holds a partial result that a later part of its value could read.
 function condition {
   return false
@@ -54,8 +60,8 @@ let t = "<b>a</b>b"
 let withoutTags = ""
 let rest = t
 while rest.contains("<") {
-  let open = rest.indexOf("<")
-  let close = rest.substring(open).indexOf(">")
+  let open = sexscriptLegacyPosition(rest.indexOf("<"))
+  let close = sexscriptLegacyPosition(rest.substring(open).indexOf(">"))
   if close < 0 {
     break
   }

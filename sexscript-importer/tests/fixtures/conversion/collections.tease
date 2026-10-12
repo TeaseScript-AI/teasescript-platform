@@ -1,6 +1,12 @@
 // MIGRATION INCOMPLETE: 4 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
+function sexscriptLegacyPosition(position) {
+  if position == null {
+    return -1
+  }
+  return position
+}
 function sexscriptLegacyArray(size, valueValue) {
   let itemsValue = []
   repeat size {
@@ -319,7 +325,7 @@ let column = -1
 say prose "Shoot (A1 to B2):", instant
 let cell = askText(prefill: "A1").replace("\n", " ")
 if cell.length == 2 {
-  column = letters.indexOf(cell.substring(0, 1))
+  column = sexscriptLegacyPosition(letters.indexOf(cell.substring(0, 1)))
 }
 if column < 0 {
   column = 0
