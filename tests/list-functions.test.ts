@@ -565,6 +565,89 @@ test("get gives the element at an index, or its default for an index the list do
   ]);
 });
 
+test("get joins an empty list default into the element type as a literal does", () => {
+  // As in [[1, 2], []], the empty list takes the element type of the inner lists, also inside an object.
+  assert.deepEqual(
+    said(
+      [
+        "let rows: integer[][] = [[1, 2], [3]]",
+        "for count in rows.get(5, default: []) {",
+        "    say count + 1",
+        "}",
+        "for count in rows.get(0, default: []) {",
+        "    say count + 1",
+        "}",
+        'let groups = [{ name: "warmup", counts: [10] }]',
+        'let group = groups.get(0, default: { name: "none", counts: [] })',
+        "for count in group.counts {",
+        "    say count + 1",
+        "}",
+        'say groups.get(1, default: { name: "none", counts: [] }).name',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2", "3", "11", "none"],
+  );
+});
+
+test("get with a null default gives the element type or null for lists of values, lists, and objects", () => {
+  const lists = [
+    "let scores: integer[] = [10, 20]",
+    "let rows: integer[][] = [[1, 2], [3]]",
+    'let people = [{ name: "Ann", age: 30 }]',
+    "",
+  ].join("\n");
+  assert.deepEqual(
+    said(
+      [
+        lists,
+        "let score = scores.get(1, default: null)",
+        "if score != null {",
+        "    say score + 1",
+        "}",
+        "let row = rows.get(0, default: null)",
+        "if row != null {",
+        "    say row[0] + 1",
+        "}",
+        "let person = people.get(0, default: null)",
+        "if person != null {",
+        "    say person.age + 1",
+        "}",
+        'say "${scores.get(2, default: null) == null} ${rows.get(2, default: null) == null} ${people.get(2, default: null) == null}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["21", "2", "31", "true true true"],
+  );
+  const cases: [string, [string, string, string][]][] = [
+    [
+      `${lists}let score: integer = scores.get(0, default: null)\nexit`,
+      [
+        [
+          "TSV041",
+          "'score' is declared as integer, so it cannot start as a whole number (integer) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "scores.get(0, default: null)",
+        ],
+      ],
+    ],
+    [
+      `${lists}let row: integer[] = rows.get(0, default: null)\nexit`,
+      [
+        [
+          "TSV041",
+          "'row' is declared as integer[], so it cannot start as a list (integer[]) or null. Keep it in a variable and check it first, as in: if value != null { ... }",
+          "rows.get(0, default: null)",
+        ],
+      ],
+    ],
+    [
+      `${lists}let person = people.get(0, default: null)\nsay person.age\nexit`,
+      [["TSV043", "'person' may be null. Check it first: if person != null { ... }", "person"]],
+    ],
+  ];
+  for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
+});
+
 test("linearRegression fits a line through the points of a list, and predict reads it", () => {
   assert.deepEqual(
     said(

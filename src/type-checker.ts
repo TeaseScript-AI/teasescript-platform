@@ -5456,12 +5456,20 @@ class TypeChecker {
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
-    // The element, or the default, which may be of another type, so their types join (#844).
+    // The element, or the default, which may be of another type, so their types join (#844). Where the default has a
+    // part that no value decided yet, such as `[]`, they join as in a literal, so that part takes the element type, as
+    // for a dict (#853). An element type with such a part keeps the plain union, since a list's `get` does not decide
+    // it as a dict's does (V30 §40).
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
-      return problems.length > 0 || fallback === undefined
-        ? UNKNOWN_TYPE
-        : union([copyType(value.element), plainType(typeOf(fallback.value))]);
+      if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
+      const element = copyType(value.element);
+      const other = plainType(typeOf(fallback.value));
+      const undecided = (type: StaticType): boolean =>
+        containsType(type, (part) => part.kind === "open");
+      const joined =
+        undecided(other) && !undecided(element) ? joinTypes([element, other]) : undefined;
+      return joined ?? union([element, other]);
     }
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
