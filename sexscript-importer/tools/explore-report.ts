@@ -341,7 +341,9 @@ function missedGroups(
 function stopShown(search: Fields): string {
   switch (search.stoppedBy) {
     case "exhausted":
-      return " It tried everything it could think of.";
+      return typeof search.randomLeft === "number" && search.randomLeft > 0
+        ? " It tried everything it could think of, but not every outcome of the script's random draws, so another playtest may reach other code."
+        : " It tried everything it could think of.";
     case "plateau":
       return " It stopped when more play no longer reached anything new: nothing in the second half of its play.";
     // Reports from before the plateau was named so.

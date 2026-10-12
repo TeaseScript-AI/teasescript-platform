@@ -1392,7 +1392,7 @@ test(
 );
 
 test(
-  "a run counts as exhausted only once the draws whose outcomes were not all offered have offered the rest",
+  "a run counts as exhausted only once the draws whose outcomes were not all offered have offered the rest, and says when some were never offered",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   () => {
     assert.ok("engine" in engineResult);
@@ -1424,6 +1424,22 @@ test(
       ["false"],
     );
     assert.equal(result.coverage.reach.unknown, 0);
+    assert.equal(result.search.randomLeft, undefined);
+    // A step's fifth draw gets no other outcomes: the run is exhausted with them not all offered, and its report says so.
+    const fifth = run(
+      'showButton "Roll"\nlet a = randomInteger(0..1)\nlet b = randomInteger(0..1)\nlet c = randomInteger(0..1)\n' +
+        'let d = randomInteger(0..1)\nlet e = randomInteger(0..1)\nif a + b + c + d + e == 5 {\n  say "All."\n}\nexit\n',
+    );
+    assert.deepEqual([fifth.search.stoppedBy, fifth.search.randomLeft], ["exhausted", 1]);
+    // So is a draw with more outcomes than the widest support offers.
+    const wide = run('showButton "Roll"\nlet n = randomInteger(0..2000)\nexit\n');
+    assert.deepEqual([wide.search.stoppedBy, wide.search.randomLeft], ["exhausted", 1]);
+    assert.match(
+      playtestReport(
+        JSON.parse(JSON.stringify({ unit: "fifth", ...fifth, compile: { ok: true } })),
+      ),
+      /not every outcome of the script's random draws/,
+    );
     // A draw at the same place and site whose range depends on an earlier answer gets the rest of its own outcomes.
     const ranged = run(
       'let size = choose small: "Small", large: "Large"\nlet cap = 40\nif size == "large" {\n  cap = 400\n}\n' +

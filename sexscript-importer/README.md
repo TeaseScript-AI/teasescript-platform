@@ -349,8 +349,12 @@ every quarter window, and the window starts after a corpus replay. Its caps are 
 unless `--budget-seconds` is given), no state cap unless `--max-states` is given, and the heap cap every run has
 (below). `search.stoppedBy` says whether the run finished, `exhausted` or `plateau`, or a cap cut it off, `budget`,
 `operations`, `maxStates`, or `memory`: a cut-off is a warning to look into, which the summary line, the playtest
-report, and the catalog say (`stalled`, in reports from before, was a plateau). `search.audit` says how the run ended: `complete` (nothing left to try, and
-no line or missed way of unknown reach), `stalled` (a plateau, or nothing left to try with code of unknown reach),
+report, and the catalog say (`stalled`, in reports from before, was a plateau). An exhausted run whose states made
+random draws with outcomes it did not offer (past the first four draws of a step, past those a draw gets, past the
+1,024 of a draw's widest support, or tried from a state of another loop group) has `search.randomLeft`, how many such states, and its playtest report says that
+not every outcome of the script's random draws was tried, so another seed may reach other code. `search.audit` says how the run ended: `complete` (nothing left to try, no random outcome left
+unoffered, and no line or missed way of unknown reach), `stalled` (a plateau, or nothing left to try with random
+outcomes left or code of unknown reach),
 `spiral` (a plateau in which one place took at least half of the expansions since the last progress: the place and
 its prompt, a problem of the explorer), or `capped` (a cap came first); with the window at the end, the last progress,
 the longest stretch without progress, and the progress by kind. The summary has a line for it, and the missed ways the

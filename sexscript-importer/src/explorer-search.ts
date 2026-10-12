@@ -648,8 +648,9 @@ export function cutOff(stoppedBy: string): boolean {
 /** How a run until stalled ended, and the progress it made. */
 export interface Audit {
   /**
-   * `complete`: nothing was left to try and no line is of unknown reach; `stalled`: a plateau, no new code or condition
-   * way for `window` operations, or nothing left to try with lines of unknown reach; `spiral`: a stall in which one place took most
+   * `complete`: nothing was left to try, no random draw had outcomes it did not offer, and no line is of unknown reach;
+   * `stalled`: a plateau, no new code or condition way for `window` operations, or nothing left to try with random
+   * outcomes not all offered (`randomLeft`) or lines of unknown reach; `spiral`: a stall in which one place took most
    * expansions since the last progress (`spiral`), a problem of the explorer; `capped`: the time or state cap came first.
    */
   result: "complete" | "stalled" | "spiral" | "capped";
@@ -747,6 +748,13 @@ export interface ExploreResult {
      * `maxStates`, the state cap; `memory`, the heap cap ({@link ExploreOptions.maxHeapBytes}).
      */
     stoppedBy: "exhausted" | "plateau" | "budget" | "operations" | "maxStates" | "memory";
+    /**
+     * Of a run that is `exhausted`: how many states made random draws whose other outcomes were not all offered (past
+     * the draws of a step that get them, past those a draw gets, past a draw's widest support, or tried from a state of
+     * another loop group), so that
+     * it did not try everything, and another seed may reach other code; absent when there are none.
+     */
+    randomLeft?: number;
     /** With `untilStalled`: how the run ended, and its progress. */
     audit?: Audit;
     /** Runtime operations the run called: the work that `budgetOps` limits. */
@@ -1832,6 +1840,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
    * state at their place: what they leave open is no trap's end.
    */
   const drawsLeft = new Set<number>();
+  /** Of those, the states whose random draws had other outcomes not offered: the run did not try them all. */
+  const randomLeft = new Set<number>();
   /** States a step that moved the wall clock on (a time step or a clock attempt) reached, also ones known before. */
   const movedOn = new Set<number>();
   /** Condition ways play with a chosen random outcome took before they were targets, with the step that took each. */
@@ -2757,8 +2767,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     if (
       next.draws.length > (chooses ? RANDOM_DRAWS_PER_STEP : 0) ||
       next.draws.some((draw) => typeof draw.drawId !== "number" || typeof draw.site !== "string")
-    )
+    ) {
       drawsLeft.add(node.id);
+      randomLeft.add(node.id);
+    }
     if (!chooses) return;
     const { random: _, ...plain } = input;
     const context = `${node.waitsAt ?? "-"} ${JSON.stringify(plain)}`;
@@ -2808,7 +2820,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       if (from !== undefined) {
         // Tried from a state of the same loop group, its way is that state's edge, which the group has. From another
         // group, what tells the groups apart may decide where it goes from here: the state's future is unknown.
-        if (nodes[from]!.loop !== node.loop) drawsLeft.add(node.id);
+        if (nodes[from]!.loop !== node.loop) {
+          drawsLeft.add(node.id);
+          randomLeft.add(node.id);
+        }
         continue;
       }
       randomTried.set(tried, node.id);
@@ -2849,8 +2864,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
           context,
           Infinity,
         );
-        if (found.complete || entry.support === RANDOM_WIDE_SUPPORT) partialDraws.splice(index, 1);
-        else index += 1;
+        if (found.complete || entry.support === RANDOM_WIDE_SUPPORT) {
+          // A draw with more outcomes than the widest support leaves the rest untried.
+          if (!found.complete) randomLeft.add(entry.node);
+          partialDraws.splice(index, 1);
+        } else index += 1;
       }
     return chosenSteps.length > before;
   };
@@ -4668,6 +4686,14 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     savedFirstChecks(plan, instructions, constants, flow),
     drawnSites,
   );
+  // A state with other outcomes of its draws not tried yet has a future not explored.
+  for (const node of [
+    ...chosenSteps.slice(chosenAt).map((job) => job.node),
+    ...partialDraws.map((entry) => entry.node),
+  ]) {
+    drawsLeft.add(node);
+    randomLeft.add(node);
+  }
   // Until stalled: a stall in which one place took most expansions since the last progress is a spiral.
   let audit: Audit | undefined;
   if (untilStalled) {
@@ -4686,7 +4712,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
             ? "spiral"
             : "stalled"
           : stoppedBy === "exhausted"
-            ? (coverage.reach.unknown ?? 0) === 0 &&
+            ? randomLeft.size === 0 &&
+              (coverage.reach.unknown ?? 0) === 0 &&
               coverage.unvisitedBranches.every((branch) => branch.reach !== "unknown")
               ? "complete"
               : "stalled"
@@ -4749,9 +4776,6 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     else counts.notFirst += 1;
     linesBySession.files.set(file, counts);
   });
-  // A state with other outcomes of its draws not tried yet has a future not explored.
-  for (const job of chosenSteps.slice(chosenAt)) drawsLeft.add(job.node);
-  for (const entry of partialDraws) drawsLeft.add(entry.node);
   const traps = findTraps(
     nodes,
     instructions,
@@ -4862,6 +4886,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       rejectedInputs,
       engineErrors,
       stoppedBy,
+      ...(stoppedBy === "exhausted" && randomLeft.size > 0 ? { randomLeft: randomLeft.size } : {}),
       ...(audit === undefined ? {} : { audit }),
       operations: session.operations,
       elapsedMs: Math.round(performance.now() - started),
