@@ -149,7 +149,7 @@ test("workspace player controls delegate interaction families and preserve prese
   assert.equal(buttonDone.outcome.kind, "completed");
 
   const choice = compileWorkspaceSource(
-    'let answer = choose first: "First", second: "Second"\nsay answer, instant\nexit',
+    'let answer = askChoice first: "First", second: "Second"\nsay answer, instant\nexit',
   );
   assert.ok(choice.plan && choice.snapshot);
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
@@ -170,7 +170,7 @@ test("workspace player controls delegate interaction families and preserve prese
 
 test("a control rendered for an earlier interaction cannot answer a later one", () => {
   const workspace = compileWorkspaceSource(
-    'let a = choose oldA: "Old A", oldB: "Old B"\nlet b = choose newA: "New A", newB: "New B"\nshowButton "Go"\nshowButton "Again"\nexit',
+    'let a = askChoice oldA: "Old A", oldB: "Old B"\nlet b = askChoice newA: "New A", newB: "New B"\nshowButton "Go"\nshowButton "Again"\nexit',
   );
   assert.ok(workspace.plan && workspace.snapshot);
   const plan = workspace.plan;
@@ -256,7 +256,7 @@ test("workspace controls preserve number input and authored choice order", () =>
   assert.deepEqual(resumedSayTexts(number.plan, completed.snapshot), ["12.5"]);
 
   const choice = compileWorkspaceSource(
-    'let selected = choose "Alpha", "Beta"\nsay selected, instant\nexit',
+    'let selected = askChoice "Alpha", "Beta"\nsay selected, instant\nexit',
   );
   assert.ok(choice.plan && choice.snapshot);
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
@@ -300,7 +300,7 @@ test("workspace composer answers date and time asks with ISO text", () => {
 
 test("composer text for a choice remains engine-owned and rejects ambiguous visible text", () => {
   const compiled = compileWorkspaceSource(
-    'let selected = choose first: "Same", second: "Same"\nexit',
+    'let selected = askChoice first: "Same", second: "Same"\nexit',
   );
   assert.ok(compiled.plan && compiled.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");

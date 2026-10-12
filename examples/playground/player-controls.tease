@@ -11,6 +11,6 @@ say as guide "The same composer handles each typed answer."
 showButton as guide "Continue"
 let name = askText as guide hint: "Your name"
 let amount = askNumber as guide hint: "A number"
-let choice = choose as guide first: "First option", second: "Second option"
+let choice = askChoice as guide first: "First option", second: "Second option"
 say as guide "Thanks ${name}. You entered ${amount} and selected ${choice}.", instant
 exit

@@ -37,7 +37,7 @@ let answer = askText hint: "What you call her"
 patience.stop()
 say "${answer}. Good. Don't forget it."
 
-let position = choose kneel: "Kneel", attention: { text: "Stand at attention", background: "#7a1f45" }
+let position = askChoice kneel: "Kneel", attention: { text: "Stand at attention", background: "#7a1f45" }
 if position == "kneel" {
     say "On your knees, then. Slowly."
 } else {

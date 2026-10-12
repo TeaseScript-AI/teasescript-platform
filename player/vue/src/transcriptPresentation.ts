@@ -17,6 +17,40 @@ function presentationOf(entry: PlayerTranscriptEntryPresentation | undefined) {
   return authoredOn(entry)?.kind === "prose" ? "prose" : "bubble";
 }
 
+/** Whether `entry` is a message that `remove()` took out of the conversation, which shows nothing of it (#836). */
+export function isRemovedEntry(entry: PlayerTranscriptEntryPresentation | undefined): boolean {
+  return entry?.kind === "message" && entry.removed === true;
+}
+
+/**
+ * The index among the entries of the one the conversation shows at `position`. A removed message keeps its place among
+ * the entries, so history and identities stay, but takes none in the conversation; `removed` lists the indexes of the
+ * removed messages in ascending order. A position past the last shown entry gives an index past the entries.
+ */
+export function shownEntryIndex(removed: readonly number[], position: number): number {
+  // `removed[j] - j` entries show before removed message `j`, a count that never decreases with `j`.
+  let low = 0;
+  let high = removed.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (removed[middle]! - middle <= position) low = middle + 1;
+    else high = middle;
+  }
+  return position + low;
+}
+
+/** The position in the conversation of the entry at `index`, or, for a removed message, of the next entry it shows. */
+export function shownPosition(removed: readonly number[], index: number): number {
+  let low = 0;
+  let high = removed.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (removed[middle]! < index) low = middle + 1;
+    else high = middle;
+  }
+  return index - low;
+}
+
 export function adjoins(
   entries: readonly PlayerTranscriptEntryPresentation[],
   index: number,

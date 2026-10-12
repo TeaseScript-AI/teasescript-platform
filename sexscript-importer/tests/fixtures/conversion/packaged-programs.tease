@@ -5,7 +5,7 @@ speaker system {
 say prose "Solve the puzzle before the time runs out", instant
 // NOTE SX_EXTERNAL_PROGRAM_NOTICE line 3: useFile() started the program files/Puzzle Challenge/1.exe on the player's computer, which a package cannot do; a system notice says so, and the player says whether the puzzle was solved.
 say as system "The puzzle (1.exe) is not available here. Solve it in your mind, or skip it.", instant
-let puzzleSolved = choose solved: "Puzzle solved", unsolved: "Not solved"
+let puzzleSolved = askChoice solved: "Puzzle solved", unsolved: "Not solved"
 say prose "Tell me when you have done the puzzle", instant
 // NOTE SX_EXTERNAL_PROGRAM_NOTICE line 5: useFile() started the program files/tools/timer.exe on the player's computer, which a package cannot do; a system notice says so.
 say as system "The program timer.exe that the original started is not available here.", instant

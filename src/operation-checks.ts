@@ -256,7 +256,6 @@ const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
   ["chance", ["percent"]],
   ["randomInteger", ["range"]],
   ["escapeMarkup", ["text"]],
-  ["removePermanentButton", ["button"]],
 ]);
 
 /** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */
@@ -860,9 +859,14 @@ export function mayBeMessage(
   const node = withoutParentheses(expression);
   const label = node.kind === "identifier" ? node.name : null;
   const test = failing.kind === "null" ? "!= null" : `is ${typeName(union(passing))}`;
+  // A type that no value decided yet has no name to give.
+  const what =
+    resolved(failing).kind === "open"
+      ? "of a type that no value decided yet, such as an element of an empty list without a written type"
+      : describeValue(failing);
   return label === null
-    ? `This value may be ${describeValue(failing)}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
-    : `'${label}' may be ${describeValue(failing)}. Check it first: if ${label} ${test} { ... }`;
+    ? `This value may be ${what}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
+    : `'${label}' may be ${what}. Check it first: if ${label} ${test} { ... }`;
 }
 
 /**

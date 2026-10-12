@@ -28,6 +28,7 @@ import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarFailure, speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
+import { isRemovedEntry } from "./transcriptPresentation";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
@@ -344,14 +345,31 @@ const savedData = computed(() =>
 const noSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = Object.freeze({});
 const transcript = computed(() => {
   if (!session.value)
-    return { key: "empty", entries: [], speakers: noSpeakers, revision: 0, jumpedRevision: -1 };
+    return {
+      key: "empty",
+      entries: [],
+      speakers: noSpeakers,
+      revision: 0,
+      jumpedRevision: -1,
+      removedRows: [],
+    };
   const future = rewindFuture.value;
+  const reached = session.value.transcriptEntries.length;
   return {
     key: `runtime-${props.player.generation.value}`,
     entries:
       future === null
         ? session.value.transcriptEntries
         : [...session.value.transcriptEntries, ...future.entries],
+    removedRows:
+      future === null
+        ? session.value.transcriptRemovedRows
+        : [
+            ...session.value.transcriptRemovedRows,
+            ...future.entries.flatMap((entry, index) =>
+              isRemovedEntry(entry) ? [reached + index] : [],
+            ),
+          ],
     speakers:
       future === null ? session.value.speakers : { ...future.speakers, ...session.value.speakers },
     revision: session.value.transcriptRevision,
@@ -620,6 +638,7 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :jumped-revision="transcript.jumpedRevision"
+          :removed-rows="transcript.removedRows"
           :observe-time="player.observe"
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"

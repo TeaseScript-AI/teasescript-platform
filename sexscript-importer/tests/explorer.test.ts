@@ -614,7 +614,7 @@ test(
     // "Spiral" counts forever, every state new; "Tour" needs eight steps of code it already ran. The counts above 0 are
     // one cell, which the search expands less often as it goes, so the tour, a cell per pass, gets to its end.
     const spiral = run(
-      'let count = 0\nlet side = choose spiral: "Spiral", tour: "Tour"\nif side == "spiral" {\n' +
+      'let count = 0\nlet side = askChoice spiral: "Spiral", tour: "Tour"\nif side == "spiral" {\n' +
         '  while count >= 0 {\n    showButton "Again"\n    count += 1\n  }\n}\n' +
         'for pass in 1..=8 {\n  showButton "Step"\n}\nsay "Reached."\nexit\n',
       40,
@@ -692,7 +692,7 @@ test(
     const { engine } = engineResult;
     const source =
       "function later(stamp) {\n  return stamp - 100\n}\n" +
-      'let pick = choose keep: "Keep", drop: "Drop"\nif pick == "keep" {\n  save 500 as "pass.until"\n}\n' +
+      'let pick = askChoice keep: "Keep", drop: "Drop"\nif pick == "keep" {\n  save 500 as "pass.until"\n}\n' +
       'showButton "Check"\nif load("pass.until", default: 0) != 0 and later(load("pass.until", default: 0)) > 1000 {\n' +
       '  say "Still valid."\n}\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -1079,7 +1079,7 @@ test(
           'if relay(load("score", default: 0)) > 7 {\n  say "Yes"\n}\nexit\n',
       );
     assert.deepEqual(reached("  let x = [0]\n  x[0] = n + 1\n  return x[0]"), ["score"]);
-    assert.deepEqual(reached('  let x = choose [{ text: "More", value: n + 1 }]\n  return x'), [
+    assert.deepEqual(reached('  let x = askChoice [{ text: "More", value: n + 1 }]\n  return x'), [
       "score",
     ]);
     assert.deepEqual(reached('  save n + 1 as "other"\n  return load("other", default: 0)'), [
@@ -1280,12 +1280,12 @@ test(
       "}",
       'save load("log.visits", default: 0) + 1 as "log.visits"',
       'if load("log.visits", default: 0) > 1 {',
-      '  let mood = choose calm: "Calm", cross: "Cross"',
+      '  let mood = askChoice calm: "Calm", cross: "Cross"',
       '  say "Back again, ${mood}."',
       "}",
       "let done = false",
       "while not done {",
-      '  let pick = choose talk: "Talk", admit: "Admit", review: "Review", tidy: "Tidy", hum: "Hum", leave: "Leave"',
+      '  let pick = askChoice talk: "Talk", admit: "Admit", review: "Review", tidy: "Tidy", hum: "Hum", leave: "Leave"',
       '  if pick == "admit" {',
       '    showButton "I admit it"',
       '    save true as "log.admitted"',
@@ -1442,7 +1442,7 @@ test(
     );
     // A draw at the same place and site whose range depends on an earlier answer gets the rest of its own outcomes.
     const ranged = run(
-      'let size = choose small: "Small", large: "Large"\nlet cap = 40\nif size == "large" {\n  cap = 400\n}\n' +
+      'let size = askChoice small: "Small", large: "Large"\nlet cap = 40\nif size == "large" {\n  cap = 400\n}\n' +
         'showButton "Go"\nlet n = randomInteger(0..cap)\nif n == 123 {\n  say "Exact."\n}\nexit\n',
     );
     assert.equal(ranged.search.stoppedBy, "exhausted");
@@ -1684,7 +1684,7 @@ test(
     assert.doesNotMatch(failed, /fx\.gone|fx\.maybe/u);
     // A template's pattern is no key, also where a literal key has the same text.
     const nul = [
-      'let suffix = choose "\u0000", ""',
+      'let suffix = askChoice "\u0000", ""',
       'save [1] as "fx.${suffix}"',
       'let items: integer[]? = load "fx.\u0000", default: null',
       "if items == null {",
@@ -1811,7 +1811,7 @@ test(
     const { engine } = engineResult;
     const source =
       'function shout(text) {\n  say text\n  return text\n}\nfunction unused(n) {\n  say "One."\n  shout("x")\n' +
-      '  say "Two."\n  return n\n}\nlet health = 9\nlet start = choose fresh: "New game", saved: "Load game"\nif start == "saved" {\n' +
+      '  say "Two."\n  return n\n}\nlet health = 9\nlet start = askChoice fresh: "New game", saved: "Load game"\nif start == "saved" {\n' +
       '  health = load("slot.health", default: 9)\n}\nshowButton "Fight"\nhealth = health - 1\nsave health as "slot.health"\n' +
       'if health < -50 {\n  say "Fallen."\n}\nshout("End.")\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -1937,7 +1937,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
-      'let points = 0\nlet rounds = 0\nwhile true {\n  let pick = choose train: "Train", leave: "Leave"\n' +
+      'let points = 0\nlet rounds = 0\nwhile true {\n  let pick = askChoice train: "Train", leave: "Leave"\n' +
       '  if pick == "leave" {\n    exit\n  }\n  rounds += 1\n  if points < 3 {\n    points += 1\n  }\n' +
       '  if points >= 5 {\n    say "Master."\n    say "You did it."\n  }\n  if points >= 2 and rounds >= 200 {\n' +
       '    say "Two hundred."\n  }\n}\n';
@@ -1991,7 +1991,7 @@ test(
     const { engine } = engineResult;
     const source =
       'function encore {\n  say "Bow."\n  say "Wave."\n  say "Leave the stage."\n}\nlet volume = 2\n' +
-      'let pick = choose soft: "Soft", softer: "Softer"\nif pick == "softer" {\n  volume = 1\n}\n' +
+      'let pick = askChoice soft: "Soft", softer: "Softer"\nif pick == "softer" {\n  volume = 1\n}\n' +
       'if volume > 50 {\n  say "Too loud."\n  encore()\n}\nswitch volume {\n  case 7..=9 {\n    say "Loud."\n' +
       '    say "Very loud."\n    encore()\n  }\n  default {\n    say "Quiet."\n  }\n}\n' +
       'let hourNow = getDateTime().hour\nshowButton "Check"\nswitch hourNow {\n  case 25 {\n    say "Never."\n  }\n' +
@@ -2052,7 +2052,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
-      'function level {\n  return 1\n}\nlet volume = 2\nlet pick = choose soft: "Soft", softer: "Softer"\n' +
+      'function level {\n  return 1\n}\nlet volume = 2\nlet pick = askChoice soft: "Soft", softer: "Softer"\n' +
       'if pick == "softer" {\n  volume = 1\n}\nif level() == 5 {\n  say "Five."\n}\nswitch volume {\n  case 7, 8 {\n' +
       '    say "Seven or eight."\n  }\n  default {\n    say "Other."\n  }\n}\nlet steady = 3\nswitch steady {\n' +
       '  case 3 {\n    say "Steady."\n  }\n  default {\n    say "Never steady."\n  }\n}\n' +
@@ -2098,7 +2098,7 @@ test(
     const source =
       'let rounds = 0\nlet far = 0\nlet flag = 1\nfunction low {\n  let points = 0\n  showButton "Low"\n' +
       '  if points >= 5 {\n    say "Low."\n  }\n}\nfunction high {\n  let points = 99\n  showButton "High"\n}\n' +
-      'while true {\n  let pick = choose go: "Go", leave: "Leave"\n  if pick == "leave" {\n    exit\n  }\n' +
+      'while true {\n  let pick = askChoice go: "Go", leave: "Leave"\n  if pick == "leave" {\n    exit\n  }\n' +
       '  rounds += 1\n  low()\n  high()\n  if far >= 10000 or rounds >= 200 {\n    say "Either."\n  }\n' +
       '  if flag == true {\n    say "Flag."\n  }\n  switch pick {\n    case "never" {\n      say "Never."\n    }\n  }\n}\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -2149,7 +2149,7 @@ test(
     // `warmUp` holds its own `reps` above its `target`: only `lift`'s pair counts, while `lift` runs.
     const source =
       'function warmUp(target) {\n  let reps = 99\n  showButton "Warm up"\n}\nfunction lift(target) {\n' +
-      '  let reps = 0\n  while true {\n    let pick = choose more: "More", stop: "Stop"\n' +
+      '  let reps = 0\n  while true {\n    let pick = askChoice more: "More", stop: "Stop"\n' +
       '    if pick == "stop" {\n      return\n    }\n    reps += 1\n    if reps >= target {\n' +
       '      say "Set done."\n    }\n  }\n}\nwarmUp(1)\nlift(1000)\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -2191,7 +2191,7 @@ test(
       'global ROPE = "rope"\nglobal KNIFE = "knife"\nfunction owns(item) {\n' +
       '  return packed(item) or load("gear.${item}", default: false) == true\n}\n' +
       'function packed(thing) {\n  return load("pack.${thing}", default: false) == true\n}\n' +
-      'let pick = choose rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
+      'let pick = askChoice rope: "Rope", knife: "Knife"\nif pick == "rope" {\n  save true as "gear.${ROPE}"\n' +
       '} else {\n  save false as "gear.${KNIFE}"\n}\nshowButton "Next"\nif owns(KNIFE) {\n' +
       '  say "Sharp."\n}\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -2242,12 +2242,12 @@ test(
       }).search;
     };
     const complete = run(
-      'let pick = choose a: "A", b: "B"\nif pick == "a" {\n  say "A."\n} else {\n  say "B."\n}\nexit\n',
+      'let pick = askChoice a: "A", b: "B"\nif pick == "a" {\n  say "A."\n} else {\n  say "B."\n}\nexit\n',
     );
     assert.deepEqual([complete.stoppedBy, complete.audit?.result], ["exhausted", "complete"]);
     // Every press of "Again" is a new state, and nothing reads the count: no progress after the first round.
     const loop =
-      'let count = 0\nwhile true {\n  let pick = choose again: "Again", leave: "Leave"\n  if pick == "leave" {\n' +
+      'let count = 0\nwhile true {\n  let pick = askChoice again: "Again", leave: "Leave"\n  if pick == "leave" {\n' +
       "    exit\n  }\n  count += 1\n";
     const spiral = run(`${loop}}\n`);
     assert.equal(spiral.stoppedBy, "plateau");
@@ -2424,7 +2424,7 @@ test(
     // a time step past the minute leaves the loop, though the states it reached are cut off here.
     const source =
       'let device = showPermanentButton "Estim: STOPPED", persist: true {\n}\n' +
-      'let pick = choose stay: "Shocks", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+      'let pick = askChoice stay: "Shocks", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
       "let start = getAbsoluteDateTime().toSeconds()\n" +
       "while getAbsoluteDateTime().toSeconds() - start < 60 {\n  wait 1 s\n}\n" +
       'say "Over."\nexit\n';
@@ -2468,7 +2468,7 @@ test(
     // other player's state there, in another loop group, whose own draws stayed in, leaves those outcomes to it, so
     // where they lead from it is not known.
     const loop = (out: string) =>
-      'let mode = choose red: "Red", blue: "Blue"\nlet block = "mix2"\nwhile block != "out" {\n' +
+      'let mode = askChoice red: "Red", blue: "Blue"\nlet block = "mix2"\nwhile block != "out" {\n' +
       '  if block == "mix2" {\n    showButton "Thank you"\n    if randomInteger(0..3) == 0 {\n' +
       `      block = "mix3"\n    } else {\n      ${out}\n    }\n` +
       '  } else {\n    wait 6 s\n    block = "mix2"\n  }\n}\nsay "Out."\nexit\n';
@@ -2518,12 +2518,12 @@ test(
     // no place the player chose, so twice the strokes make no more cells.
     const strokes = (count: number) =>
       run(
-        'let pick = choose punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+        'let pick = askChoice punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
           `for stroke in 1..=${count} {\n  wait 1 s\n}\nsay "Done."\nexit\n`,
       );
     const strokesFollowed = (count: number) =>
       run(
-        'let pick = choose punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
+        'let pick = askChoice punish: "Punish", leave: "Leave"\nif pick == "leave" {\n  exit\n}\n' +
           `for stroke in 1..=${count} {\n  wait 1 s\n}\nsay "Done."\nexit\n`,
         true,
       );
@@ -2534,7 +2534,7 @@ test(
     assert.equal(long.coverage.percent, short.coverage.percent);
     // Waiting forever is still a loop the player cannot leave.
     const endless = run(
-      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
+      'let pick = askChoice stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
     );
     assert.deepEqual(
       endless.traps.map((trap) => trap.kind),
@@ -2542,7 +2542,7 @@ test(
     );
     // Following such runs at once still ends in a run that never ends, within its share, and finds the same trap.
     const followed = run(
-      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
+      'let pick = askChoice stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  exit\n}\nwhile true {\n  wait 1 s\n}\n',
       true,
     );
     assert.equal(followed.search.stoppedBy, "operations");
@@ -2581,7 +2581,7 @@ test(
     // The short way adds one visit after one press; the long way adds `gain` after `presses` presses.
     const ways = (presses: number, gain: number, need: number) =>
       'let visits = load "fixture.visits", default: 0\n' +
-      'let pick = choose long: "Long way", short: "Short way", leave: "Leave"\n' +
+      'let pick = askChoice long: "Long way", short: "Short way", leave: "Leave"\n' +
       `if pick == "long" {\n  for step in 1..=${presses} {\n    showButton "Step"\n  }\n` +
       `  save visits + ${gain} as "fixture.visits"\n}\n` +
       'if pick == "short" {\n  showButton "Go"\n  save visits + 1 as "fixture.visits"\n}\n' +
@@ -2619,7 +2619,7 @@ test(
     // the count no closer, the other way is replayed, and the chain goes on with it.
     const cheapStops = run(
       'let visits = load "fixture.visits", default: 0\nif visits >= 40 {\n  say "Regular."\n  exit\n}\n' +
-        'let pick = choose cheap: "Cheap", other: "Other", leave: "Leave"\n' +
+        'let pick = askChoice cheap: "Cheap", other: "Other", leave: "Leave"\n' +
         'if pick == "cheap" {\n  showButton "Go"\n  if visits < 15 {\n    save visits + 1 as "fixture.visits"\n  }\n}\n' +
         'if pick == "other" {\n  for step in 1..=15 {\n    showButton "Step"\n  }\n  save visits + 2 as "fixture.visits"\n}\nexit\n',
     );
@@ -2688,7 +2688,7 @@ test(
     // same code again before their content.
     const source =
       'let visits = load "fx.visits", default: 0\nif visits == 0 {\n  say "Welcome."\n  let rounds = 0\n' +
-      '  let going = true\n  while going {\n    let pick = choose again: "Again", done: "Done"\n' +
+      '  let going = true\n  while going {\n    let pick = askChoice again: "Again", done: "Done"\n' +
       '    if pick == "done" {\n      going = false\n    }\n    rounds += 1\n  }\n}\n' +
       'if visits >= 1 {\n  for step in 1..=6 {\n    showButton "Next"\n  }\n  say "Return content."\n}\n' +
       'if visits >= 2 {\n  for step in 1..=6 {\n    showButton "On"\n  }\n  say "Third visit."\n}\n' +
@@ -3060,11 +3060,11 @@ test(
     const rounds = Array.from(
       { length: 6 },
       (_, index) =>
-        `  let pick${index} = choose a: "A${index}", b: "B${index}", c: "C${index}"\n` +
+        `  let pick${index} = askChoice a: "A${index}", b: "B${index}", c: "C${index}"\n` +
         `  if pick${index} == "a" {\n    say "a${index}"\n  }\n  showButton "Next${index}"\n`,
     ).join("");
     const source =
-      `let side = choose tree: "Tree", count: "Count"\nif side == "tree" {\n${rounds}  exit\n}\n` +
+      `let side = askChoice tree: "Tree", count: "Count"\nif side == "tree" {\n${rounds}  exit\n}\n` +
       'let count = 0\nwhile count < 100 {\n  showButton "Stroke"\n  count += 1\n}\nsay "Done."\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));
@@ -3095,7 +3095,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
-      'global KNIFE = "knife"\nlet kind = choose rope: "Rope", saw: "Saw"\n' +
+      'global KNIFE = "knife"\nlet kind = askChoice rope: "Rope", saw: "Saw"\n' +
       'let spare = load("gear.${kind}", default: false)\n' +
       'function owns(item) {\n  return load("gear.${item}", default: false) == true\n}\n' +
       'function plural(item) {\n  item = "${item}s"\n  return load("gear.${item}", default: false) == true\n}\n' +
@@ -3126,11 +3126,11 @@ test(
     const branches = Array.from(
       { length: 6 },
       (_, index) =>
-        `  let path${index} = choose left: "L${index}", right: "R${index}", back: "B${index}"\n` +
+        `  let path${index} = askChoice left: "L${index}", right: "R${index}", back: "B${index}"\n` +
         `  if path${index} == "left" {\n    say "left${index}"\n  }\n  showButton "On${index}"\n`,
     ).join("");
     const source =
-      `let way = choose trail: "Trail", climb: "Climb"\nif way == "trail" {\n${branches}  exit\n}\n` +
+      `let way = askChoice trail: "Trail", climb: "Climb"\nif way == "trail" {\n${branches}  exit\n}\n` +
       'let height = 0\nlet summit = 60 + 40\nwhile height < summit {\n  showButton "Step"\n  height += 1\n}\n' +
       'say "Summit."\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
@@ -3699,7 +3699,7 @@ test(
     assert.ok("engine" in engineResult);
     const { engine } = engineResult;
     const source =
-      'function deep {\n  say "Deep."\n}\nlet pick = choose a: "A", b: "B"\nif pick == "b" {\n  let more = choose c: "C", d: "D"\n' +
+      'function deep {\n  say "Deep."\n}\nlet pick = askChoice a: "A", b: "B"\nif pick == "b" {\n  let more = askChoice c: "C", d: "D"\n' +
       '  if more == "d" {\n    deep()\n  }\n}\nif false {\n  say "Never."\n}\nsay "End."\nexit\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));
@@ -3761,7 +3761,7 @@ test(
     assert.equal(steered.coverage.visitedLines, plain.coverage.visitedLines);
     // A way that needs both counters is steered to by their summed distance.
     const both =
-      'let a = 0\nlet b = 0\nwhile true {\n  let pick = choose up: "A", down: "B", stop: "Stop"\n' +
+      'let a = 0\nlet b = 0\nwhile true {\n  let pick = askChoice up: "A", down: "B", stop: "Stop"\n' +
       '  if pick == "up" {\n    a += 1\n  } else if pick == "down" {\n    b += 1\n  } else {\n    exit\n  }\n' +
       '  if a >= 3 and b >= 2 {\n    say "Both."\n    exit\n  }\n}\n';
     const { plan: bothPlan } = engine.compileProject([{ path: "main.tease", source: both }], {
@@ -4280,7 +4280,7 @@ test(
       'function loadNumber(key) {\n  let value = load key, default: 0\n  return value\n}\nlet name = "sion"\n' +
       'let version = loadNumber("ver${name}")\n' +
       'if version > 0 {\n  say "Welcome back."\n  exit\n}\nshowButton "Start"\nsave 1 as "version"\n' +
-      'let pick = choose stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  delete "version"\n  exit\n}\n' +
+      'let pick = askChoice stay: "Stay", leave: "Leave"\nif pick == "leave" {\n  delete "version"\n  exit\n}\n' +
       'while true {\n  showButton "Again"\n}\n';
     const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
     assert.ok(isRecord(plan));

@@ -1660,10 +1660,11 @@ export class InstructionCompiler {
   }
 
   /**
-   * A basic ask says its question, then opens its field; `choose` opens its buttons, and `askBoolean` says its question,
-   * then opens its two buttons. The question and the options are evaluated once, in written order, before the question
-   * is said, so a prefill that asks itself comes first. The question is said by the requesting speaker, captured before
-   * any operand. It is said `instant`, so its field or buttons appear with it (owner decision on #829, 2026-10-11).
+   * A basic ask says its question, then opens its field; `askChoice` opens its buttons, and `askBoolean` says its
+   * question, then opens its two buttons. The question and the options are evaluated once, in written order, before
+   * the question is said, so a prefill that asks itself comes first. The question is said by the requesting speaker,
+   * captured before any operand. It is said `instant`, so its field or buttons appear with it (owner decision on #829,
+   * 2026-10-11).
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     if (expression.interactionKind === "form" || expression.interactionKind === "booleans")
@@ -1680,7 +1681,7 @@ export class InstructionCompiler {
     const ui = staticInteractionUi(expression);
     const staticQuestion =
       expression.question === null ? null : staticVisibleText(expression.question);
-    if (ui !== undefined && staticQuestion !== undefined) {
+    if (ui !== undefined && staticQuestion !== undefined && expression.presentation === null) {
       if (staticQuestion !== null) {
         // Said and asked by the same speaker: nothing runs between the two instructions.
         this.instructions.push({
@@ -1731,6 +1732,12 @@ export class InstructionCompiler {
           expression.speaker?.name ?? null,
           expression.asSpan ?? expression.commandSpan,
         );
+        const presentation = yield* compileChild(
+          this.#lowerQuestionPresentationTask(
+            expression.presentation ?? undefined,
+            speakerTemporary,
+          ),
+        );
         const lowered = yield* compileChild(
           this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
         );
@@ -1745,7 +1752,7 @@ export class InstructionCompiler {
         this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
         question = {
           kind: "say",
-          presentation: null,
+          presentation: presentation?.plan ?? null,
           speaker: expression.speaker?.name ?? null,
           value: lowered.plan,
           ...sayTemporaries,
@@ -1757,13 +1764,14 @@ export class InstructionCompiler {
         questionTemporaryIds = [
           sayTemporaries.speakerTemporary,
           sayTemporaries.contextualSpeakerTemporary,
+          ...(presentation?.temporaryIds ?? []),
           textTemporary,
         ];
       }
       let hint: { readonly temporaryId: number } | null = null;
       let prefill: { readonly temporaryId: number } | null = null;
       for (const operand of askOperands(expression)) {
-        if (operand === expression.question) continue;
+        if (operand === expression.question || operand === expression.presentation) continue;
         const materialized = this.#materializeDedicatedInteractionValue(
           yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
           operand.span,
@@ -1890,8 +1898,8 @@ export class InstructionCompiler {
   /**
    * `askBoolean` with an operand only known at runtime, or with its question named `message:`: like a form, its
    * arguments are evaluated in written order into one object, from which it says its question. Its two buttons,
-   * `yesText:` (default "Yes") returning `true` and `noText:` (default "No") returning `false`, then open as a `choose`
-   * of two choice objects.
+   * `yesText:` (default "Yes") returning `true` and `noText:` (default "No") returning `false`, then open as an
+   * `askChoice` of two choice objects.
    */
   *#lowerAskBooleanTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     const span = copySpan(expression.span);
@@ -1976,6 +1984,15 @@ export class InstructionCompiler {
     const sayTemporaries = named.some((argument) => argument.name === "message")
       ? this.#prepareQuestionSpeaker(speaker, speakerSpan)
       : null;
+    const presentation =
+      sayTemporaries === null
+        ? null
+        : yield* compileChild(
+            this.#lowerQuestionPresentationTask(
+              expression.presentation ?? undefined,
+              speakerTemporary,
+            ),
+          );
     const values = yield* compileChild(
       this.#lowerInteractionPayloadsTask(
         named.map((argument) => argument.value),
@@ -2027,7 +2044,7 @@ export class InstructionCompiler {
       });
       this.instructions.push({
         kind: "say",
-        presentation: null,
+        presentation: presentation?.plan ?? null,
         speaker,
         value: question,
         ...sayTemporaries,
@@ -2037,7 +2054,12 @@ export class InstructionCompiler {
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
-        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        [
+          sayTemporaries.speakerTemporary,
+          sayTemporaries.contextualSpeakerTemporary,
+          ...(presentation?.temporaryIds ?? []),
+          textTemporary,
+        ],
         expression.span,
       );
     }
@@ -2059,6 +2081,12 @@ export class InstructionCompiler {
     const sayTemporaries = asksQuestion
       ? this.#prepareQuestionSpeaker(null, expression.span)
       : null;
+    const presentation =
+      sayTemporaries === null
+        ? null
+        : yield* compileChild(
+            this.#lowerQuestionPresentationTask(expression.presentation, speakerTemporary),
+          );
     const values = yield* compileChild(
       this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
     );
@@ -2103,7 +2131,7 @@ export class InstructionCompiler {
       });
       this.instructions.push({
         kind: "say",
-        presentation: null,
+        presentation: presentation?.plan ?? null,
         speaker: null,
         value: question,
         ...sayTemporaries,
@@ -2113,7 +2141,12 @@ export class InstructionCompiler {
         span: copySpan(expression.span),
       });
       this.#emitTemporaryCleanup(
-        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        [
+          sayTemporaries.speakerTemporary,
+          sayTemporaries.contextualSpeakerTemporary,
+          ...(presentation?.temporaryIds ?? []),
+          textTemporary,
+        ],
         expression.span,
       );
     }
@@ -2215,6 +2248,21 @@ export class InstructionCompiler {
       span: copySpan(span),
     });
     return { speakerTemporary, contextualSpeakerTemporary };
+  }
+
+  /**
+   * The options of the mode written for an ask's question, `bubble(...)` or `prose(...)` (#832), evaluated once before
+   * the question as those of a `say` are, into a temporary its `say` reads; `null` when none is written.
+   */
+  *#lowerQuestionPresentationTask(
+    presentation: Expression | undefined,
+    speakerTemporary: number,
+  ): CompileTask<LoweredExpression | null> {
+    if (presentation === undefined) return null;
+    return this.#materializeExpression(
+      yield* compileChild(this.#lowerInteractionPayloadTask(presentation, speakerTemporary)),
+      presentation.span,
+    );
   }
 
   #prepareInteractionSpeaker(speaker: string | null, span: SourceSpan): number {

@@ -6,7 +6,7 @@ Provider selection, local/cloud execution, context storage, vision evidence, too
 
 ## Accepted first Standard Library interaction boundary
 
-ADR 0018 does not add LLM interpretation to the first deterministic interaction POC. `askText`, `askNumber`, `choose`, and `showButton` must first work through exact typed validation without an LLM dependency.
+ADR 0018 does not add LLM interpretation to the first deterministic interaction POC. `askText`, `askNumber`, `askChoice`, and `showButton` must first work through exact typed validation without an LLM dependency.
 
 A later optional interpreter may receive only bounded structured context relevant to the active interaction, such as:
 
@@ -19,7 +19,7 @@ submitted player text
 validation failure
 ```
 
-For `choose`, the LLM may propose exactly one currently offered button or visible option, or a typed `needsClarification` outcome. For `askNumber`, it may propose one finite number or `needsClarification`, for example when interpreting natural language such as “about twenty”. It may also generate speaker-styled clarification text through the normal validated chat-output path.
+For `askChoice`, the LLM may propose exactly one currently offered button or visible option, or a typed `needsClarification` outcome. For `askNumber`, it may propose one finite number or `needsClarification`, for example when interpreting natural language such as “about twenty”. It may also generate speaker-styled clarification text through the normal validated chat-output path.
 
 The deterministic engine remains authoritative:
 

@@ -135,7 +135,7 @@ say prose "${code.substring(0, 3)}${code.substring(code.length - 2)}${sexscriptL
 // Groovy iterated null zero times.
 say prose "Pick one?", instant
 let picked: string? = "red"
-if (choose 0: "none", 1: "red") == "none" {
+if (askChoice 0: "none", 1: "red") == "none" {
   picked = null
 }
 for c in sexscriptLegacyItems(picked) {

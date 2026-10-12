@@ -250,7 +250,7 @@ test("a busy, removed, unknown, early, or malformed click changes nothing", () =
       "}",
       'let gone = showPermanentButton "Gone" {',
       "}",
-      "removePermanentButton(gone)",
+      "gone.remove()",
       'timer async 2 s { say "timer" }',
       "wait 10 s",
       "exit",
@@ -284,21 +284,21 @@ test("a busy, removed, unknown, early, or malformed click changes nothing", () =
   assert.equal(early.outcome.kind, "executionPending");
 });
 
-test("removePermanentButton removes a button and its queued click, but not a block that runs", () => {
+test("button.remove() removes a button and its queued click, but not a block that runs", () => {
   const session = new Session(
     [
       'let a = showPermanentButton "A" {',
       '    say "a"',
       "}",
       'let b = showPermanentButton "B" {',
-      "    removePermanentButton(b)",
+      "    b.remove()",
       '    say "b runs on"',
       "    say b",
-      "    removePermanentButton(b)",
+      "    b.remove()",
       "}",
       'showPermanentButton "Remove A" {',
       "    wait 1 s",
-      "    removePermanentButton(a)",
+      "    a.remove()",
       "}",
       "say a",
       "wait 10 s",
@@ -319,6 +319,57 @@ test("removePermanentButton removes a button and its queued click, but not a blo
   assert.deepEqual(session.buttons(), ["Remove A"]);
   assert.deepEqual(removed(session.events), [1, 2], "each removal settles its button once");
   assert.equal(session.snapshot.status, "waiting");
+});
+
+test("button.remove() resumes equivalently at every boundary, and removing a gone button does nothing", () => {
+  const source = [
+    'let hint = showPermanentButton "Hint" {',
+    "    hint.remove()",
+    '    say "Count out loud.", instant',
+    "}",
+    'let other = showPermanentButton "Other" {',
+    "}",
+    "wait 2 s",
+    "hint.remove()",
+    "other.remove()",
+    "other.remove()",
+    'say "done", instant',
+    "exit",
+  ].join("\n");
+  const result = assertRuntimeResumeEquivalent(source, {
+    press: (snapshot, events) =>
+      events.some((event) => event.kind === "permanentButtonPressed")
+        ? null
+        : (permanentButtonProjection(snapshot).find((button) => button.text === "Hint")?.buttonId ??
+          null),
+  });
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["Count out loud.", "done"],
+  );
+  // Hint removed itself in its block; the later removals of it and of Other's second do nothing.
+  assert.deepEqual(removed(result.events), [1, 2]);
+  assert.deepEqual(permanentButtonProjection(result.finalSnapshot), []);
+});
+
+test("removePermanentButton(...) is a compile error that names button.remove()", () => {
+  const errors = (source: string) =>
+    compileSource(source).diagnostics.map(
+      (diagnostic) =>
+        `${diagnostic.code} ${diagnostic.span.start.line}:${diagnostic.span.start.column} ${diagnostic.message}`,
+    );
+  const button = 'let stop = showPermanentButton "Stop" {\n}\n';
+  assert.deepEqual(errors(`${button}removePermanentButton(stop)\nexit`), [
+    "TSV018 2:0 removePermanentButton(...) is replaced by the button's own remove(), like stop() on a timer. Write 'stop.remove()'.",
+  ]);
+  assert.deepEqual(
+    errors(`${button}let buttons = [stop]\nremovePermanentButton(buttons[0])\nexit`),
+    [
+      "TSV018 3:0 removePermanentButton(...) is replaced by the button's own remove(), like stop() on a timer. Call remove() on the button that showPermanentButton gave, as in 'button.remove()'.",
+    ],
+  );
+  // The name stays reserved.
+  assert.deepEqual(errorCodes("let removePermanentButton = 1\nexit"), ["TSV001"]);
 });
 
 test("a button belongs to the file entry that showed it unless it persists, and exit removes every button", () => {
@@ -379,8 +430,8 @@ test("permanent buttons need a block, shown text, and their own identifier", () 
   assert.deepEqual(errorCodes(`${button}say "\${stop}"\nexit`), ["TSV042"]);
   assert.deepEqual(errorCodes(`${button}save stop as "button"\nexit`), ["TSV043"]);
   assert.deepEqual(errorCodes(`${button}say stop.text\nexit`), ["TSV043"]);
-  assert.deepEqual(errorCodes('removePermanentButton("Stop")\nexit'), ["TSV043"]);
-  assert.deepEqual(errorCodes(`${button}removePermanentButton(stop, stop)\nexit`), ["TSV020"]);
+  assert.deepEqual(errorCodes(`${button}stop.remove(stop)\nexit`), ["TSV043"]);
+  assert.deepEqual(errorCodes(`${button}stop.stop()\nexit`), ["TSV043"]);
 });
 
 test("persist is a literal option of the command, and the block line it replaces names the fix", () => {
@@ -431,11 +482,11 @@ test("persist is a literal option of the command, and the block line it replaces
   // Text that would take the option as its own, such as a compact choice, is grouped in the replacement, which keeps
   // the two choice options and makes the button persist.
   const [replacement] = compileSource(
-    'showPermanentButton choose "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
+    'showPermanentButton askChoice "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
   ).diagnostics.map(
     (diagnostic) => /'(showPermanentButton .*) \{'\.$/u.exec(diagnostic.message)?.[1],
   );
-  assert.equal(replacement, 'showPermanentButton (choose "A", "B"), persist: true');
+  assert.equal(replacement, 'showPermanentButton (askChoice "A", "B"), persist: true');
   const [statement] = parse(`${replacement} {\n    say "clicked"\n}\nexit`).program.statements;
   assert.ok(statement?.kind === "showPermanentButtonStatement");
   assert.equal(statement.persist, true);
@@ -507,7 +558,7 @@ test("mixing permanent buttons with other values suggests no unwritable type", (
   const button = 'let b = showPermanentButton "x" {\n}\n';
   for (const source of [
     `${button}let values = [b, 1]\nexit`,
-    `${button}let answer = choose { value: b, text: "B" }, { value: 1, text: "One" }\nexit`,
+    `${button}let answer = askChoice { value: b, text: "B" }, { value: 1, text: "One" }\nexit`,
   ]) {
     const mixes = compileSource(source)
       .diagnostics.filter((diagnostic) => diagnostic.code === "TSV044")

@@ -184,7 +184,7 @@ test("serialization retains checkpoint validation and rejects malformed data bef
 });
 
 test("JSON longer than a text can be fails with TSK004 from either writer, in every host", (context) => {
-  const plan = compileValidPlan('let items = ["a", "b"]\nlet pick = choose "One", "Two"\nexit');
+  const plan = compileValidPlan('let items = ["a", "b"]\nlet pick = askChoice "One", "Two"\nexit');
   const checkpoint = createCheckpoint(plan, run(plan, createFreshRuntimeSnapshot(plan)).snapshot);
   const json = serializeCheckpoint(checkpoint);
   const tooLarge = (error: unknown) =>

@@ -250,13 +250,13 @@ async function settle(context: TestContext) {
 
 const script = [
   'save 1 as "k"',
-  'let first = choose "One", "Two"',
+  'let first = askChoice "One", "Two"',
   'save first as "pick"',
   'say "first ${first}", instant',
-  'let second = choose "Red", "Blue"',
+  'let second = askChoice "Red", "Blue"',
   'save second as "color"',
   'say "second ${second}", instant',
-  'let third = choose "A", "B"',
+  'let third = askChoice "A", "B"',
   "exit",
 ].join("\n");
 
@@ -332,9 +332,9 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   // With the scope IDs used up, the run after the second answer throws (TSR101) when it enters the block, an error no
   // script reaches otherwise.
   const source = [
-    'let first = choose "One", "Two"',
+    'let first = askChoice "One", "Two"',
     'say "first ${first}", instant',
-    'let second = choose "Red", "Long"',
+    'let second = askChoice "Red", "Long"',
     'if second == "Long" {',
     '  say "deep", instant',
     "}",
@@ -714,7 +714,7 @@ test("a session-local state that rewind adopted leaves Play again session-local"
       [
         'let k = load("k", default: 0) + 1',
         'save k as "k"',
-        'let pick = choose "Go", "Stay"',
+        'let pick = askChoice "Go", "Stay"',
         'say "${k}", instant',
         "exit",
       ].join("\n"),

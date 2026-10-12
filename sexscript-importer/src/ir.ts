@@ -71,9 +71,10 @@ export type IrStatement =
   /**
    * Every text is said at once (`say text, instant`), as legacy `show()` displayed it, and only the legacy waits time it
    * (owner decision 2026-10-11: literal timing). `speaker` says it `as` that speaker, and `prose` shows it as prose
-   * rather than a speech bubble (V30 §17).
+   * rather than a speech bubble (V30 §17). `prompt` marks a legacy input's text said right before its ask (pushPrompt),
+   * which may become the ask's question (ask-questions.ts).
    */
-  | (IrBase & { kind: "say"; value: IrExpression; speaker?: string; prose?: true })
+  | (IrBase & { kind: "say"; value: IrExpression; speaker?: string; prose?: true; prompt?: true })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";
@@ -233,7 +234,7 @@ export type IrStatement =
   | (IrBase & { kind: "blank" });
 
 /**
- * One option of a `choose` with list options (V30 §19, PR #515): a written option, with its numeric value or
+ * One option of an `askChoice` with list options (V30 §19, PR #515): a written option, with its numeric value or
  * without one (the button text is the value), or a list whose elements are texts or, with `records`,
  * `{ value, text }` choice objects.
  */
@@ -306,19 +307,20 @@ export type IrExpression =
       rebuilds?: true;
     }
   /**
-   * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
-   * option gets the identifier label that `choose` returns.
+   * Compact `askChoice`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
+   * option gets the identifier label that `askChoice` returns.
    */
   | { kind: "choice"; options: IrExpression[]; labels?: string[] }
   /**
-   * `choose` whose options may mix written values with options without one, and whose list options give one button
+   * `askChoice` whose options may mix written values with options without one, and whose list options give one button
    * per element (V30 §19, #515).
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**
-   * Single-field input. `question` is said in the chat before the field opens (#634); a legacy prompt stays a `say`
-   * before it, which shows as prose at once (owner decisions 2026-10-11). `defaultValue` prefills the field, written
-   * `askText "Name?", default: value` (V30 §20).
+   * Single-field input. `question` is said in the chat before the field opens (#634); a legacy prompt is a `say`
+   * before it, which shows as prose at once (owner decisions 2026-10-11), or the ask's question in prose where nothing
+   * comes between them (`prose`, ask-questions.ts). `defaultValue` prefills the field, written
+   * `askText "Name?", prefill: value` (V30 §20).
    */
   | {
       kind: "input";
@@ -339,6 +341,8 @@ export type IrExpression =
       speaker?: string;
       /** An answer that the script never reads, whose line breaks stay (emit-tease.ts SINGLE_LINE). */
       unread?: true;
+      /** The question is said as prose, `askText prose "Name?"` (V30 §20, #852). */
+      prose?: true;
     }
   /** `count` marks the range of a Groovy `n.times`, which runs for the whole part of `to`. */
   | {
@@ -379,6 +383,8 @@ export type IrExpression =
       local?: true;
       /** A value of a type the conversion does not know, which keeps a variable it is assigned to open. */
       open?: true;
+      /** An `askBooleans` whose `message:` is said as prose, `askBooleans prose "Which?", texts: names` (#852). */
+      prose?: true;
     }
   /** Interpolated string: literal text segments and `${...}` values in source order. */
   | { kind: "template"; parts: Array<{ text: string } | { value: IrExpression }> };

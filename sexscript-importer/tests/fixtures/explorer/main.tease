@@ -1,5 +1,5 @@
 say "Welcome."
-let pick = choose left: "Left", right: "Right", stay: "Stay", count: "Count"
+let pick = askChoice left: "Left", right: "Right", stay: "Stay", count: "Count"
 if pick == "left" {
   say "You went left."
   exit

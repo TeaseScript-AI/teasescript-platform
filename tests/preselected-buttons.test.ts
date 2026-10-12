@@ -41,17 +41,21 @@ test("prefill: preselects the first button with its value, which the Player mark
     ['let a = askBoolean "Ready?", prefill: false', ["Yes", "No*"], "false"],
     ["let p = false\nlet a = askBoolean(question(), prefill: p)", ["Yes", "No*"], "false"],
     ['let a = askBoolean "Ready?"', ["Yes", "No"], "false"],
-    ['let a = choose stay: "Stay", leave: "Leave", prefill: "leave"', ["Stay", "Leave*"], "leave"],
-    ["let a = choose 5, 10, 15, prefill: 10", ["5", "10*", "15"], "15"],
-    ["let a = choose 5, 10, prefill: 10.0", ["5", "10*"], "10"],
-    ["let a = choose 6, [7, 7], prefill: 7", ["6", "7*", "7"], "7"],
     [
-      'let a = choose { value: "prefill", text: "Saved" }, other: "Other", prefill: "prefill"',
+      'let a = askChoice stay: "Stay", leave: "Leave", prefill: "leave"',
+      ["Stay", "Leave*"],
+      "leave",
+    ],
+    ["let a = askChoice 5, 10, 15, prefill: 10", ["5", "10*", "15"], "15"],
+    ["let a = askChoice 5, 10, prefill: 10.0", ["5", "10*"], "10"],
+    ["let a = askChoice 6, [7, 7], prefill: 7", ["6", "7*", "7"], "7"],
+    [
+      'let a = askChoice { value: "prefill", text: "Saved" }, other: "Other", prefill: "prefill"',
       ["Saved*", "Other"],
       "other",
     ],
-    ["let level: integer? = null\nlet a = choose 6, 7, prefill: level", ["6", "7"], "7"],
-    ["let a = choose 6, 7", ["6", "7"], "7"],
+    ["let level: integer? = null\nlet a = askChoice 6, 7, prefill: level", ["6", "7"], "7"],
+    ["let a = askChoice 6, 7", ["6", "7"], "7"],
   ] as const) {
     let session = createPlayerRuntimeSession(`${PRELUDE}${source}\nsay "\${a}", instant\nexit`);
     assert.deepEqual(buttons(session), shown, source);
@@ -67,7 +71,7 @@ test("prefill: preselects the first button with its value, which the Player mark
 
 test("a prefill no button has preselects none and warns in Debug, and the script goes on", () => {
   const session = createPlayerRuntimeSession(
-    'let a = choose stay: "Stay", leave: "Leave", prefill: "Leave"\nexit',
+    'let a = askChoice stay: "Stay", leave: "Leave", prefill: "Leave"\nexit',
   );
   assert.deepEqual(buttons(session), ["Stay", "Leave"]);
   assert.deepEqual(warnings(session), [
@@ -143,7 +147,7 @@ test("an askBoolean prefill known only at runtime is true or false, null or blan
 test("a restored choice keeps its preselected button, and one that does not fit its prefill is rejected", () => {
   for (const source of [
     'let a = askBoolean "Ready?", prefill: false',
-    "let p = 10\nlet a = choose 5, 10, prefill: p",
+    "let p = 10\nlet a = askChoice 5, 10, prefill: p",
   ]) {
     const session = createPlayerRuntimeSession(`${source}\nexit`);
     const restored = restorePlayerRuntimeSession(
@@ -193,22 +197,22 @@ test("a restored choice keeps its preselected button, and one that does not fit 
   assert.equal(validateInstructionPlan(plan).valid, false);
 });
 
-test("choose takes prefill: once, after its options, and askBoolean's prefill is true or false", () => {
+test("askChoice takes prefill: once, after its options, and askBoolean's prefill is true or false", () => {
   const errors = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
-  assert.deepEqual(errors("let a = choose prefill: 1, 2"), [
-    "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+  assert.deepEqual(errors("let a = askChoice prefill: 1, 2"), [
+    "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
   ]);
-  assert.deepEqual(errors("let a = choose 1, 2, prefill: 1, prefill: 2"), [
-    "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+  assert.deepEqual(errors("let a = askChoice 1, 2, prefill: 1, prefill: 2"), [
+    "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
   ]);
-  assert.deepEqual(errors("let a = choose 1, 2, prefill: 1, 3"), [
-    "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+  assert.deepEqual(errors("let a = askChoice 1, 2, prefill: 1, 3"), [
+    "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
   ]);
   // Inside a grouping the error ends at its closing delimiter, so the next statement still parses.
-  const grouped = "let a = (choose 1, 2, prefill: 1, prefill: 2)\nlet b = 3";
+  const grouped = "let a = (askChoice 1, 2, prefill: 1, prefill: 2)\nlet b = 3";
   assert.deepEqual(errors(grouped), [
-    "choose takes one 'prefill:', after its options, as in 'choose 5, 10, prefill: 10'.",
+    "askChoice takes one 'prefill:', after its options, as in 'askChoice 5, 10, prefill: 10'.",
   ]);
   assert.equal(parse(`${grouped}\nexit`).program.statements.length, 3);
   assert.deepEqual(errors('let a = askBoolean "Q", prefill: null'), [

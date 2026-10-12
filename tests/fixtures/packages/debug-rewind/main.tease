@@ -2,15 +2,15 @@
 title: "Debug rewind"
 ---
 save 1 as "k"
-let first = choose "One", "Two"
+let first = askChoice "One", "Two"
 save first as "pick"
 say "first ${first}", instant
-let second = choose "Red", "Fail"
+let second = askChoice "Red", "Fail"
 save second as "color"
 say "second ${second}", instant
 if second == "Fail" {
     let zero = 0
     let broken = 1 / zero
 }
-let third = choose "A", "B"
+let third = askChoice "A", "B"
 exit

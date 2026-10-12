@@ -31,7 +31,7 @@ decisions recorded on issues whose implementation is still open, such as script 
 subset the current compiler implements. Script chaining, for example, has no faithful implemented substitute, so
 avoiding accepted-but-unimplemented forms would only trade compiler errors for wrong behavior. Within that target:
 
-- prefer a compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, a `choose` with
+- prefer a compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, an `askChoice` with
   numeric or `yes`/`no` values, or `showButton "Done", timeout: 30`, instead of parenthesized V30 input calls;
 - produce natural TeaseScript: keep comments and paragraph breaks, `else if` chains, interpolation, and idiomatic
   forms such as `list.random`; write text with line breaks as a V30 §8 block string with the same value, except

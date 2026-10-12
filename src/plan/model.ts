@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 82;
+export const INSTRUCTION_PLAN_VERSION = 84;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -571,7 +571,7 @@ export type InteractionChoiceValue =
   | ({ readonly kind: "time" } & TimeFields)
   | ({ readonly kind: "datetime" } & DateTimeFields)
   | { readonly kind: "absoluteDateTime"; readonly epochMilliseconds: number };
-/** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
+/** One button. `value` is what `askChoice` returns for it; `text` is what the button shows. */
 export interface InteractionChoiceOption {
   readonly text: string;
   readonly value: InteractionChoiceValue;
@@ -612,8 +612,8 @@ export type InteractionUiPayload =
       readonly kind: "choice";
       readonly options: readonly InteractionChoiceOption[];
       /**
-       * The position of the preselected button, the first whose value is the `prefill:` of `choose` or `askBoolean`: it
-       * is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
+       * The position of the preselected button, the first whose value is the `prefill:` of `askChoice` or `askBoolean`:
+       * it is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
        */
       readonly preselected?: number;
       readonly accessibleName: InteractionAccessibleName;

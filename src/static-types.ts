@@ -27,7 +27,7 @@ export type StaticType =
   | {
       readonly kind: "scalar";
       readonly name: ScalarTypeName;
-      /** The only values it may be, as for a `choose` result; places always keep the plain type. */
+      /** The only values it may be, as for an `askChoice` result; places always keep the plain type. */
       readonly values?: readonly ScalarValue[];
       /**
        * For a number, the variables without a type annotation that its value derives from: when one of them widens to
@@ -101,7 +101,7 @@ const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
 export const NULL_TYPE: StaticType = Object.freeze({ kind: "null" });
 const ANY_OBJECT_TYPE: StaticType = Object.freeze({ kind: "object", properties: null });
 
-/** A literal value that a scalar type may be restricted to, such as one button value of a `choose`. */
+/** A literal value that a scalar type may be restricted to, such as one button value of an `askChoice`. */
 export type ScalarValue = string | number | boolean;
 
 function scalar(name: ScalarTypeName): StaticType {
@@ -245,7 +245,7 @@ export interface PossibleValue {
 
 /**
  * The values a value of this type can only be, with `null` for a possibly null value, or `undefined` when it may be
- * any value of its type. Only a `choose` with literal button values restricts a type.
+ * any value of its type. Only an `askChoice` with literal button values restricts a type.
  */
 export function possibleValues(type: StaticType): readonly PossibleValue[] | undefined {
   const possible: PossibleValue[] = [];
@@ -774,12 +774,12 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       return { kind: "union", members: copied };
     }
     default:
-      // A copy of a value keeps the values a `choose` restricted it to; only a place drops them.
+      // A copy of a value keeps the values an `askChoice` restricted it to; only a place drops them.
       return type;
   }
 }
 
-/** The type without the values a `choose` restricted it to: a place keeps the plain type (#511 C5). */
+/** The type without the values an `askChoice` restricted it to: a place keeps the plain type (#511 C5). */
 export function plainType(type: StaticType): StaticType {
   return runCompileTask(plainTask(type));
 }
@@ -837,7 +837,7 @@ function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticTyp
   if (type.kind === "never") return openType();
   if (isCollection(type))
     return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
-  // A place keeps the plain type: values a `choose` restricts it to are not a type of their own.
+  // A place keeps the plain type: values an `askChoice` restricts it to are not a type of their own.
   const plain = yield* compileChild(plainTask(type));
   return copy || plain !== type ? yield* compileChild(copyTask(plain)) : plain;
 }
@@ -1382,8 +1382,8 @@ function* joinValuesTask(
   if (sameFamily(left, right)) return mergeScalars(left, right);
   if (includes(left, right)) return withOrigins(left, scalarOrigins(right));
   if (includes(right, left)) return withOrigins(right, scalarOrigins(left));
-  // Values of one type that a `choose` restricted to different values, such as two `string | integer` results, still
-  // share that type: the join keeps both sets of values.
+  // Values of one type that an `askChoice` restricted to different values, such as two `string | integer` results,
+  // still share that type: the join keeps both sets of values.
   const plainLeft = plainType(left);
   const plainRight = plainType(right);
   if (includes(plainLeft, plainRight) || includes(plainRight, plainLeft))
@@ -1543,7 +1543,7 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
   const stored = canonical(value);
   if (stored.kind === "unknown") return kept;
   if (kept.kind === "unknown") return stored;
-  // A value a `choose` restricted to some literal values keeps that restriction while nothing else is stored.
+  // A value an `askChoice` restricted to some literal values keeps that restriction while nothing else is stored.
   const restricted = (part: StaticType): boolean =>
     part.kind === "scalar" && part.values !== undefined;
   // The variable keeps its own type, such as a number that an assignment widened, with the restricted values.
@@ -1556,7 +1556,7 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
     // A slot that no value decided yet, such as a property that so far took only null or values the compiler cannot
     // know, may hold any value: it narrows to nothing more precise.
     if (resolved(part).kind === "open") return union(accepting);
-    // A member that holds the value itself, such as the `null` of `let answer = choose null`, says more than a slot
+    // A member that holds the value itself, such as the `null` of `let answer = askChoice null`, says more than a slot
     // that a later value decides.
     const precise = accepting.filter((member) => member.kind !== "open");
     return union(

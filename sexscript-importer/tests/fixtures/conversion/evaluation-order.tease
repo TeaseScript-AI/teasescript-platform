@@ -23,8 +23,7 @@ if conditional2 {
 say prose conditional2, instant
 let conditional3 = false
 if conditional3 {
-  say prose "Never ask", instant
-  conditional3 = askText().replace("\n", " ") != ""
+  conditional3 = askText prose() ("Never ask").replace("\n", " ") != ""
 }
 if conditional3 {
   say prose "yes", instant
@@ -46,10 +45,8 @@ function bump {
   return "prefill"
 }
 let prefill = bump()
-say prose "Question", instant
-let typed = askText(prefill: prefill).replace("\n", " ")
-say prose "Strict?", instant
-if askBoolean {
+let typed = askText prose() ("Question", prefill: prefill).replace("\n", " ")
+if askBoolean prose "Strict?" {
   say prose "Strict", instant
 } else {
   say prose "Gentle", instant
@@ -57,8 +54,7 @@ if askBoolean {
 let i: number = 0
 while i < 2 {
   say prose "Round", instant
-  say prose "Next", instant
-  i = askNumber
+  i = askNumber prose "Next"
 }
 // An increment used as a value follows the statement when nothing else in it reads the variable.
 let rules = ["Kneel", "Wait"]

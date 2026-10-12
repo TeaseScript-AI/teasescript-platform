@@ -871,7 +871,7 @@ interface Place {
   readonly widening?: PlacePath | undefined;
   /**
    * Whether no type is written for the place: a variable or parameter without an annotation, or a property or element
-   * that one holds. Only a written union type keeps a `choose` of different value types (#511 C2).
+   * that one holds. Only a written union type keeps an `askChoice` of different value types (#511 C2).
    */
   readonly inferred?: "variable" | "part" | undefined;
   /** The source spelling of the place, such as `items` or `door.locked`, when it has one. */
@@ -1004,7 +1004,7 @@ class TypeChecker {
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
    */
   #mixedLiterals = new Map<Expression, readonly StaticType[]>();
-  /** `choose` expressions whose buttons return values of different types, which only a declared union may keep. */
+  /** `askChoice` expressions whose buttons return values of different types, which only a declared union may keep. */
   readonly #mixedChoices = new Map<Expression, StaticType>();
 
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
@@ -1951,7 +1951,7 @@ class TypeChecker {
       this.#reportMixedChoice(
         written,
         (type) =>
-          `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = choose ...'`,
+          `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = askChoice ...'`,
       );
     } else {
       type = declared!;
@@ -2186,7 +2186,7 @@ class TypeChecker {
     )
       this.#loadReceivers.set(loaded, variable.type);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-    // A mixed `choose` that C2 rejects for the other receivers needs no second message here.
+    // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
       if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
         this.#checkSpeakerProperty(speakerProperty, statement.value, value);
@@ -2490,7 +2490,7 @@ class TypeChecker {
         value,
       });
     if (isAssignable(place.type, value)) {
-      // A place without a written type, or whose type the value would decide, cannot keep a mixed `choose`.
+      // A place without a written type, or whose type the value would decide, cannot keep a mixed `askChoice`.
       if (place.inferred !== undefined || members(place.type).some((member) => !isKnown(member)))
         this.#reportMixedChoice(expression, (written) =>
           place.verb === "take" && place.label !== null
@@ -2887,6 +2887,54 @@ class TypeChecker {
       return current;
     this.#relaxNarrowing(entry.variable);
     return this.#currentType(entry.variable);
+  }
+
+  /**
+   * Lets the `default:` of a list or dict `get` decide an element or value type that no value decided yet, as a first
+   * stored value would (V30 §16, §40), so that `counts.get(key, default: 0) + 1` counts. A default of unknown type
+   * decides nothing, and neither does a null default, so the type never starts as only null for a collection that holds
+   * no null (#831). Parts of the default that the compiler cannot know are checked when the script runs. A test may
+   * narrow a variable whose own type is still undecided, which the default then decides. Where a read saw the type
+   * undecided before, a later check starts with the type this default decided, and the default stays its first value.
+   */
+  *#defaultDecidesTask(
+    call: CallExpression,
+    collectionExpression: Expression,
+    receiver: StaticType,
+    defaultExpression: Expression,
+    fallback: StaticType,
+    scope: Scope,
+    kind: "list" | "dict",
+  ): CompileTask<void> {
+    const node = unwrap(collectionExpression);
+    const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
+    const own = entry?.kind === "variable" ? entry.variable.type : receiver;
+    const decides = (type: StaticType): boolean => {
+      const shared = elementStoreType(type);
+      return (
+        undecidedValues(type) ||
+        (shared !== undefined && findDecidedSlot(shared) === defaultExpression.span)
+      );
+    };
+    if (!decides(receiver) && !decides(own)) return;
+    if (!isKnown(fallback) || decidedValue(fallback).kind === "never") return;
+    const collection = this.#elementReceiver(collectionExpression, scope, receiver, fallback);
+    yield* compileChild(
+      this.#storeElementTask(
+        collection,
+        collectionExpression,
+        defaultExpression,
+        fallback,
+        scope,
+        "default to",
+      ),
+    );
+    this.#recordRuntimeCheck(
+      call,
+      elementStoreType(collection) ?? UNKNOWN_TYPE,
+      elementLabel(expressionLabel(collectionExpression), kind),
+      fallback,
+    );
   }
 
   /**
@@ -3431,7 +3479,7 @@ class TypeChecker {
           types.push(this.#capture(item));
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown. A
-        // `choose` that returns values of different types mixes them too.
+        // `askChoice` that returns values of different types mixes them too.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
         const choice = expression.elements.find((item) => this.#mixedChoices.has(unwrap(item)));
         let element = types.length === 0 ? openType() : joinTypes(known);
@@ -3475,7 +3523,7 @@ class TypeChecker {
         for (const property of expression.properties) {
           yield* compileChild(this.#expressionTask(property.value, scope));
           const value = this.#capture(property.value);
-          // A property is a place without a declared type, so it cannot keep a mixed `choose` (#511 C2).
+          // A property is a place without a declared type, so it cannot keep a mixed `askChoice` (#511 C2).
           this.#reportMixedChoice(property.value, () => ONE_TYPE_FIX);
           properties.set(property.name.name, freshPlaceType(value));
         }
@@ -4063,7 +4111,7 @@ class TypeChecker {
   }
 
   /**
-   * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
+   * What a cycle returns: each option's value, or the text of a choice object without one, as an `askChoice` button
    * returns it. Written choice objects are read one by one; for a computed one, whether it has a `value` is not
    * known, so either may be returned.
    */
@@ -4160,6 +4208,8 @@ class TypeChecker {
    * values must be valid, and written sources must leave the player a way to answer.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+    if (expression.presentation !== undefined)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     const sources: boolean[] = [];
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
@@ -4464,9 +4514,10 @@ class TypeChecker {
   }
 
   /**
-   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): a `choose` result compared
-   * with a value no button returns (#511 C5), or values of types that are never equal, such as text and a number, or a
-   * value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a literal `case`.
+   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): an `askChoice` result
+   * compared with a value no button returns (#511 C5), or values of types that are never equal, such as text and a
+   * number, or a value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a
+   * literal `case`.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -4508,8 +4559,8 @@ class TypeChecker {
 
   /**
    * Why a literal `case` value never matches what the switched value can still hold, or `undefined` when it may: the
-   * cases above took every value of its type, as `case is integer` before `case 5`, or a `choose` result never is it
-   * (#511 C5). The case compares with `==` (V30 §32).
+   * cases above took every value of its type, as `case is integer` before `case 5`, or an `askChoice` result never is
+   * it (#511 C5). The case compares with `==` (V30 §32).
    */
   #neverMatchingCaseValue(
     subjectExpression: Expression,
@@ -5224,6 +5275,28 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
+    // anything reads the element.
+    const listDefault = expression.arguments[1];
+    if (
+      method === "get" &&
+      expression.arguments.length === 2 &&
+      expression.arguments[0]!.kind === "positionalArgument" &&
+      listDefault?.kind === "namedArgument" &&
+      listDefault.name.name === "default" &&
+      members(nonNullType(value)).every(isList)
+    )
+      yield* compileChild(
+        this.#defaultDecidesTask(
+          expression,
+          callee.object,
+          receiver,
+          listDefault.value,
+          values[1]!,
+          scope,
+          "list",
+        ),
+      );
     // A list's `get` takes its index as indexing does, but gives its default for a negative one (#844). A member without
     // `get`, such as null, is reported below instead, and a dict, which has one, here, as for indexing.
     if (
@@ -5248,24 +5321,17 @@ class TypeChecker {
       if (method === "get" && defaultArgument !== undefined) {
         // The result may be the default itself, so it is a copy that later stores to either cannot share.
         fallback = this.#capture(defaultArgument.value);
-        // The default is a value the dict could hold: it must fit, and it decides an undecided value type. A default
-        // the compiler cannot know is checked when the script runs.
-        const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
+        // The default may be of any type, and the result joins it with the value type (V30 §40).
         yield* compileChild(
-          this.#storeElementTask(
-            collection,
+          this.#defaultDecidesTask(
+            expression,
             callee.object,
+            receiver,
             defaultArgument.value,
             fallback,
             scope,
-            "default to",
+            "dict",
           ),
-        );
-        this.#recordRuntimeCheck(
-          expression,
-          elementStoreType(collection) ?? UNKNOWN_TYPE,
-          elementLabel(expressionLabel(callee.object), "dict"),
-          fallback,
         );
       }
     } else if (
@@ -5280,11 +5346,12 @@ class TypeChecker {
     const results = all.map((member) => memberMethodType(member, method));
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
-      const handles = all.every((member) => ["timer", "media"].includes(resolved(member).kind));
+      const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
+      const handles = all.every((member) => HANDLE_LABELS.has(resolved(member).kind));
       if (handles && expression.arguments.length > 0)
         this.#report(
           typeCode.invalidOperand,
-          `${resolved(all[0]!).kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
+          `${handle} ${method}() takes no arguments.`,
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
@@ -5308,7 +5375,12 @@ class TypeChecker {
                 typeOf,
               ),
             );
-          return results[index]!;
+          if (fallback === undefined) return results[index]!;
+          // A dict gives the value or the default, so their types join as in a literal, where an empty list default
+          // takes the element type of a list value, and a default of another type adds its type. A default of unknown
+          // type makes the result unknown, so a place checks it when the script runs.
+          const both = [results[index]!, plainType(fallback)];
+          return joinTypes(both) ?? union(both);
         });
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
@@ -5322,9 +5394,7 @@ class TypeChecker {
             : `${method}() takes no arguments.`,
           callee.property.span,
         );
-      const result = all.length === 1 ? results[0]! : union(results.map((result) => result!));
-      // A value of unknown type as the default makes the result unknown, so a place checks it when the script runs.
-      return fallback === undefined ? result : union([result, plainType(fallback)]);
+      return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
@@ -5356,7 +5426,9 @@ class TypeChecker {
                 failing.kind === "camera" ||
                 failing.kind === "messageHandle"
               ? handleMemberMessage(failing.kind, method, "call")
-              : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+              : failing.kind === "permanentButton"
+                ? `Permanent buttons have no method '${method}'. Use remove().`
+                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -5439,12 +5511,20 @@ class TypeChecker {
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
-    // The element, or the default, which may be of another type, so their types join (#844).
+    // The element, or the default, which may be of another type, so their types join (#844). Where the default has a
+    // part that no value decided yet, such as `[]`, they join as in a literal, so that part takes the element type, as
+    // for a dict (#853). An element type that is still undecided, such as where a null default decided nothing, keeps
+    // the plain union.
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
-      return problems.length > 0 || fallback === undefined
-        ? UNKNOWN_TYPE
-        : union([copyType(value.element), plainType(typeOf(fallback.value))]);
+      if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
+      const element = copyType(value.element);
+      const other = plainType(typeOf(fallback.value));
+      const undecided = (type: StaticType): boolean =>
+        containsType(type, (part) => part.kind === "open");
+      const joined =
+        undecided(other) && !undecided(element) ? joinTypes([element, other]) : undefined;
+      return joined ?? union([element, other]);
     }
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
@@ -5655,15 +5735,6 @@ class TypeChecker {
           this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
         }
         return INTEGER_TYPE;
-      case "removePermanentButton":
-        if (argument !== undefined && value !== undefined)
-          this.#reportUnless(
-            value,
-            (member) => member.kind === "permanentButton",
-            argument.value,
-            "removePermanentButton(...) takes the identifier that showPermanentButton gives",
-          );
-        return NULL_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -6007,6 +6078,9 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    // The options of the question's mode are evaluated first, as for `say`.
+    if (expression.presentation !== null)
+      yield* compileChild(this.#expressionTask(expression.presentation, scope));
     if (expression.interactionKind === "form")
       return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind === "booleans")
@@ -6027,6 +6101,7 @@ class TypeChecker {
     }
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
+        if (operand === expression.presentation) continue;
         const type = yield* compileChild(this.#expressionTask(operand, scope));
         if (operand === expression.prefill)
           this.#checkInteractionPrefill(expression.interactionKind, operand, type);
@@ -6039,7 +6114,7 @@ class TypeChecker {
       }
       return interactionResultType(expression.interactionKind);
     }
-    // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
+    // `askChoice` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
     // button's value is also kept when the source shows it, so a comparison with another value can be checked (C5).
     const values: StaticType[] = [];
     let literals: (ScalarValue | null)[] | null = [];
@@ -6163,7 +6238,7 @@ class TypeChecker {
   }
 
   /**
-   * Reports a `choose` whose buttons return values of different types where its value would decide a type, such as
+   * Reports an `askChoice` whose buttons return values of different types where its value would decide a type, such as
    * an unannotated `let`, an inferred function result, or a parameter without a type (#511 C2).
    */
   #reportMixedChoice(expression: Expression, fix: (written: string) => string): void {
@@ -6171,7 +6246,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
+      `This askChoice returns ${describeValue(mixed)}. A place keeps one type. ${capitalize(unnamedMixFix(mixed) ?? fix(typeName(mixed)))}.`,
       expression.span,
     );
   }
@@ -7473,6 +7548,19 @@ function hasUndecidedElements(type: StaticType): boolean {
   });
 }
 
+/**
+ * Whether no value decided the element type of a list or the value type of a dict receiver yet, as for `[]`, `dict{}`,
+ * or `dict{ a: null }`, so that a first value decides it.
+ */
+function undecidedValues(type: StaticType): boolean {
+  const shared = elementStoreType(type);
+  const parts = shared === undefined ? [] : members(shared).map(resolved);
+  return (
+    parts.some((part) => part.kind === "open") &&
+    parts.every((part) => part.kind === "open" || part.kind === "null")
+  );
+}
+
 /** The methods of a dict. */
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
@@ -7930,7 +8018,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  if (value.kind === "camera" || value.kind === "messageHandle") return undefined;
+  // A message or a permanent button removes itself (#836).
+  if (value.kind === "messageHandle" || value.kind === "permanentButton")
+    return method === "remove" ? NULL_TYPE : undefined;
+  if (value.kind === "camera") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -8276,7 +8367,7 @@ function mixesFamilies(type: StaticType): boolean {
   return families.size > 1;
 }
 
-/** A numeric value with `-` before it: the values a `choose` restricted it to change sign too. */
+/** A numeric value with `-` before it: the values an `askChoice` restricted it to change sign too. */
 function negatedValues(type: StaticType, operator: string): StaticType {
   if (operator !== "-" || type.kind !== "scalar" || type.values === undefined) return type;
   return withValues(
@@ -8404,7 +8495,6 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["chance", BOOLEAN_TYPE],
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
-  ["removePermanentButton", NULL_TYPE],
 ]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
@@ -8499,6 +8589,14 @@ function mixDescription(first: StaticType, other: StaticType): string {
 /** The kinds of handle whose properties scripts read or assign. */
 type HandleKind = "timer" | "media" | "camera" | "messageHandle";
 
+/** The handles whose methods take no arguments, as their messages name them. */
+const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["timer", "Timer"],
+  ["media", "Media"],
+  ["messageHandle", "Message"],
+  ["permanentButton", "Permanent button"],
+]);
+
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
   handle: HandleKind,
@@ -8507,7 +8605,7 @@ function handleMemberMessage(
 ): string {
   if (handle === "messageHandle")
     return use === "call"
-      ? `Message handles have no method '${name}'. Change the message with its text property.`
+      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
       : `Message handles have no property '${name}'. Use the text property.`;
   if (handle === "camera")
     return use === "call"

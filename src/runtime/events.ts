@@ -40,6 +40,14 @@ export interface MessageUpdatedEvent {
   readonly span: SourceSpan;
 }
 
+/** `remove()` took the message of the `say` event `messageId` out of the conversation (#836). */
+export interface MessageRemovedEvent {
+  readonly kind: "messageRemoved";
+  readonly sequence: number;
+  readonly messageId: number;
+  readonly span: SourceSpan;
+}
+
 export interface ExitEvent {
   readonly kind: "exit";
   readonly sequence: number;
@@ -118,6 +126,7 @@ export interface ScriptStorageEditedEvent {
 export type InterpreterEvent =
   | SayEvent
   | MessageUpdatedEvent
+  | MessageRemovedEvent
   | ExitEvent
   | ActionRequestedEvent
   | ActionCompletedEvent

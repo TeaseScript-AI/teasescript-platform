@@ -16,6 +16,7 @@ import {
   recordContinueCapture,
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
@@ -50,6 +51,7 @@ import {
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
+  playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 
@@ -117,6 +119,32 @@ exit
   });
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
+
+test("an ask's prose question reaches the transcript as prose with its field, and keeps its mode on restore", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide {
+  prose: { align: "left" }
+}
+let name = askText as guide prose(position: "center") "Your name?"
+say "Hello \${name}", instant
+exit
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message") throw new Error("Expected the question.");
+  assert.equal(entry.text, "Your name?");
+  assert.deepEqual(entry.presentation, {
+    kind: "prose",
+    position: "center",
+    align: "left",
+    font: null,
+    color: null,
+    background: null,
+  });
+  assert.equal(playerRuntimeForeground(session)?.kind, "ask-text");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  assert.equal(playerRuntimeForeground(restored)?.kind, "ask-text");
 });
 
 test("speaker identity remains stable when authored presentation changes", () => {
@@ -194,7 +222,7 @@ say as guide "**Ready?**", instant
 showButton as guide "Continue"
 let text = askText as guide hint: "Text"
 let amount = askNumber as guide hint: "Number"
-let choice = choose as guide first: "Same", second: "Same"
+let choice = askChoice as guide first: "Same", second: "Same"
 say as guide "${"${text}"} / ${"${amount}"} / ${"${choice}"}", instant
 exit
 `);
@@ -292,7 +320,7 @@ exit
 
 test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
-    'let choice = choose "First", "Second"\nsay choice, instant\nexit',
+    'let choice = askChoice "First", "Second"\nsay choice, instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   assert.equal(foreground?.kind, "choose");
@@ -312,7 +340,7 @@ test("runtime adapter preserves choice order and rendered-selection semantics", 
 
 test("runtime adapter selects the rendered button even when two buttons return the same value", () => {
   const session = createPlayerRuntimeSession(
-    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant\nexit',
+    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = askChoice options\nsay [choice], instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
@@ -361,7 +389,7 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
 
 test("runtime checkpoint restore reconstructs presentation without replay or completion", () => {
   let session = createPlayerRuntimeSession(
-    'say "Question", instant\nlet answer = choose one: "One", two: "Two"\nsay answer, instant\nexit',
+    'say "Question", instant\nlet answer = askChoice one: "One", two: "Two"\nsay answer, instant\nexit',
   );
   const before = playerRuntimeForeground(session);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
@@ -497,7 +525,7 @@ exit
 test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
   let session = createPlayerRuntimeSession(`
 let reply = askText hint: "Reply"
-let answer = choose left: "Left", right: "Right"
+let answer = askChoice left: "Left", right: "Right"
 showButton "Continue"
 exit
 `);
@@ -1277,9 +1305,101 @@ test("a message update replaces its row in place, keeping its identity, speaker,
   assert.equal(restorePlayerRuntimeSession(restorePoint).transcriptEntries[0]?.text, "Waiting.");
 });
 
+test("a removed message keeps its row, marked removed, also through a restore and in a kept session's transcript", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'let first = say "First", instant',
+      'let second = say "Second", instant',
+      'say "Third", instant',
+      "wait 1 s",
+      "second.remove()",
+      "first.remove()",
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const before = session.transcriptEntries.map((entry) => entry.id);
+  const restorePoint = createPlayerRuntimeRestorePoint(session);
+  assert.deepEqual(session.transcriptRemovedRows, []);
+
+  session = observePlayerRuntimeTime(session, 1_000)!.session;
+  // The rows keep their places, so the others keep theirs; the removal is the event Explain values explains.
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => [
+      entry.id,
+      entry.text,
+      entry.kind === "message" && entry.removed === true,
+    ]),
+    [
+      [before[0], "First", true],
+      [before[1], "Second", true],
+      [before[2], "Third", false],
+    ],
+  );
+  assert.deepEqual(session.transcriptRemovedRows, [0, 1]);
+  const removal = session.events.findLast((event) => event.kind === "messageRemoved");
+  const first = session.transcriptEntries[0];
+  assert.ok(first?.kind === "message");
+  assert.equal(first.contentSequence, removal?.sequence);
+
+  // A restore, and the transcript a kept session's events give, show the same rows.
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  assert.deepEqual(restored.transcriptRemovedRows, [0, 1]);
+  assert.deepEqual(playerRuntimeTranscript(session.events).entries, session.transcriptEntries);
+  assert.deepEqual(restorePlayerRuntimeSession(restorePoint).transcriptRemovedRows, []);
+});
+
+test("the conversation leaves removed messages out of its positions and groups the messages around them", async () => {
+  const presentation: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/transcriptPresentation.ts",
+  );
+  for (const name of ["adjoins", "shownEntryIndex", "shownPosition"])
+    assert.equal(typeof presentation[name], "function", name);
+  // EVIDENCE: validation: Vite loaded the real source module and each export is callable.
+  const { adjoins, shownEntryIndex, shownPosition } = presentation as {
+    adjoins: (entries: readonly unknown[], index: number, other: number) => boolean;
+    shownEntryIndex: (removed: readonly number[], position: number) => number;
+    shownPosition: (removed: readonly number[], index: number) => number;
+  };
+  const session = createPlayerRuntimeSession(
+    [
+      'say "First", instant',
+      'let a = say "Gone A", instant',
+      'let b = say "Gone B", instant',
+      'say "Second", instant',
+      'let c = say "Gone C", instant',
+      "b.remove()",
+      "c.remove()",
+      "a.remove()",
+      "wait 1 s",
+      "exit",
+    ].join("\n"),
+  );
+  const entries = session.transcriptEntries;
+  const removed = session.transcriptRemovedRows;
+  assert.deepEqual(removed, [1, 2, 4]);
+  const shown = Array.from({ length: entries.length - removed.length }, (_, position) =>
+    shownEntryIndex(removed, position),
+  );
+  assert.deepEqual(
+    shown.map((index) => entries[index]?.text),
+    ["First", "Second"],
+  );
+  // Past the last shown entry, a position names no entry.
+  assert.equal(entries[shownEntryIndex(removed, shown.length)], undefined);
+  // A removed message's place is that of the next message the conversation shows.
+  assert.deepEqual(
+    entries.map((_, index) => shownPosition(removed, index)),
+    [0, 1, 1, 1, 2],
+  );
+  // First and Second adjoin, as if the removed messages between them had never been there.
+  assert.equal(adjoins(entries, shown[1]!, shown[0]!), true);
+});
+
 test("an answer whose run throws leaves the transcript as the Player showed it, and the next answer follows on", () => {
   const source = [
-    'let pick = choose again: "Again", long: "Long"',
+    'let pick = askChoice again: "Again", long: "Long"',
     'if pick == "long" {',
     '  say "deep", instant',
     "}",

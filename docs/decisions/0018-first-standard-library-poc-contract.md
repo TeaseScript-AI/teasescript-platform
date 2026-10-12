@@ -15,7 +15,7 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 
 ## Decision summary
 
-1. The first blocking Standard Library implementation slice is `showButton`, `askText`, `askNumber`, and `choose`.
+1. The first blocking Standard Library implementation slice is `showButton`, `askText`, `askNumber`, and `askChoice`.
 2. All four helpers use one generic typed foreground-interaction primitive.
 3. `say` plus deterministic smart autoplay is the next implementation slice after those interactions.
 4. Compiler-owned `wait` remains a core path and is not wrapped by the Standard Library in this POC.
@@ -23,15 +23,15 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 6. The Platform Standard Library is an automatic default prelude. Its selected names are directly callable, protected from ordinary script shadowing, and cannot be disabled or replaced in the first POC.
 7. The selected resumable Standard Library behavior is fully lowered into versioned JSON-safe plan instructions. Restore never resolves against an implicit latest library.
 8. The first POC uses one Standard chat target with stable optional speaker provenance. Broader involved-speaker and conversation identity remain deferred.
-9. `askText`, `askNumber`, `choose`, and `showButton` are mandatory foreground interactions with no cancellation
+9. `askText`, `askNumber`, `askChoice`, and `showButton` are mandatory foreground interactions with no cancellation
    result. Timer interrupts may suspend them; handler `exit` discards the interrupted instruction without a value.
 10. Interaction definitions and completions are bounded, typed, JSON-safe data. Over-limit data is rejected deterministically without truncation or partial state mutation.
 11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as
     buttons or a dropdown without changing semantics; `showButton` completes through its rendered button or exact
     visible-text composer submission.
 12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible
-    choice text may activate `choose`; exact visible button text may activate `showButton`. Space in the empty composer
-    does not activate `showButton`.
+    choice text may activate `askChoice`; exact visible button text may activate `showButton`. Space in the empty
+    composer does not activate `showButton`.
 13. `say` uses account-configured smart autoplay by default, supports exact durations, `0 s`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive reading time is one ADR 0016 pending action, the foreground action: a paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision on #829, 2026-10-11).
 15. A skippable pacing gate may be completed by a primary click or tap on Player background or other unused Player space, or by Space while the focused composer is empty. Skip completes only the pacing gate.
@@ -48,7 +48,7 @@ Implementation is split into two ordered slices.
 showButton
 askText
 askNumber
-choose
+askChoice
 ```
 
 This slice establishes the generic interaction action, typed completion validation, checkpoint/restore behavior,
@@ -103,7 +103,7 @@ The selected interaction forms support an optional requesting speaker:
 ```tease
 let answer = askText as mistress "What is your name?"
 let amount = askNumber as mistress "How many?"
-let choice = choose as mistress yes: "Yes", no: "No"
+let choice = askChoice as mistress yes: "Yes", no: "No"
 showButton as mistress "Ready"
 ```
 
@@ -248,26 +248,33 @@ let day = askDate hint: "Pick a day"
   again.
 - `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
   question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
+- The question may be shown as `say` shows a message (owner decision on #832, 2026-10-11): `bubble(options)` or
+  `prose(options)` after `as speaker` and before the question, as in `askText prose "Your name?"`, with the options of
+  `say`, evaluated once before the question. Without one, the speaker's mode applies, a bubble by default. A mode needs
+  a question ([V30 §20](../specifications/accepted-syntaxes-v30.md#20-input-functions)).
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
   hint shows none while the control keeps its accessible name. In a text or number field the hint shows only while the
   field is empty, so a prefill usually hides it; a date or time control shows it beside the control, also with a
   prefill. Examples write `prefill:` first. Neither the question nor the hint becomes the
   accessible name.
 
-### `choose`
+### `askChoice`
 
-`choose` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
+`askChoice` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
+It was named `choose` until the owner decision of 2026-10-11 (#830), so that every request that waits for the player's
+answer starts with `ask`; that earlier name is a compile error that names the fix.
 
-Each option shows one button, or one per element when the option is a list or a set, and `choose` returns the selected
-button's value. A value may be written before an option's `:`; an option without one returns itself, with its own type:
+Each option shows one button, or one per element when the option is a list or a set, and `askChoice` returns the
+selected button's value. A value may be written before an option's `:`; an option without one returns itself, with its
+own type:
 
 ```tease
-let result = choose "Bratty", "Very submissive"
-let result = choose as mistress "Bratty", "Very submissive"
-let result = choose bratty: "Bratty", submissive: "Very submissive"
-let result = choose as mistress first: "Mystery", second: "Mystery"
-let result = choose 1: "Open the door", 2: "Walk away"
-let result = choose back: "Back", offenses, "Corner"
+let result = askChoice "Bratty", "Very submissive"
+let result = askChoice as mistress "Bratty", "Very submissive"
+let result = askChoice bratty: "Bratty", submissive: "Very submissive"
+let result = askChoice as mistress first: "Mystery", second: "Mystery"
+let result = askChoice 1: "Open the door", 2: "Walk away"
+let result = askChoice back: "Back", offenses, "Corner"
 ```
 
 [V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices) defines options, values, list options, and choice
@@ -288,7 +295,7 @@ objects (owner decisions on #511). Interaction rules:
 
 A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Player application does not supply an independent canonical transcript string.
 
-This compact syntax supersedes the V30 split between `{...}` choice bodies with values and `[...]` choice bodies without. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
+This compact syntax supersedes the V30 split between `{...}` choice bodies with values and `[...]` choice bodies without. The question itself is normally a preceding `say`; compact `askChoice` has no prompt argument.
 
 ### Authored button backgrounds
 
@@ -299,7 +306,7 @@ evaluate in source order. A computed object follows the same shape; unknown prop
 object may also carry `value` ([V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices)).
 
 ```tease
-let result = choose coast: { text: "Stay by the water", background: "seagreen" },
+let result = askChoice coast: { text: "Stay by the water", background: "seagreen" },
   lights: { text: "Follow the lights", background: "gold" }, sunset: "Wait for sunset"
 showButton "Continue", background: "hsl(155 55% 35%)"
 ```
@@ -319,7 +326,7 @@ let elapsed = showButton "Continue", timeout: 30 s
 ```
 
 The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
-foreground-control vocabulary as `choose`. The Player activates it by
+foreground-control vocabulary as `askChoice`. The Player activates it by
 clicking/tapping the rendered button or submitting its exact non-empty stored visible text in the composer. Other text,
 Space in the empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
@@ -425,11 +432,11 @@ askText or askNumber:
     actionId
     submittedText
 
-choose through typed input:
+askChoice through typed input:
     actionId
     submittedText
 
-choose control:
+askChoice control:
     actionId
     selected option position
 
@@ -454,10 +461,10 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 ## Mandatory completion and pause policy
 
-`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result (a form written with
+`askText`, `askNumber`, `askChoice`, and `showButton` expose no public cancellation result (a form written with
 `cancel:` is the exception: cancelling it returns `null`; see [V30 §20](../specifications/accepted-syntaxes-v30.md#forms)):
 
-- they never complete with `null` as a cancellation result (`choose` returns `null` only as the value of a selected
+- they never complete with `null` as a cancellation result (`askChoice` returns `null` only as the value of a selected
   option);
 - closing or hiding a control does not complete it;
 - invalid input does not complete it;
@@ -487,13 +494,13 @@ During a foreground interaction:
 - the answer field receives focus by default so the player can type without first clicking it;
 - only a valid completion advances the deterministic foreground interaction. Non-matching composer text does not become ordinary script progress; in this first POC it is a rejected attempt and the same mandatory interaction remains active. Future LLM clarification or interpretation may handle such text only through a separately accepted constrained contract.
 
-The Player application dynamically chooses how a `choose` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
+The Player application dynamically chooses how an `askChoice` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
 
 Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same values, visible texts, completion validation, transcript output, and return value.
 
 Valid `askText` and `askNumber` submissions are represented as player-authored transcript messages using their normalization rules while the engine stores the typed return value.
 
-For `choose`, selecting a button or dropdown entry:
+For `askChoice`, selecting a button or dropdown entry:
 
 1. supplies the position of the selected button;
 2. lets the engine derive and append the exact visible option text as the player's transcript message;
@@ -724,9 +731,10 @@ The engine remains authoritative and validates the proposal against the active a
 
 This ADR accepts these scoped post-V30 changes:
 
-- add compact `as speaker` forms for `askText`, `askNumber`, `choose`, and `showButton`;
+- add compact `as speaker` forms for `askText`, `askNumber`, `askChoice`, and `showButton`;
 - add compact command-expression forms for `askText` and `askNumber`;
-- replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
+- replace the V30 split between `askChoice` bodies with values and lists without them by one comma-separated compact
+  form;
 - retain identifier and numeric values before `:` from accepted V30 capability;
 - extend `say` with `skippable`, `unskippable`, exact durations, `0 s`, and `instant`;
 - define field text as Standard UI hint/label data rather than automatic transcript output (for basic asks superseded by
@@ -744,7 +752,7 @@ Implementation should be split into small issues, at minimum:
 
 1. **Default prelude and lowering boundary** — reserve selected names, add parser/semantic support for compact forms, and lower them without final package import syntax.
 2. **Generic foreground interaction runtime** — add the typed action union, any platform guards justified under ADR 0019, completion validation, transcript derivation, checkpoint/restore, events, and deterministic resume tests.
-3. **Basic Standard Library interactions and Standard UI** — implement `showButton`, `askText`, `askNumber`, and `choose`, dynamic button/dropdown presentation, composer integration, transcript behavior, accessibility defaults, and playground acceptance examples.
+3. **Basic Standard Library interactions and Standard UI** — implement `showButton`, `askText`, `askNumber`, and `askChoice`, dynamic button/dropdown presentation, composer integration, transcript behavior, accessibility defaults, and playground acceptance examples.
 4. **Smart-autoplay runtime and `say` composition** — implement validated captured account settings, `chatPacingGate`, exact/instant modes, speaker skip defaults, click/tap/Space completion, event ordering, and resume-equivalence tests.
 5. **Editor metadata and diagnostics** — add completion, signature/hover guidance, compact-syntax formatting,
    duplicate/mixed-choice diagnostics, pacing diagnostics, bounded-data diagnostics, and protected-name diagnostics.
@@ -758,7 +766,7 @@ This ADR intentionally defers:
 
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
 - parenthesized call forms other than the basic asks, and richer input/choice options;
-- custom input hints for compact `choose`;
+- custom input hints for compact `askChoice`;
 - any concrete platform guard that a real boundary requires; its mechanism and selected boundary must be justified under ADR 0019 before tests verify it;
 - the exact advanced accessibility-override field;
 - LLM implementation and author-facing interpretation options;

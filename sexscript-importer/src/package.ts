@@ -77,7 +77,6 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "pow",
   "random",
   "randomInteger",
-  "removePermanentButton",
   "round",
   "showButton",
   "sign",
@@ -2032,7 +2031,7 @@ const RESERVED_IDS = new Set([
   ..."let function return if else switch case default repeat for in while break continue and or not set true false".split(
     " ",
   ),
-  ..."null choose speaker say as label goto call end exit fallback global tagged save load delete is".split(
+  ..."null choose askChoice speaker say as label goto call end exit fallback global tagged save load delete is".split(
     " ",
   ),
   ..."string boolean integer number date time datetime timestamp absoluteDateTime duration list dict object range media script timer".split(

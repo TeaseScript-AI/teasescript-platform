@@ -15,7 +15,7 @@ say prose "Cards ${deal_hand().length}", instant
 // BanjoGameHub rockpaperscissors: a ladder of tests of one choice is a switch.
 let opponent = ""
 say prose "Select your opponent:", instant
-let pick_opponent = choose 0: "Anna",
+let pick_opponent = askChoice 0: "Anna",
   1: "Bella",
   2: "Cleo",
   3: "Dora"

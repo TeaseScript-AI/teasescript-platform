@@ -222,17 +222,17 @@ test("cue positions may start with an object literal and continue like other exp
   );
   assert.deepEqual(
     offsets(
-      'playAudio "a" {\n  beforeEnd choose 1 s,\n\n    2 s { }\n  at choose 3 s { }\n}\nexit',
+      'playAudio "a" {\n  beforeEnd askChoice 1 s,\n\n    2 s { }\n  at askChoice 3 s { }\n}\nexit',
     ),
     ["beforeEnd", "at"],
   );
   // Only a cue position ends a choice option at `{`.
-  const choiceBeforeBrace = 'let x = choose 1: "One" {\n}';
+  const choiceBeforeBrace = 'let x = askChoice 1: "One" {\n}';
   const choiceBrace = choiceBeforeBrace.indexOf("{");
   assert.deepEqual(firstError(choiceBeforeBrace), ["TSP031", choiceBrace, choiceBrace + 1]);
   // A block inside a cue position parses like any other block.
   const blockInPosition =
-    'function point(x) {\n  return 1 s\n}\nplayAudio "a" {\n  at point(timer async 1 s {\n    let n = choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
+    'function point(x) {\n  return 1 s\n}\nplayAudio "a" {\n  at point(timer async 1 s {\n    let n = askChoice 1: "Once", 2: "Twice" { }\n  }) { }\n}';
   const innerBrace = blockInPosition.indexOf("{ }");
   assert.deepEqual(firstError(blockInPosition), ["TSP031", innerBrace, innerBrace + 1]);
 });

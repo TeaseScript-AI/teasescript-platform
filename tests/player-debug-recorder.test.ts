@@ -272,7 +272,7 @@ test("each call keeps its own copy of the arguments and the store's answers, als
 test("an answer keeps how the player gave it, which the export carries and checks", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'let name = askText "Name"\nlet pick = choose yes: "Yes", no: "No"\nwait 1 s\nexit',
+    'let name = askText "Name"\nlet pick = askChoice yes: "Yes", no: "No"\nwait 1 s\nexit',
     { recorder },
   );
   session = answeredByPlayerInput(session, "enter", () =>
@@ -613,7 +613,7 @@ test("after a call throws, the session continues from the state the Player showe
     '    say "deep", instant',
     "  }",
     "}",
-    'let pick = choose again: "Again"',
+    'let pick = askChoice again: "Again"',
     'say "done", instant',
     "exit",
   ].join("\n");
@@ -676,7 +676,7 @@ test("after a call the recording could not keep, an error still continues from t
   const asking = [
     ...timer,
     'let name = askText "Name"',
-    'let pick = choose again: "Again"',
+    'let pick = askChoice again: "Again"',
     "exit",
   ].join("\n");
   const small = new DebugRecorder({ argumentBytes: 50 });
@@ -739,7 +739,7 @@ test("a refusal the host does not keep leaves the later publications recoverable
     "timer async 300 ms {",
     "  seen = 1",
     "}",
-    'let pick = choose again: "Again"',
+    'let pick = askChoice again: "Again"',
     "exit",
   ].join("\n");
   const shown = startedWithScopesUsedUp(source, 1, new DebugRecorder());

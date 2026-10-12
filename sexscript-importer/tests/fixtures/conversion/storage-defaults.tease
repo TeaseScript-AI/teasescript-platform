@@ -139,8 +139,7 @@ function setVolume {
 // A null the script sets a text variable to is the empty text too; a value of a type that the importer cannot tell
 // keeps the read of an open type.
 let dompic = load "game.dompic", default: ""
-say prose "Reset the picture?", instant
-if askBoolean {
+if askBoolean prose "Reset the picture?" {
   dompic = ""
 }
 if dompic == "" {
@@ -176,8 +175,7 @@ function readName {
 }
 function decide {
   let ret = false
-  say prose "Ready?", instant
-  ret = askBoolean
+  ret = askBoolean prose "Ready?"
   return ret
 }
 say prose "${readName()} ${decide()}", instant
@@ -241,8 +239,7 @@ if noteCopy == null {
 // NOTE SX_LOAD_OPEN_NULL line 104: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
 let oldHints = load "game.oldHints", default: sexscriptLegacyValue(null)
 function readHint {
-  say prose "A hint?", instant
-  if askBoolean {
+  if askBoolean prose "A hint?" {
     let savedHint: string? = load "game.hint", default: null
     return savedHint
   }
@@ -253,15 +250,12 @@ if readHint() == null {
 }
 // A variable is apart from another of the same name in another block.
 function work {
-  say prose "Read?", instant
-  if askBoolean {
+  if askBoolean prose "Read?" {
     let v = load "game.work", default: ""
     say prose "Work ${v}", instant
   }
-  say prose "Ask?", instant
-  if askBoolean {
-    say prose "Your name?", instant
-    let v = askText(prefill: "x").replace("\n", " ")
+  if askBoolean prose "Ask?" {
+    let v = askText prose() ("Your name?", prefill: "x").replace("\n", " ")
     if v == null {
       say prose "No name.", instant
     }
@@ -306,8 +300,7 @@ say prose "Note ${checkNote()} ${checkNote(null)}", instant
 // A variable that such a text is copied into holds its null too, where no null test rules it out.
 let firstPic: string? = load "game.firstPic", default: null
 let shownPic: string? = "none"
-say prose "Show the first?", instant
-if askBoolean {
+if askBoolean prose "Show the first?" {
   shownPic = firstPic
 }
 say prose "Picture ${shownPic}", instant
@@ -407,14 +400,12 @@ let grids = [["old"]]
 grids[0][0] = load "game.grid${slot}", default: ""
 say prose "Grid ${grids[0][0]}", instant
 function fillLists {
-  say prose "Words?", instant
-  if askBoolean {
+  if askBoolean prose "Words?" {
     let values = ["old"]
     values[0] = load "game.word${slot}", default: ""
     say prose "Word ${values[0]}", instant
   }
-  say prose "Numbers?", instant
-  if askBoolean {
+  if askBoolean prose "Numbers?" {
     let values = [1]
     say prose "Number ${values[0]}", instant
   }

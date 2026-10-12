@@ -21,7 +21,6 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "true",
   "false",
   "null",
-  "choose",
   "speaker",
   "say",
   "as",
@@ -119,6 +118,9 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "cancelSchedule",
   "askText",
   "askNumber",
+  "askChoice",
+  // The earlier name of `askChoice` stays reserved, so its use is a compile error that names the fix (#830).
+  "choose",
   "showButton",
   "takePhoto",
   "askImage",
@@ -132,6 +134,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "wait",
   "timer",
   "showPermanentButton",
+  // The earlier way to remove a permanent button stays reserved, so its call is a compile error that names
+  // `button.remove()` (#836).
   "removePermanentButton",
   "playAudio",
   "playVideo",
@@ -214,7 +218,6 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "getDateTime",
   "getAbsoluteDateTime",
   "script",
-  "removePermanentButton",
 ] as const);
 
 /** The earlier names of core built-ins, whose calls are compile errors that name the fix (ADR 0026). */

@@ -485,7 +485,7 @@ test("folding known durations takes work in proportion to the source", () => {
 
 test("calendar durations survive checkpoints and choices with their parts", () => {
   const plan = compileValidPlan(
-    "let d = 1 calendar mo + 2 calendar d + 3 h\nlet e = 2 days\nlet pick = choose [1 calendar day, 1 calendar week]\nsay d\nsay e\nsay pick\nexit",
+    "let d = 1 calendar mo + 2 calendar d + 3 h\nlet e = 2 days\nlet pick = askChoice [1 calendar day, 1 calendar week]\nsay d\nsay e\nsay pick\nexit",
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const action = waiting.snapshot.foregroundAction;

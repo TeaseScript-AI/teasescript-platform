@@ -14,8 +14,7 @@ function yesText {
   return "Yes"
 }
 let option = yesText()
-say prose "Question", instant
-let result = askBoolean yesText: option
+let result = askBoolean prose "Question", yesText: option
 function getRandom(maxValue) {
   return maxValue - 1
 }
@@ -25,8 +24,7 @@ let count = 0
 let ready = false
 let question = null
 let answer = askText().replace("\n", " ")
-say prose "Ready?", instant
-let ignoredAnswer1 = askBoolean
+let ignoredAnswer1 = askBoolean prose "Ready?"
 let match = 1
 if count == match {
   say prose "matched", instant

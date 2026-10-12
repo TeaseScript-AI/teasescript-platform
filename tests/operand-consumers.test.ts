@@ -89,26 +89,26 @@ test("a computed choice object's text that cannot be shown is an error", () => {
   // The object may lack any other property when the choice opens, which the runtime checks (ADR 0021 rule 1.8); a text
   // of a known type that cannot be shown fails whether it is there or missing.
   for (const source of SOURCES.slice(1).map((wrap) =>
-    wrap("{ text: [1], value: 1 }", "let answer = choose @"),
+    wrap("{ text: [1], value: 1 }", "let answer = askChoice @"),
   ))
     assert.ok(
       errors(source).some(([code]) => code === "TSV040"),
       `${source}\n${JSON.stringify(errors(source))}`,
     );
   assert.deepEqual(
-    errors("let options = [{ text: [1], value: 1 }]\nlet answer = choose options\nexit").map(
+    errors("let options = [{ text: [1], value: 1 }]\nlet answer = askChoice options\nexit").map(
       ([code]) => code,
     ),
     ["TSV040"],
   );
   assert.deepEqual(
-    errors('let options = [{ text: "A", value: 1 }]\nlet answer = choose options\nexit'),
+    errors('let options = [{ text: "A", value: 1 }]\nlet answer = askChoice options\nexit'),
     [],
   );
   // A text that may still be null may give a button.
   for (const source of [
-    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = choose options\nsay "done"\nexit',
-    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = choose option\nsay "done"\nexit',
+    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = askChoice options\nsay "done"\nexit',
+    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = askChoice option\nsay "done"\nexit',
   ])
     assert.deepEqual(saysAfterChoice(source), ["done"], source);
 });

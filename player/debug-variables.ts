@@ -124,7 +124,10 @@ export function playerDebugVariables(
   );
 }
 
-/** A value as the trace previews it; a message handle also shows the text its message has now. */
+/**
+ * A value as the trace previews it; a message handle also shows the text its message has now, or, once `remove()`
+ * took the message out of the conversation, that it was removed with the text it had.
+ */
 function livePreview(
   snapshot: Pick<RuntimeSessionVariablePreviews, "liveMessages">,
   variable: RuntimeSessionVariablePreview,
@@ -132,11 +135,12 @@ function livePreview(
   const preview = { text: variable.preview, truncated: variable.truncated };
   const messageId = variable.messageId;
   if (messageId === null) return preview;
-  const text = snapshot.liveMessages.find((message) => message.messageId === messageId)?.sourceText;
-  if (text === undefined) return preview;
+  const message = snapshot.liveMessages.find((record) => record.messageId === messageId);
+  if (message === undefined) return preview;
+  const text = message.sourceText;
   const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
   return {
-    text: `<message ${messageId} ${quotedText(text.slice(0, limit))}>`,
+    text: `<message ${messageId}${message.removed === true ? " removed" : ""} ${quotedText(text.slice(0, limit))}>`,
     truncated: text.length > limit,
   };
 }
@@ -389,7 +393,8 @@ export function playerDebugRecordText(
       title = `${target} =`;
       break;
     case "mutation":
-      title = `${target} changed`;
+      // The one change that is a message's output: its `remove()`, with the text the message had (#836).
+      title = detail?.kind === "output" ? "Removed message" : `${target} changed`;
       break;
     case "argument":
     case "parameter":

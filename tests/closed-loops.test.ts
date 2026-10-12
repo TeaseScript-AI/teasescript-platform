@@ -7,7 +7,7 @@ const NO_WAY_OUT =
   "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.";
 
 /** A start that can end the session, so the loop after it is the only thing to report. */
-const QUIT = 'let answer = choose "Play", "Quit"\nif answer == "Quit" { exit }\n';
+const QUIT = 'let answer = askChoice "Play", "Quit"\nif answer == "Quit" { exit }\n';
 
 /** Each diagnostic as `line severity code`, and whether the source compiled to a plan. */
 function report(
@@ -53,7 +53,7 @@ test("a while true or label loop with no way out is a warning, which does not pr
     ["while (true) {\n    wait 1 s\n}", 3],
     ['label again\nsay "Again", instant\nwait 1 s\ngoto again', 6],
     // Asking, showing, and engine functions that only compute a value are no way out.
-    ['while true {\n    let mood = choose "Good", "Bad"\n    say mood\n}', 3],
+    ['while true {\n    let mood = askChoice "Good", "Bad"\n    say mood\n}', 3],
     ['while true {\n    say "You rolled ${randomInteger(1..6)}", instant\n    wait 1 s\n}', 3],
     // A timer block without a way out does not end the loop.
     ['timer async 5 s { say "Hurry" }\nwhile true { wait 1 s }', 4],
@@ -78,15 +78,15 @@ test("a while true or label loop with no way out is a warning, which does not pr
 test("a way out anywhere in the loop, also nested or in a branch never taken, silences the warning", () => {
   for (const [source, options] of [
     [
-      'while true {\n    let answer = choose "Continue", "Stop"\n    if answer == "Stop" { break }\n}\nexit',
+      'while true {\n    let answer = askChoice "Continue", "Stop"\n    if answer == "Stop" { break }\n}\nexit',
       {},
     ],
     [
-      'while true {\n    let answer = choose "Continue", "Stop"\n    if answer == "Stop" { goto done }\n    wait 1 s\n}\nlabel done\nexit',
+      'while true {\n    let answer = askChoice "Continue", "Stop"\n    if answer == "Stop" { goto done }\n    wait 1 s\n}\nlabel done\nexit',
       {},
     ],
     [
-      'label again\nsay "Again"\nlet answer = choose "Again", "Stop"\nif answer == "Stop" { exit }\nwait 1 s\ngoto again',
+      'label again\nsay "Again"\nlet answer = askChoice "Again", "Stop"\nif answer == "Stop" { exit }\nwait 1 s\ngoto again',
       {},
     ],
     [`${QUIT}while true {\n    if false { break }\n    wait 1 s\n}`, {}],

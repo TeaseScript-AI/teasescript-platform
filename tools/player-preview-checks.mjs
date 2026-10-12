@@ -2263,7 +2263,7 @@ async function debugVariablesChecks(page) {
     `let tools = ["paddle", "cane", ${JSON.stringify(longTool)}]`,
     `let variable_${"verylong".repeat(24)} = 7`,
     `say "You get \${spanks} spanks, \${spanks} in all, \${variable_${"verylong".repeat(24)}}", instant`,
-    'let pick = choose a: "Apple", b: "Pear"',
+    'let pick = askChoice a: "Apple", b: "Pear"',
     'say "You picked ${pick}", instant',
     'let done = showButton "Done"',
     // After Debug turns on again: a chain eight values deep from an unrecorded value, with a wide sum on the way.

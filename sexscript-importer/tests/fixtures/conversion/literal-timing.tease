@@ -84,8 +84,7 @@ say prose """
 wait 5 s
 
 // A computed wait, and a run of waits; a sum takes parentheses before its unit.
-say prose "How long?", instant
-let n = askInteger prefill: 3
+let n = askInteger prose "How long?", prefill: 3
 say prose "Waiting ${n} seconds.", instant
 wait n s
 say prose "Hold it.", instant

@@ -27,12 +27,12 @@ import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
 
 /**
- * A plan whose `choose` is replaced by a prepared form reading the local `request`, as the compiler lowers `askForm`
+ * A plan whose `askChoice` is replaced by a prepared form reading the local `request`, as the compiler lowers `askForm`
  * once its source form exists. `prefix` runs first; the form's result is bound to `result`.
  */
 function formPlan(request: string, shape: PreparedFormShape, prefix = ""): InstructionPlan {
   const base = compileValidPlan(
-    `${prefix}let request = ${request}\nlet result = choose request, "placeholder"\nexit`,
+    `${prefix}let request = ${request}\nlet result = askChoice request, "placeholder"\nexit`,
   );
   const index = base.instructions.findIndex(
     (instruction) => instruction.kind === "interaction" && "preparedUi" in instruction,

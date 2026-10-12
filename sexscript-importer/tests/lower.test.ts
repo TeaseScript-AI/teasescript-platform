@@ -592,7 +592,7 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
     emitTease(program),
     [
       'say prose "Choose one", instant',
-      'let selected = choose 0: "First",',
+      'let selected = askChoice 0: "First",',
       '  1: "Second",',
       '  2: "Third"',
       "exit",
@@ -1306,7 +1306,7 @@ test("maps legacy getBooleans to native askBooleans", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    'say prose "Choose", instant\nlet selected = askBooleans(texts: ["A", "B"], prefill: [true, false])\nexit\n',
+    'let selected = askBooleans prose "Choose", texts: ["A", "B"], prefill: [true, false]\nexit\n',
   );
 });
 

@@ -20,14 +20,14 @@ function sexscriptLegacyItemAt(listValue, position) {
 let offenses = ["Being late", "Being rude"]
 offenses.add("Lying")
 say prose "What do you confess?", instant
-let pick = choose 0: "Back", sexscriptLegacyMenuOptions(offenses, 1)
+let pick = askChoice 0: "Back", sexscriptLegacyMenuOptions(offenses, 1)
 if pick > 0 {
   say prose "You confessed: ${offenses[pick - 1]}", instant
 }
 
 let levels = ["Low", "High"]
 say prose "Which level?", instant
-let level = choose sexscriptLegacyMenuOptions(levels, 0)
+let level = askChoice sexscriptLegacyMenuOptions(levels, 0)
 say prose "Level ${levels[level]}", instant
 
 let toys = [
@@ -38,27 +38,27 @@ let menuTexts = []
 for it in toys {
   menuTexts.add(it.lbl)
 }
-let toy = toys[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].id
+let toy = toys[(askChoice sexscriptLegacyMenuOptions(menuTexts, 0))].id
 say prose "Toy: ${toy}", instant
 
 let again = 0
 while again == 0 {
   say prose "Again?", instant
-  again = choose 0: "Back", sexscriptLegacyMenuOptions(levels, 1)
+  again = askChoice 0: "Back", sexscriptLegacyMenuOptions(levels, 1)
 }
 
 // The same menu reached again with other option texts.
 let options = ["Low", "High"]
 for roundValue in 1..=2 {
   say prose "Pick one", instant
-  let picked = choose sexscriptLegacyMenuOptions(options, 0)
+  let picked = askChoice sexscriptLegacyMenuOptions(options, 0)
   say prose "Picked ${options[picked]}", instant
   options = ["Plug", "Clamps"]
 }
 // Written options after a runtime list join it, so their positions follow the list's.
 let mistresses = ["Vera", "Anna"]
 say prose "Who will see you?", instant
-let pickMistress = choose sexscriptLegacyMenuOptions(mistresses + ["Back"], 0)
+let pickMistress = askChoice sexscriptLegacyMenuOptions(mistresses + ["Back"], 0)
 if pickMistress == mistresses.length {
   say prose "Back", instant
 } else {
@@ -73,15 +73,14 @@ let menuTexts2 = []
 for it in resets {
   menuTexts2.add(it.lbl)
 }
-let reset: integer? = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
+let reset: integer? = resets[(askChoice sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
 say prose "Reset ${reset}", instant
 // Records put in front of a list by concatenation count too.
 let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
 choices = [{ lbl: "Nothing", act: null }] + choices
 say prose "Choices ${choices.length}", instant
 // A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
-say prose "Strict?", instant
-let strict = askBoolean
+let strict = askBoolean prose "Strict?"
 let tasks = [
   { name: "Kneel" },
   { name: "Crawl" }
@@ -95,7 +94,7 @@ for it in tasks {
   menuTexts3.add(it.name)
 }
 say prose conditional, instant
-let task = choose sexscriptLegacyMenuOptions(menuTexts3, 0)
+let task = askChoice sexscriptLegacyMenuOptions(menuTexts3, 0)
 say prose "Task ${task}", instant
 // A field that some records leave null may be null where it is read, and its truth is a plain test.
 let picked: integer? = 1
@@ -105,7 +104,7 @@ while picked != null and picked != 0 {
     menuTexts4.add(it.lbl)
   }
   say prose "Again?", instant
-  picked = resets[(choose sexscriptLegacyMenuOptions(menuTexts4, 0))].ID
+  picked = resets[(askChoice sexscriptLegacyMenuOptions(menuTexts4, 0))].ID
   if picked != null and picked != 0 {
     say prose "Reset ${picked}", instant
   }
@@ -121,7 +120,7 @@ for timerValue in timers {
   timerNames.add(timerValue.name)
 }
 say prose "Which timer?", instant
-let timerChoice = choose sexscriptLegacyMenuOptions(timerNames, 0)
+let timerChoice = askChoice sexscriptLegacyMenuOptions(timerNames, 0)
 if timerChoice != 0 {
   say prose "Timer ${timers[timerChoice - 1].name}", instant
 }
@@ -139,7 +138,7 @@ while p < pendingOffenses.length {
 // Groovy read null, as DungeonTrials' weapon choice.
 let weapons = ["Sword", "Bow"]
 say prose "Which weapon?", instant
-let weaponPick = choose sexscriptLegacyMenuOptions(weapons + ["No weapon"], 0)
+let weaponPick = askChoice sexscriptLegacyMenuOptions(weapons + ["No weapon"], 0)
 // NOTE SX_INDEX_PAST_END line 74: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 // NOTE SX_INDEX_PAST_END line 75: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(weapons, weaponPick) == "Sword" {

@@ -8,15 +8,11 @@ function sexscriptLegacyAskInteger(prefill) {
 }
 // Inputs that pre-fill a value the player can accept or change.
 let level = 3
-say prose "What is your name?", instant
-let name = askText(prefill: "slave").replace("\n", " ")
-say prose "Set your level", instant
-let newLevel = askInteger prefill: level
-say prose "Your weight in kg?", instant
-let weight = askNumber prefill: 70.5
+let name = askText prose() ("What is your name?", prefill: "slave").replace("\n", " ")
+let newLevel = askInteger prose "Set your level", prefill: level
+let weight = askNumber prose "Your weight in kg?", prefill: 70.5
 // Legacy showed any default as text, a list as [a, b].
-say prose "Your code?", instant
-let code = askText(prefill: "${level}").replace("\n", " ")
+let code = askText prose() ("Your code?", prefill: "${level}").replace("\n", " ")
 let toys = ["plug", "clamps"]
 say prose "Which toys?", instant
 let wanted = askText(prefill: "[${toys.join(", ")}]").replace("\n", " ")

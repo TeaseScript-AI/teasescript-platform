@@ -137,8 +137,7 @@ while getAbsoluteDateTime().toSeconds() < zeroEnd {
 // A loop whose body waits on some ways only also waits where the clock did not advance, but keeps its texts as
 // messages, as does one that can end otherwise than by time passing.
 let strokeEnd = getAbsoluteDateTime().toSeconds() + 2
-say prose "Rest?", instant
-let rest = askInteger prefill: 0
+let rest = askInteger prose "Rest?", prefill: 0
 // NOTE SX_CLOCK_LOOP line 81: The legacy loop polled the clock until the time was up, and a pass of it may wait for nothing; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second.
 let passClock6: absoluteDateTime? = null
 while getAbsoluteDateTime().toSeconds() < strokeEnd {
@@ -180,8 +179,7 @@ while getAbsoluteDateTime().toSeconds() < tickEnd {
   }
 }
 // A wait of a time known only when the loop runs may be of none; one surely more than none needs no check.
-say prose "Pause?", instant
-let pause = askInteger prefill: 0
+let pause = askInteger prose "Pause?", prefill: 0
 let pauseEnd = getAbsoluteDateTime().toSeconds() + 1
 // NOTE SX_CLOCK_LOOP line 97: The legacy loop polled the clock until the time was up, and a pass of it may wait for nothing; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second.
 let passClock9: absoluteDateTime? = null
@@ -205,8 +203,7 @@ function askNext {
   say prose "Next?", instant
   return askInteger prefill: 0
 }
-say prose "Rest?", instant
-let resting = askBoolean
+let resting = askBoolean prose "Rest?"
 let guardEnd = getAbsoluteDateTime().toSeconds() + 1
 // NOTE SX_CLOCK_LOOP line 105: The legacy loop polled the clock until the time was up, and a pass of it may wait for nothing; a TeaseScript clock advances only at waits, so a pass after one in which the clock did not advance starts with a wait of a tenth of a second.
 let passClock10: absoluteDateTime? = null

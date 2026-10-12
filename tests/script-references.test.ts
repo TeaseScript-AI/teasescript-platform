@@ -251,21 +251,21 @@ test("a script(...) with literal text is checked like a file target, and a compu
   // A button cannot return a reference, also through its text; with a value written before ':' it may show one.
   const noReturn =
     "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
-  assert.deepEqual(check('let next = choose script("rooms/hall.tease"), "stay"\nexit'), [
+  assert.deepEqual(check('let next = askChoice script("rooms/hall.tease"), "stay"\nexit'), [
     ["TSV029", noReturn],
   ]);
-  assert.deepEqual(check('let next = choose { text: script("rooms/hall.tease") }\nexit'), [
+  assert.deepEqual(check('let next = askChoice { text: script("rooms/hall.tease") }\nexit'), [
     ["TSV029", noReturn],
   ]);
   assert.deepEqual(
-    check('let next = choose go: script("rooms/hall.tease"), stay: "Stay"\nexit'),
+    check('let next = askChoice go: script("rooms/hall.tease"), stay: "Stay"\nexit'),
     [],
   );
 });
 
 test("a button shows a script reference only when a written value is what it returns", () => {
   const plan = compiled(
-    project('let next = choose go: script("rooms/hall.tease"), stay: "Stay"\nexit', HALL),
+    project('let next = askChoice go: script("rooms/hall.tease"), stay: "Stay"\nexit', HALL),
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   const action = waiting.foregroundAction;
@@ -284,7 +284,7 @@ test("a button shows a script reference only when a written value is what it ret
   assert.deepEqual(
     said(
       project(
-        'let next = load "ne" + "xt", default: null\nlet answer = choose next, "stay"\nexit',
+        'let next = load "ne" + "xt", default: null\nlet answer = askChoice next, "stay"\nexit',
         HALL,
       ),
       { scriptStorage, ending: "failed" },

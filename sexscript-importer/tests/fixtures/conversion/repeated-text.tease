@@ -3,8 +3,7 @@
 // text's final punctuation ignored.
 say prose "I will decide when you get to cum from now on.", instant
 wait 5 s
-say prose "Do you accept?", instant
-if askBoolean {
+if askBoolean prose "Do you accept?" {
   say prose "Good.", instant
 }
 // Growing dots, which only add punctuation between waits, are an animation: one message whose text each step changes.
@@ -18,8 +17,7 @@ wait 1 s
 say prose "How many days?", instant
 let days = askInteger prefill: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
-say prose "Your name?", instant
-let name = askText(prefill: "pet").replace("\n", " ")
+let name = askText prose() ("Your name?", prefill: "pet").replace("\n", " ")
 say prose "Hello ${name}.", instant
 showImage "kneel.jpg"
 say prose "Kneel.", instant
@@ -34,7 +32,7 @@ say prose "Show me how you kneel.", instant
 // NOTE SX_FILE_PHOTO line 31: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 showImage askImage()
 // An empty text only cleared the legacy display, so it is not said, also through a variable that stays empty.
-let pickedColor = choose 0: "Red", 1: "Blue"
+let pickedColor = askChoice 0: "Red", 1: "Blue"
 say prose "Color ${pickedColor}", instant
 // An exact repeat between waits goes, and the waits around it join.
 say prose "Processing.", instant
@@ -54,6 +52,6 @@ switch randomInteger(0..2) {
 if greeting != "" {
   say prose greeting, instant
 }
-let picked = choose 0: "Ask", 1: "Chores"
+let picked = askChoice 0: "Ask", 1: "Chores"
 say prose "Picked ${picked}", instant
 exit

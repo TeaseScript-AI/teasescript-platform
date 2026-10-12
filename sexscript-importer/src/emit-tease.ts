@@ -397,11 +397,14 @@ export function emitExpression(expression: IrExpression): string {
         expression.speaker === undefined
           ? expression.input
           : `${expression.input} as ${expression.speaker} `;
-      return `${asked}(${askArguments(expression).join(", ")})${singleLine(expression) ? SINGLE_LINE : ""}`;
+      // A question's mode takes its own parentheses before those of the ask (V30 §20).
+      const mode =
+        expression.prose === true ? `${expression.speaker === undefined ? " " : ""}prose() ` : "";
+      return `${asked}${mode}(${askArguments(expression).join(", ")})${singleLine(expression) ? SINGLE_LINE : ""}`;
     }
     case "choice":
     case "listChoice":
-      // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
+      // `askChoice a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
       // statement value (see emitValue).
       return `(${emitChoice(expression)})`;
     case "button":
@@ -438,7 +441,7 @@ export function emitExpression(expression: IrExpression): string {
     case "call": {
       // askBooleans takes its message first without a name, as the other asks do (V30 §20).
       if (isBooleansAsk(expression))
-        return `askBooleans(${booleansArguments(expression).join(", ")})`;
+        return `askBooleans${expression.prose === true ? " prose() " : ""}(${booleansArguments(expression).join(", ")})`;
       const positional = expression.positional.map(emitExpression);
       const named = Object.entries(expression.named).map(
         ([name, value]) => `${name}: ${emitExpression(value)}`,
@@ -659,12 +662,12 @@ function emitChoice(expression: Extract<IrExpression, { kind: "choice" | "listCh
       const text = emitExpression(option.text);
       return option.value === null ? text : `${option.value}: ${text}`;
     });
-    return `choose ${menuOptions(options)}`;
+    return `askChoice ${menuOptions(options)}`;
   }
   const options = expression.options.map(
     (option, index) => () => `${expression.labels?.[index] ?? index}: ${emitExpression(option)}`,
   );
-  return `choose ${menuOptions(options)}`;
+  return `askChoice ${menuOptions(options)}`;
 }
 
 /** A menu's options, from three on with each option after the first on its own line, one level deeper. */
@@ -731,8 +734,14 @@ function emitValue(expression: IrExpression): string {
   if (expression.kind === "load")
     return `load ${operand(expression.key, POSTFIX)}, default: ${loadDefault(expression)}`;
   if (expression.kind === "input") return compactInput(expression);
-  if (expression.kind === "call" && isBooleansAsk(expression))
-    return `askBooleans ${booleansArguments(expression).join(", ")}`;
+  if (expression.kind === "call" && isBooleansAsk(expression)) {
+    const args = booleansArguments(expression);
+    if (expression.prose !== true) return `askBooleans ${args.join(", ")}`;
+    // A question in parentheses would read as the ask's own (V30 §20), so it takes the parenthesized form.
+    return args[0]!.startsWith("(")
+      ? emitExpression(expression)
+      : `askBooleans prose ${args.join(", ")}`;
+  }
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
     : emitExpression(expression);
@@ -759,6 +768,11 @@ function compactInput(expression: Extract<IrExpression, { kind: "input" }>): str
       ? expression.input
       : `${expression.input} as ${expression.speaker}`;
   const args = askArguments(expression);
+  if (expression.prose === true) {
+    // A question in parentheses would read as the ask's own (V30 §20), so it takes the parenthesized form.
+    if (args[0]!.startsWith("(")) return emitExpression(expression);
+    return `${asked} prose ${args.join(", ")}`;
+  }
   // Without a question, `askInteger prefill: 3` has no comma (V30 §20).
   return args.length === 0 ? asked : `${asked} ${args.join(", ")}`;
 }
