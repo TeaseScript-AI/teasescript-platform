@@ -213,7 +213,7 @@ if askBoolean {
 }
 // A list repeated by a count that may be missing is repeated as a number.
 let rounds = load "game.rounds", default: 2
-let marks = sexscriptLegacyRepeatList([null], toInteger(rounds))
+let marks = sexscriptLegacyRepeatList([null], rounds)
 say prose "Marks ${marks.length}", instant
 // A -1 copied through another variable counts from the end too (PainStacks' unfair column).
 let stacks = [

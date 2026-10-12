@@ -2228,6 +2228,7 @@ function lowerFileOnce(
     context.resizedLists = resizedLists(body, context.bindings);
     context.declaredWrites = declaredWrites(body, context.bindings);
     context.nullOnly = nullOnlyVariables(body, context);
+    markSentinelReads(body, context);
     context.menuIndexes = menuIndexes(body);
     context.nullElementLists = nullElementLists(body, context.bindings);
     markSequentialWrites(body, context);
@@ -10557,6 +10558,9 @@ function mayReadNull(node: AstNode, context: LowerContext, seen = new Set<string
 
 /** Methods whose results are whole numbers. */
 const WHOLE_NUMBER_METHODS = new Set([
+  // A whole number, or null for a missing key, which a boxed Integer[] element stores as it is (YAFOWC).
+  "loadInteger",
+  "receiveInteger",
   "size",
   "length",
   "getRandom",
@@ -12558,8 +12562,9 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     if (context.menuIndexes.has(node)) return { kind: "index", target, index };
     // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
     // position for null.
-    // A variable of Groovy's multiple assignment took null past the end of the list (withTupleAssignments).
-    if (node.tupleItem === true) {
+    // A variable of Groovy's multiple assignment took null past the end of the list (withTupleAssignments), and so did
+    // one that a loop tests for null (sentinelReads); the helper's null keeps the variable open.
+    if (node.tupleItem === true || (sentinelReads.has(node) && !context.writeTargets.has(node))) {
       const read = useHelper(context, "itemAt", [target, index]);
       return read.kind === "call" ? { ...read, open: true } : read;
     }
@@ -13682,6 +13687,76 @@ function isRepeatableIndex(node: AstNode): boolean {
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
 /** List positions that the code compares with null, which read past the end as null (see lowerIndex). */
 const nullComparedReads = new WeakSet<AstNode>();
+/** List positions read into a variable that a loop's condition tests for null (markSentinelReads). */
+const sentinelReads = new WeakSet<AstNode>();
+
+/**
+ * Marks the list positions read into a variable that their loop's condition compares with null at a position the loop
+ * counts up, `next = pick[ipick]` in `for (…; next != null; ipick++)` (Stay): Groovy read null past the end of the
+ * list, which ended the loop. A Java array's position past its end failed in Groovy and is left alone.
+ */
+function markSentinelReads(body: AstNode, context: LowerContext): void {
+  const javaArray = (list: AstNode): boolean => {
+    const key = bindingKey(list, context.bindings);
+    return (
+      key !== null &&
+      (context.assignedValues.get(key) ?? []).some(
+        (value) =>
+          value.kind === "array" ||
+          (value.kind === "cast" && /^\[|\[\]$/u.test(text(value.type) ?? "")),
+      )
+    );
+  };
+  walkAst(body, (node) => {
+    const parts = nodeArray(asNode(node.collection)?.items);
+    const condition =
+      node.kind === "while"
+        ? asNode(node.condition)
+        : node.kind === "for" && node.variable === "forLoopDummyParameter"
+          ? (parts[1] ?? null)
+          : null;
+    const loopBody = asNode(node.body);
+    if (condition?.kind !== "binary" || loopBody === null) return;
+    if (condition.operator !== "==" && condition.operator !== "!=") return;
+    const [left, right] = [asNode(condition.left), asNode(condition.right)];
+    const tested =
+      right !== null && isNullConstant(right)
+        ? left
+        : left !== null && isNullConstant(left)
+          ? right
+          : null;
+    const key = tested?.kind === "variable" ? bindingKey(tested, context.bindings) : null;
+    if (key === null) return;
+    // The positions the loop counts up: `i++`, `++i`, or `i += …`.
+    const counted = new Set<string>();
+    walkAst(node, (inner) => {
+      const target =
+        (inner.kind === "postfix" || inner.kind === "prefix") && text(inner.operator) === "++"
+          ? asNode(inner.value)
+          : inner.kind === "binary" && inner.operator === "+="
+            ? asNode(inner.left)
+            : null;
+      const counter = target === null ? null : bindingKey(target, context.bindings);
+      if (counter !== null) counted.add(counter);
+    });
+    walkAst(loopBody, (inner) => {
+      if (inner.kind !== "binary" || inner.operator !== "=") return;
+      const [target, value] = [asNode(inner.left), asNode(inner.right)];
+      if (target === null || value === null || bindingKey(target, context.bindings) !== key) return;
+      const list = asNode(value.left);
+      const index = asNode(value.right);
+      if (
+        value.kind === "binary" &&
+        value.operator === "[" &&
+        list !== null &&
+        index !== null &&
+        counted.has(bindingKey(index, context.bindings) ?? "") &&
+        !javaArray(list)
+      )
+        sentinelReads.add(value);
+    });
+  });
+}
 
 /** Arithmetic of plain values, such as `i * 52 + j`, which can be evaluated twice with the same result. */
 function isPlainArithmetic(node: AstNode): boolean {

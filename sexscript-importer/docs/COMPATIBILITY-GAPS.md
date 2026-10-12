@@ -309,7 +309,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `contestants = [winner1]`), a position whose largest value from numbers and random draws reaches past the list
   literals the variable is set to (justalittlefun's fourth roll, `texts4[val4 - 1]` after `val4 = 1 + getRandom(6)`
   over five texts, of a list that nothing resizes), and a variable only ever set to numbers, in a list that only ever
-  starts empty (interrogation's `goals[goal]`), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
+  starts empty (interrogation's `goals[goal]`), and a position a loop counts up whose read goes into the variable the
+  loop tests for null (Stay's `next = pick[ipick]` in `for (…; next != null; ipick++)`; not a Java array, whose end
+  failed in Groovy too), goes through `sexscriptLegacyItemAt` (`SX_NEGATIVE_INDEX`, `SX_INDEX_PAST_END`), except where the position certainly
   names an element: a menu position, after a test that rules out the menu's written options, of a menu over
   `["Back"] + list` or over a list that a loop built with one option for each element of the read list, and a counter
   that started at 0 or more, only grew since, and is tested below the list's size, with nothing in between that may
