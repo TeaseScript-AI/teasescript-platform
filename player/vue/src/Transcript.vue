@@ -27,7 +27,7 @@ import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } fro
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
-import { adjoins, isRemovedEntry, resolveAppearance } from "./transcriptPresentation";
+import { adjoins, resolveAppearance } from "./transcriptPresentation";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 
 const props = defineProps<{
@@ -37,21 +37,7 @@ const props = defineProps<{
   /** The revision through which updates show directly, like history: what development time jumps published. */
   jumpedRevision?: number;
   bottomInset?: number;
-  /** The indexes of the removed messages among `entries`, in ascending order; they take no place in the list. */
-  removedRows?: readonly number[];
 }>();
-// The list position of the entry at `index` among those that show: the removed messages before it do not count.
-function listPosition(index: number): number {
-  const removed = props.removedRows ?? [];
-  let low = 0;
-  let high = removed.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (removed[middle]! < index) low = middle + 1;
-    else high = middle;
-  }
-  return index + 1 - low;
-}
 const avatarOrdinals = reactive(new Map<string, number>());
 let assignedEntries = props.entries;
 let assignedThrough = 0;
@@ -187,9 +173,7 @@ watch(
     liveUntil = performance.now() + LIVE_UPDATE_MS;
     entrances.admit(
       added.flatMap((entry) =>
-        entry.kind === "message" && entry.future !== true && entry.removed !== true
-          ? [entry.id]
-          : [],
+        entry.kind === "message" && entry.future !== true ? [entry.id] : [],
       ),
     );
   },
@@ -235,8 +219,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
       count: entries.length,
       getScrollElement: () => scrollElement.value,
       getItemKey: itemKeyFor(entries),
-      // A removed message shows nothing, so it takes no room, also before it is measured.
-      estimateSize: (index: number) => (isRemovedEntry(entries[index]) ? 0 : 140),
+      estimateSize: () => 140,
       measureElement: measureEntry,
       overscan: 5,
       // A viewport of leading space keeps even a single message scrollable.
@@ -455,11 +438,6 @@ watch(
       `.transcript-entry[data-message-id="${CSS.escape(id)}"]`,
     );
     if (entry === null || entry === undefined) return;
-    // A removed message shows nothing to focus, so focus moves to the conversation.
-    if (entry.dataset.removed !== undefined) {
-      scrollElement.value?.focus({ preventScroll: true });
-      return;
-    }
     entry.tabIndex = -1;
     entry.addEventListener("blur", () => entry.removeAttribute("tabindex"), { once: true });
     entry.focus({ preventScroll: true });
@@ -571,11 +549,9 @@ onMounted(() => {
                   entry.kind === 'message' ? entry.contentSequence : undefined
                 "
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-                :data-removed="isRemovedEntry(entry) || undefined"
-                :role="isRemovedEntry(entry) ? undefined : 'listitem'"
-                :aria-hidden="isRemovedEntry(entry) || undefined"
-                :aria-posinset="isRemovedEntry(entry) ? undefined : listPosition(item.index)"
-                :aria-setsize="entries.length - (removedRows?.length ?? 0)"
+                role="listitem"
+                :aria-posinset="item.index + 1"
+                :aria-setsize="entries.length"
                 class="transcript-entry"
                 :data-continues="continues(item.index)"
                 :data-prose="appearance.placement !== null || undefined"
@@ -591,7 +567,6 @@ onMounted(() => {
                   Future · Forward restores it
                 </p>
                 <TranscriptMessage
-                  v-if="!isRemovedEntry(entry)"
                   :entry="entry"
                   :speakers="speakers"
                   :avatar-ordinal="
@@ -721,9 +696,6 @@ onMounted(() => {
 }
 .transcript-entry[data-continues="true"] {
   padding-block-start: 3px;
-}
-.transcript-entry[data-removed] {
-  padding-block: 0;
 }
 .transcript-entry[data-prose] {
   padding-block: 1.75rem 0.75rem;

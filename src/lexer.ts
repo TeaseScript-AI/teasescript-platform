@@ -451,12 +451,14 @@ class Lexer {
         (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
           isInteractionCommand(this.#tokens[index - 2]?.lexeme)) ||
         // The mode of an ask's question, as in `askText prose "Name?"` or `askText as mistress prose "Name?"`.
-        ((previous?.lexeme === "bubble" || previous?.lexeme === "prose") &&
-          (isInteractionCommand(this.#tokens[index - 1]?.lexeme) ||
-            (this.#tokens[index - 2]?.kind === TokenKind.KeywordAs &&
-              isInteractionCommand(this.#tokens[index - 3]?.lexeme)))))
+        this.#isQuestionMode(index))
     ) {
       return true;
+    }
+    // The options of that mode, as in `askText prose(align: "center") "Name?"`.
+    if (previousKind === TokenKind.RightParenthesis) {
+      const opener = this.#openerOf(index);
+      if (opener !== null && this.#isQuestionMode(opener - 1)) return true;
     }
     switch (previousKind) {
       case TokenKind.InterpolationStart:
@@ -486,6 +488,35 @@ class Lexer {
       default:
         return false;
     }
+  }
+
+  /** Whether the token at `index` is `bubble` or `prose` right after an ask, or after its `as speaker`. */
+  #isQuestionMode(index: number): boolean {
+    const lexeme = this.#tokens[index]?.lexeme;
+    return (
+      this.#tokens[index]?.kind === TokenKind.Identifier &&
+      (lexeme === "bubble" || lexeme === "prose") &&
+      (isInteractionCommand(this.#tokens[index - 1]?.lexeme) ||
+        (this.#tokens[index - 2]?.kind === TokenKind.KeywordAs &&
+          isInteractionCommand(this.#tokens[index - 3]?.lexeme)))
+    );
+  }
+
+  /**
+   * The index of the `(` that the `)` at `index` closes, found back to the interpolation it stands in, or `null`. Only
+   * a quote right after a `)` asks, and the search goes back over that one group.
+   */
+  #openerOf(index: number): number | null {
+    let depth = 0;
+    for (let at = index; at >= 0; at -= 1) {
+      const kind = this.#tokens[at]!.kind;
+      if (kind === TokenKind.RightParenthesis) depth += 1;
+      else if (kind === TokenKind.LeftParenthesis) {
+        depth -= 1;
+        if (depth === 0) return at;
+      } else if (kind === TokenKind.InterpolationStart) return null;
+    }
+    return null;
   }
 
   #scanEscape(): string {

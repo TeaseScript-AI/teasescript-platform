@@ -17,23 +17,12 @@ function presentationOf(entry: PlayerTranscriptEntryPresentation | undefined) {
   return authoredOn(entry)?.kind === "prose" ? "prose" : "bubble";
 }
 
-/** Whether `entry` is a message that `remove()` took out of the conversation, which shows nothing (#836). */
-export function isRemovedEntry(entry: PlayerTranscriptEntryPresentation | undefined): boolean {
-  return entry?.kind === "message" && entry.removed === true;
-}
-
-/**
- * Whether the message at `index` groups with its nearest shown neighbour towards `other`: removed messages between
- * them show nothing, so the messages around them adjoin.
- */
 export function adjoins(
   entries: readonly PlayerTranscriptEntryPresentation[],
   index: number,
   other: number,
 ) {
   const entry = entries[index];
-  const step = other < index ? -1 : 1;
-  while (isRemovedEntry(entries[other])) other += step;
   const neighbour = entries[other];
   if (entry?.kind !== "message" || neighbour?.kind !== "message") return false;
   return (

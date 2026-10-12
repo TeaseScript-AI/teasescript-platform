@@ -127,10 +127,14 @@ test("an ask's question may be shown as prose or a bubble, as by say, and stays 
       assert.deepEqual(said.slice(0, -1), [`${shown}: Question?`], ask);
     }
   }
-  // The question is said once, in its mode, and the input opens with it.
+  // The question is said once, in its mode, and the input opens with it, also inside interpolation.
   assert.deepEqual(questionShown('askNumber prose "How many?", prefill: 2'), [
     "prose -: How many?",
     "opens number",
+  ]);
+  assert.deepEqual(questionShown('"${askText as mistress prose(align: "center") "Name?"}"'), [
+    "prose center: Name?",
+    "opens text",
   ]);
 });
 
