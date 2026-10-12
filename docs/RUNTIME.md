@@ -1676,8 +1676,8 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),
   `beforeDebug` after attaching, `restored` after a restore, and `unavailable` once older records were dropped.
   `status()` reports the epoch, its origin, its draws, the generator state it began with (the seed after Start), and
-  the sequence of its first event, so that a host can tell a message shown before the epoch from one whose record was
-  dropped.
+  the sequence of its first event and whether it set the Stage image, so that a host can tell a message shown or an
+  image set before the epoch from one whose record was dropped.
 - **Queries.** `record(id)` gives a detached JSON-safe view; `outputRecord(eventSequence)`, `outputs(limit)`,
   `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
 - **Branch decisions.** A variable write, `return` value, storage write, message, or Stage image names in `control`

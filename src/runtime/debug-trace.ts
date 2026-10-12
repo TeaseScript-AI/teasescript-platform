@@ -209,6 +209,11 @@ export interface RuntimeDebugTraceStatus {
    * `null` before the first operation.
    */
   readonly firstEventSequence: number | null;
+  /**
+   * Whether this epoch set the Stage image, with `showImage` or `hideImage`: without a `stageImageRecord()`, an image
+   * this epoch set had its record dropped, and any other was set before the epoch began.
+   */
+  readonly stageImageSet: boolean;
 }
 
 export interface RuntimeDebugTraceOptions {
@@ -388,6 +393,7 @@ interface Stage {
   readonly pendingOutput: TraceStore["pendingOutput"];
   readonly pendingStorage: TraceStore["pendingStorage"];
   readonly stageImageId: number | null;
+  readonly stageImageSet: boolean;
   readonly lastRandom: TraceRecord | null;
   readonly versions: Map<string, number | undefined>;
   readonly outputs: number[];
@@ -412,6 +418,7 @@ export class TraceStore {
   #versions = new Map<string, number>();
   #outputs = new Map<number, number>();
   #stageImageId: number | null = null;
+  #stageImageSet = false;
   pendingOutput: { readonly instruction: number; readonly deps: DebugDependencies } | null = null;
   pendingStorage: {
     readonly actionId: number;
@@ -502,6 +509,7 @@ export class TraceStore {
     this.#versions = new Map();
     this.#outputs = new Map();
     this.#stageImageId = null;
+    this.#stageImageSet = false;
     this.pendingOutput = null;
     this.pendingStorage = null;
     this.#lastRandom = null;
@@ -522,6 +530,7 @@ export class TraceStore {
     this.#bytes = 0;
     this.#versions = new Map();
     this.#outputs = new Map();
+    this.#stageImageId = null;
     this.#stage = null;
     this.#decisions = [];
   }
@@ -1140,7 +1149,9 @@ export class TraceStore {
 
   image(value: SerializableRuntimeValue): void {
     const id = this.write("image", null, "Stage image", value);
-    if (id !== null) this.#stageImageId = id;
+    // A record larger than the budget is dropped at once, so the image has none.
+    if (id !== null) this.#stageImageId = this.#find(id) === undefined ? null : id;
+    this.#stageImageSet = true;
   }
 
   /**
@@ -1156,6 +1167,7 @@ export class TraceStore {
       pendingOutput: this.pendingOutput,
       pendingStorage: this.pendingStorage,
       stageImageId: this.#stageImageId,
+      stageImageSet: this.#stageImageSet,
       lastRandom: this.#lastRandom,
       versions: new Map(),
       outputs: [],
@@ -1210,6 +1222,7 @@ export class TraceStore {
         stage.stageImageId !== null && this.#find(stage.stageImageId) !== undefined
           ? stage.stageImageId
           : null;
+      this.#stageImageSet = stage.stageImageSet;
       this.#lastRandom =
         stage.lastRandom !== null && this.#find(stage.lastRandom.id) === stage.lastRandom
           ? stage.lastRandom
@@ -1447,6 +1460,7 @@ export class TraceStore {
       draws: this.#draws,
       rngAnchorState: this.#rngAnchorState,
       firstEventSequence: this.#firstEventSequence,
+      stageImageSet: this.#stageImageSet,
     });
   }
 }

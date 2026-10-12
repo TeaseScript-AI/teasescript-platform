@@ -179,7 +179,7 @@ selection in `usePlayerDebug` with the trace and epoch it belongs to, selects th
 through `PlayerToolsShell`'s exposed `showTool`. The tab finds the selected message with
 `playerRuntimeTranscriptMessage` in each published session and explains its `contentSequence`, the event whose content
 it shows; `playerDebugMessageOrigin` gives that event's output record or why there is none, from the trace status's
-`firstEventSequence`.
+`firstEventSequence`; `playerDebugImageOrigin` does the same for the Stage image in the Now tab, from `stageImageSet`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

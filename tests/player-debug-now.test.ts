@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { RuntimeDebugContext } from "../src/index.js";
+import { playerDebugImageOrigin } from "../player/debug-variables.js";
 import { debugStageImageStatus } from "../player/presentation.js";
 import {
   activatePlayerRuntimeButton,
+  advancePlayerRuntimeTime,
+  createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeCalls,
   playerRuntimeDebugNow,
   reportPlayerRuntimeMediaLoad,
+  restorePlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
+  withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
@@ -156,6 +163,69 @@ test("the Stage image state follows the resolved source and what the Stage repor
   assert.equal(debugStageImageStatus({ ...stage, loaded: "/a.png", covered: true }), "covered");
   // A development Stage fixture shows instead: its own load says nothing about the session's image.
   assert.equal(debugStageImageStatus({ ...stage, overridden: true }), "overridden");
+});
+
+test("the Stage image names the statement that set it, or why the trace does not know it", () => {
+  const source = [
+    'showImage "a.png"',
+    'let name = askText "Name?"',
+    'let greeting = "Hi ${name}"',
+    'say "${greeting}"',
+    'let ready = askText "Ready?"',
+    'showImage "b.png"',
+    'let done = askText "Done?"',
+    "exit",
+  ].join("\n");
+  const origin = (trace: RuntimeDebugContext) => {
+    const found = playerDebugImageOrigin(trace);
+    if (found.kind === "unavailable") return found.reason;
+    const location = trace.record(found.id)!.location!;
+    return `Set by ${location.path}:${location.line}`;
+  };
+  // Answers the question, then lets the next message's pacing pass.
+  const answer = (session: PlayerRuntimeSession, text: string) => {
+    const answered = submitPlayerRuntimeComposer(session, text)!.session;
+    return advancePlayerRuntimeTime(answered, answered.state.currentSessionTimeMs + 60_000);
+  };
+
+  // Recorded from Start: the statement that set it.
+  const trace = new RuntimeDebugContext();
+  const started = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession(source, { debugTrace: trace }),
+    60_000,
+  );
+  assert.equal(origin(trace), "Set by main.tease:1");
+
+  // Continue from a saved point: the image came with the saved point, until the script sets another.
+  const restored = restorePlayerRuntimeSession(
+    createPlayerRuntimeRestorePoint(started),
+    null,
+    trace,
+  );
+  assert.equal(origin(trace), "Set before Continue: a saved point keeps no history");
+  const greeted = answer(restored, "Bo");
+  assert.equal(origin(trace), "Set before Continue: a saved point keeps no history");
+  answer(greeted, "yes");
+  assert.equal(origin(trace), "Set by main.tease:6");
+
+  // Debug turned on after the image was set, also once later records have been dropped.
+  const late = new RuntimeDebugContext({ maxRecords: 2 });
+  const waiting = advancePlayerRuntimeTime(createPlayerRuntimeSession(source), 60_000);
+  answer(withPlayerRuntimeDebugTrace(waiting, late), "Bo");
+  assert.ok(late.status().truncated);
+  assert.equal(origin(late), "Set before Debug was turned on");
+
+  // A long history dropped the record of the statement that set it.
+  const small = new RuntimeDebugContext({ maxRecords: 2 });
+  answer(
+    advancePlayerRuntimeTime(createPlayerRuntimeSession(source, { debugTrace: small }), 60_000),
+    "Bo",
+  );
+  assert.equal(origin(small), "Expired: older history was dropped");
+  // So did a byte budget smaller than that record alone.
+  const tiny = new RuntimeDebugContext({ maxAccountedBytes: 128 });
+  createPlayerRuntimeSession(source, { debugTrace: tiny });
+  assert.equal(origin(tiny), "Expired: older history was dropped");
 });
 
 test("Now lists each active sound with the statement that started it", () => {

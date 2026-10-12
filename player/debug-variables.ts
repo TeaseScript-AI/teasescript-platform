@@ -2,6 +2,7 @@ import {
   RUNTIME_DEBUG_TRACE_LIMITS,
   type RuntimeDebugContext,
   type RuntimeDebugRecord,
+  type RuntimeDebugTraceStatus,
   type RuntimeSessionCall,
   type RuntimeSessionScopePreview,
   type RuntimeSessionVariablePreview,
@@ -487,34 +488,58 @@ export function playerDebugRecordText(
   });
 }
 
-/** Why a chat message has no record to explain, or its output record. */
-export type PlayerDebugMessageOrigin =
+/** The record that explains a chat message or the Stage image, or why the trace has none. */
+export type PlayerDebugOrigin =
   | { readonly kind: "record"; readonly id: number }
   | { readonly kind: "unavailable"; readonly reason: string };
 
 const BEFORE_EPOCH = {
-  start: "Shown before recording began",
-  restore: "Shown before Continue: a saved point keeps no history",
-  attach: "Shown before Debug was turned on",
+  start: "before recording began",
+  restore: "before Continue: a saved point keeps no history",
+  attach: "before Debug was turned on",
 } as const;
 
 /**
- * The output record of the `say` event with this sequence, found by the event's identity and never by its text, or why
- * the trace has none: the message came before the current recording began, its record was dropped, or recording stopped.
+ * Why the trace has no record of what a chat message `Shown` or the Stage image `Set`: it came before the current
+ * recording began, its record was dropped, or recording stopped.
  */
-export function playerDebugMessageOrigin(
-  trace: RuntimeDebugContext,
-  eventSequence: number,
-): PlayerDebugMessageOrigin {
-  const id = trace.outputRecord(eventSequence);
-  if (id !== null) return Object.freeze({ kind: "record", id });
-  const status = trace.status();
+function unavailable(
+  status: RuntimeDebugTraceStatus,
+  verb: "Shown" | "Set",
+  beforeEpoch: boolean,
+): PlayerDebugOrigin {
   const reason = !status.recording
     ? "Recording stopped"
-    : status.firstEventSequence === null || eventSequence < status.firstEventSequence
-      ? BEFORE_EPOCH[status.origin]
+    : beforeEpoch
+      ? `${verb} ${BEFORE_EPOCH[status.origin]}`
       : status.truncated
         ? "Expired: older history was dropped"
         : "Not recorded";
   return Object.freeze({ kind: "unavailable", reason });
+}
+
+/**
+ * The output record of the `say` event with this sequence, found by the event's identity and never by its text, or why
+ * the trace has none.
+ */
+export function playerDebugMessageOrigin(
+  trace: RuntimeDebugContext,
+  eventSequence: number,
+): PlayerDebugOrigin {
+  const id = trace.outputRecord(eventSequence);
+  if (id !== null) return Object.freeze({ kind: "record", id });
+  const status = trace.status();
+  return unavailable(
+    status,
+    "Shown",
+    status.firstEventSequence === null || eventSequence < status.firstEventSequence,
+  );
+}
+
+/** The record of the `showImage` or `hideImage` that set the current Stage image, or why the trace has none. */
+export function playerDebugImageOrigin(trace: RuntimeDebugContext): PlayerDebugOrigin {
+  const id = trace.stageImageRecord();
+  if (id !== null) return Object.freeze({ kind: "record", id });
+  const status = trace.status();
+  return unavailable(status, "Set", !status.stageImageSet);
 }
