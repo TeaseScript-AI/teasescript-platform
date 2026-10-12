@@ -15,6 +15,7 @@ import type {
   LoadExpression,
   MediaParts,
   Program,
+  PropertyAccessExpression,
   ScalarTypeName,
   SayParts,
   ShowButtonParts,
@@ -122,6 +123,7 @@ import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
+import { missingPropertyMessage, misspelledPropertyHint } from "./object-properties.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -154,7 +156,12 @@ import {
   TypeJoin,
   decidedValue,
   members,
-  type PropertyTable,
+  PropertyTable,
+  type PropertyRead,
+  missingPropertyReads,
+  flowInto,
+  openTables,
+  startPropertyLineage,
   misfitProperty,
   nonNullType,
   NULL_TYPE,
@@ -506,6 +513,11 @@ type DeferredCheck = {
       readonly place: Place;
       readonly expression: Expression;
       readonly value: StaticType;
+    }
+  | {
+      /** A read of a property that its object's tables lacked, also by `+=` or `-=` (#845). */
+      readonly kind: "property";
+      readonly read: PropertyAccessExpression;
     }
 );
 
@@ -967,6 +979,12 @@ class TypeChecker {
    */
   readonly #deferred: DeferredCheck[] = [];
 
+  /**
+   * The tables of the objects of each property read that they lacked, or `null` when a check of the same read found a
+   * value it cannot decide for (see {@link #noteMissingProperty}).
+   */
+  readonly #missingReads = new Map<PropertyAccessExpression, PropertyTable[] | null>();
+
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
 
@@ -1240,6 +1258,7 @@ class TypeChecker {
    * `main.tease` first, as a single script (rule 6).
    */
   public check(programs: readonly Program[]): void {
+    startPropertyLineage();
     const effects = programs.map(programEffects);
     const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
     const sharedGlobals = new Map<string, Sharing>();
@@ -2093,6 +2112,10 @@ class TypeChecker {
               scope,
             ),
           );
+          // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
+          if (checked !== statement.value)
+            for (const member of members(nonNullType(receiver)).map(resolved))
+              if (isCollection(member)) flowInto(member.element, value);
           this.#recordRuntimeCheck(
             statement,
             elementStoreType(receiver) ?? UNKNOWN_TYPE,
@@ -2155,6 +2178,8 @@ class TypeChecker {
               this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
             }
           }
+          // `+=` and `-=` read the property first.
+          else this.#noteMissingProperty(target, object);
           return;
         }
         const before = this.diagnostics.length;
@@ -2210,6 +2235,8 @@ class TypeChecker {
           checked === statement.value ? value : this.#typeOf(checked),
         ),
       );
+      // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
+      if (checked !== statement.value) flowInto(place.type, value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
@@ -3344,6 +3371,8 @@ class TypeChecker {
             : parameterFix(parameter.name, parameter.type, rejected, value),
       };
       yield* compileChild(this.#storeTask(place, argument.value, values[argumentIndex]!, false));
+      // The argument does not change the parameter's type, but its objects reach the parameter (#845).
+      flowInto(parameter.type, values[argumentIndex]!);
       this.#recordRuntimeCheck(
         argument,
         parameter.type,
@@ -3519,7 +3548,7 @@ class TypeChecker {
         return { kind: "dict", element };
       }
       case "objectLiteral": {
-        const properties = new Map<string, StaticType>();
+        const properties = new PropertyTable();
         for (const property of expression.properties) {
           yield* compileChild(this.#expressionTask(property.value, scope));
           const value = this.#capture(property.value);
@@ -3678,6 +3707,8 @@ class TypeChecker {
           if (mayBeUnknown(fallback)) {
             this.storageLoads.push({ key, type: read, at: expression.span, declared: false });
             this.#runtimeChecks.push({ site: expression, place: read, label: storageLabel(key) });
+            // Stored data may come from an older version of the script, with other properties (#845).
+            openTables(read);
             return optional(read);
           }
           if (givenKind !== "never" && !isAssignable(read, given))
@@ -3731,6 +3762,8 @@ class TypeChecker {
         // A part that no value decided, such as the elements of `default: []`, is checked by nothing when the script
         // runs, so it holds values the compiler cannot know, also after a later value decides the variable's part.
         const type = decidedType(detachedType(read));
+        // Stored data may come from an older version of the script, with other properties (#845).
+        openTables(type);
         return isNullable(fallback) ? optional(type) : type;
       }
       case "typeTestExpression":
@@ -3934,7 +3967,7 @@ class TypeChecker {
         ? literal.properties.map((property) => [property.name.name, property.value] as const)
         : [],
     );
-    const result: PropertyTable = new Map();
+    const result = new PropertyTable();
     const recorded: {
       readonly name: string;
       readonly start: StaticType | null;
@@ -3946,7 +3979,11 @@ class TypeChecker {
       recorded.push({ name, start: field.start, answer: field.result });
     }
     this.#forms.set(expression, { kind: "object", fields: recorded });
-    return container.properties === null ? UNKNOWN_TYPE : { kind: "object", properties: result };
+    if (container.properties === null) return UNKNOWN_TYPE;
+    const answers: StaticType = { kind: "object", properties: result };
+    // The answers have the fields the container has when the form opens.
+    flowInto(answers, container);
+    return answers;
   }
 
   /**
@@ -5015,6 +5052,33 @@ class TypeChecker {
   }
 
   /**
+   * Notes a read of a property from a value of type `object`. When every value it may be is an object whose properties
+   * the compiler knows, and none has the property, the end of the check reports the read if no object at that place can
+   * have it when the script runs (#845); any other read the runtime checks (TSR017).
+   */
+  #noteMissingProperty(read: PropertyAccessExpression, object: StaticType): void {
+    const name = read.property.name;
+    const objects = members(object).map(resolved);
+    const tables = objects.flatMap((member) =>
+      member.kind === "object" && member.properties !== null && !member.properties.has(name)
+        ? [member.properties]
+        : [],
+    );
+    const noted = this.#missingReads.get(read);
+    if (tables.length < objects.length) {
+      if (noted !== undefined) this.#missingReads.set(read, null);
+    } else if (noted === undefined) {
+      this.#missingReads.set(read, tables);
+      this.#deferred.push({
+        kind: "property",
+        file: this.#file,
+        at: this.diagnostics.length,
+        read,
+      });
+    } else if (noted !== null) for (const table of tables) noted.push(table);
+  }
+
+  /**
    * Reports the checks of {@link #deferred} that fail at the end of the check, at the place among the other diagnostics
    * of their file where they would have been reported: operations whose operands held only null to the end, and stores
    * that no result of their operation could fit once a later value decided the place's type.
@@ -5026,10 +5090,34 @@ class TypeChecker {
       { readonly at: number; readonly found: readonly Diagnostic[] }[]
     >();
     const current = this.#file;
+    // Every store, copy, and decision is known now, so it decides which properties the objects of a read can have.
+    const reads: PropertyAccessExpression[] = [];
+    const checked: PropertyRead[] = [];
+    for (const [read, tables] of this.#missingReads)
+      if (tables !== null) {
+        reads.push(read);
+        checked.push({ name: read.property.name, tables });
+      }
+    const verdicts = missingPropertyReads(checked);
+    const missing = new Map(reads.map((read, index) => [read, verdicts[index]]));
     for (const check of this.#deferred) {
       let found: readonly Diagnostic[] = [];
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
+      } else if (check.kind === "property") {
+        const names = missing.get(check.read);
+        if (names !== undefined) {
+          this.#file = check.file;
+          const before = this.diagnostics.length;
+          const name = check.read.property.name;
+          this.#report(
+            typeCode.invalidOperand,
+            missingPropertyMessage(expressionLabel(check.read.object), name, names) +
+              misspelledPropertyHint(name, names),
+            check.read.property.span,
+          );
+          found = this.diagnostics.splice(before);
+        }
       } else {
         // The message names lines as seen from the store's file.
         this.#file = check.file;
@@ -5885,6 +5973,7 @@ class TypeChecker {
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length) {
+      this.#noteMissingProperty(expression, object);
       const type = all.length === 1 ? types[0]! : union(types.map((type) => type!));
       // A set member is read as a copy (ADR 0014), so what changes the copy decides or widens nothing in the set.
       if (LIST_ELEMENT_READS.has(name) && all.some((member) => resolved(member).kind === "set"))

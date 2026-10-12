@@ -1493,6 +1493,20 @@ door.color = "red"     // adds color, which holds text (string) from now on
 When an object is stored in a place that already holds an object, such as an element of a list of objects, the
 properties they share must have the same types.
 
+Reading a property, also with `+=` or `-=`, that no object in that place can have is a compile error that names the
+properties it can have. An object can have every property that a literal or an assignment anywhere in the project
+gives an object that reaches its place, in whatever order the script runs that code; the elements of a list, set, or
+dict share one place. A read that may find the property is checked when the script runs, such as a read of a property
+that only some code adds, or of an object that may come from a value the compiler cannot know, such as stored data,
+an `object`, or a parameter without a type or default:
+
+```text
+say door.colour        // compile error that names name, locked, and color, and asks: did you mean color?
+let shed = { name: "shed" }
+if windy { shed.locked = true }
+say shed.locked        // compiles, and fails when the script runs if shed.locked was not set
+```
+
 Two objects are equal (`==`) when they have the same property names with equal values, in any property order. A
 property set to `null` differs from a missing property:
 
