@@ -232,6 +232,14 @@ subsystems may still have different maturity levels.
     a missing file.
     - A misspelled literal image path shows up only at runtime, as a missing-media warning.
 
+- [ ] **Consider: choose how numbers and other values are shown in text**
+  - **Outcome:** Decide whether a script can choose how a value is shown in text, such as a fixed number of decimals.
+    - Today `"${3.0} seconds"` shows "3 seconds", and `"${1 / 3}"` shows "0.3333333333333333". A script cannot show
+      "3.0 seconds".
+    - SexScript scripts wrote `String.format("%.1f seconds", t)`. The importer replaces that with a generated helper
+      (14 places in 10 converted units).
+  - **Reference:** Owner, 2026-10-12: not needed before the Beta, because the current output works.
+
 ## Release Candidate
 
 **Goal:** Validate a specific candidate containing the scope selected for the first stable release.
