@@ -81,7 +81,9 @@ ADR 0018 selects direct Standard Library names with no import and no first-POC o
 The current compiler implements the compact interaction forms in this section, and the parenthesized form of the basic
 asks as the same interactions, through explicit versioned interaction instructions and the canonical resumable runtime.
 The broader parenthesized V30 APIs and their advanced parameters remain deferred, except `askImage(...)`, which is
-implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)),
+implemented in its V30 call form (`let picture = askImage("Add an image")`, and with `allowSkip: true` a `string?`
+that is `null` when the player skips it; see [Image input](RUNTIME.md#image-input) and
+[V30 §20](specifications/accepted-syntaxes-v30.md#skipping-a-file-input)),
 and `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,

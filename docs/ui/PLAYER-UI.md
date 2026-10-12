@@ -876,8 +876,17 @@ otherwise the request opens a camera of its own, only for itself, and turns it o
 a file answered. A camera that is denied, missing, broken, or ended shows why in an alert, with **Try again**, which asks
 for it again. The viewfinder belongs to its request: it closes when the request ends or is interrupted, or its session is
 replaced, and a restored session asks for the camera again but never takes a photo by itself. Where no camera can be
-used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered, and a
-[player notice](#player-notices) says so.
+used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered with an
+image, and a [player notice](#player-notices) says so.
+
+An `askImage(...)` written with `allowSkip: true` shows a **Skip** action button under its question, where `showButton`
+shows its button, for as long as the request waits: beside the paperclip and the camera, also while the camera cannot
+be used and while the camera window a script shows holds the viewfinder. It is not preselected, so Space in the empty
+composer does not skip. Skip, or its exact text submitted from the composer, answers the request with `null`, which
+the transcript records as the player message `Skip`; the viewfinder closes and a camera the request opened turns off,
+as after any answer. Skip waits while a chosen image is being checked. Other typed text shows the composer notice,
+which then also names Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.". A
+request without `allowSkip: true` shows no Skip.
 
 `askChoice` and `showButton` keep the composer enabled rather than visually disabling it:
 
