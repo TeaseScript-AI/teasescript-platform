@@ -287,8 +287,8 @@ and `absoluteDateTime` values with strict ISO conversion and the player's numeri
 and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
 restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Blocks never interrupt each other,
 so a repeating timer whose block takes at least as long as its period holds the script after the timer for as long as
-it repeats, and Debug reports developer warning `TSW018` for it once. Timer, media, and button blocks share the
-variables of the code that creates them
+it repeats. Debug reports this once as developer warning `TSW018`, when a whole round runs out inside the block. Timer,
+media, and button blocks share the variables of the code that creates them
 ([§14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)). Accepted forms and current
 limits are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
 [§28](specifications/accepted-syntaxes-v30.md#28-permanent-buttons), and
