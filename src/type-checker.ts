@@ -2003,11 +2003,23 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      type = this.#newPlaceType(written, value);
+      // A copy of a place that no value decided yet but that held a value the compiler cannot know, such as an element
+      // of `[]` after `add(load(key, default: null))`, holds that value too, which may be null: the value that later
+      // decides the variable's own copy decides it as optional, and the copied value is checked against the type it
+      // decides when the script runs, as a store of it would be (#859).
+      const held = members(value).some(
+        (part) => part.kind === "open" && part.heldUnknown !== undefined,
+      );
+      type = held ? placeType(value) : this.#newPlaceType(written, value);
+      if (held)
+        for (const part of members(type))
+          if (part.kind === "open" && part.heldUnknown !== undefined) part.sawNull = true;
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);
       type = this.#ownType(statement, type);
+      // A later check may start with the copy decided, so the check is kept without asking the value again.
+      if (held) this.#runtimeChecks.push({ site: statement, place: type, label: `'${name}'` });
       this.#reportMixedChoice(
         written,
         (type) =>
