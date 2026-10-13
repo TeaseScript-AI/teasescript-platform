@@ -53,7 +53,7 @@ test("probe --json output stays complete through a pipe", () => {
   // Enough events for more than one pipe buffer, so an early exit would cut the JSON off.
   const result = runProbe("for i in 1..=3000 { wait 1 ms }\nexit\n", ["--run", "--json"]);
   assert.equal(result.status, 0, result.stderr);
-  const output = JSON.parse(result.stdout) as { run: { status: string; events: string[] } };
+  const output: { run: { status: string; events: string[] } } = JSON.parse(result.stdout);
   assert.equal(output.run.status, "halted");
   assert.equal(output.run.events.at(-1), "exit");
 });
