@@ -9,6 +9,8 @@ import {
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
   closePlayerRuntimePopup,
+  openPlayerRuntimeUrl,
+  playerRuntimeUrlRequest,
   playerRuntimeForeground,
   playerRuntimeForm,
   playerRuntimePacingGate,
@@ -37,6 +39,7 @@ import type {
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
 import type { DebugAnswerInput } from "../../debug-export.js";
+import { openUrlTab } from "../../url-tab.js";
 import type { ImageCapture } from "./useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -355,6 +358,38 @@ useEventListener(
   { capture: true },
 );
 
+/**
+ * `openUrl` (V30 §33): when this session's own run requested it and the player's recent click lets the browser open a
+ * tab, the Player opens the address at once and settles the request, so its button never shows. Each request is tried
+ * once, when it is first presented; a request a restore, rewind, or reload brought back is never opened by itself, and
+ * neither is one whose tab the browser did not open: its button opens it.
+ */
+let urlTried: { readonly plan: unknown; readonly reset: number; readonly actionId: number } | null = null;
+watch(
+  [actionId, () => props.reset],
+  () => {
+    const session = props.session;
+    const id = actionId.value;
+    if (!session || id === undefined || foreground.value?.kind !== "open-url") return;
+    if (urlTried?.plan === session.plan && urlTried.reset === props.reset && urlTried.actionId === id)
+      return;
+    urlTried = { plan: session.plan, reset: props.reset, actionId: id };
+    // Typically an answer the player just gave presents it, while that answer still holds the controls.
+    if (!playerRuntimeUrlRequest(session)?.live) return;
+    // Host input happens at the observed time; settling must not be refused once the tab is open.
+    const observed = props.observeTime ? props.observeTime() : session;
+    const request = observed ? playerRuntimeUrlRequest(observed) : null;
+    if (!observed || request?.actionId !== id || !request.live || !openUrlTab(request.url)) return;
+    const result = openPlayerRuntimeUrl(observed);
+    if (result) emit("update:session", result.session);
+  },
+  { immediate: true },
+);
+/** The player's click on an `openUrl`'s button opens its address in a new tab, then settles it. */
+function openUrl(session: PlayerRuntimeSession) {
+  const request = playerRuntimeUrlRequest(session);
+  return request !== null && openUrlTab(request.url) ? openPlayerRuntimeUrl(session) : null;
+}
 function focusInput() {
   composer.value?.focusInput();
 }
@@ -409,7 +444,11 @@ watch(
       (foreground.value || pacing.value) &&
       foreground.value?.kind !== "popup"
     ) {
-      if (wasEditing) focusInput();
+      // An `openUrl`'s button stands in for the composer, which takes no answer meanwhile.
+      if (foreground.value?.kind === "open-url") {
+        if (!keyboardNavigation) document.documentElement.dataset.playerKeyboardFocus = "false";
+        root.value?.querySelector<HTMLElement>("[data-open-url]")?.focus({ preventScroll: true });
+      } else if (wasEditing) focusInput();
       // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
       else if (composerFocused && !root.value?.contains(document.activeElement)) focusInput();
       else if (unownedFocus || releasedFocus) {
@@ -678,6 +717,7 @@ function submit(source: "input" | "button") {
                   )
               "
               @skip="complete(answer('button', skipPlayerRuntimeImage))"
+              @open="complete(answer('button', openUrl))"
               @image="imageControl"
             />
             <!-- Status text only: it is not announced each second and takes no input. -->
@@ -707,7 +747,11 @@ function submit(source: "input" | "button") {
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="(!foreground && !pacing) || foreground?.kind === 'popup'"
+          :disabled="
+            (!foreground && !pacing) ||
+            foreground?.kind === 'popup' ||
+            foreground?.kind === 'open-url'
+          "
           :pacing="!foreground && !!pacing"
           :preselected="preselected !== undefined"
           :buttons-only="

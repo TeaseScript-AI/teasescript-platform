@@ -204,9 +204,10 @@ async function main() {
       await formsScenario(cdp, origin);
       await preselectScenario(cdp, origin);
       await popupScenario(cdp, origin);
+      await openUrlScenario(cdp, origin, debugPort);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, and popup scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, and openUrl scenarios",
       );
     } finally {
       cdp.close();
@@ -5455,6 +5456,108 @@ async function popupScenario(cdp, origin) {
       true,
       `Entry ${index} is ${texts[index]}, not ${text}`,
     );
+}
+
+/**
+ * `openUrl` (V30 §33), on a package served as a catalog that names pages of the smoke's own server: right after the
+ * player's click the Player opens the address in a new tab at once and the script goes on; without a recent click it
+ * shows the button "Open <host>", whose click opens it; after a reload it never opens the address by itself, also not
+ * after the click on Continue, but shows the button. Each address opens once, in a tab without an opener.
+ */
+async function openUrlScenario(cdp, origin, debugPort) {
+  const address = (page) => `${origin}/open-url-target/${page}`;
+  CATALOGS.set("/dev-package/open-url/catalog.json", {
+    images: [],
+    media: [],
+    sources: [
+      {
+        path: "main.tease",
+        source: [
+          'showButton "Go"',
+          `openUrl("${address(1)}")`,
+          'say "Opened at once", instant',
+          `openUrl("${address(2)}")`,
+          'say "Opened from its button", instant',
+          `openUrl("${address(3)}")`,
+          'say "Opened after the reload", instant',
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    problems: [],
+  });
+  const tabs = async () =>
+    (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).filter(
+      (target) => target.type === "page" && target.url.startsWith(address("")),
+    );
+  const waitForTabs = async (count, message) => {
+    const deadline = Date.now() + 8_000;
+    while ((await tabs()).length < count) {
+      if (Date.now() > deadline) throw new Error(message);
+      await delay(50);
+    }
+  };
+  const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
+  const said = (text) => `${entries}.some((entry) => entry.endsWith(${JSON.stringify(text)}))`;
+  const button = `document.querySelector('[data-open-url]')?.textContent.trim() ?? null`;
+  const host = new URL(origin).host;
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=open-url`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  // The click on Go lets the browser open the first address at once; that tab takes the activation, so the second
+  // address waits for its button.
+  await waitForTabs(1, "The first address did not open at once");
+  await waitFor(
+    cdp,
+    said("Opened at once"),
+    8_000,
+    "The script did not go on after the tab opened",
+  );
+  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The second address shows no button");
+  assertEqual((await tabs()).length, 1, "The second address opened without a click");
+  const [first] = await tabs();
+  const tab = await connectCdp(first.webSocketDebuggerUrl);
+  try {
+    await waitFor(tab, `document.readyState === 'complete'`);
+    assertEqual(await value(tab, "window.opener === null"), true, "The new tab has an opener");
+    assertEqual(await value(tab, "location.href"), address(1), "The tab shows another address");
+  } finally {
+    tab.close();
+  }
+  // The player comes back to the Player's tab, which the new tab covered.
+  await cdp.call("Page.bringToFront");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(2, "The button did not open the second address");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, said("Opened from its button"), 8_000, "The script did not go on");
+  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The third address shows no button");
+  // A reload brings the waiting request back as history: Continue is a click, but it does not open the address.
+  await reloadKept(cdp, address(3));
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The reload lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 2, "The reload opened the third address by itself");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(3, "The button did not open the third address after the reload");
+  await waitFor(cdp, said("Opened after the reload"), 8_000, "The script did not go on");
+  assertEqual(
+    JSON.stringify((await tabs()).map((target) => target.url).sort()),
+    JSON.stringify([address(1), address(2), address(3)]),
+    "An address opened twice",
+  );
+  // Only the click on Go answers; the addresses and their buttons add nothing to the transcript.
+  const texts = await value(cdp, entries);
+  assertEqual(
+    texts.filter((text) => text.includes("Open ") || text.includes("open-url-target")).length,
+    0,
+    `The transcript shows an address: ${JSON.stringify(texts)}`,
+  );
+  for (const target of await tabs())
+    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
 }
 
 async function preselectScenario(cdp, origin) {

@@ -29,6 +29,7 @@ const emit = defineEmits<{
   activate: [optionId: string | null];
   skip: [];
   image: [control: ImageControl];
+  open: [];
 }>();
 const group = ref<HTMLElement | null>(null);
 const balanceLastRow = ref(false);
@@ -127,7 +128,8 @@ function focusOut(event: FocusEvent) {
     v-if="
       foreground?.kind === 'choose' ||
       foreground?.kind === 'show-button' ||
-      foreground?.kind === 'ask-image'
+      foreground?.kind === 'ask-image' ||
+      foreground?.kind === 'open-url'
     "
     role="group"
     :aria-label="foreground.accessibleName"
@@ -230,6 +232,14 @@ function focusOut(event: FocusEvent) {
         />
       </template>
     </div>
+    <!-- An openUrl the Player could not open at once: the player's click opens it. -->
+    <PlayerActionButton
+      v-else-if="foreground.kind === 'open-url'"
+      :disabled="disabled"
+      :label="foreground.buttonText"
+      data-open-url
+      @click="emit('open')"
+    />
     <!-- The visible label names the button; the localized default only stands in for a blank label. -->
     <PlayerActionButton
       v-else
