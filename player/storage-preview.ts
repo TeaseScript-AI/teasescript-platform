@@ -43,7 +43,8 @@ export function storagePreview(value: SerializableRuntimeValue): StoragePreview 
   if (typeof value === "string")
     return Object.freeze({
       type: "Text",
-      text: shortText(JSON.stringify(value)),
+      // Only the head that the preview can show is written as JSON: a saved text may be too long to write whole.
+      text: shortText(JSON.stringify(value.slice(0, PREVIEW_TEXT_LENGTH))),
       photo: isWellFormedCapturedMediaReference(value) ? value : null,
       size: null,
     });
