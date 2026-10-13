@@ -1383,8 +1383,8 @@ let decoded = fromJson(fromBase64(text, default: ""), default: null)
 
 **Files (Owner decisions, 2026-10-13):** with files, `toJson` writes every stored file reference, of a photo or of a
 file from `fileFromBase64` ([§33](#stored-files)), as a data URL, `data:<type>;base64,…`, with the type its bytes give.
-`fromJson` turns data URLs back into stored files and gives their references; only a data URL of an image, audio, or
-video type of [§33](#stored-files) becomes a file, and any other data URL stays text. `files: false` keeps references
+`fromJson` turns data URLs back into stored files and gives their references; only a data URL whose bytes are of an
+image, audio, or video type of [§33](#stored-files) becomes a file, and any other data URL stays text. `files: false` keeps references
 in `toJson` and data URLs in `fromJson` as text. A package path such as `"images/a.jpg"` and any other text are never
 embedded or converted: a text is a stored file reference only when the session knows it as one, never by its shape.
 `toJson` and `fromJson` wait briefly for the Player's file store only when files are involved.
@@ -4214,8 +4214,8 @@ fileToBase64(file)
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
 `default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
-them as plain Base64 text. Storing and reading the store take a short wait, as a photo does. The result is recorded, so
-a restore or a replay does not need the store again. The Base64 text may be as long as any text.
+them as plain Base64 text. Storing a file and reading one each take a short wait, as a photo does. The result is
+recorded: a restore or a replay can reuse a recorded result without asking the store again. The Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
