@@ -723,7 +723,7 @@ export function positionalMethodProblems(
   return [
     {
       kind: "argumentCount",
-      message: `remove() takes 1 argument (value), or none on a message or permanent button, received ${call.arguments.length}.`,
+      message: `remove() takes 1 argument, or none on a message or permanent button, received ${call.arguments.length}.`,
       span: call.span,
     },
   ];

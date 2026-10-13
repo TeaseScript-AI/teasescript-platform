@@ -115,6 +115,12 @@ test("a list or set method call with arguments it never takes is a compile error
       "clear() takes no arguments, received 1.",
       "c.clear(1)",
     ],
+    [
+      'function drop(c: integer dict | messageHandle) {\n    c.remove("a", 2)\n}',
+      "TSV020",
+      "remove() takes 1 argument, or none on a message or permanent button, received 2.",
+      'c.remove("a", 2)',
+    ],
   ];
   for (const [source, code, message, text] of cases)
     assert.deepEqual(diagnostics(`${source}\nexit`), [[code, message, text]], source);
@@ -158,7 +164,7 @@ test("a call that no receiver with the method takes is a compile error on a valu
     [
       "v.remove(1, 2)",
       "TSV020",
-      "remove() takes 1 argument (value), or none on a message or permanent button, received 2.",
+      "remove() takes 1 argument, or none on a message or permanent button, received 2.",
       "v.remove(1, 2)",
     ],
     [
@@ -186,7 +192,7 @@ test("a call that no receiver with the method takes is a compile error on a valu
 });
 
 test("a call that some receiver with the method takes compiles, and its receiver checks it when it runs", () => {
-  // A message takes `remove()`, and a list takes `remove(value)`.
+  // A message takes `remove()`, a list `remove(value)`, and a dict `remove(key)`.
   const removed = [
     'let line = say "Gone", instant',
     'let kept = say "Kept", instant',
@@ -197,12 +203,16 @@ test("a call that some receiver with the method takes compiles, and its receiver
     "    c.remove()",
     "}",
     "removeFrom(kept)",
+    "function removeKey(c: integer dict | messageHandle) {",
+    '    return c.remove("a")',
+    "}",
     "say names",
+    "say removeKey(dict{ a: 7 })",
     "exit",
   ].join("\n");
   const result = runValidSource(`${DYNAMIC}${removed}`);
   assert.equal(result.snapshot.failure, null);
-  assert.deepEqual(sayTexts(result), ["Gone", "Kept", "[1]"]);
+  assert.deepEqual(sayTexts(result), ["Gone", "Kept", "[1]", "7"]);
   assert.deepEqual(
     result.snapshot.liveMessages.map((message) => [message.sourceText, message.removed === true]),
     [
