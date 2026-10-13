@@ -326,6 +326,8 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
+  /** Set while a map literal takes the place of what a JsonSlurper's parseText() gave: its maps are dicts. */
+  jsonLiterals?: true;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
   /** Variables that only ever hold null, a switch on which keeps only its default (nullOnlyVariables). */
@@ -11755,7 +11757,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return { kind: "list", items: withAllRecordFields(items) };
     }
     case "map":
-      return lowerMapExpression(node, context);
+      return lowerMapExpression(node, context, context.jsonLiterals === true);
     case "gstring":
       return lowerGString(node, context);
     case "array":
@@ -12136,8 +12138,16 @@ function namedMapLiteral(
 ): IrExpression | null {
   const key = bindingKey(target, context.bindings) ?? "";
   const uses = context.mapUses;
-  // A map that takes the place of what a JsonSlurper's parseText() gave is a dict as well, whose keys reads read.
-  if (uses.jsonValues.has(key)) return lowerMapExpression(node, context, true);
+  // A map that takes the place of what a JsonSlurper's parseText() gave is a dict as well, whose keys reads read, and
+  // so are the maps in it.
+  if (uses.jsonValues.has(key) && context.jsonLiterals !== true) {
+    context.jsonLiterals = true;
+    try {
+      return lowerMapExpression(node, context, true);
+    } finally {
+      delete context.jsonLiterals;
+    }
+  }
   if (!uses.dictionaries.has(key))
     return lowerMapExpression(node, context, false, uses.recordFields.get(key) ?? []);
   if (
@@ -14596,7 +14606,7 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     return target === null ? null : { kind: "property", target, name: "length" };
   }
   // Groovy read `value.size` of what a JsonSlurper's parseText() gave as a map's key, or a list's length.
-  if (property === "size" && isJsonValue(targetNode, context)) {
+  if (property === "size" && !context.writeTargets.has(node) && isJsonValue(targetNode, context)) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : useHelper(context, "jsonSize", [target]);
   }
