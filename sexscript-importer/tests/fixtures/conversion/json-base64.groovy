@@ -26,3 +26,7 @@ else if (report.violations > 1) show("You moved " + report.violations + " times"
 def data = new groovy.json.JsonSlurper().parseText('{"config": {"title": "Yes", "size": 3}, "rolls": [4, 6]}')
 def inner = data.config
 show(data.config.title + " " + inner.size + " " + data.rolls[1])
+// A map that takes the place of a parse is a dict as well, and a list's size is its length.
+def fallback = new groovy.json.JsonSlurper().parseText('null')
+if (fallback == null) fallback = [title: "Fallback"]
+show(fallback.title + " " + data.rolls.size)

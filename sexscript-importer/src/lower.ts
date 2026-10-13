@@ -292,6 +292,8 @@ interface LowerContext {
   cancelBooleans?: true;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
+  /** The legacy file being lowered. */
+  sourceName: string;
   /** Binding keys of variables that closures declare (bindingKeys). */
   bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
@@ -621,9 +623,13 @@ export interface MapUses {
   dictionaries: Set<string>;
   /** Closures every return of which gives such a map, whose calls are dicts too. */
   dictionaryFunctions: Set<string>;
-  /** Variables that hold what a JsonSlurper's parseText() gave, and the closures that return it (jsonValueBindings). */
+  /**
+   * Variables that hold what a JsonSlurper's parseText() gave, the closures that return it, which calls of other files
+   * reach, and each file's own closures, by name, with whether they return it (jsonValueBindings).
+   */
   jsonValues: Set<string>;
   jsonFunctions: Set<string>;
+  jsonClosures: Map<string, Map<string, boolean>>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -664,6 +670,8 @@ interface MapBody {
   body: AstNode;
   types: TypeEnvironment;
   keys: BindingKeys;
+  /** The file's name, which tells its closures from other files' of the same name (jsonValueBindings). */
+  source?: string;
 }
 
 /**
@@ -692,7 +700,7 @@ export function packageMapUses(
         ),
         globalTypes,
       );
-      return [{ body, types, keys }];
+      return [{ body, types, keys, source: file.sourceName }];
     }),
   );
 }
@@ -959,6 +967,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     dictionaryFunctions,
     jsonValues: json.variables,
     jsonFunctions: json.functions,
+    jsonClosures: json.closures,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -2106,6 +2115,7 @@ function lowerFileOnce(
     menuIndexes: new Set(),
     nullElementLists: new Set(),
     mapUses: mapUsesOf([]),
+    sourceName: file.sourceName,
     bindings: new Map(),
     integerVariables: new Set(),
     typedVariables: new Set(),
@@ -2250,7 +2260,8 @@ function lowerFileOnce(
     context.fixedClosureCalls = fixedClosureCalls(body);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
-      options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
+      options.mapUses ??
+      mapUsesOf([{ body, types: context.types, keys: context.bindings, source: file.sourceName }]);
     context.elementRemovals = elementRemovals(body);
     Object.assign(context, fileTests(body));
     context.java = javaFileState(body, options.javaResources ?? null);
@@ -3439,6 +3450,7 @@ function lowerHelperMethod(
     menuIndexes: menuIndexes(body),
     nullElementLists: new Set(),
     mapUses: baseContext.mapUses,
+    sourceName: baseContext.sourceName,
     bindings: new Map(),
     integerVariables: new Set(),
     typedVariables: new Set(),
@@ -12124,6 +12136,8 @@ function namedMapLiteral(
 ): IrExpression | null {
   const key = bindingKey(target, context.bindings) ?? "";
   const uses = context.mapUses;
+  // A map that takes the place of what a JsonSlurper's parseText() gave is a dict as well, whose keys reads read.
+  if (uses.jsonValues.has(key)) return lowerMapExpression(node, context, true);
   if (!uses.dictionaries.has(key))
     return lowerMapExpression(node, context, false, uses.recordFields.get(key) ?? []);
   if (
@@ -14581,6 +14595,11 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
+  // Groovy read `value.size` of what a JsonSlurper's parseText() gave as a map's key, or a list's length.
+  if (property === "size" && isJsonValue(targetNode, context)) {
+    const target = lowerExpression(targetNode, context);
+    return target === null ? null : useHelper(context, "jsonSize", [target]);
+  }
   // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536), as does what a JsonSlurper's
   // parseText() gave, also a map nested in it (V30 §30).
   if (isDictionary(targetNode, context) || isJsonValue(targetNode, context)) {
@@ -15915,10 +15934,11 @@ function dictionaryVariables(
 function jsonValueBindings(bodies: readonly MapBody[]): {
   variables: Set<string>;
   functions: Set<string>;
+  closures: Map<string, Map<string, boolean>>;
 } {
   const variables = new Set<string>();
   const functions = new Set<string>();
-  const parts = bodies.map(({ body, keys }) => {
+  const parts = bodies.map(({ body, keys, source }) => {
     const slurpers = jsonSlurperNames(body);
     const assignments: Array<[string, AstNode]> = [];
     const closures = new Map<string, AstNode[] | null>();
@@ -15966,10 +15986,13 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       visit(statements);
       closures.set(name, endsInReturn(statements.at(-1) ?? null) ? values : null);
     });
-    return { keys, slurpers, assignments, closures, functions: new Set<string>() };
+    return { keys, slurpers, assignments, closures, functions: new Set<string>(), source };
   });
-  for (let size = -1; size !== variables.size + functions.size;) {
-    size = variables.size + functions.size;
+  // Rounds until no file finds another variable or closure.
+  const found = (): number =>
+    variables.size + parts.reduce((total, part) => total + part.functions.size, 0);
+  for (let size = -1; size !== found();) {
+    size = found();
     // Names some file defines as a closure that gives no such value.
     const conflicts = new Set(
       parts.flatMap(({ closures, functions: own }) =>
@@ -16011,10 +16034,19 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       }
     }
   }
-  // A name that a file defines as another closure is no such function.
-  for (const { closures, functions: own } of parts)
-    for (const name of closures.keys()) if (!own.has(name)) functions.delete(name);
-  return { variables, functions };
+  // A name that a file defines as another closure is no such function for calls of other files; a file's own calls
+  // go to its own closures (jsonClosures).
+  const closures = new Map<string, Map<string, boolean>>();
+  for (const [index, { closures: defined, functions: own, source }] of parts.entries()) {
+    const file = source ?? `#${index}`;
+    const known = closures.get(file) ?? new Map<string, boolean>();
+    for (const name of defined.keys()) {
+      known.set(name, (known.get(name) ?? true) && own.has(name));
+      if (!own.has(name)) functions.delete(name);
+    }
+    closures.set(file, known);
+  }
+  return { variables, functions, closures };
 }
 
 /** Whether a node is or holds what a JsonSlurper's parseText() gave, as a value or a key's value in it (jsonValueBindings). */
@@ -16033,9 +16065,10 @@ function isJsonValue(node: AstNode | null, context: LowerContext): boolean {
     return isJsonValue(asNode(node.left), context);
   const called =
     node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
-  return (
-    called !== null && context.mapUses.jsonFunctions.has(called) && context.functions.has(called)
-  );
+  if (called === null || !context.functions.has(called)) return false;
+  // A closure of the file itself, else one of another file.
+  const own = context.mapUses.jsonClosures.get(context.sourceName)?.get(called);
+  return own ?? context.mapUses.jsonFunctions.has(called);
 }
 
 /** Whether a Groovy map literal has a key that is no TeaseScript property name, so that it becomes a dict. */

@@ -19,6 +19,12 @@ function sexscriptLegacyTruth(value) {
   }
   return value != null
 }
+function sexscriptLegacyJsonSize(value) {
+  if value is list {
+    return value.length
+  }
+  return value["size"]
+}
 // JSON and Base64 text (V30 §30): JsonOutput.toJson() is toJson(), a text's bytes in Base64 toBase64(), decodeBase64()
 // bytes that new String() makes text again fromBase64(), and a JsonSlurper's parseText() fromJson(). Text that is not
 // Base64 or JSON gives a default where Groovy failed, here into the catch, which returned null as fromJson() does.
@@ -58,6 +64,12 @@ let inner = data["config"]
 // NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-say prose "${data["config"]["title"]} ${inner["size"]} ${data["rolls"][1]}", instant
+say prose "${data["config"]["title"]} ${sexscriptLegacyJsonSize(inner)} ${data["rolls"][1]}", instant
+// A map that takes the place of a parse is a dict as well, and a list's size is its length.
+// NOTE SX_JSON_PARSE line 30: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
+let fallbackValue = fromJson("null", default: null)
+fallbackValue = fallbackValue otherwise dict{ title: "Fallback" }
+// NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say prose "${fallbackValue["title"]} ${sexscriptLegacyJsonSize(data["rolls"])}", instant
 exit

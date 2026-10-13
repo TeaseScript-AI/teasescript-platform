@@ -175,6 +175,7 @@ export type HelperName =
   | "itemAt"
   | "truth"
   | "text"
+  | "jsonSize"
   | "systemSpeaker"
   | "deviceButtons"
   | "showDevice"
@@ -310,6 +311,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "itemAt",
   "truth",
   "text",
+  "jsonSize",
   "deviceButtons",
   "showDevice",
   "openTray",
@@ -1716,6 +1718,21 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyText",
         ["value"],
         [ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]), ret(template(v("value")))],
+      ),
+  },
+  // Groovy `value.size` of what a JsonSlurper parsed: a map's "size" key, and a list's length (its private size field).
+  jsonSize: {
+    name: "sexscriptLegacyJsonSize",
+    build: () =>
+      fn(
+        "sexscriptLegacyJsonSize",
+        ["value"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
+            ret(prop(v("value"), "length")),
+          ]),
+          ret({ kind: "index", target: v("value"), index: lit("size"), dict: true }),
+        ],
       ),
   },
   // Groovy `(String) value`: null stays null, and another value becomes its text.
