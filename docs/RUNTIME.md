@@ -1473,10 +1473,10 @@ Player POC implement that contract; production host lifecycle and cross-origin w
 ## JSON and Base64 text
 
 `toJson`, `fromJson`, `toBase64`, and `fromBase64` ([V30 §13](specifications/accepted-syntaxes-v30.md#json-and-base64))
-are pure core built-ins. Native JSON writes and reads each string and number, native `btoa` and `atob` do the Base64,
-and `TextEncoder` and a fatal `TextDecoder` the UTF-8. The engine walks the structure itself, without native recursion,
-so that object keys keep their source order, which native JSON reading does not for keys that look like whole numbers,
-and so that any depth gives the same result in every host:
+are pure core built-ins. Native JSON writes each string and reads each string with escapes, `Number` reads and `String`
+writes each number, native `btoa` and `atob` do the Base64, and `TextEncoder` and a fatal `TextDecoder` the UTF-8. The
+engine walks the structure itself, without native recursion, so that object keys keep their source order, which native
+JSON reading does not for keys that look like whole numbers, and so that any depth gives the same result in every host:
 
 - `toJson` writes a dict, object, or speaker's properties in their order, and fails with `TSR059` for a calendar
   duration, range, script reference, timer, media, or message handle, camera view, or permanent button, or for a
@@ -1486,8 +1486,8 @@ and so that any depth gives the same result in every host:
   stays whole.
 - `toBase64` writes a lone surrogate as U+FFFD, as UTF-8 encoding does; a text whose Base64 would be longer than a text
   can be fails with `TSR084`. `fromBase64` keeps a leading byte order mark.
-- A value that is not text, which only a value of unknown type can be, gives the default of `fromJson` and
-  `fromBase64`, and fails `toBase64` with `TSR059`.
+- A value that is not text, such as `null` from a `string?` or a value of unknown type, gives the default of `fromJson`
+  and `fromBase64`. `toBase64` fails with `TSR059` for one that the compiler could not see.
 
 ## Runtime defaults and limits
 
