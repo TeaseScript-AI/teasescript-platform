@@ -21,7 +21,7 @@ export function missingPropertyMessage(
   return `${subject} has no property '${name}'. ${listed}.`;
 }
 
-/** The property of several that `name` likely misspells, as `name` for `nmae`, as a hint after the message. */
+/** The property or method of several that `name` likely misspells, as `name` for `nmae`, as a hint after the message. */
 export function misspelledPropertyHint(name: string, properties: readonly string[]): string {
   if (properties.length < 2) return "";
   let nearest: string | undefined;

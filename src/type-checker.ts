@@ -5653,9 +5653,18 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // Every member of a union must have the method (ADR 0021 rule 3.5).
+    // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
+    // another member has the method, the runtime checks a speaker.
     const all = members(value);
-    const results = all.map((member) => memberMethodType(member, method));
+    const typed = all.map((member) => memberMethodType(member, method));
+    const elsewhere = all.some(
+      (member, index) => typed[index] !== undefined && resolved(member).kind !== "speaker",
+    );
+    const results = elsewhere
+      ? typed
+      : all.map((member, index) =>
+          resolved(member).kind === "speaker" ? undefined : typed[index],
+        );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
       const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
@@ -5750,7 +5759,9 @@ class TypeChecker {
               ? handleMemberMessage(failing.kind, method, "call")
               : failing.kind === "permanentButton"
                 ? `Permanent buttons have no method '${method}'. Use remove().`
-                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+                : failing.kind === "speaker" && all.length === 1
+                  ? speakerMethodMessage(method, expressionLabel(callee.object))
+                  : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -9044,6 +9055,14 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
   ["messageHandle", "Message"],
   ["permanentButton", "Permanent button"],
 ]);
+
+/**
+ * The message for a method call on a receiver that is a speaker, which has properties but no methods (V30 §37). In a
+ * union, the example property would first need a check that the value is a speaker, so a union gets the plain message.
+ */
+function speakerMethodMessage(method: string, label: string | null): string {
+  return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
+}
 
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(

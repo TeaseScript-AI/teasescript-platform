@@ -12,6 +12,7 @@ import {
   type ConversionResult,
 } from "./conversions.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
+import { misspelledPropertyHint } from "./object-properties.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
@@ -65,12 +66,15 @@ export interface OperationProblem {
   readonly fix?: string;
 }
 
+/** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
+const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
+
 /**
  * Compile-time problems with a member read (`call` is `null`) or method call: unknown text members, members of values
  * that have none, and visible misuse of text operation and `join` arguments, also on a receiver of unknown type for the
- * methods only text or only lists have. On a receiver of unknown type, the arguments of the other methods are checked
- * where no receiver with the method takes them. Objects, speakers, handles, unions, and the other list and set members
- * are left to the type check's own rules or to the runtime.
+ * methods only text or only lists have. On a receiver of unknown type, a method that no value has is reported, and the
+ * arguments of the other methods are checked where no receiver with the method takes them. Objects, speakers, handles,
+ * unions, and the other list and set members are left to the type check's own rules or to the runtime.
  */
 export function memberProblems(
   receiver: Expression,
@@ -88,10 +92,7 @@ export function memberProblems(
     const member = TEXT_MEMBERS.get(name);
     if (member === undefined)
       return problem(unknownTextMemberMessage(name, call === null ? "property" : "method"));
-    if (member.parameters === null)
-      return call === null
-        ? []
-        : problem("'length' is a property, not a method. Write .length without parentheses.");
+    if (member.parameters === null) return call === null ? [] : problem(LENGTH_PROPERTY);
     if (call === null)
       return problem(
         `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
@@ -115,6 +116,13 @@ export function memberProblems(
     // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections,
     // and text and lists both have `reverse` without arguments.
     if (call === null) return [];
+    // A name that no value has as a method fails on every receiver; every value with `length` has it as a property.
+    if (!METHOD_NAMES.has(name))
+      return problem(
+        name === "length"
+          ? LENGTH_PROPERTY
+          : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
+      );
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
       return takeProblems(name, undefined, property, call, typeOf);
@@ -704,6 +712,20 @@ const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
   positionalMethod("toDateTime"),
   positionalMethod("toSeconds"),
   positionalMethod("toMilliseconds"),
+]);
+
+/**
+ * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
+ * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
+ * numbers, objects, and speakers, have none.
+ */
+const METHOD_NAMES: ReadonlySet<string> = new Set([
+  ...[...TEXT_MEMBERS.values()]
+    .filter((member) => member.parameters !== null)
+    .map(({ name }) => name),
+  LIST_JOIN.name,
+  ...COLLECTION_METHODS,
+  ...POSITIONAL_METHODS.keys(),
 ]);
 
 /**
