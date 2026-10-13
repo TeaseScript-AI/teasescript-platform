@@ -3959,6 +3959,17 @@ Rules:
 **Status (Owner decision, 2026-10-13):** the popup is a dialog outside the chat with its message and one button, which
 closes it. The player can only close it, and `buttonText` only renames the button.
 
+**Status (Owner decision, 2026-10-13):** `showPopup`, in both forms, returns how long the popup was open until the
+player closed it as a `duration`, exactly like the elapsed waiting time `showButton` returns
+([§21](#21-blocking-button)). The return value may be ignored.
+
+```text
+let t = showPopup "Stand in the corner. Click when you're done."
+if t < 5 min {
+    say "Back already? Again."
+}
+```
+
 ### System notification
 
 ```text
