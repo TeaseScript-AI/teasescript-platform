@@ -683,6 +683,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
   // could not load, such as a browser that denies storage. A session-local run plays normally and keeps nothing.
   const storedEntries = shallowRef<readonly RuntimeScriptStorageEntrySnapshot[] | null>(null);
+  // The references in the stored values that the media store had stored when they were read: the stored files a Start
+  // names, with those it holds since.
+  let readStoredFiles: ReadonlySet<string> = new Set();
   // Counts changes this Player made to the saved values: a stored save, a clear, an import, or a fresh read.
   const savedDataRevision = ref(0);
   /**
@@ -692,7 +695,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function loadScriptStorage(): Promise<void> {
     if (!scriptStorage) return;
     try {
-      storedEntries.value = await scriptStorage.load();
+      const entries = await scriptStorage.load();
+      readStoredFiles = await capturedMedia
+        .storedReferences(storedValueReferences(entries))
+        .catch(() => new Set<string>());
+      storedEntries.value = entries;
       savedDataRevision.value++;
       notices.dismiss(playerNoticeKeys.storageUnavailable);
     } catch {
@@ -701,20 +708,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
   }
   /**
-   * Session options for the script's storage; call it from the Start factory. The references of this Player's store in
-   * the stored values are stored files the session knows, so `toJson` writes them and `fileToBase64` reads them.
+   * Session options for the script's storage; call it from the Start factory. The references in the stored values that
+   * the media store holds, or had stored when they were read, are stored files the session knows, so `toJson` writes
+   * them and `fileToBase64` reads them; other text, also text of the same shape, stays text.
    */
   function scriptStorageOptions(): PlayerRuntimeSessionOptions {
     if (storedEntries.value === null) return {};
-    const storedFiles = new Set<string>();
-    for (const entry of storedEntries.value)
-      for (const reference of capturedMediaReferences(entry.value))
-        if (isWellFormedCapturedMediaReference(reference)) storedFiles.add(reference);
-    return {
-      scriptStorage: storedEntries.value,
-      persistentScriptStorage: true,
-      storedFiles: [...storedFiles],
-    };
+    const storedFiles = [...storedValueReferences(storedEntries.value)].filter(
+      (reference) => readStoredFiles.has(reference) || capturedMedia.knows(reference),
+    );
+    return { scriptStorage: storedEntries.value, persistentScriptStorage: true, storedFiles };
   }
   // Each pending write is persisted once through the provider and then reported to the runtime, which keeps the
   // previous value when it failed (warning TSW014). Every published session is observed, whichever operation made it.
@@ -2147,4 +2150,13 @@ function sameSavedValue(
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   return serializableEquals(left, right);
+}
+
+/** The captured-media references of the stored values, by their shape: candidates that only the media store can confirm. */
+function storedValueReferences(entries: readonly RuntimeScriptStorageEntrySnapshot[]): Set<string> {
+  const references = new Set<string>();
+  for (const entry of entries)
+    for (const reference of capturedMediaReferences(entry.value))
+      if (isWellFormedCapturedMediaReference(reference)) references.add(reference);
+  return references;
 }

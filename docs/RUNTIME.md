@@ -1563,7 +1563,8 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
 as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
 stored files' bytes, from durable storage when needed. When it cannot decode, keep, or read them, it answers `failed`.
-At Start it names the references of its store that the saved values hold. Its media store resolves a reference only for
+At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
+text that only has the shape of a reference stays text. Its media store resolves a reference only for
 its own kind and the Player asks only for images, so only an image is ever shown, and stored audio and video are not
 played. A save whose files cannot be stored durably, as when the browser's storage is full, fails like any failed
 persistent write, with `TSW014` and the previous value, and the files stay usable for the session. The technical

@@ -314,3 +314,50 @@ test("when the browser's storage is full a save of a file keeps the previous val
   assert.notEqual(played.host.resolveAsset(picture), null);
   assert.equal(repository.size, 0);
 });
+
+test("saved text that only has the shape of a reference stays text in a later session", async (context) => {
+  stubBrowser(context);
+  const repository = new FakeMediaRepository();
+  const { provider } = memoryStorage("shapes");
+  const shaped = "captured-media:00000000-0000-4000-8000-000000000000:1";
+  const first = await playInPlayer(
+    context,
+    [
+      `let shaped = "${shaped}"`,
+      'save shaped as "text"',
+      'save [shaped] as "list"',
+      'save { file: shaped } as "object"',
+      'save dict { "${shaped}": 1 } as "keyed"',
+      `let picture = fileFromBase64("${PNG}", default: "")`,
+      'save picture as "picture"',
+      "exit",
+    ].join("\n"),
+    provider,
+    repository,
+  );
+  const { picture } = first.variables;
+  first.scope.stop();
+  const later = await playInPlayer(
+    context,
+    [
+      'let text: string = load("text", default: "")',
+      'let items: string[] = load("list", default: [])',
+      'let keyed = load("keyed", default: dict { "": 0 })',
+      'let picture: string = load("picture", default: "")',
+      "let json = toJson({ text: text, list: items, keys: keyed.keys, picture: picture })",
+      "exit",
+    ].join("\n"),
+    provider,
+    repository,
+  );
+  assert.equal(
+    later.variables.json,
+    JSON.stringify({
+      text: shaped,
+      list: [shaped],
+      keys: [shaped],
+      picture: `data:image/png;base64,${PNG}`,
+    }),
+  );
+  assert.deepEqual(playerRuntimeSnapshot(later.host.session.value!).storedFiles, [picture]);
+});
