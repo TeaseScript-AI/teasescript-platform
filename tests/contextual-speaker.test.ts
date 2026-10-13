@@ -29,8 +29,8 @@ function onePath(on: boolean): string {
 
 /**
  * The places a message reads `speaker` (V30 §37), by route: a `say` that evaluates its own text, one that prepares it
- * because of a call, a mode, or an option, and an interaction, which prepares its speaker apart. Each read is the only
- * `speaker` of its source, with what a `say` shows when the message has one.
+ * because of a call, a mode, or an option, and an interaction, which prepares its speaker apart, also `askImage`,
+ * written as a call. Each read is the only `speaker` of its source, with what a `say` shows when the message has one.
  */
 const READS: readonly (readonly [string, readonly string[]])[] = [
   ['say "${speaker.title}"', ["Mistress"]],
@@ -46,6 +46,12 @@ const READS: readonly (readonly [string, readonly string[]])[] = [
   ['showButton "Go", timeout: speaker.title.length * 1 s', []],
   ['let answer = askText "${speaker.title}"', ["Mistress"]],
   ['let answer = askChoice "${speaker.title}", "Other"', []],
+  [
+    'let image = askImage("Show your ${speaker.title} your setup")',
+    ["Show your Mistress your setup"],
+  ],
+  ['let image = askImage(hint: "Attach a photo", message: "${speaker.title}?")', ["Mistress?"]],
+  ['let image = askImage prose(font: speaker.font) ("Hi")', ["Hi"]],
 ];
 
 test("'speaker' in a message without a speaker is a runtime error, wherever the message reads it", () => {
@@ -108,6 +114,7 @@ test("'speaker' in a message without 'as' is a compile error when the script nev
     'showPermanentButton "Kneel" {\n    say "${speaker.title}"\n}',
     // An ask without 'as' inside a 'say as' text is a message of its own, with the default speaker.
     'say as vera "${askText "Q ${speaker.title}"}"',
+    'say as vera "${askImage("Q ${speaker.title}")}"',
   ];
   for (const read of reads) {
     const source = `${VERA}\n${read}\nexit`;
@@ -130,6 +137,30 @@ test("a message with 'as', and a speaker's own property, read 'speaker' without 
   );
   assert.equal(result.snapshot.failure, null);
   assert.deepEqual(sayTexts(result), ["Mistress Mistress!", "MISTRESS?"]);
+});
+
+test("an askImage message reads the speaker who says it, not that of a 'say as' around it", () => {
+  const result = runValidSource(
+    [
+      VERA,
+      'speaker guide {\n    title: "Guide"\n}',
+      "speaker guide",
+      'say as vera "${askImage("Show your ${speaker.title}")}"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(
+    result.events.flatMap((event) =>
+      event.kind === "say" ? [[event.speaker?.identifier, event.text]] : [],
+    ),
+    [["guide", "Show your Guide"]],
+  );
+});
+
+test("'speaker' next to an askImage call, outside its message, is no message's speaker", () => {
+  const source = `${VERA}\nspeaker vera\nlet image = askImage("Q") + speaker.title\nexit`;
+  assert.deepEqual(diagnostics(source), [["TSV002", "Unknown variable 'speaker'.", "speaker"]]);
 });
 
 test("a default speaker set anywhere in the package leaves 'speaker' to the runtime", () => {

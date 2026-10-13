@@ -2080,9 +2080,11 @@ class SemanticValidator {
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
             this.#validatePresentationProperties(expression.presentation ?? null);
+            // `askImage` has no `as`, so the default speaker says its question: `speaker` in its mode and its message
+            // is that speaker.
             if (expression.presentation !== undefined)
               yield* compileChild(
-                this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
+                this.#validateExpressionTask(expression.presentation, scope, "speaker"),
               );
           } else if (name === "openUrl" || name === "exportText") {
             // A statement of its own is an `openUrlStatement` or an `exportTextStatement`.
@@ -2197,9 +2199,17 @@ class SemanticValidator {
             );
           }
         }
+        const asksImage = isAskImageCall(expression);
         for (const argument of expression.arguments) {
+          const said =
+            asksImage &&
+            (argument.kind === "positionalArgument" || argument.name.name === "message");
           yield* compileChild(
-            this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
+            this.#validateExpressionTask(
+              argument.value,
+              scope,
+              said ? "speaker" : contextualSpeaker,
+            ),
           );
         }
         if (

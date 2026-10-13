@@ -2300,18 +2300,17 @@ export class InstructionCompiler {
   /**
    * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
    * reads when it opens. It is always prepared: its request is checked then. Like a basic ask, it first says its
-   * question, the message, read from that object.
+   * question, the message, read from that object; `speaker` in the message and its mode is the asking speaker.
    */
   *#lowerAskImageTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): CompileTask<LoweredExpression> {
     const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
-    const asksQuestion = expression.arguments.some(
+    const message = expression.arguments.find(
       (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
     );
-    const sayTemporaries = asksQuestion
-      ? this.#prepareQuestionSpeaker(null, expression.span)
-      : null;
+    const sayTemporaries =
+      message === undefined ? null : this.#prepareQuestionSpeaker(null, expression.span);
     const presentation =
       sayTemporaries === null
         ? null
@@ -2319,7 +2318,11 @@ export class InstructionCompiler {
             this.#lowerQuestionPresentationTask(expression.presentation, speakerTemporary),
           );
     const values = yield* compileChild(
-      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+      this.#lowerOrderedExpressionsTask(
+        expression.arguments.map((argument) => argument.value),
+        false,
+        message === undefined ? undefined : { expression: message.value, speakerTemporary },
+      ),
     );
     const requestTemporary = this.#allocateTemporary();
     this.instructions.push({
@@ -2696,9 +2699,14 @@ export class InstructionCompiler {
     };
   }
 
+  /**
+   * Lowers `expressions` in source order. `said` is one of them that a speaker says, with that speaker's temporary,
+   * which `speaker` in it reads.
+   */
   *#lowerOrderedExpressionsTask(
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
+    said?: { readonly expression: Expression; readonly speakerTemporary: number },
   ): CompileTask<LoweredExpression[]> {
     const emitsInstructions = expressions.map((expression) => this.#containsUserCall(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
@@ -2711,7 +2719,11 @@ export class InstructionCompiler {
     const lowered: LoweredExpression[] = [];
     for (let index = 0; index < expressions.length; index += 1) {
       const expression = expressions[index]!;
-      let item = yield* compileChild(this.#lowerExpressionTask(expression));
+      let item = yield* compileChild(
+        expression === said?.expression
+          ? this.#lowerInteractionPayloadTask(expression, said.speakerTemporary)
+          : this.#lowerExpressionTask(expression),
+      );
       if (
         laterEmitsInstructions[index] ||
         (materializeInstructionEmitting && emitsInstructions[index])
