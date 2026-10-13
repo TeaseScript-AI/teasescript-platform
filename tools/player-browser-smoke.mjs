@@ -200,7 +200,7 @@ async function main() {
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
-      await photoColourScenario(cdp, origin);
+      await photoColourScenario(cdp, origin, profile);
       await messageUpdatesScenario(cdp, origin);
       await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -2514,16 +2514,34 @@ async function lateImageScenario(cdp, origin) {
 
 /**
  * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
- * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the theme's; and the
- * empty Stage after `hideImage` gives every theme colour back.
+ * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
+ * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
+ * the empty Stage after `hideImage` gives every theme colour back; and switching light/dark while the colour fades keeps
+ * text readable on the background and in the message bubble, in both directions.
  */
-async function photoColourScenario(cdp, origin) {
+async function photoColourScenario(cdp, origin, profile) {
   await setViewport(cdp, 1440, 900);
+  const chosen = join(profile, "photo-colour-chosen.png");
+  await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
   // The theme's colour roles on the document root, and the HSL hue of a colour as the screen shows it.
   const roles = `Object.fromEntries([...document.documentElement.style].filter((name) => /^--(theme|story-accent)-/.test(name)).map((name) => [name, document.documentElement.style.getPropertyValue(name)]))`;
   const hue = (colour) =>
     `(() => { const probe = document.createElement('span'); probe.style.color = ${colour}; document.body.append(probe); const context = document.createElement('canvas').getContext('2d'); context.fillStyle = getComputedStyle(probe).color; probe.remove(); context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; const max = Math.max(r, g, b), min = Math.min(r, g, b); if (max === min) return null; const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min); return Math.round(((h * 60) % 360 + 360) % 360); })()`;
   const green = (degrees) => degrees !== null && degrees > 80 && degrees < 160;
+  // The lower WCAG contrast of the text on the background and of the message bubble's text, as the screen shows them now.
+  const contrast = `(() => {
+    const rgb = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+    const luminance = (colour) => rgb(colour).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const ratio = (first, second) => { const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a); return (high + 0.05) / (low + 0.05); };
+    const bubble = getComputedStyle(document.querySelector('.message-speaker'));
+    const background = getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor;
+    return Math.min(ratio(bubble.color, bubble.backgroundColor), ratio(getComputedStyle(document.body).color, background));
+  })()`;
+  const switchMode = async (mode) => {
+    await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
+    await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
+  };
+  const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
   const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
   const differing = (first, second) =>
     Object.keys({ ...first, ...second }).filter((name) => first[name] !== second[name]);
@@ -2544,12 +2562,25 @@ async function photoColourScenario(cdp, origin) {
   const theme = await value(cdp, roles);
   photoColourRequests.count = 0;
   await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
+  await waitFor(
+    cdp,
+    `${photo} && ${fading} && !!document.querySelector('.message-speaker')`,
+    8_000,
+    "The Stage photo did not colour the Player",
+  );
   // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
   // caching it.
   assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
-  // Let the fade to the photo's colour end.
+  // Light to dark while the photo's colour fades in: the background switches with its text.
+  await switchMode("dark");
+  const lightToDark = await value(cdp, contrast);
+  assertEqual(
+    lightToDark >= 4.5,
+    true,
+    `Text during a fade, light to dark: ${lightToDark.toFixed(2)} to 1`,
+  );
   await delay(900);
+  await switchMode("light");
   const withPhoto = await value(cdp, roles);
   for (const [name, colour] of [
     [
@@ -2581,20 +2612,46 @@ async function photoColourScenario(cdp, origin) {
     "",
     "A did not restore the photo accent",
   );
-  await physicalClick(cdp, '[aria-label="Switch to dark theme"]');
-  await waitFor(cdp, `document.documentElement.dataset.playerTheme === 'dark'`);
+  await switchMode("dark");
   assertEqual(
     green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
     true,
     "The dark canvas is not green",
   );
-  await physicalClick(cdp, '[aria-label="Switch to light theme"]');
-  await waitFor(cdp, `document.documentElement.dataset.playerTheme === 'light'`);
-  // The empty Stage gives the theme's own colours back.
+  // The window shrinks while an image request's preview hides the photo; once answered, the photo shows again in its
+  // new box, and the background's effects are centred on it.
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(cdp, decodedPreview, 8_000, "The chosen image showed no preview");
+  await setViewport(cdp, 900, 700);
+  await useImage(cdp);
+  const centred = `(() => {
+    const image = document.querySelector('img.stage-media:not([data-stage-preview])');
+    const box = image.getBoundingClientRect();
+    const origin = document.querySelector('.player-viewport-canvas').getBoundingClientRect();
+    const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+    const drawn = [box.left - origin.left + box.width / 2, box.top - origin.top + box.height / 2, image.naturalWidth * scale, image.naturalHeight * scale];
+    const placed = ['--photo-cx', '--photo-cy', '--photo-w', '--photo-h'].map((name) => parseFloat(document.documentElement.style.getPropertyValue(name)));
+    return box.width > 0 && drawn.every((value, index) => Math.abs(value - placed[index]) < 2);
+  })()`;
+  await waitFor(
+    cdp,
+    centred,
+    3_000,
+    "The background's effects are not centred on the photo after the preview",
+  );
+  // Dark to light while the colour fades out: the empty Stage gives the theme's own colours back.
   const press = `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === 'Hide')`;
   await waitFor(cdp, `!!${press}`);
   await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
+  await waitFor(cdp, `!${photo} && ${fading}`, 5_000, "The empty Stage kept the photo's colours");
+  await switchMode("light");
+  const darkToLight = await value(cdp, contrast);
+  assertEqual(
+    darkToLight >= 4.5,
+    true,
+    `Text during a fade, dark to light: ${darkToLight.toFixed(2)} to 1`,
+  );
   assertEqual(
     differing(theme, await value(cdp, roles)).join(", "),
     "",

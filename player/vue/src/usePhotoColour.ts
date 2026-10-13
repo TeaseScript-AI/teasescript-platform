@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch, watchEffect, type Ref } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch, watchEffect, type Ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
 import { photoColours } from "../../theme/photo-theme.js";
@@ -29,10 +29,18 @@ function measure(image: HTMLImageElement): PhotoSwatches | null {
   return photoSwatches(context.getImageData(0, 0, canvas.width, canvas.height).data);
 }
 
+/** The Stage's photo, not an image request's preview over it. */
+function stageImage(stage: HTMLElement | undefined) {
+  return (
+    stage?.querySelector<HTMLImageElement>("img.stage-media:not([data-stage-preview])") ?? undefined
+  );
+}
+
 /**
  * Where the photo is drawn on the Player's background (`--photo-cx`, `--photo-cy`, `--photo-w`, `--photo-h` on the
  * document root), so the background centres its effects on it. The Stage image keeps its aspect inside its box
- * (`object-fit: contain`).
+ * (`object-fit: contain`). Its box can change while the canvas and the Stage keep their size, as when a preview or the
+ * camera view over it goes, so the image is observed too.
  */
 function usePhotoGeometry(
   canvas: Readonly<Ref<HTMLElement | undefined>>,
@@ -40,28 +48,27 @@ function usePhotoGeometry(
   photo: readonly Readonly<Ref<unknown>>[],
 ) {
   const root = document.documentElement;
+  const image = shallowRef<HTMLImageElement>();
   let frame = 0;
   function place() {
     frame = 0;
-    const image = stage.value?.querySelector<HTMLImageElement>(
-      "img.stage-media:not([data-stage-preview])",
-    );
-    if (!canvas.value || !image || image.naturalWidth === 0) return;
-    const box = image.getBoundingClientRect();
+    image.value = stageImage(stage.value);
+    if (!canvas.value || !image.value || image.value.naturalWidth === 0) return;
+    const { naturalWidth, naturalHeight } = image.value;
+    const box = image.value.getBoundingClientRect();
     // An image request's preview hides the photo: its effects keep their place.
     if (box.width === 0 || box.height === 0) return;
     const origin = canvas.value.getBoundingClientRect();
-    const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+    const scale = Math.min(box.width / naturalWidth, box.height / naturalHeight);
     root.style.setProperty("--photo-cx", `${box.left - origin.left + box.width / 2}px`);
     root.style.setProperty("--photo-cy", `${box.top - origin.top + box.height / 2}px`);
-    root.style.setProperty("--photo-w", `${image.naturalWidth * scale}px`);
-    root.style.setProperty("--photo-h", `${image.naturalHeight * scale}px`);
+    root.style.setProperty("--photo-w", `${naturalWidth * scale}px`);
+    root.style.setProperty("--photo-h", `${naturalHeight * scale}px`);
   }
   const schedule = () => {
     if (!frame) frame = requestAnimationFrame(place);
   };
-  useResizeObserver(canvas, schedule);
-  useResizeObserver(stage, schedule);
+  useResizeObserver([canvas, stage, image], schedule);
   watch(photo, schedule, { flush: "post" });
   onBeforeUnmount(() => {
     cancelAnimationFrame(frame);
@@ -86,9 +93,7 @@ export function usePhotoColour(
 ) {
   // The Stage's own image of that source, while it still shows it.
   const swatches = usePhotoSwatches(source, (src) => {
-    const image = elements.stage.value?.querySelector<HTMLImageElement>(
-      "img.stage-media:not([data-stage-preview])",
-    );
+    const image = stageImage(elements.stage.value);
     return image?.getAttribute("src") === src && image.complete ? measure(image) : undefined;
   });
   const colours = computed(() =>
@@ -102,6 +107,11 @@ export function usePhotoColour(
     fading.value = true;
     clearTimeout(fadeTimer);
     fadeTimer = setTimeout(() => (fading.value = false), FADE_MS + 100);
+  });
+  // A mode change switches the background together with the text on it: a fade would leave them alike for a moment.
+  watch(mode, () => {
+    clearTimeout(fadeTimer);
+    fading.value = false;
   });
   watchEffect(() => {
     const vignette = colours.value?.vignette;

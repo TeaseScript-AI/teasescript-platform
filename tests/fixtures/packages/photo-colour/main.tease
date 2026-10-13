@@ -1,5 +1,7 @@
 // Photo colours: the green photo colours the Player, and the empty Stage gives the theme's colours back.
 showImage "images/green.svg"
+say "A green photo."
+let picture: string = askImage(hint: "Add an image")
 showButton "Hide"
 hideImage
 showButton "Done"
