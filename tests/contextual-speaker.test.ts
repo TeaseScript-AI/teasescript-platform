@@ -52,6 +52,7 @@ const READS: readonly (readonly [string, readonly string[]])[] = [
   ],
   ['let image = askImage(hint: "Attach a photo", message: "${speaker.title}?")', ["Mistress?"]],
   ['let image = askImage prose(font: speaker.font) ("Hi")', ["Hi"]],
+  ['let image = askImage(hint: "For your ${speaker.title}")', []],
 ];
 
 test("'speaker' in a message without a speaker is a runtime error, wherever the message reads it", () => {
@@ -115,6 +116,7 @@ test("'speaker' in a message without 'as' is a compile error when the script nev
     // An ask without 'as' inside a 'say as' text is a message of its own, with the default speaker.
     'say as vera "${askText "Q ${speaker.title}"}"',
     'say as vera "${askImage("Q ${speaker.title}")}"',
+    'say as vera "${askImage("Q", hint: speaker.title)}"',
   ];
   for (const read of reads) {
     const source = `${VERA}\n${read}\nexit`;
@@ -139,13 +141,13 @@ test("a message with 'as', and a speaker's own property, read 'speaker' without 
   assert.deepEqual(sayTexts(result), ["Mistress Mistress!", "MISTRESS?"]);
 });
 
-test("an askImage message reads the speaker who says it, not that of a 'say as' around it", () => {
+test("an askImage reads the speaker who asks, not that of a 'say as' around it", () => {
   const result = runValidSource(
     [
       VERA,
       'speaker guide {\n    title: "Guide"\n}',
       "speaker guide",
-      'say as vera "${askImage("Show your ${speaker.title}")}"',
+      'say as vera "${askImage("Show your ${speaker.title}", hint: "For your ${speaker.title}")}"',
       "exit",
     ].join("\n"),
   );
@@ -156,9 +158,12 @@ test("an askImage message reads the speaker who says it, not that of a 'say as' 
     ),
     [["guide", "Show your Guide"]],
   );
+  const action = result.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.ui.kind === "image");
+  assert.equal(action.ui.hint, "For your Guide");
 });
 
-test("'speaker' next to an askImage call, outside its message, is no message's speaker", () => {
+test("'speaker' next to an askImage call, outside its arguments, is no message's speaker", () => {
   const source = `${VERA}\nspeaker vera\nlet image = askImage("Q") + speaker.title\nexit`;
   assert.deepEqual(diagnostics(source), [["TSV002", "Unknown variable 'speaker'.", "speaker"]]);
 });
