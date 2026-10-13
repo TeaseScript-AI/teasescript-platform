@@ -277,6 +277,15 @@ function templateText(text: string, part: string, span: SourceSpan): string {
   return text + part;
 }
 
+/** Builtin records that a session created and froze itself, with data properties only (`RuntimeSession`). */
+const ADMITTED_BUILTINS = new WeakSet<object>();
+
+/** Marks a builtin record the engine created and froze, which reading never changes; returns it. */
+export function admittedBuiltinRecord<T extends object>(record: T): T {
+  ADMITTED_BUILTINS.add(record);
+  return record;
+}
+
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
   /** Whether the instruction observer ended the operation before an instruction. */
@@ -317,9 +326,8 @@ export class RuntimeExecutionContext {
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
-  /** The builtin record `#builtins` was last filled from, and whether that record can never give other functions. */
+  /** The builtin record `#builtins` was last filled from. */
   #registered: RuntimeCapabilities["builtins"] = undefined;
-  #registrationFixed = true;
 
   #referenceEpoch = 0;
 
@@ -347,17 +355,15 @@ export class Evaluator {
 
   public refreshBuiltinRegistration(): void {
     const builtins = this.capabilities.builtins;
-    if (builtins === this.#registered && this.#registrationFixed) return;
+    // A session's admitted record cannot change; a host's record is read again, as reading it may give or do more.
+    if (
+      builtins === this.#registered &&
+      (builtins === undefined || ADMITTED_BUILTINS.has(builtins))
+    )
+      return;
     for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
     Object.assign(this.#builtins, builtins ?? {});
     this.#registered = builtins;
-    // A frozen record of data properties, such as a session's, cannot change; a getter can give another function.
-    this.#registrationFixed =
-      builtins === undefined ||
-      (Object.isFrozen(builtins) &&
-        Reflect.ownKeys(builtins).every(
-          (key) => "value" in Object.getOwnPropertyDescriptor(builtins, key)!,
-        ));
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {

@@ -31,6 +31,7 @@ import {
   type RandomPolicy,
 } from "./random-control.js";
 import {
+  admittedBuiltinRecord,
   bindingScopeId,
   type RuntimeBuiltinFunction,
   type RuntimeCapabilities,
@@ -855,7 +856,7 @@ function admittedBuiltins(
     }
     admitted[name] = builtin;
   }
-  return Object.freeze(admitted);
+  return admittedBuiltinRecord(Object.freeze(admitted));
 }
 
 /** The random policy `randomControl` gives a session of `plan`, checked once; `null` leaves every draw natural. */
