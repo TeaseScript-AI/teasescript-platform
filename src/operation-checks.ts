@@ -2,6 +2,7 @@ import type { CallExpression, Expression, Identifier, ScalarTypeName } from "./a
 import {
   booleanFromText,
   CONVERSION_RESULTS,
+  DATA_TEXT_FUNCTIONS,
   describeConversionResult,
   isConversionName,
   isTemporalConversionResult,
@@ -9,6 +10,8 @@ import {
   MIN_MAX_BUILTINS,
   TEMPORAL_CONVERSIONS,
   temporalTextProblem,
+  unwritableJsonReason,
+  WRITABLE_JSON_FIX,
   type ConversionResult,
 } from "./conversions.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
@@ -17,6 +20,7 @@ import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   CALENDAR_DURATION_TYPE,
+  containsType,
   DATE_TYPE,
   DATETIME_TYPE,
   describeValue,
@@ -316,6 +320,7 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (DATA_TEXT_FUNCTIONS.has(name)) return dataTextProblems(name, call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -357,6 +362,96 @@ export function builtinCallProblems(
   }
   return problems;
 }
+
+/**
+ * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, or `fromBase64(text, default:)` (V30
+ * §13): their arguments, a required `default:` that is missing, text to read that can never be text, and a value that
+ * is or may hold one that `toJson` cannot write. `toBase64`'s text is checked where it is called.
+ */
+function dataTextProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const reads = name === "fromJson" || name === "fromBase64";
+  const problems: OperationProblem[] = [];
+  const positional: Expression[] = [];
+  let fallback = false;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    else if (reads && argument.name.name === "default") fallback = true;
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: reads
+          ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`
+          : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional.length !== 1)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      span: call.span,
+    });
+  else if (reads && !fallback)
+    problems.push({
+      kind: "argumentCount",
+      message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
+      span: call.span,
+    });
+  if (problems.length > 0 || name === "toBase64") return problems;
+  const value = positional[0]!;
+  const type = typeOf(value);
+  if (reads) {
+    // As for a conversion, a value that may be text is read when the script runs.
+    const candidates = members(forUse(type)).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `${name}(...) reads text (string), not ${describeValue(type)}.`,
+        span: value.span,
+      });
+    return problems;
+  }
+  let unwritable: StaticType | undefined;
+  containsType(type, (part) => {
+    if (
+      !SESSION_HANDLE_KINDS.has(part.kind) &&
+      part.kind !== "range" &&
+      !isScalar(part, "calendarDuration", "script")
+    )
+      return false;
+    unwritable = part;
+    return true;
+  });
+  if (unwritable !== undefined) {
+    const kind = describeValue(unwritable);
+    const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+    problems.push({
+      kind: "invalidOperand",
+      message:
+        resolved(type) === unwritable
+          ? `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
+          : `toJson(...) cannot write ${kind}, which ${reason}, and this is ${describeValue(type)}. ${WRITABLE_JSON_FIX}`,
+      span: value.span,
+    });
+  }
+  return problems;
+}
+
+/** The handles of what a script started or showed, which exist only in the current session. */
+const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "timer",
+  "media",
+  "camera",
+  "permanentButton",
+  "messageHandle",
+]);
 
 /**
  * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are

@@ -59,6 +59,7 @@ import type {
   ShowPopupParts,
   ShowPopupStatement,
   OpenUrlStatement,
+  ExportTextStatement,
   CalendarDurationUnit,
   DurationUnit,
   UnitExpression,
@@ -125,6 +126,7 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showImage",
   "showPopup",
   "openUrl",
+  "exportText",
   "hideImage",
   "hideCamera",
   "stopAudio",
@@ -439,6 +441,9 @@ class Parser {
     if (this.#checkIdentifier("openUrl")) {
       return yield* parseChild(this.#parseOpenUrlStatement());
     }
+    if (this.#checkIdentifier("exportText")) {
+      return yield* parseChild(this.#parseExportTextStatement());
+    }
     if (this.#checkIdentifier("stopAudio")) {
       return this.#parseStopAudioStatement();
     }
@@ -605,6 +610,27 @@ class Parser {
     );
     return Object.freeze({
       kind: "openUrlStatement",
+      arguments: call.arguments,
+      span: copySpan(call.span),
+    });
+  }
+
+  /** `exportText(<text>, title: ..., fileName: ...)` (V30 §31), which has only the call form. */
+  *#parseExportTextStatement(): ParseTask<ExportTextStatement | null> {
+    const command = this.#advance();
+    if (!this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        "exportText takes its text in parentheses, as in 'exportText(report)'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    return Object.freeze({
+      kind: "exportTextStatement",
       arguments: call.arguments,
       span: copySpan(call.span),
     });

@@ -710,6 +710,7 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
       form: "Answer this form in the Player.",
       popup: "Close this popup in the Player.",
       url: "Open this web address in the Player.",
+      export: "Copy or download this text in the Player.",
     }[interaction.ui.kind];
     return;
   }

@@ -19,6 +19,7 @@ export type Statement =
   | HideCameraStatement
   | ShowPopupStatement
   | OpenUrlStatement
+  | ExportTextStatement
   | ShowPermanentButtonStatement
   | PlayMediaStatement
   | StopAudioStatement
@@ -221,6 +222,16 @@ export interface ShowPopupExpression extends ShowPopupParts {
 /** `openUrl(<url>)` (V30 §33): offers the player the URL to open; it gives no value. */
 export interface OpenUrlStatement {
   readonly kind: "openUrlStatement";
+  readonly arguments: readonly CallArgument[];
+  readonly span: SourceSpan;
+}
+
+/**
+ * `exportText(<text>, title: ..., fileName: ...)` (V30 §31): shows the text for the player to copy or download, and
+ * waits until the player closes it; it gives no value.
+ */
+export interface ExportTextStatement {
+  readonly kind: "exportTextStatement";
   readonly arguments: readonly CallArgument[];
   readonly span: SourceSpan;
 }

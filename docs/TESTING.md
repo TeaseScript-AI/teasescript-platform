@@ -665,7 +665,10 @@ catalog that names pages of the smoke's server, checks that right after a click 
 a tab without an opener and the script goes on, that with `alwaysButton: true` its button, with its `buttonText:`,
 shows also right after a click and opens it, that without a recent click its button "Open link" opens it, and that
 after a reload the address does not open by itself, also not from the click on Continue, but from its button, as after
-Debug's Return and after turning Debug off while the rewind inspects an earlier state. A choice and a form toggle held
+Debug's Return and after turning Debug off while the rewind inspects an earlier state. Its `export-text` package checks
+`exportText`'s dialog: its title and read-only text, Copy, a refused copy that leaves the text selected and points to
+Download, Download as a UTF-8 file with the script's file name, a click beside it that does not close it, Close, and a
+reload that shows the waiting dialog again, with no dialog text in the transcript. A choice and a form toggle held
 down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
 `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image

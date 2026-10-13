@@ -89,6 +89,7 @@ import {
   visibleText,
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
+import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -238,6 +239,7 @@ import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
   CONVERSION_RESULTS,
+  DATA_TEXT_FUNCTIONS,
   describeConversionResult,
   isConversionName,
   isConversionResult,
@@ -2066,6 +2068,8 @@ export class Evaluator {
           expression.arguments[0]?.value,
           expression.span,
         );
+      if (DATA_TEXT_FUNCTIONS.has(name))
+        return this.#dataTextFunction(name, positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
@@ -3334,6 +3338,55 @@ export class Evaluator {
     return number === undefined || result === "number"
       ? number
       : withoutNegativeZero(Math.trunc(number));
+  }
+
+  /**
+   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13). Text that does not read as JSON or Base64, or a value
+   * that is not text, gives the `default:` of a reading function, never a runtime error.
+   */
+  #dataTextFunction(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const reads = name === "fromJson" || name === "fromBase64";
+    const names = Object.keys(named);
+    if (
+      positional.length !== 1 ||
+      (reads ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
+    )
+      throw fault(
+        "TSR028",
+        reads
+          ? `${name}(...) takes one text and a default:, such as ${name}(text, default: null).`
+          : `${name}(...) takes one ${name === "toJson" ? "value" : "text"} and no named arguments.`,
+        span,
+      );
+    const value = positional[0]!;
+    if (name === "toJson")
+      return jsonText(
+        value,
+        (speaker) => this.speakerById(speaker.speakerId, span).properties,
+        span,
+      );
+    if (name === "toBase64") {
+      if (typeof value !== "string")
+        throw fault(
+          "TSR059",
+          `toBase64(...) encodes text (string), not ${describeRuntimeValue(value)}.`,
+          span,
+        );
+      return base64Text(value, span);
+    }
+    const read =
+      typeof value !== "string"
+        ? undefined
+        : name === "fromJson"
+          ? valueFromJson(value)
+          : textFromBase64(value);
+    // JSON's null is a value; only text that does not read gives the default.
+    return read === undefined ? named.default! : read;
   }
 
   /** `min` or `max` of two or more values that are all numbers, all durations, or all date or time values of one kind. */

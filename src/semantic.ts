@@ -30,6 +30,7 @@ import type {
   LabelTarget,
   LetStatement,
   OpenUrlStatement,
+  ExportTextStatement,
   ShowPopupParts,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -594,6 +595,7 @@ class SemanticValidator {
           "askImage",
           "showPopup",
           "openUrl",
+          "exportText",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
           "pi",
           // The engine reads `debugMode` from the session.
@@ -1348,6 +1350,11 @@ class SemanticValidator {
         for (const argument of statement.arguments)
           this.#validateExpression(argument.value, scope, null);
         return;
+      case "exportTextStatement":
+        this.#validateExportTextArguments(statement);
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
         this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
@@ -1912,7 +1919,8 @@ class SemanticValidator {
             expression.name === "takePhoto" ||
             expression.name === "askImage" ||
             expression.name === "showPopup" ||
-            expression.name === "openUrl"
+            expression.name === "openUrl" ||
+            expression.name === "exportText"
           ) {
             this.#report(
               semanticCode.functionValue,
@@ -2052,11 +2060,11 @@ class SemanticValidator {
               yield* compileChild(
                 this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
               );
-          } else if (name === "openUrl") {
-            // A statement of its own is an `openUrlStatement`.
+          } else if (name === "openUrl" || name === "exportText") {
+            // A statement of its own is an `openUrlStatement` or an `exportTextStatement`.
             this.#report(
               semanticCode.functionValue,
-              "openUrl(...) gives no value, so it can only be a statement of its own.",
+              `${name}(...) gives no value, so it can only be a statement of its own.`,
               expression.callee.span,
             );
           } else if (binding?.declaration !== undefined) {
@@ -2638,6 +2646,35 @@ class SemanticValidator {
         this.#report(
           semanticCode.unknownNamedArgument,
           `openUrl has no argument '${argument.name.name}'. It takes a web address, buttonText:, and alwaysButton:.`,
+          argument.name.span,
+        );
+  }
+
+  /**
+   * `exportText` takes one text without a name, first, and the optional `title:` and `fileName:` (V30 §31). A repeated
+   * name is reported with the other arguments.
+   */
+  #validateExportTextArguments(statement: ExportTextStatement): void {
+    this.#validateDistinctNamedArguments(statement);
+    const texts = statement.arguments.filter((argument) => argument.kind === "positionalArgument");
+    const given = texts.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
+    if (!given)
+      this.#report(
+        semanticCode.argumentCount,
+        "exportText takes one text without a name, first, as in 'exportText(report, title: \"Your report\")'.",
+        statement.span,
+      );
+    for (const argument of statement.arguments)
+      if (
+        argument.kind === "namedArgument" &&
+        argument.name.name !== "title" &&
+        argument.name.name !== "fileName" &&
+        // A named text without a positional one is the error above.
+        (given || argument.name.name !== "text")
+      )
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `exportText has no argument '${argument.name.name}'. It takes a text, title:, and fileName:.`,
           argument.name.span,
         );
   }

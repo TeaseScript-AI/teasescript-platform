@@ -16,6 +16,7 @@ import type {
   ShowPermanentButtonParts,
   ShowPopupParts,
   OpenUrlStatement,
+  ExportTextStatement,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -370,6 +371,9 @@ export class InstructionCompiler {
         return;
       case "openUrlStatement":
         yield* compileChild(this.#lowerOpenUrlTask(statement));
+        return;
+      case "exportTextStatement":
+        yield* compileChild(this.#lowerExportTextTask(statement));
         return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
@@ -1830,6 +1834,51 @@ export class InstructionCompiler {
         ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
         ...(alwaysButtonTemporary === undefined ? {} : { alwaysButtonTemporary }),
         accessibleName,
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
+  }
+
+  /**
+   * Lowers an `exportText` (V30 §31), which waits until the player closes its dialog. The written arguments are
+   * evaluated once, in written order, into temporaries that the dialog reads when it opens; its text is never embedded,
+   * as it may be as long as any text.
+   */
+  *#lowerExportTextTask(statement: ExportTextStatement): CompileTask<void> {
+    const [text] = statement.arguments;
+    if (text === undefined) throw new TypeError("exportText without its text reached lowering.");
+    const named = (name: string) =>
+      statement.arguments.find(
+        (argument) => argument.kind === "namedArgument" && argument.name.name === name,
+      );
+    const title = named("title");
+    const fileName = named("fileName");
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const titleTemporary = title === undefined ? undefined : temporaries.get(title);
+    const fileNameTemporary = fileName === undefined ? undefined : temporaries.get(fileName);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "export",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "export",
+        textTemporary: temporaries.get(text)!,
+        ...(titleTemporary === undefined ? {} : { titleTemporary }),
+        ...(fileNameTemporary === undefined ? {} : { fileNameTemporary }),
+        accessibleName: { kind: "localizedDefault", key: "continue" },
       },
       span: copySpan(statement.span),
     });

@@ -109,6 +109,17 @@ export type PlayerForegroundPresentation =
       readonly buttonText: string;
     }
   | {
+      /**
+       * `exportText`: a dialog outside the chat with the title and the text, which the player may copy or download as
+       * a file named `fileName` until they close it.
+       */
+      readonly kind: "export-text";
+      readonly accessibleName: string;
+      readonly title: string;
+      readonly text: string;
+      readonly fileName: string;
+    }
+  | {
       /** `ask-date`, `ask-time`, and `ask-datetime` use the browser's date and time controls, which submit ISO text. */
       readonly kind: "ask-text" | "ask-number" | "ask-date" | "ask-time" | "ask-datetime";
       readonly accessibleName: string;

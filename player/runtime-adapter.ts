@@ -732,6 +732,14 @@ export function playerRuntimeForeground(
         url: action.ui.url,
         buttonText: action.ui.buttonText,
       });
+    case "export":
+      return Object.freeze({
+        kind: "export-text",
+        accessibleName,
+        title: action.ui.title,
+        text: action.ui.text,
+        fileName: action.ui.fileName,
+      });
     case "text":
       return Object.freeze({
         kind: "ask-text",
@@ -936,6 +944,7 @@ export type PlayerDebugWaitKind =
   | "image"
   | "popup"
   | "url"
+  | "export"
   | "pacing"
   | "media"
   | "save"
@@ -1012,7 +1021,8 @@ function debugWaitKind(
         action.interactionKind === "choice" ||
         action.interactionKind === "image" ||
         action.interactionKind === "popup" ||
-        action.interactionKind === "url"
+        action.interactionKind === "url" ||
+        action.interactionKind === "export"
         ? action.interactionKind
         : "input";
     case "chatPacingGate":
@@ -1607,6 +1617,15 @@ export function closePlayerRuntimePopup(
   const action = activeInteraction(session.state);
   if (action?.interactionKind !== "popup") return null;
   return completePlayerAction(session, action, { kind: "activate" });
+}
+
+/** Closes the presented `exportText` dialog, which continues the script; copying and downloading leave it open. */
+export function closePlayerRuntimeExport(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "export") return null;
+  return completePlayerAction(session, action, { kind: "close" });
 }
 
 export function activatePlayerRuntimeButton(

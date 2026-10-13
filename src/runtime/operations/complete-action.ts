@@ -449,7 +449,8 @@ function completeInteraction(
       receivedInteractionKind === "image" ||
       receivedInteractionKind === "form" ||
       receivedInteractionKind === "popup" ||
-      receivedInteractionKind === "url"
+      receivedInteractionKind === "url" ||
+      receivedInteractionKind === "export"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
@@ -468,7 +469,7 @@ function completeInteraction(
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
-  // A popup or an `openUrl` adds nothing to the transcript, so only its completion takes a sequence.
+  // A popup, an `openUrl`, or an `exportText` adds nothing to the transcript, so only its completion takes a sequence.
   const transcriptText = resolved.transcriptText;
   assertEventSequenceCapacity(current, transcriptText === null ? 1 : 2);
   const transcriptSequence = transcriptText === null ? null : takeSequence(current, 2);

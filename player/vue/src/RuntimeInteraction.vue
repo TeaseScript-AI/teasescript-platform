@@ -2,12 +2,14 @@
 import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
+import ExportTextDialog from "./ExportTextDialog.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   openPlayerRuntimeUrl,
   playerRuntimeUrlRequest,
@@ -85,7 +87,7 @@ const props = defineProps<{
   capture?: ImageCapture;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
   debugCountdown?: string | null;
-  /** Whether a popup is modal; while Debug runs it is not, so the Debug panel stays usable beside it. */
+  /** Whether a popup or an exportText dialog is modal; while Debug runs it is not, so the Debug panel stays usable. */
   popupModal?: boolean;
 }>();
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
@@ -443,11 +445,13 @@ watch(
       !active.isConnected &&
       (document.activeElement === null || document.activeElement === document.body) &&
       hoverAvailable.value;
-    // Progression may restore composer focus, but must not steal it from Tools/dialogs. A popup focuses its button.
+    // Progression may restore composer focus, but must not steal it from Tools/dialogs. A popup and an exportText
+    // dialog focus their own button.
     if (
       (ownedFocus || returnToChoice || unownedFocus || releasedFocus) &&
       (foreground.value || pacing.value) &&
-      foreground.value?.kind !== "popup"
+      foreground.value?.kind !== "popup" &&
+      foreground.value?.kind !== "export-text"
     ) {
       // An `openUrl`'s button stands in for the composer, which takes no answer meanwhile.
       if (foreground.value?.kind === "open-url") {
@@ -750,12 +754,24 @@ function submit(source: "input" | "button") {
           :area="composition"
           @close="complete(answer('button', closePlayerRuntimePopup))"
         />
+        <ExportTextDialog
+          v-if="foreground?.kind === 'export-text'"
+          :key="actionId ?? 0"
+          :title="foreground.title"
+          :text="foreground.text"
+          :file-name="foreground.fileName"
+          :modal="popupModal ?? true"
+          :busy="submitting"
+          :area="composition"
+          @close="complete(answer('button', closePlayerRuntimeExport))"
+        />
         <Composer
           ref="composer"
           v-model="draft"
           :disabled="
             (!foreground && !pacing) ||
             foreground?.kind === 'popup' ||
+            foreground?.kind === 'export-text' ||
             foreground?.kind === 'open-url'
           "
           :pacing="!foreground && !!pacing"
@@ -768,7 +784,9 @@ function submit(source: "input" | "button") {
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="
-            foreground?.kind === 'popup' || foreground?.kind === 'open-url'
+            foreground?.kind === 'popup' ||
+            foreground?.kind === 'export-text' ||
+            foreground?.kind === 'open-url'
               ? ''
               : formEditor
                 ? formEditor.hint
