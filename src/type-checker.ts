@@ -8758,11 +8758,22 @@ function neverNull(type: StaticType): boolean {
 /**
  * The type of `value otherwise fallback` (V30 §18): the value where it is never null, the fallback where it is only
  * null, and otherwise both, joined as for a list `get` default: where the fallback has a part that no value decided
- * yet, such as `[]`, as in a literal, and otherwise as a union, so an undecided value is not decided by its fallback.
+ * yet, such as `[]`, as in a literal, and otherwise as a union, so an undecided part of the value is not decided by its
+ * fallback.
+ *
+ * A value whose own type no value decided yet, such as `x` after `let x = null` once a load or a call may have stored
+ * in it, counts as what a read of it gives elsewhere (#859): a value the compiler cannot know where one reached it, and
+ * otherwise only null so far, which a fallback of known type other than null replaces, as `if x == null { x = 0 }`
+ * would. Where a later value decides it, the next check starts with that type, as for any read that saw it undecided.
  */
 function fallbackType(value: StaticType, fallback: StaticType): StaticType {
   if (neverNull(value)) return value;
-  const kept = nonNullType(value);
+  let kept = nonNullType(value);
+  if (decidedValue(fallback).kind !== "never") {
+    if (members(kept).some((member) => member.kind === "open" && member.heldUnknown !== undefined))
+      return UNKNOWN_TYPE;
+    kept = decidedValue(kept);
+  }
   if (resolved(kept).kind === "never") return fallback;
   const undecided = (type: StaticType): boolean =>
     containsType(type, (part) => part.kind === "open");
