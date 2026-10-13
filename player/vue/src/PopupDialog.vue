@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { useElementBounding } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogContent from "@/components/ui/dialog/DialogContent.vue";
@@ -9,7 +10,8 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 // A script's popup (`showPopup`, PLAYER-UI "Foreground interaction presentation"): its message, which names the
 // dialog, and one button outside the chat. Like the end dialog, only the button, which takes focus, and Escape close it,
 // not a click beside it; closing it continues the script. While Debug runs it is not modal, so the Debug panel and its
-// rewind stay usable beside it, and Escape closes it only from inside. A key held down since before it opened, such as
+// rewind stay usable beside it: it stands in the middle of the session's `area`, below the drawer of a narrow layout,
+// and Escape closes it only from inside. A key held down since before it opened, such as
 // the Enter that answered the question before it, does not close it, and neither does anything while an answer is under
 // way (`busy`).
 const props = defineProps<{
@@ -17,10 +19,22 @@ const props = defineProps<{
   buttonText: string;
   modal: boolean;
   busy: boolean;
+  /** The session's area, which a dialog that is not modal centres on instead of the window. */
+  area?: HTMLElement | null;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
 const button = ref<InstanceType<typeof Button> | null>(null);
+const bounds = useElementBounding(() => (props.modal ? null : (props.area ?? null)));
+const placement = computed(() =>
+  props.modal || !props.area
+    ? undefined
+    : {
+        left: `${bounds.left.value + bounds.width.value / 2}px`,
+        top: `${bounds.top.value + bounds.height.value / 2}px`,
+        maxWidth: `min(32rem, ${Math.max(0, bounds.width.value - 32)}px)`,
+      },
+);
 function focusButton(event: Event) {
   event.preventDefault();
   (button.value?.$el as HTMLElement | undefined)?.focus();
@@ -46,6 +60,8 @@ function close() {
   <Dialog :open="true" :modal="modal" @update:open="(open) => !open && close()">
     <DialogContent
       class="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      :class="{ 'z-[38]': !modal }"
+      :style="placement"
       :show-close-button="false"
       :aria-describedby="undefined"
       data-popup-dialog

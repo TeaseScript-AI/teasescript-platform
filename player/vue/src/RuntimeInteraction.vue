@@ -260,6 +260,8 @@ function presents(request: ImageRequestIdentity): boolean {
 }
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
+// The session's area, which a popup that is not modal centres on, beside the Debug panel.
+const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
 const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
@@ -742,6 +744,7 @@ function submit(source: "input" | "button") {
           :button-text="foreground.buttonText"
           :modal="popupModal ?? true"
           :busy="submitting"
+          :area="composition"
           @close="complete(answer('button', closePlayerRuntimePopup))"
         />
         <Composer
@@ -762,11 +765,13 @@ function submit(source: "input" | "button") {
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="
-            formEditor
-              ? formEditor.hint
-              : foreground && 'hint' in foreground
-                ? foreground.hint
-                : 'Type your response…'
+            foreground?.kind === 'popup' || foreground?.kind === 'open-url'
+              ? ''
+              : formEditor
+                ? formEditor.hint
+                : foreground && 'hint' in foreground
+                  ? foreground.hint
+                  : 'Type your response…'
           "
           :attach="attach"
           :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"

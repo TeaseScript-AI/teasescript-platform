@@ -916,7 +916,9 @@ the popup's message, which names the dialog, and one button with its `buttonText
 The button, by click, Enter, or Space, and Escape close it, not a click beside it; closing it continues the script and
 adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
-panel and its rewind stay usable beside it, and Escape closes it only while focus is inside it.
+panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
+the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup or an `openUrl`
+button waits, the composer shows no hint.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script
