@@ -12,6 +12,7 @@ import type {
   Identifier,
   InteractionExpression,
   LetStatement,
+  OpenUrlStatement,
   ShowPopupStatement,
   LoadExpression,
   MediaParts,
@@ -71,6 +72,7 @@ import {
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -1610,6 +1612,10 @@ class TypeChecker {
       case "showPopupStatement":
         yield* compileChild(this.#showPopupTask(statement, scope));
         // The popup waits until the player closes it.
+        this.#suspend();
+        return true;
+      case "openUrlStatement":
+        yield* compileChild(this.#openUrlTask(statement, scope));
         this.#suspend();
         return true;
       case "saveStatement": {
@@ -4360,6 +4366,35 @@ class TypeChecker {
       if (name === "message") this.#checkShownText(argument.value, type, "a popup message");
       else if (name === "buttonText")
         this.#checkShownText(argument.value, type, "the text of a popup's button");
+    }
+  }
+
+  /**
+   * `openUrl` takes a web address as text. A list is never one (V30 §16), and a written address must be an `http` or
+   * `https` URL; other values are checked when the statement runs.
+   */
+  *#openUrlTask(statement: OpenUrlStatement, scope: Scope): CompileTask<void> {
+    for (const argument of statement.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      if (argument.kind === "namedArgument") continue;
+      const label = expressionLabel(argument.value) ?? "list";
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "string"),
+        argument.value,
+        "openUrl needs a web address in text (string)",
+        () =>
+          members(type).some((member) => resolved(member).kind === "list")
+            ? ` A list is never an address. Select one, such as '${label}[0]' or '${label}.random'.`
+            : "",
+      );
+      const text = staticText(argument.value);
+      if (text !== undefined && canonicalWebUrl(text) === null)
+        this.#report(
+          typeCode.invalidOperand,
+          `${OPEN_URL_RULE}. ${OPEN_URL_FIX}`,
+          argument.value.span,
+        );
     }
   }
 
@@ -7552,6 +7587,7 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "sayStatement",
   "showButtonStatement",
   "showPopupStatement",
+  "openUrlStatement",
   "waitStatement",
   "timerStatement",
   "playMediaStatement",
@@ -7995,6 +8031,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
     case "showImageStatement":
       return [statement.image];
     case "showPopupStatement":
+    case "openUrlStatement":
       return statement.arguments.map((argument) => argument.value);
     case "saveStatement":
       return [statement.value, statement.key];

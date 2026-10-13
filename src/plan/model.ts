@@ -547,7 +547,7 @@ export interface StopAudioInstruction extends InstructionBase {
 export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
 
 export type InteractionKind =
-  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup";
+  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup" | "url";
 /**
  * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
  * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
@@ -628,6 +628,16 @@ export type InteractionUiPayload =
        */
       readonly kind: "popup";
       readonly message: string;
+      readonly buttonText: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `openUrl` (V30 §33): the Player opens the canonical web address `url` in a new tab, at once after the player's
+       * recent click, otherwise from a button with `buttonText` where `showButton` shows its button.
+       */
+      readonly kind: "url";
+      readonly url: string;
       readonly buttonText: string;
       readonly accessibleName: InteractionAccessibleName;
     }
@@ -780,6 +790,12 @@ export type PreparedInteractionUiPayload =
       readonly messageTemporary: number;
       /** Absent when the button keeps its default text. */
       readonly buttonTextTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "url";
+      /** Holds the evaluated address until the request opens, then its canonical form. */
+      readonly urlTemporary: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

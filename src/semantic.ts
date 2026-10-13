@@ -592,6 +592,7 @@ class SemanticValidator {
           "showPermanentButton",
           "askImage",
           "showPopup",
+          "openUrl",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
           "pi",
           // The engine reads `debugMode` from the session.
@@ -1341,6 +1342,18 @@ class SemanticValidator {
         for (const argument of statement.arguments)
           this.#validateExpression(argument.value, scope, null);
         return;
+      case "openUrlStatement": {
+        const [first, ...rest] = statement.arguments;
+        if (first?.kind !== "positionalArgument" || rest.length > 0)
+          this.#report(
+            semanticCode.argumentCount,
+            "openUrl takes one web address without a name, as in 'openUrl(\"https://example.com\")'.",
+            statement.span,
+          );
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
+      }
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
         this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
@@ -1904,7 +1917,8 @@ class SemanticValidator {
             this.#builtins.has(expression.name) ||
             expression.name === "takePhoto" ||
             expression.name === "askImage" ||
-            expression.name === "showPopup"
+            expression.name === "showPopup" ||
+            expression.name === "openUrl"
           ) {
             this.#report(
               semanticCode.functionValue,
@@ -2039,8 +2053,8 @@ class SemanticValidator {
               yield* compileChild(
                 this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
               );
-          } else if (name === "showPopup") {
-            // A statement of its own is a `showPopupStatement`.
+          } else if (name === "showPopup" || name === "openUrl") {
+            // A statement of its own is a `showPopupStatement` or an `openUrlStatement`.
             this.#report(
               semanticCode.functionValue,
               `${name}(...) gives no value, so it can only be a statement of its own.`,

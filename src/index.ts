@@ -402,6 +402,7 @@ export type {
   TimerStatement,
   ShowImageStatement,
   ShowPopupStatement,
+  OpenUrlStatement,
   HideImageStatement,
   MediaCue,
   MediaHandlers,

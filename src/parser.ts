@@ -57,6 +57,7 @@ import type {
   SaveStatement,
   ShowImageStatement,
   ShowPopupStatement,
+  OpenUrlStatement,
   CalendarDurationUnit,
   DurationUnit,
   UnitExpression,
@@ -122,6 +123,7 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "showPopup",
+  "openUrl",
   "hideImage",
   "hideCamera",
   "stopAudio",
@@ -433,6 +435,9 @@ class Parser {
     if (this.#checkIdentifier("showPopup")) {
       return yield* parseChild(this.#parseShowPopupStatement());
     }
+    if (this.#checkIdentifier("openUrl")) {
+      return yield* parseChild(this.#parseOpenUrlStatement());
+    }
     if (this.#checkIdentifier("stopAudio")) {
       return this.#parseStopAudioStatement();
     }
@@ -561,6 +566,27 @@ class Parser {
         } satisfies PositionalArgument),
       ]),
       span: spanFrom(command.span, message.span),
+    });
+  }
+
+  /** `openUrl(<url>)` (V30 §33), which has only the call form. */
+  *#parseOpenUrlStatement(): ParseTask<OpenUrlStatement | null> {
+    const command = this.#advance();
+    if (!this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        "openUrl takes its web address in parentheses, as in 'openUrl(\"https://example.com\")'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    return Object.freeze({
+      kind: "openUrlStatement",
+      arguments: call.arguments,
+      span: copySpan(call.span),
     });
   }
 

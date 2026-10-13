@@ -35,7 +35,7 @@ export type ResolvedInteraction =
   | {
       readonly ok: true;
       readonly result: InteractionResultValue;
-      /** `null` for a popup, whose closing adds nothing to the transcript. */
+      /** `null` for a popup and an `openUrl`, which add nothing to the transcript. */
       readonly transcriptText: string | null;
       /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
       readonly shownOptions?: readonly (number | null)[] | null;
@@ -82,6 +82,12 @@ export function resolveInteractionCompletion(
     return payload.kind === "activate" && Object.keys(payload).length === 1
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "Popup completion requires { kind: 'activate' } only." };
+  }
+  // The Player reports that it opened the address in a new tab.
+  if (action.interactionKind === "url") {
+    return payload.kind === "opened" && Object.keys(payload).length === 1
+      ? { ok: true, result: null, transcriptText: null }
+      : { ok: false, message: "openUrl completion requires { kind: 'opened' } only." };
   }
   if (action.interactionKind === "text") {
     if (

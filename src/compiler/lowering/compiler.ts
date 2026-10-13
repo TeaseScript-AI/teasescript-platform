@@ -15,6 +15,7 @@ import type {
   ShowButtonParts,
   ShowPermanentButtonParts,
   ShowPopupStatement,
+  OpenUrlStatement,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -57,6 +58,7 @@ import type {
   UnitPlan,
 } from "../../plan/model.js";
 import { DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
+import { canonicalWebUrl, openUrlButtonText } from "../../web-url.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -365,6 +367,9 @@ export class InstructionCompiler {
         return;
       case "showPopupStatement":
         yield* compileChild(this.#lowerShowPopupTask(statement));
+        return;
+      case "openUrlStatement":
+        yield* compileChild(this.#lowerOpenUrlTask(statement));
         return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
@@ -1727,6 +1732,48 @@ export class InstructionCompiler {
       span: copySpan(statement.span),
     });
     this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
+  }
+
+  /**
+   * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address is checked
+   * and made canonical here; any other is evaluated into a temporary, which the request checks and makes canonical when
+   * it opens.
+   */
+  *#lowerOpenUrlTask(statement: OpenUrlStatement): CompileTask<void> {
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const argument = statement.arguments[0];
+    if (argument === undefined) throw new TypeError("openUrl without an address reached lowering.");
+    const written = staticVisibleText(argument.value);
+    const url = written === undefined ? null : canonicalWebUrl(written);
+    if (url !== null) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "url",
+        target: "standardChat",
+        speaker: null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: { kind: "url", url, buttonText: openUrlButtonText(url), accessibleName },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const urlTemporary = this.#materializeDedicatedInteractionValue(
+      yield* compileChild(this.#lowerExpressionTask(argument.value)),
+      argument.value.span,
+    ).temporaryId;
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "url",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: { kind: "url", urlTemporary, accessibleName },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, urlTemporary], statement.span);
   }
 
   /**

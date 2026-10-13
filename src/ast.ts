@@ -18,6 +18,7 @@ export type Statement =
   | ShowCameraStatement
   | HideCameraStatement
   | ShowPopupStatement
+  | OpenUrlStatement
   | ShowPermanentButtonStatement
   | PlayMediaStatement
   | StopAudioStatement
@@ -204,6 +205,13 @@ export interface HideCameraStatement {
  */
 export interface ShowPopupStatement {
   readonly kind: "showPopupStatement";
+  readonly arguments: readonly CallArgument[];
+  readonly span: SourceSpan;
+}
+
+/** `openUrl(<url>)` (V30 §33): offers the player the URL to open; it gives no value. */
+export interface OpenUrlStatement {
+  readonly kind: "openUrlStatement";
   readonly arguments: readonly CallArgument[];
   readonly span: SourceSpan;
 }

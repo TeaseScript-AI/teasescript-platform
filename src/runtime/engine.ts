@@ -218,6 +218,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE, openUrlButtonText } from "../web-url.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
@@ -1585,6 +1586,23 @@ function materializeInteractionUi(
           : readText(prepared.buttonTextTemporary),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "url") {
+    // A web address is checked and made canonical as the request opens; the temporary keeps the canonical form.
+    const temporary = read(prepared.urlTemporary);
+    const url = typeof temporary.value === "string" ? canonicalWebUrl(temporary.value) : null;
+    if (url === null)
+      throw fault(
+        "TSR050",
+        `${OPEN_URL_RULE}, but this is ${describeShownValue(temporary.value)}. ${OPEN_URL_FIX}`,
+        span,
+      );
+    stagedWrites.push({ temporaryId: temporary.id, value: url });
+    ui = {
+      kind: "url",
+      url,
+      buttonText: openUrlButtonText(url),
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
@@ -1879,6 +1897,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "popup") strings.push(ui.message, ui.buttonText);
+  else if (ui.kind === "url") strings.push(ui.url, ui.buttonText);
   else if (ui.kind === "form") {
     // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
     for (const text of formUiTexts(ui)) strings.push(text);
@@ -1907,7 +1926,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, labels, hints, prefill or choice values, or file filters.`,
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, labels, hints, prefill or choice values, file filters, or web address.`,
         span,
       );
     aggregate += bytes;
@@ -2571,6 +2590,8 @@ function cloneInteractionUi(
   }
   if (ui.kind === "popup")
     return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
+  if (ui.kind === "url")
+    return { kind: "url", url: ui.url, buttonText: ui.buttonText, accessibleName };
   if (ui.kind === "button")
     return {
       kind: "button",

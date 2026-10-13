@@ -53,6 +53,7 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   input: "Answer",
   image: "Image request",
   popup: "Popup",
+  url: "Web address",
   pacing: "Pacing",
   media: "Media",
   save: "Save",

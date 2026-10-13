@@ -126,6 +126,8 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.backgroundTemporary);
           if (instruction.preparedUi.timeoutTemporary !== undefined)
             output.add(instruction.preparedUi.timeoutTemporary);
+        } else if (instruction.preparedUi.kind === "url") {
+          output.add(instruction.preparedUi.urlTemporary);
         } else if (instruction.preparedUi.kind === "popup") {
           output.add(instruction.preparedUi.messageTemporary);
           if (instruction.preparedUi.buttonTextTemporary !== undefined)

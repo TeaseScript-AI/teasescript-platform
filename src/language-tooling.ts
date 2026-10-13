@@ -894,6 +894,7 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
       children.push({ kind: "expression", node: statement.image });
       return;
     case "showPopupStatement":
+    case "openUrlStatement":
       for (const argument of statement.arguments)
         children.push({ kind: "expression", node: argument.value });
       return;

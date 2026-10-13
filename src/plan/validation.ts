@@ -3,6 +3,7 @@ import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
+import { canonicalWebUrl, openUrlButtonText } from "../web-url.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -1316,7 +1317,17 @@ function validateInteractionInstruction(
   }
   const kind = value.interactionKind;
   if (
-    !isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image", "form", "popup"])
+    !isOneOf(kind, [
+      "button",
+      "text",
+      "number",
+      "choice",
+      "temporal",
+      "image",
+      "form",
+      "popup",
+      "url",
+    ])
   ) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
@@ -1328,7 +1339,7 @@ function validateInteractionInstruction(
 
   const ui = prepared ? value.preparedUi : value.ui;
   const expected =
-    kind === "button" || kind === "popup"
+    kind === "button" || kind === "popup" || kind === "url"
       ? value.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1350,11 +1361,15 @@ function validateInteractionInstruction(
       ),
     );
   }
-  // A popup gives no value.
-  if (kind === "popup") {
+  // A popup and `openUrl` give no value.
+  if (kind === "popup" || kind === "url") {
     if (value.destinationTemporary !== null)
       errors.push(
-        planError("TSC002", "A popup has no result destination.", `${path}.destinationTemporary`),
+        planError(
+          "TSC002",
+          "A popup or openUrl has no result destination.",
+          `${path}.destinationTemporary`,
+        ),
       );
   } else if (kind !== "button" || value.destinationTemporary !== null) {
     validateTemporaryId(
@@ -1428,12 +1443,14 @@ function validateStaticInteractionUi(
             ]
           : kind === "popup"
             ? ["kind", "message", "buttonText", "accessibleName"]
-            : [
-                "kind",
-                "options",
-                "accessibleName",
-                ...("preselected" in ui ? ["preselected"] : []),
-              ];
+            : kind === "url"
+              ? ["kind", "url", "buttonText", "accessibleName"]
+              : [
+                  "kind",
+                  "options",
+                  "accessibleName",
+                  ...("preselected" in ui ? ["preselected"] : []),
+                ];
   if (
     !hasExactKeys(ui, uiKeys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1492,6 +1509,14 @@ function validateStaticInteractionUi(
     countString(ui.message, `${path}.message`);
     countString(ui.buttonText, `${path}.buttonText`);
   }
+  // The address is canonical, and its button shows the label derived from it.
+  if (
+    kind === "url" &&
+    countString(ui.url, `${path}.url`) &&
+    countString(ui.buttonText, `${path}.buttonText`) &&
+    (canonicalWebUrl(ui.url) !== ui.url || ui.buttonText !== openUrlButtonText(ui.url))
+  )
+    errors.push(planError("TSC002", "The web address of openUrl is invalid.", `${path}.url`));
   if (kind === "button") {
     countString(ui.buttonLabel, `${path}.buttonLabel`);
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
@@ -1628,14 +1653,16 @@ function validatePreparedInteractionUi(
                   "accessibleName",
                   ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
                 ]
-              : [
-                  "kind",
-                  "optionsTemporary",
-                  "values",
-                  "accessibleName",
-                  ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
-                  ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
-                ];
+              : kind === "url"
+                ? ["kind", "urlTemporary", "accessibleName"]
+                : [
+                    "kind",
+                    "optionsTemporary",
+                    "values",
+                    "accessibleName",
+                    ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                    ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
+                  ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1720,6 +1747,10 @@ function validatePreparedInteractionUi(
     addTemporary(ui.messageTemporary, `${path}.messageTemporary`);
     if ("buttonTextTemporary" in ui)
       addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
+    return;
+  }
+  if (kind === "url") {
+    addTemporary(ui.urlTemporary, `${path}.urlTemporary`);
     return;
   }
   if (kind === "text" || kind === "number" || kind === "temporal") {
@@ -1872,7 +1903,7 @@ function validateInteractionAccessibleName(
     );
   }
   const expectedKey =
-    kind === "button" || kind === "popup"
+    kind === "button" || kind === "popup" || kind === "url"
       ? "continue"
       : kind === "number"
         ? "number"

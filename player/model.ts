@@ -91,6 +91,16 @@ export type PlayerForegroundPresentation =
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
   | {
+      /**
+       * `openUrl`: the button that opens `url` in a new tab, shown where `showButton` shows its button when the Player
+       * could not open it at once.
+       */
+      readonly kind: "open-url";
+      readonly accessibleName: string;
+      readonly url: string;
+      readonly buttonText: string;
+    }
+  | {
       /** `showPopup`: a dialog outside the chat with the message and one button, which closes it. */
       readonly kind: "popup";
       readonly accessibleName: string;
