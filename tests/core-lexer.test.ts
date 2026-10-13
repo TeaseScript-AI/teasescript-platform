@@ -51,8 +51,9 @@ test("distinguishes dots from leading-dot numbers with exact spans", () => {
 });
 
 test("lexes core keywords, delimiters, and operators", () => {
+  // `/` divides after an operand, such as `x`; where a value is expected it starts a regex literal (V30 §8).
   const result = lex(
-    "let if else true false null not and or set function return () [] , ? + - * / % = == != < <= > >=",
+    "let if else true false null not and or set function return () [] , ? + - * x / % = == != < <= > >=",
   );
 
   assert.deepEqual(result.diagnostics, []);
@@ -80,6 +81,7 @@ test("lexes core keywords, delimiters, and operators", () => {
       TokenKind.Plus,
       TokenKind.Minus,
       TokenKind.Star,
+      TokenKind.Identifier,
       TokenKind.Slash,
       TokenKind.Percent,
       TokenKind.Equal,
