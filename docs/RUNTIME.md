@@ -1473,7 +1473,9 @@ Player POC implement that contract; production host lifecycle and cross-origin w
 ## JSON and Base64 text
 
 `toJson`, `fromJson`, `toBase64`, and `fromBase64` ([V30 §13](specifications/accepted-syntaxes-v30.md#json-and-base64))
-are pure core built-ins. Native JSON writes each string and reads each string with escapes, `Number` reads and `String`
+are core built-ins. `toBase64` and `fromBase64`, and `toJson` and `fromJson` with a written `files: false`, are pure;
+otherwise `toJson` and `fromJson` run as [file store](#stored-files) instructions, which give their result at once when
+no stored file or data URL of a file is involved. Native JSON writes each string and reads each string with escapes, `Number` reads and `String`
 writes each number, native `btoa` and `atob` do the Base64, and `TextEncoder` and a fatal `TextDecoder` the UTF-8. The
 engine walks the structure itself, without native recursion, so that object keys keep their source order, which native
 JSON reading does not for keys that look like whole numbers, and so that any depth gives the same result in every host:
@@ -1488,6 +1490,84 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   can be fails with `TSR084`. `fromBase64` keeps a leading byte order mark.
 - A value that is not text, such as `null` from a `string?` or a value of unknown type, gives the default of `fromJson`
   and `fromBase64`. `toBase64` fails with `TSR059` for one that the compiler could not see.
+- With files, `toJson` writes each text of the value that is a stored file of the session, also inside a speaker's
+  properties, as `data:<type>;base64,…` with the type its bytes give; a dict key stays as it is. `fromJson` turns each
+  text it reads, the whole value or an element or dict value at any depth, that is a `data:` URL with Base64 data of a
+  recognized type into a stored file and gives its reference; a dict key and any other data URL stay text. A file that
+  occurs twice is read or stored once. `files:` that is not true or false is compile error `TSV043` for a known type and
+  runtime error `TSR059` otherwise.
+
+## Stored files
+
+`fileFromBase64(text, default:)` and `fileToBase64(file)` implement
+[V30 §33](specifications/accepted-syntaxes-v30.md#stored-files). Like `toJson` and `fromJson` without a written
+`files: false`, they are protected core built-ins that lower to a `fileStore` instruction, whose operands are
+temporaries or literals evaluated once in written order; plan validation rejects them as ordinary calls. `default:` is
+required (`TSV020`), a value the compiler knows is not text is `TSV043`, and the result of `fileFromBase64` is text or
+the default's type. The instruction first finds the files it needs:
+
+- `fileFromBase64` reads text as `fromBase64` does, ignoring spaces and line breaks, with the URL alphabet and without
+  padding, or the Base64 data of a `data:<type>;base64,…` URL, whose declared type it ignores. Anything else, also a
+  value that is not text, gives the default at once. A file whose standard Base64 would be longer than a text can be
+  fails with `TSR084`.
+- `fileToBase64` needs a text that is a stored file of the session; anything else, also a package path such as
+  `"images/a.jpg"`, fails with `TSR059`.
+- `toJson` and `fromJson` find the files their [data URLs](#json-and-base64-text) need.
+
+Without files the instruction gives its result at once. Otherwise it creates a foreground `fileStore` action, either
+`operation: "store"` with `files`, each `{ type, base64 }` in standard Base64, or `operation: "read"` with the stored
+file `references`, each file once, and waits with the instruction itself as its continuation. The host answers through
+`completeAction`:
+
+```text
+{ actionId, actionKind: "fileStore", payload: { kind: "stored", references } }
+{ actionId, actionKind: "fileStore", payload: { kind: "read", files } }
+{ actionId, actionKind: "fileStore", payload: { kind: "failed" } }
+```
+
+`references` holds one new reference per file to store, each accepted only when
+`ActionCompletionOptions.capturedMedia.holds(reference, kind)` vouches for it with the kind of the file's type, `image`,
+`audio`, `video`, or `file` for `application/octet-stream`; `files` holds the standard Base64 of each file read. The
+completion retains the settlement, with its `outcome` and the stored references, as `lastSettlement`, so a repeated
+completion replays as `alreadySettled`, and hands the answer off. The instruction then runs again with it, before any
+block, and gives the stored reference, the Base64, the JSON with its data URLs, or the value read with its references.
+When the host could not store the files, `fileFromBase64` and `fromJson` give their default with developer warning
+`TSW019`; when it could not read them, `fileToBase64` and `toJson` fail with `TSR085`. A file store is not interrupted:
+a due block runs once it settles. It survives checkpoint and restore, waiting or with its answer handed off, and a
+replay of recorded completions needs no store: a read's answer holds the Base64, and a store's admission answers are
+recorded.
+
+The snapshot's `storedFiles` lists in ascending order the references the session knows as stored files: those
+`FreshRuntimeOptions.storedFiles` names at Start, which the host vouches for, captured photos, image answers, and the
+files a file store kept. Only these become data URLs, and `fileToBase64` reads only these; a text is never taken for a
+stored file by its spelling.
+
+A file's type comes from its first bytes, read within the 1,445-byte resource header of the
+[WHATWG MIME Sniffing](https://mimesniff.spec.whatwg.org/) standard, with its patterns for these types; its MP3 and
+WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is MP4 audio:
+
+| Type | First bytes |
+| --- | --- |
+| `image/jpeg` | `FF D8 FF` |
+| `image/png` | `89 50 4E 47 0D 0A 1A 0A` |
+| `image/gif` | `GIF87a` or `GIF89a` |
+| `image/webp` | `RIFF`, four bytes, `WEBPVP` |
+| `audio/mpeg` | `ID3`, or an MPEG Layer III frame header followed by another where its frame ends |
+| `audio/ogg` | `OggS` and a zero byte |
+| `audio/wave` | `RIFF`, four bytes, `WAVE` |
+| `audio/mp4` | an ISO file type box (`ftyp`) whose major brand is `M4A ` |
+| `video/mp4` | an ISO file type box whose major brand or a compatible brand starts with `mp4` |
+| `video/webm` | an EBML header whose document type is `webm` |
+| `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text |
+
+The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
+as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
+stored files' bytes, from durable storage when needed. When it cannot decode, keep, or read them, it answers `failed`.
+At Start it names the references of its store that the saved values hold. Its media store resolves a reference only for
+its own kind and the Player asks only for images, so only an image is ever shown, and stored audio and video are not
+played. A save whose files cannot be stored durably, as when the browser's storage is full, fails like any failed
+persistent write, with `TSW014` and the previous value, and the files stay usable for the session. The technical
+playground answers each file store as `failed`.
 
 ## Runtime defaults and limits
 
@@ -1610,7 +1690,7 @@ restart, and report the failure with its debug export.
 | `TSR055` | A `save` of a value that exists only in this session: a timer, media, or message handle, a speaker, a camera view, or a permanent button. | Save plain data, and recreate the session value after loading. |
 | `TSR057` | A count or text argument that a text method or `take(...)` cannot use, such as a negative count or empty text. | Pass the kind of value the message names. |
 | `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion. | Convert or check the value, or declare a type that includes it. |
-| `TSR059` | A built-in argument of the wrong kind, such as a value that `toJson` cannot write. | Pass the kind the message names. |
+| `TSR059` | A built-in argument of the wrong kind, such as a value that `toJson` cannot write or a text that `fileToBase64` does not know as a stored file. | Pass the kind the message names. |
 | `TSR060` | A collection operation whose elements or argument have the wrong kind, or whose elements lack the property it reads. | Make the elements one kind the operation takes, or name a property they have. |
 | `TSR061` | A dict without the key that is read. | Check with `contains(...)` first, or use `get(key, default: value)`. |
 | `TSR062` | A dict key that is not text. | Write the key as text. |
@@ -1626,6 +1706,7 @@ restart, and report the failure with its debug export.
 | `TSR082` | No file or image has the tags of a query. | Relax the query, or add files with those tags. |
 | `TSR083` | `takePhoto(tags:)` with something other than tags, or with two numbers for one tag. | Pass tags such as `"bedroom"` or `"punishment: 4"`, with one number per tag. |
 | `TSR084` | A text longer than the maximum text length. | Build a shorter text. |
+| `TSR085` | A stored file that `fileToBase64` or `toJson` needs, which the Player could not read. | Take, choose, or store the file again. |
 | `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
 | `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |
 
@@ -1737,7 +1818,7 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 Without host builtins or a random source, as the Player runs it, execution reads no clock, randomness, or host state
 outside the snapshot and the arguments of each operation, except a media store's answer whether it holds a
-captured-media reference. Running the same operations with the same arguments
+captured-media or stored-file reference. Running the same operations with the same arguments
 and store answers from a restored snapshot therefore reaches the same state and events; a debug export's replay relies
 on this ([`DEBUGGER.md`](DEBUGGER.md#debug-export)). The Player records its operations beside the session, outside
 runtime state, and recording never changes them.

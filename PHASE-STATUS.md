@@ -22,7 +22,8 @@ accept syntax, architecture, or implementation details.
   `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, `takeLast`, `indexOf`,
   `lastIndexOf`, `count`, and `get` with `default:`, `+` on two texts or two lists, the
   `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, `toJson`/`fromJson`/`toBase64`/`fromBase64` for data
-  that other programs exchange, list `addAll`, `sort`/`shuffle`/`reverse` and set
+  that other programs exchange, with stored files as data URLs, `fileFromBase64`/`fileToBase64` for stored files of any
+  type, list `addAll`, `sort`/`shuffle`/`reverse` and set
   operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
   (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
   shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets

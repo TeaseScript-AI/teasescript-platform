@@ -188,6 +188,20 @@ with Copy, Download, and Close, and waits until the player closes it; nothing en
 value ([§31](specifications/accepted-syntaxes-v30.md#export-text)). The text may be as long as any text. A text or file
 name that is not text is compile error `TSV043` for a known type and runtime error `TSR050` otherwise.
 
+```tease
+let shared = toJson({ name: name, photo: takePhoto() })
+let preset = fromJson(text, default: null)
+let picture = fileFromBase64(base64, default: null)
+```
+
+`toJson` writes every stored file a value holds, a photo or a file from `fileFromBase64`, as a `data:` URL with the
+type its first bytes give, and `fromJson` stores each data URL of an image, audio, or video type as a file again and
+gives its reference; `files: false` keeps both as text. `fileFromBase64(text, default:)` stores the bytes of Base64
+text or of a `data:…;base64,` URL as a file and gives its reference, or the default for text that is not Base64, and
+`fileToBase64(file)` gives a stored file's bytes as Base64. A stored file is shown only when it is an image; other files
+can be kept, passed along, and turned back into Base64 ([§33](specifications/accepted-syntaxes-v30.md#stored-files),
+[stored files](RUNTIME.md#stored-files)).
+
 ### Compact choices
 
 `askChoice` returns the value of the selected button. A value may be written before an option's `:`; an option without
@@ -364,7 +378,9 @@ Implemented value operations include the V30 §8 text operations, joining two te
 `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and `get` with
 `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
-`toBase64`, and `fromBase64`, the numeric functions `round` (also with `decimals:`),
+`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §33 file functions
+`fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the numeric functions `round` (also
+with `decimals:`),
 `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
 the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
