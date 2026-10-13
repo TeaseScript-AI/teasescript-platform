@@ -2300,7 +2300,7 @@ export class InstructionCompiler {
   /**
    * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
    * reads when it opens. It is always prepared: its request is checked then. Like a basic ask, it first says its
-   * question, the message, read from that object.
+   * question, the message, read from that object; `speaker` in its mode and in every argument is the asking speaker.
    */
   *#lowerAskImageTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
@@ -2319,7 +2319,10 @@ export class InstructionCompiler {
             this.#lowerQuestionPresentationTask(expression.presentation, speakerTemporary),
           );
     const values = yield* compileChild(
-      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+      this.#lowerInteractionPayloadsTask(
+        expression.arguments.map((argument) => argument.value),
+        speakerTemporary,
+      ),
     );
     const requestTemporary = this.#allocateTemporary();
     this.instructions.push({
