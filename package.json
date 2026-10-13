@@ -26,6 +26,7 @@
     "test:lint": "tsc -p tools/oxlint/tsconfig.json && node tools/oxlint/test.mjs",
     "playground": "npm run build && node dist/playground/server.js",
     "playground:https": "npm run build && node dist/playground/server.js --https",
+    "probe": "node tools/probe.mjs",
     "test:editor-browser": "npm run build:editor && node tools/editor-browser-smoke.mjs",
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:build:typescript": "node ./tools/test-clean-typescript-build.mjs",
