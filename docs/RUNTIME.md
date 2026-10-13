@@ -1510,10 +1510,18 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   occurs twice is read or stored once. `files:` that is not true or false is compile error `TSV043` for a known type and
   runtime error `TSR059` otherwise.
 
+`hashText` ([V30 §13](specifications/accepted-syntaxes-v30.md#hashes)) is a pure core built-in as well, and gives its
+result at once: native `crypto.subtle.digest` always waits, so the engine has its own SHA-256 (FIPS 180-4,
+`src/runtime/sha256.ts`). `TextEncoder` writes the text's UTF-8 in parts of 65,536 code units, a surrogate pair kept in
+one part and a lone surrogate written as U+FFFD, as for `toBase64`, so the time grows only with the bytes and no part
+needs the whole text's UTF-8 at once. The result is 64 lowercase hexadecimal digits. A value that is not text is
+`TSV043` where the compiler knows it and `TSR059` otherwise.
+
 ## Stored files
 
-`fileFromBase64(text, default:)` and `fileToBase64(file)` implement
-[V30 §33](specifications/accepted-syntaxes-v30.md#stored-files). Like `toJson` and `fromJson` without a written
+`fileFromBase64(text, default:)`, `fileToBase64(file)`, and `hashFile(file)` implement
+[V30 §33](specifications/accepted-syntaxes-v30.md#stored-files) and [§13](specifications/accepted-syntaxes-v30.md#hashes).
+Like `toJson` and `fromJson` without a written
 `files: false`, they are protected core built-ins that lower to a `fileStore` instruction, whose operands are
 temporaries or literals evaluated once in written order; plan validation rejects them as ordinary calls. `default:` is
 required (`TSV020`), a value the compiler knows is not text is `TSV043`, and the result of `fileFromBase64` is text or
@@ -1523,32 +1531,34 @@ the default's type. The instruction first finds the files it needs:
   padding, or the Base64 data of a `data:<type>;base64,…` URL, whose declared type it ignores. Anything else, also a
   value that is not text, gives the default at once. A file whose standard Base64 would be longer than a text can be
   fails with `TSR084`.
-- `fileToBase64` needs a text that is a stored file of the session; anything else, also a package path such as
-  `"images/a.jpg"`, fails with `TSR059`.
+- `fileToBase64` and `hashFile` need a text that is a stored file of the session; anything else, also a package path
+  such as `"images/a.jpg"`, fails with `TSR059`.
 - `toJson` and `fromJson` find the files their [data URLs](#json-and-base64-text) need.
 
 Without files the instruction gives its result at once. Otherwise it creates a foreground `fileStore` action, either
-`operation: "store"` with `files`, each `{ type, base64 }` in standard Base64, or `operation: "read"` with the stored
-file `references`, each file once, and waits with the instruction itself as its continuation. The host answers through
-`completeAction`:
+`operation: "store"` with `files`, each `{ type, base64 }` in standard Base64, or `operation: "read"` or, for
+`hashFile`, `operation: "hash"` with the stored file `references`, each file once, and waits with the instruction itself
+as its continuation. The host answers through `completeAction`:
 
 ```text
 { actionId, actionKind: "fileStore", payload: { kind: "stored", references } }
 { actionId, actionKind: "fileStore", payload: { kind: "read", files } }
+{ actionId, actionKind: "fileStore", payload: { kind: "hashed", hashes } }
 { actionId, actionKind: "fileStore", payload: { kind: "failed" } }
 ```
 
 `references` holds one new reference per file to store, each accepted only when
 `ActionCompletionOptions.capturedMedia.holds(reference, kind)` vouches for it with the kind of the file's type, `image`,
-`audio`, `video`, or `file` for `application/octet-stream`; `files` holds the standard Base64 of each file read. The
-completion retains the settlement, with its `outcome` and the stored references, as `lastSettlement`, so a repeated
-completion replays as `alreadySettled`, and hands the answer off. The instruction then runs again with it, before any
-block, and gives the stored reference, the Base64, the JSON with its data URLs, or the value read with its references.
-When the host could not store the files, `fileFromBase64` and `fromJson` give their default with developer warning
-`TSW019`; when it could not read them, `fileToBase64` and `toJson` fail with `TSR085`. A file store is not interrupted:
-a due block runs once it settles. It survives checkpoint and restore, waiting or with its answer handed off, and a
-replay of recorded completions needs no store: a read's answer holds the Base64, and a store's admission answers are
-recorded.
+`audio`, `video`, or `file` for `application/octet-stream`; `files` holds the standard Base64 of each file read, and
+`hashes` the SHA-256 of each file hashed as 64 lowercase hexadecimal digits. The completion retains the settlement, with
+its `outcome` and the stored references, as `lastSettlement`, so a repeated completion replays as `alreadySettled`, and
+hands the answer off. The instruction then runs again with it, before any block, and gives the stored reference, the
+Base64, the hash, the JSON with its data URLs, or the value read with its references. When the host could not store
+the files, `fileFromBase64` and `fromJson` give their default with developer warning `TSW019`; when it could not read
+them, `fileToBase64`, `hashFile`, and `toJson` fail with `TSR085`. A file store is not interrupted: a due block runs
+once it settles. It survives checkpoint and restore, waiting or with its answer handed off, and a replay of recorded
+completions needs no store: a read's answer holds the Base64, a hash's answer the hash, and a store's admission answers
+are recorded.
 
 The snapshot's `storedFiles` lists in ascending order the references the session knows as stored files: those
 `FreshRuntimeOptions.storedFiles` names at Start, which the host vouches for, captured photos, image answers, and the
@@ -1575,7 +1585,9 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 
 The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
 as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
-stored files' bytes, from durable storage when needed. When it cannot decode, keep, or read them, it answers `failed`.
+stored files' bytes, from durable storage when needed. It hashes their bytes with `crypto.subtle.digest`, or, outside a
+secure context, where the browser has no `crypto.subtle`, with the engine's SHA-256, which gives the same hash. When it
+cannot decode, keep, or read them, it answers `failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
 text that only has the shape of a reference stays text. Its media store resolves a reference only for
 its own kind and the Player asks only for images, so only an image is ever shown, and stored audio and video are not
