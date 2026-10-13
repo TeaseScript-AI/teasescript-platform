@@ -1621,6 +1621,7 @@ restart, and report the failure with its debug export.
 | `TSR067` | A start value that selects at random. | Select at random once the story runs. |
 | `TSR069` | A `goto`, `call`, or `fallback` target that does not exist. | Name an existing file or label. |
 | `TSR070` | A variable read before its `let` ran. | Give the variable a value before it is used. |
+| `TSR071` | `speaker` in a message that names no speaker with `as` while no default speaker is set. | Give the message a speaker with `as`, or set a default speaker with `speaker name` before it. |
 | `TSR080` | A tag's number compared with something other than a number. | Compare it with a number. |
 | `TSR081` | A tag query option that is not a list of tag names. | Pass tag names, such as `"bedroom"`. |
 | `TSR082` | No file or image has the tags of a query. | Relax the query, or add files with those tags. |

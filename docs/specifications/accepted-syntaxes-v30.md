@@ -4508,6 +4508,11 @@ speaker mistressVera
 
 This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
 
+**Status (Owner decision, 2026-10-13):** a message that names no speaker with `as` while no default speaker is set
+has no speaker, and `speaker` in it has no value. If no file of the package has a `speaker` statement that sets the
+default speaker, `speaker` in a message without `as` is compile error `TSV063`. Otherwise reading it in a message that
+has no speaker is runtime error `TSR071`.
+
 A speaker is global ([ADR 0022](../decisions/0022-multi-file-scripts.md)): declared anywhere in any file of a package,
 also inside a block or function, it is known in every file. Its name is unique in the package like that of a global
 ([§12](#global-variables)). The session sets it up at its start, together with the globals and in their order, so its

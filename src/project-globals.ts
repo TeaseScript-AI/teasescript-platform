@@ -21,6 +21,29 @@ export function sessionDeclarations(programs: readonly Program[]): readonly Sess
 
 function declarationsOf(program: Program): (GlobalStatement | SpeakerDeclaration)[] {
   const found: (GlobalStatement | SpeakerDeclaration)[] = [];
+  someNode(program, (node) => {
+    if (node.kind === "globalStatement" || node.kind === "speakerDeclaration")
+      // EVIDENCE: invariant: the parser gives these two kinds only to global and speaker declarations.
+      found.push(node as GlobalStatement | SpeakerDeclaration);
+    return false;
+  });
+  return found;
+}
+
+/** Whether a statement of the project sets the default speaker, as `speaker vera` does, wherever it stands. */
+export function setsDefaultSpeaker(programs: readonly Program[]): boolean {
+  return programs.some((program) =>
+    someNode(program, (node) => node.kind === "speakerSetterStatement"),
+  );
+}
+
+/** An object of a parser-owned AST: a node with a kind, or a span or position without one. */
+interface AstObject {
+  readonly kind?: unknown;
+}
+
+/** Whether `test` holds for a node of a parser-owned AST, also inside blocks, functions, and expressions. */
+function someNode(program: Program, test: (node: AstObject) => boolean): boolean {
   const work: unknown[] = [program];
   while (work.length > 0) {
     const value = work.pop();
@@ -30,15 +53,13 @@ function declarationsOf(program: Program): (GlobalStatement | SpeakerDeclaration
       continue;
     }
     // EVIDENCE: invariant: an object of a parser-owned AST is a node with a kind, or a span or position without one.
-    const kind = (value as { readonly kind?: unknown }).kind;
-    if (kind === "globalStatement" || kind === "speakerDeclaration")
-      // EVIDENCE: invariant: the parser gives these two kinds only to global and speaker declarations.
-      found.push(value as GlobalStatement | SpeakerDeclaration);
+    const node = value as AstObject;
     // Spans and positions hold no statements.
-    if (kind === undefined) continue;
+    if (node.kind === undefined) continue;
+    if (test(node)) return true;
     for (const nested of Object.values(value)) work.push(nested);
   }
-  return found;
+  return false;
 }
 
 /**

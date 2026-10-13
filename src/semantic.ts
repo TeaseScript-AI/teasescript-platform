@@ -70,7 +70,7 @@ import {
 } from "./project-paths.js";
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
-import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import { runsOnItsOwn, sessionDeclarations, setsDefaultSpeaker } from "./project-globals.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -188,6 +188,7 @@ const semanticCode = {
   fileName: "TSV056",
   invalidFileTarget: "TSV057",
   invalidCameraHandleMember: "TSV059",
+  noSpeaker: "TSV063",
 } as const;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
@@ -309,6 +310,8 @@ class ProjectNames {
   /** Each global and speaker declaration with its position in the session-start order. */
   readonly #orders = new Map<GlobalStatement | SpeakerDeclaration, number>();
 
+  #setsDefaultSpeaker: boolean | undefined;
+
   public constructor(
     readonly files: readonly ProjectProgram[],
     options: SemanticValidationOptions,
@@ -377,6 +380,12 @@ class ProjectNames {
               order: null,
             },
           });
+  }
+
+  /** Whether a file sets the default speaker anywhere, which a message without `as` needs for its `speaker`. */
+  public get setsDefaultSpeaker(): boolean {
+    this.#setsDefaultSpeaker ??= setsDefaultSpeaker(this.files.map((file) => file.program));
+    return this.#setsDefaultSpeaker;
   }
 
   /** The position of a global or speaker in the session-start order. */
@@ -1908,7 +1917,16 @@ class SemanticValidator {
         return;
       }
       case "identifier":
-        if (expression.name === "speaker" && contextualSpeaker !== null) return;
+        if (expression.name === "speaker" && contextualSpeaker !== null) {
+          // Without `as`, a message has the default speaker, which a script that never sets one cannot have.
+          if (contextualSpeaker === "speaker" && !this.project.setsDefaultSpeaker)
+            this.#report(
+              semanticCode.noSpeaker,
+              "This message has no speaker, so 'speaker' has no value: it names none with 'as', and the script never sets a default speaker. Give it one with 'as name', or set a default speaker with 'speaker name'.",
+              expression.span,
+            );
+          return;
+        }
         // Protected, so never a binding: the engine reads it from the session.
         if (expression.name === "debugMode") return;
         const binding = scope.resolve(expression.name);

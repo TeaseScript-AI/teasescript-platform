@@ -60,8 +60,6 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Standard Library string API and signatures beyond the first POC.
 - Module recursion, cooldown, and history rules (ADR 0022 decides file targets and fallback; ADR 0023 decides file
   headers and tagged selection).
-- Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
-  available.
 
 - Detailed interaction result objects, including the author-facing option that selects them.
 - Compatibility mapping, names, and option shapes that expose the accepted V30 parenthesized input/choice options

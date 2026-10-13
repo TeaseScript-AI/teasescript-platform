@@ -205,6 +205,30 @@ test("a say rejected after its expressions ran keeps nothing, with either stagin
   }
 });
 
+test("a say rejected for 'speaker' without a speaker keeps nothing, with either staging", () => {
+  // The default speaker is set only on a path that does not run, so the say has none.
+  const unset = ["speaker vera { }", "if done {\n  speaker vera\n}"];
+  const reads = [
+    'say "${random()} ${speaker.title}"',
+    'let line = say "${items.random} ${speaker.title.uppercase()}"',
+  ];
+  assert.deepEqual(staging([...unset, ...reads]), [true, true]);
+  for (const read of reads) {
+    const { events, finalSnapshot } = assertStagingsAgree(
+      [...DECLARATIONS, ...unset, read, "exit"].join("\n"),
+      { ending: "failed", seed: 77 },
+    );
+    assert.deepEqual(
+      events.map((event) => event.kind),
+      ["runtimeFailure"],
+    );
+    assert.equal(finalSnapshot.failure?.code, "TSR071");
+    assert.equal(finalSnapshot.rng.state, 77);
+    assert.equal(finalSnapshot.contextualSpeaker, null);
+    assert.deepEqual(finalSnapshot.liveMessages, []);
+  }
+});
+
 test("speaker warnings, message handles, and timer blocks stage alike either way", () => {
   // The first say warns that vera has no display name; the later ones do not warn again.
   assertStagingsAgree(
