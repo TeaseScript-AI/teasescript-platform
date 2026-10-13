@@ -955,6 +955,8 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       ...(ui.preselected === undefined ? {} : { preselected: ui.preselected }),
       accessibleName,
     };
+  if (ui.kind === "popup")
+    return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
   if (ui.kind === "button")
     return {
       kind: "button",

@@ -707,6 +707,13 @@ export function playerRuntimeForeground(
         label: action.ui.buttonLabel,
         ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
       });
+    case "popup":
+      return Object.freeze({
+        kind: "popup",
+        accessibleName,
+        message: action.ui.message,
+        buttonText: action.ui.buttonText,
+      });
     case "text":
       return Object.freeze({
         kind: "ask-text",
@@ -909,6 +916,7 @@ export type PlayerDebugWaitKind =
   | "choice"
   | "input"
   | "image"
+  | "popup"
   | "pacing"
   | "media"
   | "save"
@@ -983,7 +991,8 @@ function debugWaitKind(
     case "interaction":
       return action.interactionKind === "button" ||
         action.interactionKind === "choice" ||
-        action.interactionKind === "image"
+        action.interactionKind === "image" ||
+        action.interactionKind === "popup"
         ? action.interactionKind
         : "input";
     case "chatPacingGate":
@@ -1534,6 +1543,15 @@ export function skipPlayerRuntimeImage(
   const action = activeInteraction(session.state);
   if (action?.ui.kind !== "image" || !action.ui.allowSkip) return null;
   return completePlayerAction(session, action, { kind: "skip" });
+}
+
+/** Closes the presented popup, which continues the script. */
+export function closePlayerRuntimePopup(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "popup") return null;
+  return completePlayerAction(session, action, { kind: "activate" });
 }
 
 export function activatePlayerRuntimeButton(

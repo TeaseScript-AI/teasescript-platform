@@ -704,8 +704,12 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
   }
 
   // An image is chosen in the Player, which stores it; the playground has no image input.
-  if (interaction.ui.kind === "image" || interaction.ui.kind === "form") {
-    elements.composerHelp.textContent = `Answer this ${interaction.ui.kind === "image" ? "image request" : "form"} in the Player.`;
+  if (
+    interaction.ui.kind === "image" ||
+    interaction.ui.kind === "form" ||
+    interaction.ui.kind === "popup"
+  ) {
+    elements.composerHelp.textContent = `Answer this ${interaction.ui.kind === "image" ? "image request" : interaction.ui.kind} in the Player.`;
     return;
   }
 

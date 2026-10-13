@@ -543,8 +543,11 @@ export interface StopAudioInstruction extends InstructionBase {
   readonly kind: "stopAudio";
 }
 
+/** The text of a popup's button when `showPopup` gives no `buttonText:` (V30 §31). */
+export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
+
 export type InteractionKind =
-  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form";
+  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup";
 /**
  * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
  * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
@@ -616,6 +619,16 @@ export type InteractionUiPayload =
        * it is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
        */
       readonly preselected?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `showPopup` (V30 §31): a dialog outside the chat with the message and one button, which closes it. Neither
+       * enters the transcript.
+       */
+      readonly kind: "popup";
+      readonly message: string;
+      readonly buttonText: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -759,6 +772,14 @@ export type PreparedInteractionUiPayload =
        * any other value fails as the choice would open. Without it, a value no button has warns.
        */
       readonly booleanPrefill?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "popup";
+      /** Hold the evaluated message and button text until the popup opens, then their text. */
+      readonly messageTemporary: number;
+      /** Absent when the button keeps its default text. */
+      readonly buttonTextTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

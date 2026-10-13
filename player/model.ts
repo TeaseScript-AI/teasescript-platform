@@ -91,6 +91,13 @@ export type PlayerForegroundPresentation =
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
   | {
+      /** `showPopup`: a dialog outside the chat with the message and one button, which closes it. */
+      readonly kind: "popup";
+      readonly accessibleName: string;
+      readonly message: string;
+      readonly buttonText: string;
+    }
+  | {
       /** `ask-date`, `ask-time`, and `ask-datetime` use the browser's date and time controls, which submit ISO text. */
       readonly kind: "ask-text" | "ask-number" | "ask-date" | "ask-time" | "ask-datetime";
       readonly accessibleName: string;

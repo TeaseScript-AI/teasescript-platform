@@ -125,6 +125,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "showButton",
   "takePhoto",
   "askImage",
+  "showPopup",
   "askInteger",
   "askBoolean",
   "askBooleans",

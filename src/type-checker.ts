@@ -12,6 +12,7 @@ import type {
   Identifier,
   InteractionExpression,
   LetStatement,
+  ShowPopupStatement,
   LoadExpression,
   MediaParts,
   Program,
@@ -1604,6 +1605,11 @@ class TypeChecker {
       case "showCameraStatement":
       case "hideCameraStatement":
       case "stopAudioStatement":
+        this.#suspend();
+        return true;
+      case "showPopupStatement":
+        yield* compileChild(this.#showPopupTask(statement, scope));
+        // The popup waits until the player closes it.
         this.#suspend();
         return true;
       case "saveStatement": {
@@ -4344,6 +4350,17 @@ class TypeChecker {
     if (sources.length === 2 && !sources[0] && !sources[1])
       this.#report(typeCode.invalidOperand, IMAGE_NO_SOURCE_MESSAGE, expression.span);
     return skippable ? optional(STRING_TYPE) : STRING_TYPE;
+  }
+
+  /** The message and `buttonText:` of `showPopup` are shown text. */
+  *#showPopupTask(statement: ShowPopupStatement, scope: Scope): CompileTask<void> {
+    for (const argument of statement.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      if (name === "message") this.#checkShownText(argument.value, type, "a popup message");
+      else if (name === "buttonText")
+        this.#checkShownText(argument.value, type, "the text of a popup's button");
+    }
   }
 
   /** A written `types:` or `mime:` list holds at least one entry, and each written text is valid. */
@@ -7534,6 +7551,7 @@ interface LoopEffects {
 const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "sayStatement",
   "showButtonStatement",
+  "showPopupStatement",
   "waitStatement",
   "timerStatement",
   "playMediaStatement",
@@ -7976,6 +7994,8 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return mediaOperands(statement);
     case "showImageStatement":
       return [statement.image];
+    case "showPopupStatement":
+      return statement.arguments.map((argument) => argument.value);
     case "saveStatement":
       return [statement.value, statement.key];
     case "deleteStatement":

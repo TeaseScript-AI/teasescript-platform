@@ -15,6 +15,7 @@ import {
   type PlanSourceLocation,
   type PlanTag,
   type PreparedInteractionUiPayload,
+  DEFAULT_POPUP_BUTTON_TEXT,
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
@@ -1574,6 +1575,16 @@ function materializeInteractionUi(
         : { background: backgroundColor(read(prepared.backgroundTemporary).value) }),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "popup") {
+    ui = {
+      kind: "popup",
+      message: readText(prepared.messageTemporary),
+      buttonText:
+        prepared.buttonTextTemporary === undefined
+          ? DEFAULT_POPUP_BUTTON_TEXT
+          : readText(prepared.buttonTextTemporary),
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
@@ -1867,6 +1878,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
+  else if (ui.kind === "popup") strings.push(ui.message, ui.buttonText);
   else if (ui.kind === "form") {
     // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
     for (const text of formUiTexts(ui)) strings.push(text);
@@ -1895,7 +1907,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its labels, hints, prefill or choice values, or file filters.`,
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, labels, hints, prefill or choice values, or file filters.`,
         span,
       );
     aggregate += bytes;
@@ -2557,6 +2569,8 @@ function cloneInteractionUi(
       accessibleName,
     };
   }
+  if (ui.kind === "popup")
+    return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
   if (ui.kind === "button")
     return {
       kind: "button",

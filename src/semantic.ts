@@ -29,6 +29,7 @@ import type {
   FunctionParameter,
   LabelTarget,
   LetStatement,
+  ShowPopupStatement,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -590,6 +591,7 @@ class SemanticValidator {
           "stopAudio",
           "showPermanentButton",
           "askImage",
+          "showPopup",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
           "pi",
           // The engine reads `debugMode` from the session.
@@ -1334,6 +1336,11 @@ class SemanticValidator {
       case "hideCameraStatement":
       case "stopAudioStatement":
         return;
+      case "showPopupStatement":
+        this.#validateShowPopupArguments(statement);
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
         this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
@@ -1896,7 +1903,8 @@ class SemanticValidator {
           if (
             this.#builtins.has(expression.name) ||
             expression.name === "takePhoto" ||
-            expression.name === "askImage"
+            expression.name === "askImage" ||
+            expression.name === "showPopup"
           ) {
             this.#report(
               semanticCode.functionValue,
@@ -2031,6 +2039,13 @@ class SemanticValidator {
               yield* compileChild(
                 this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
               );
+          } else if (name === "showPopup") {
+            // A statement of its own is a `showPopupStatement`.
+            this.#report(
+              semanticCode.functionValue,
+              `${name}(...) gives no value, so it can only be a statement of its own.`,
+              expression.callee.span,
+            );
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
@@ -2539,8 +2554,51 @@ class SemanticValidator {
     }
   }
 
+  /**
+   * `showPopup` takes its message first, without a name or as `message:`, and an optional `buttonText:` (V30 §31). A
+   * repeated name is reported with the other arguments.
+   */
+  #validateShowPopupArguments(statement: ShowPopupStatement): void {
+    this.#validateDistinctNamedArguments(statement);
+    let message = false;
+    for (const [index, argument] of statement.arguments.entries()) {
+      if (argument.kind === "positionalArgument") {
+        if (index > 0 || message)
+          this.#report(
+            semanticCode.argumentCount,
+            'showPopup takes only its message without a name, first. Name the button text, as in \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
+            argument.span,
+          );
+        message = true;
+        continue;
+      }
+      const name = argument.name.name;
+      if (name === "message") {
+        if (message)
+          this.#report(
+            semanticCode.argumentCount,
+            "showPopup takes one message: give it without a name or as message:, not both.",
+            argument.name.span,
+          );
+        message = true;
+      } else if (name !== "buttonText") {
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `showPopup has no argument '${name}'. It takes a message and buttonText:.`,
+          argument.name.span,
+        );
+      }
+    }
+    if (!message)
+      this.#report(
+        semanticCode.missingNamedArgument,
+        "showPopup needs a message, as in 'showPopup \"Task completed\"'.",
+        statement.span,
+      );
+  }
+
   #validateDistinctNamedArguments(
-    expression: Extract<Expression, { kind: "callExpression" }>,
+    expression: Pick<Extract<Expression, { kind: "callExpression" }>, "arguments">,
   ): void {
     const names = new Set<string>();
     for (const argument of expression.arguments) {

@@ -1,5 +1,6 @@
 import type {
   Block,
+  CallArgument,
   Expression,
   TimerParts,
   SayParts,
@@ -13,6 +14,7 @@ import type {
   InteractionExpression,
   ShowButtonParts,
   ShowPermanentButtonParts,
+  ShowPopupStatement,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -54,6 +56,7 @@ import type {
   TagQueryExpressionPlan,
   UnitPlan,
 } from "../../plan/model.js";
+import { DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -359,6 +362,9 @@ export class InstructionCompiler {
         return;
       case "hideCameraStatement":
         this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
+        return;
+      case "showPopupStatement":
+        yield* compileChild(this.#lowerShowPopupTask(statement));
         return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
@@ -1664,6 +1670,63 @@ export class InstructionCompiler {
     }
     this.#emitTemporaryCleanup(preparedTemporaryIds, parts.span);
     return lowered;
+  }
+
+  /**
+   * Lowers a `showPopup` (V30 §31). A static message and button text embed the popup's UI; otherwise the requesting
+   * speaker is captured, as for any interaction, and the written arguments are evaluated once, in written order, into
+   * temporaries that the popup reads when it opens.
+   */
+  *#lowerShowPopupTask(statement: ShowPopupStatement): CompileTask<void> {
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const message = statement.arguments.find(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    if (message === undefined) throw new TypeError("A popup without a message reached lowering.");
+    const buttonText = statement.arguments.find((argument) => argument !== message);
+    const staticMessage = staticVisibleText(message.value);
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_POPUP_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    if (staticMessage !== undefined && staticButtonText !== undefined) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "popup",
+        target: "standardChat",
+        speaker: null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: { kind: "popup", message: staticMessage, buttonText: staticButtonText, accessibleName },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "popup",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "popup",
+        messageTemporary: temporaries.get(message)!,
+        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+        accessibleName,
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
   }
 
   /**

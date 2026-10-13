@@ -447,7 +447,8 @@ function completeInteraction(
       receivedInteractionKind === "choice" ||
       receivedInteractionKind === "temporal" ||
       receivedInteractionKind === "image" ||
-      receivedInteractionKind === "form"
+      receivedInteractionKind === "form" ||
+      receivedInteractionKind === "popup"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
@@ -466,8 +467,10 @@ function completeInteraction(
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
-  assertEventSequenceCapacity(current, 2);
-  const transcriptSequence = takeSequence(current, 2);
+  // Closing a popup adds nothing to the transcript, so only its completion takes a sequence.
+  const transcriptText = resolved.transcriptText;
+  assertEventSequenceCapacity(current, transcriptText === null ? 1 : 2);
+  const transcriptSequence = transcriptText === null ? null : takeSequence(current, 2);
   const completionSequence = takeSequence(current, 2);
   // A button used as a value yields the scene time it waited; it never exceeds the timeout.
   const result =
@@ -488,21 +491,25 @@ function completeInteraction(
       transcriptEventSequence: transcriptSequence,
       completionEventSequence: completionSequence,
       result,
-      transcriptText: resolved.transcriptText,
+      transcriptText,
       ...(resolved.shownOptions === undefined ? {} : { shownOptions: resolved.shownOptions }),
     },
     trace,
   );
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [
-    Object.freeze({
-      kind: "playerTranscript",
-      sequence: transcriptSequence,
-      target: action.target,
-      requestingSpeakerId: action.speakerId,
-      text: resolved.transcriptText,
-      span: copySpan(span),
-    } satisfies PlayerTranscriptEvent),
+    ...(transcriptText === null || transcriptSequence === null
+      ? []
+      : [
+          Object.freeze({
+            kind: "playerTranscript",
+            sequence: transcriptSequence,
+            target: action.target,
+            requestingSpeakerId: action.speakerId,
+            text: transcriptText,
+            span: copySpan(span),
+          } satisfies PlayerTranscriptEvent),
+        ]),
     Object.freeze({
       kind: "actionCompleted",
       sequence: completionSequence,

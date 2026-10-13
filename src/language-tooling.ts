@@ -893,6 +893,10 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "showImageStatement":
       children.push({ kind: "expression", node: statement.image });
       return;
+    case "showPopupStatement":
+      for (const argument of statement.arguments)
+        children.push({ kind: "expression", node: argument.value });
+      return;
     case "saveStatement":
       children.push({ kind: "expression", node: statement.value });
       children.push({ kind: "expression", node: statement.key });

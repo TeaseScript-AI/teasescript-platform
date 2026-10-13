@@ -52,6 +52,7 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   choice: "Choice",
   input: "Answer",
   image: "Image request",
+  popup: "Popup",
   pacing: "Pacing",
   media: "Media",
   save: "Save",

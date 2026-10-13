@@ -1315,7 +1315,9 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image", "form"])) {
+  if (
+    !isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image", "form", "popup"])
+  ) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   // A form reads its fields when it opens, so it is always prepared.
@@ -1326,7 +1328,7 @@ function validateInteractionInstruction(
 
   const ui = prepared ? value.preparedUi : value.ui;
   const expected =
-    kind === "button"
+    kind === "button" || kind === "popup"
       ? value.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1348,7 +1350,13 @@ function validateInteractionInstruction(
       ),
     );
   }
-  if (kind !== "button" || value.destinationTemporary !== null) {
+  // A popup gives no value.
+  if (kind === "popup") {
+    if (value.destinationTemporary !== null)
+      errors.push(
+        planError("TSC002", "A popup has no result destination.", `${path}.destinationTemporary`),
+      );
+  } else if (kind !== "button" || value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
       `${path}.destinationTemporary`,
@@ -1418,7 +1426,14 @@ function validateStaticInteractionUi(
               "types",
               "mime",
             ]
-          : ["kind", "options", "accessibleName", ...("preselected" in ui ? ["preselected"] : [])];
+          : kind === "popup"
+            ? ["kind", "message", "buttonText", "accessibleName"]
+            : [
+                "kind",
+                "options",
+                "accessibleName",
+                ...("preselected" in ui ? ["preselected"] : []),
+              ];
   if (
     !hasExactKeys(ui, uiKeys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1473,6 +1488,10 @@ function validateStaticInteractionUi(
     measurementExhausted,
     errors,
   );
+  if (kind === "popup") {
+    countString(ui.message, `${path}.message`);
+    countString(ui.buttonText, `${path}.buttonText`);
+  }
   if (kind === "button") {
     countString(ui.buttonLabel, `${path}.buttonLabel`);
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
@@ -1602,14 +1621,21 @@ function validatePreparedInteractionUi(
           ? ["kind", "requestTemporary", "accessibleName"]
           : kind === "form"
             ? ["kind", "requestTemporary", "shape", "accessibleName"]
-            : [
-                "kind",
-                "optionsTemporary",
-                "values",
-                "accessibleName",
-                ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
-                ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
-              ];
+            : kind === "popup"
+              ? [
+                  "kind",
+                  "messageTemporary",
+                  "accessibleName",
+                  ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
+                ]
+              : [
+                  "kind",
+                  "optionsTemporary",
+                  "values",
+                  "accessibleName",
+                  ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                  ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
+                ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1688,6 +1714,12 @@ function validatePreparedInteractionUi(
     if ("backgroundTemporary" in ui)
       addTemporary(ui.backgroundTemporary, `${path}.backgroundTemporary`);
     if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
+    return;
+  }
+  if (kind === "popup") {
+    addTemporary(ui.messageTemporary, `${path}.messageTemporary`);
+    if ("buttonTextTemporary" in ui)
+      addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
     return;
   }
   if (kind === "text" || kind === "number" || kind === "temporal") {
@@ -1840,7 +1872,7 @@ function validateInteractionAccessibleName(
     );
   }
   const expectedKey =
-    kind === "button"
+    kind === "button" || kind === "popup"
       ? "continue"
       : kind === "number"
         ? "number"

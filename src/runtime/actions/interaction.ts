@@ -35,7 +35,8 @@ export type ResolvedInteraction =
   | {
       readonly ok: true;
       readonly result: InteractionResultValue;
-      readonly transcriptText: string;
+      /** `null` for a popup, whose closing adds nothing to the transcript. */
+      readonly transcriptText: string | null;
       /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
       readonly shownOptions?: readonly (number | null)[] | null;
     }
@@ -76,6 +77,11 @@ export function resolveInteractionCompletion(
     return payload.kind === "activate" && action.ui.kind === "button"
       ? { ok: true, result: null, transcriptText: action.ui.buttonLabel }
       : { ok: false, message: "Button completion requires activation only." };
+  }
+  if (action.interactionKind === "popup") {
+    return payload.kind === "activate" && Object.keys(payload).length === 1
+      ? { ok: true, result: null, transcriptText: null }
+      : { ok: false, message: "Popup completion requires { kind: 'activate' } only." };
   }
   if (action.interactionKind === "text") {
     if (
