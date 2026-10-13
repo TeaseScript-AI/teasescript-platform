@@ -116,16 +116,17 @@ function runScript(plan) {
 function nextDueMs(view) {
   const foreground = view.foregroundAction;
   if (foreground !== null && !timedForeground.has(foreground.kind)) return null;
-  const due = [];
+  // A running loop, not Math.min(...): a script may start any number of timers.
+  let earliest = Infinity;
   if (foreground !== null && Number.isFinite(foreground.deadlineMs))
-    due.push(foreground.deadlineMs);
+    earliest = foreground.deadlineMs;
   for (const action of view.backgroundActions) {
     const deadline =
       action.timer?.state === "running" ? action.timer.deadlineMs : action.deadlineMs;
-    if (Number.isFinite(deadline)) due.push(deadline);
+    if (Number.isFinite(deadline) && deadline < earliest) earliest = deadline;
   }
-  if (due.length === 0) return null;
-  return Math.max(Math.min(...due), view.currentSessionTimeMs);
+  if (earliest === Infinity) return null;
+  return Math.max(earliest, view.currentSessionTimeMs);
 }
 
 function describe(event) {
