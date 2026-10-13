@@ -4070,9 +4070,13 @@ function commentStatement(comment: SourceComment, previousEndLine: number | null
   };
 }
 
+/** Statements whose lowering puts the prelude of their parts before them, or before each evaluation of a loop test. */
+const statementRoots = new WeakSet<AstNode>();
+
 function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
   const outerRoot = context.statementRoot;
   context.statementRoot = node;
+  statementRoots.add(node);
   try {
     return lowerStatementNode(node, context);
   } finally {
@@ -22364,8 +22368,10 @@ function javaHost(context: LowerContext): JavaRuleHost {
     actionCall: (action, args) => actionCall(action, args, context),
     isPhoto: (node) => context.photoVariables.has(variableName(node) ?? ""),
     reversedCopy: (list, node) => {
+      // Only a statement takes the copy before it; a part with a root of its own, such as a C-style for's test, may not.
       const root = context.statementRoot;
-      if (root === null || !isHoistable(root, node, context)) return null;
+      if (root === null || !statementRoots.has(root) || !isHoistable(root, node, context))
+        return null;
       // Assignment copies a list (ADR 0014), which TeaseScript reverse() then reverses in place (#860).
       const name = freshName("reversed", context);
       const copy: IrExpression = { kind: "variable", name };

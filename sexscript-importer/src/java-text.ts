@@ -4,7 +4,7 @@
  * conversions, and collection constructors. Each rule converts only when the receiver and the arguments are proven
  * to have the types its Java method needs; anything else keeps the lowering's own diagnostic.
  */
-import { constantString, variableName, type AstNode, type SourceSpan } from "./ast.ts";
+import { constantString, isAstNode, variableName, type AstNode, type SourceSpan } from "./ast.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
 import {
   argumentsOf,
@@ -208,8 +208,8 @@ const TEXT_ONLY_METHODS = new Set([
 /**
  * `reverse()` calls that reverse text: of the result of a text-only method, `name.substring(1).reverse()`, or whose
  * result is the receiver of one, `path.reverse().substring(0, 4)` (a list has no such method, so Groovy failed there);
- * also another `reverse()` of the same receiver in the same statement (BuzzQuiz's
- * `QFiles[r0].reverse().substring(0, QFiles[r0].reverse().indexOf("/"))`), which nothing between changes.
+ * also a `reverse()` of the same receiver inside that method's arguments, which read nothing that may change it
+ * (BuzzQuiz's `QFiles[r0].reverse().substring(0, QFiles[r0].reverse().indexOf("/"))`).
  */
 function textReverses(tree: Tree): Set<AstNode> {
   const isReverse = (node: AstNode | null | undefined): node is AstNode =>
@@ -222,26 +222,62 @@ function textReverses(tree: Tree): Set<AstNode> {
     JSON.stringify(node, (name: string, value: unknown) => (name === "span" ? undefined : value));
   const reverses = [...tree.parents.keys()].filter(isReverse);
   const found = new Set<AstNode>();
-  const proven = new Set<string>();
+  // The text-only calls whose receiver is a proven reverse() of a repeatable value, with that value's key.
+  const provers = new Map<AstNode, string>();
   for (const node of reverses) {
     const parent = tree.parents.get(node) ?? null;
     const receiver = asNode(node.object);
-    if ((textOnly(parent) && asNode(parent!.object) === node) || textOnly(receiver)) {
-      found.add(node);
-      if (node.span !== null && repeatable(receiver))
-        proven.add(`${node.span.line} ${key(receiver)}`);
-    }
+    const isReceiver = textOnly(parent) && asNode(parent!.object) === node;
+    if (!isReceiver && !textOnly(receiver)) continue;
+    found.add(node);
+    if (isReceiver && repeatable(receiver) && argumentsOf(parent!).every(effectFree))
+      provers.set(parent!, key(receiver));
   }
   for (const node of reverses) {
     const receiver = asNode(node.object);
-    if (
-      node.span !== null &&
-      repeatable(receiver) &&
-      proven.has(`${node.span.line} ${key(receiver)}`)
-    )
-      found.add(node);
+    if (found.has(node) || !repeatable(receiver)) continue;
+    for (let at = tree.parents.get(node) ?? null; at !== null; at = tree.parents.get(at) ?? null) {
+      const prover = provers.get(at);
+      if (prover === undefined) continue;
+      if (prover === key(receiver) && asNode(at.object) !== node) found.add(node);
+      break;
+    }
   }
   return found;
+}
+
+/** Groovy methods of text and lists that change nothing. */
+const READING_METHODS = new Set([
+  ...TEXT_ONLY_METHODS,
+  "reverse",
+  "indexOf",
+  "lastIndexOf",
+  "contains",
+  "size",
+  "length",
+]);
+
+/** Whether evaluating a value changes nothing: no assignment, step, construction, or call that may run code. */
+function effectFree(node: AstNode): boolean {
+  if (node.kind === "postfix" || node.kind === "prefix" || node.kind === "constructorCall")
+    return false;
+  if (node.kind === "binary" && typeof node.operator === "string") {
+    const operator = node.operator;
+    if (
+      operator === "<<" ||
+      (operator.endsWith("=") && !["==", "!=", "<=", ">="].includes(operator))
+    )
+      return false;
+  }
+  if (node.kind === "methodCall" && !READING_METHODS.has(constantString(node.method) ?? ""))
+    return false;
+  if (node.kind === "closure") return false;
+  for (const [name, value] of Object.entries(node)) {
+    if (name === "span") continue;
+    for (const child of Array.isArray(value) ? value : [value])
+      if (isAstNode(child) && !effectFree(child)) return false;
+  }
+  return true;
 }
 
 /** A variable, or an element or a field of one at a constant or variable position, which reading does not change. */
