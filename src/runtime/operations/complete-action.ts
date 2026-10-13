@@ -32,7 +32,7 @@ import {
 } from "../actions/capture.js";
 import { resolveFileStoreCompletion } from "../actions/file-store.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
-import { addStoredFile } from "../stored-files.js";
+import { addStoredFile, addStoredFiles } from "../stored-files.js";
 import { createCapturedSerializableList } from "../serializable-values.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
@@ -457,7 +457,7 @@ function completeFileStore(
   }
   assertEventSequenceCapacity(current, 1);
   const stored = resolved.outcome === "stored" ? (resolved.answer ?? []) : [];
-  for (const reference of stored) addStoredFile(current.storedFiles, reference);
+  addStoredFiles(current.storedFiles, stored);
   const completionSequence = takeSequence(current, 1);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,

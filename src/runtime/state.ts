@@ -71,7 +71,7 @@ import {
 } from "./serializable-values.js";
 import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 import { validateCaptureState } from "./capture-validation.js";
-import { addStoredFile } from "./stored-files.js";
+import { addStoredFiles } from "./stored-files.js";
 import {
   contextHoldsInstruction,
   rootFitsFunction,
@@ -621,7 +621,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     throw new TypeError("storedFiles must be a list of stored file references.");
   const knownFiles: string[] = [];
   // EVIDENCE: validation: every entry passed isStoredFileReference above.
-  for (const reference of storedFiles as string[]) addStoredFile(knownFiles, reference);
+  addStoredFiles(knownFiles, storedFiles as string[]);
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     if (scriptGlobals.has(name))

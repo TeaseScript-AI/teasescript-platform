@@ -183,6 +183,21 @@ export function addStoredFile(references: string[], reference: string): void {
   if (references[index] !== reference) references.splice(index, 0, reference);
 }
 
+/**
+ * Adds `added` to `references`, which stay in ascending order without repeats: one by one for a few, and else sorted
+ * together once, so that many files at a time do not cost a move of the whole list each.
+ */
+export function addStoredFiles(references: string[], added: readonly string[]): void {
+  if (added.length <= 1) {
+    for (const reference of added) addStoredFile(references, reference);
+    return;
+  }
+  // The default order compares UTF-16 code units, as `<` does.
+  const merged = [...new Set([...references, ...added])].sort();
+  references.length = 0;
+  for (const reference of merged) references.push(reference);
+}
+
 /** Where `text` is or would go in `references`, in ascending order. */
 function storedFileIndex(references: readonly string[], text: string): number {
   let low = 0;

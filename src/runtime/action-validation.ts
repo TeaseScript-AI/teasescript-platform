@@ -1924,7 +1924,7 @@ function validFileStoreSettlement(
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
 ): boolean {
-  const known: readonly unknown[] = Array.isArray(snapshot.storedFiles) ? snapshot.storedFiles : [];
+  const known = new Set<unknown>(Array.isArray(snapshot.storedFiles) ? snapshot.storedFiles : []);
   if (
     !hasExactKeys(settlement, [
       "actionId",
@@ -1946,7 +1946,7 @@ function validFileStoreSettlement(
     !Array.isArray(settlement.references) ||
     (settlement.outcome === "stored") !== settlement.references.length > 0 ||
     // Stored files stay known for the rest of the session.
-    !settlement.references.every((reference: unknown) => known.includes(reference)) ||
+    !settlement.references.every((reference: unknown) => known.has(reference)) ||
     new Set(settlement.references).size !== settlement.references.length ||
     !validSessionTime(settlement.completedAtMs) ||
     !validSessionTime(snapshot.currentSessionTimeMs) ||
