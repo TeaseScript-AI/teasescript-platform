@@ -643,8 +643,10 @@ visible and says when it names no saved photo, shows the saved photo once with b
 to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
 off, and fits the narrow drawer. Its editor on the `debug-storage-edit` package refuses a malformed number inline and
 stores nothing, stores an added value that the running session's next load returns while the earlier load stays,
-marks the session edited, changes the value to text and deletes it, fits a narrow screen, and after the session ended
-stores a deletion for the next Start. The spill store of Debug's rewind history, loaded into the page, keeps and deletes
+marks the session edited, changes the value to text and deletes it, keeps a JSON-shaped draft too long to write as JSON
+as Text when Advanced is chosen and says so inline, also when editing it, and lists it saved as text with its preview,
+neither as a Player error, fits a narrow screen, and after the session ended stores a deletion for the next Start. The
+spill store of Debug's rewind history, loaded into the page, keeps and deletes
 rows in IndexedDB; its sweep deletes the history databases of pages that ended, a live one only once its page closes it,
 and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
 shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
@@ -654,7 +656,19 @@ Debug shows the failure on the Now tab. Its `session-end` package opens the end 
 focus to the end line, and a five-star radio group chosen by click and arrow key beside an unavailable Send review;
 Escape closes it too, the line's Play again starts anew, and an end that rewind's Forward and Return restore opens no
 dialog; its `call-failure` package's error dialog shows the failing line and the call path from a function of another
-file. A choice and a form toggle held
+file. On `session-end`, Start takes a screen wake lock, the browser releases it while the minimized window hides the
+page, the page shown again takes a new one, and none is held once the script exits. Its `popup` package shows
+`showPopup` dialogs whose button takes focus: the Enter held since the answer before a
+popup does not close it, a fresh Enter, Escape, Space, or a click on the button does and a click beside it does not, a
+reload shows the waiting popup again, and no popup text reaches the transcript. Its `open-url` package, served as a
+catalog that names pages of the smoke's server, checks that right after a click `openUrl` opens its address at once in
+a tab without an opener and the script goes on, that with `alwaysButton: true` its button, with its `buttonText:`,
+shows also right after a click and opens it, that without a recent click its button "Open link" opens it, and that
+after a reload the address does not open by itself, also not from the click on Continue, but from its button, as after
+Debug's Return and after turning Debug off while the rewind inspects an earlier state. Its `export-text` package checks
+`exportText`'s dialog: its title and read-only text, Copy, a refused copy that leaves the text selected and points to
+Download, Download as a UTF-8 file with the script's file name, a click beside it that does not close it, Close, and a
+reload that shows the waiting dialog again, with no dialog text in the transcript. A choice and a form toggle held
 down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
 `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image

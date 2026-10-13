@@ -190,6 +190,7 @@ async function main() {
       await debugHistoryStorageScenario(cdp, origin);
       await debugRewindScenario(cdp, origin);
       await sessionEndScenario(cdp, origin);
+      await wakeLockScenario(cdp, origin);
       await errorCallPathScenario(cdp, origin);
       await heldPressScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
@@ -203,9 +204,12 @@ async function main() {
       await permanentButtonsScenario(cdp, origin);
       await formsScenario(cdp, origin);
       await preselectScenario(cdp, origin);
+      await popupScenario(cdp, origin);
+      await openUrlScenario(cdp, origin, debugPort);
+      await exportTextScenario(cdp, origin, profile);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();
@@ -2952,6 +2956,69 @@ async function debugStorageEditScenario(cdp, origin) {
   );
   await closed();
 
+  // A text too long to write as JSON, which V8 refuses as for any text longer than its limit, is no Player error. Its
+  // draft keeps its type when Advanced is chosen and the editor says so; the draft here is shaped like JSON, which
+  // Advanced would read as another value. Saved as text, the list shows its preview.
+  const tooLong = `too long ${"x".repeat(100)}`;
+  const draft = JSON.stringify(tooLong);
+  await evaluate(
+    cdp,
+    `{ const stringify = JSON.stringify; globalThis.smokeStringify = stringify; JSON.stringify = function (...args) { const json = stringify.apply(this, args); if (typeof json === "string" && json.includes(${JSON.stringify(tooLong)})) throw new RangeError("Invalid string length"); return json; }; }`,
+  );
+  const noPlayerError = async (failure) =>
+    assertEqual(
+      await value(cdp, `!document.querySelector('[data-runtime-failure]')`),
+      true,
+      failure,
+    );
+  const keepsText = async (when) => {
+    await choose("advanced");
+    // A Player error would show at once.
+    await delay(300);
+    await noPlayerError(`Choosing Advanced for such a draft ${when} was a Player error`);
+    assertEqual(
+      await value(
+        cdp,
+        `[document.querySelector('[data-storage-editor-type]').value, document.querySelector('[data-storage-editor-value]').value, /too large to show as text/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')].join("|")`,
+      ),
+      `text|${draft}|true`,
+      `Such a draft ${when} did not keep its type and text, saying so in the editor`,
+    );
+  };
+  await physicalClick(cdp, "[data-debug-storage-add]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await setField("[data-storage-editor-key]", "long");
+  await setField("[data-storage-editor-value]", draft);
+  await keepsText("being added");
+  await save(
+    `!document.querySelector('[data-storage-editor]')`,
+    "A text too long to write as JSON was not saved",
+  );
+  await delay(300);
+  await noPlayerError("Listing a text too long to write as JSON was a Player error");
+  await waitFor(
+    cdp,
+    `JSON.stringify(${rows}) === JSON.stringify([['"long"', ${JSON.stringify(`${JSON.stringify(draft).slice(0, 79)}…`)}]])`,
+    8_000,
+    "A text too long to write as JSON was not listed as text with its preview",
+  );
+  await physicalClick(cdp, "[data-debug-storage-edit]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await keepsText("being edited");
+  await physicalClick(cdp, "[data-storage-editor] form button[type='button']");
+  await closed();
+  await evaluate(
+    cdp,
+    `JSON.stringify = globalThis.smokeStringify; delete globalThis.smokeStringify;`,
+  );
+  await physicalClick(cdp, "[data-debug-storage-delete]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await save(
+    `document.querySelectorAll('[data-debug-storage-row]').length === 0`,
+    "The long text was not deleted",
+  );
+  await closed();
+
   // The editor fits a narrow, short screen: within the viewport, scrolling to reach Save.
   await setViewport(cdp, 390, 480);
   await waitFor(
@@ -5354,6 +5421,399 @@ async function permanentButtonsScenario(cdp, origin) {
  * Without a preselected button it activates nothing; Space on a focused form toggle flips it; a held Enter submits
  * nothing.
  */
+/**
+ * The `popup` package shows popups (PLAYER-UI "Foreground interaction presentation"): a dialog whose button takes focus,
+ * outside the chat. The Enter held since the answer before it does not close it; a fresh Enter, Escape, Space, or a click
+ * on the button does, but a click beside it does not; a reload shows the waiting popup again. No popup text reaches the
+ * transcript.
+ */
+async function popupScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=popup`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const input = `document.querySelector('[data-composer-input]')`;
+  const message = `(document.querySelector('[data-popup-message]')?.textContent.trim() ?? null)`;
+  const focused = `document.activeElement?.matches('[data-popup-button]') ? document.activeElement.textContent.trim() : null`;
+  const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
+  const enter = (type, autoRepeat = false) =>
+    cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      autoRepeat,
+      ...(type === "keyDown" ? { text: "\r" } : {}),
+    });
+  const escape = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+  };
+  await waitFor(cdp, `!!${input} && !${input}.disabled`, 8_000, "askText did not open");
+  await evaluate(cdp, `${input}.focus()`);
+  await cdp.call("Input.insertText", { text: "Ada" });
+  // The Enter that answers the question is held: its repeats reach the popup that opens next.
+  await enter("keyDown");
+  await waitFor(cdp, `${message} === 'Welcome, Ada'`, 8_000, "The first popup did not open");
+  await waitFor(cdp, `(${focused}) === 'OK'`, 2_000, "The popup's button did not take focus");
+  for (let repeat = 0; repeat < 3; repeat += 1) await enter("keyDown", true);
+  await enter("keyUp");
+  await delay(300);
+  assertEqual(await value(cdp, message), "Welcome, Ada", "A held Enter closed the popup");
+  assertEqual(
+    await value(cdp, `${input}.disabled`),
+    true,
+    "The composer takes an answer while the popup waits",
+  );
+  await enter("keyDown");
+  await enter("keyUp");
+  await waitFor(cdp, `${message} === 'The next part starts now.'`, 8_000, "Enter did not close it");
+  await waitFor(cdp, `(${focused}) === 'Continue'`, 2_000, "Continue did not take focus");
+  await backdropClick(cdp);
+  await delay(300);
+  assertEqual(
+    await value(cdp, message),
+    "The next part starts now.",
+    "A click beside the popup closed it",
+  );
+  await escape();
+  await waitFor(cdp, `${message} === 'Space closes this one'`, 8_000, "Escape did not close it");
+  await waitFor(cdp, `(${focused}) === 'OK'`, 2_000, "OK did not take focus");
+  await pressSpace(cdp);
+  await waitFor(
+    cdp,
+    `${message} === 'A reload shows this one again'`,
+    8_000,
+    "Space did not close it",
+  );
+  await reloadKept(cdp, "A reload shows this one again");
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `${message} === 'A reload shows this one again'`,
+    8_000,
+    "The reload lost the popup",
+  );
+  await physicalClick(cdp, "[data-popup-button]");
+  await waitFor(
+    cdp,
+    `${message} === null && !!document.querySelector('[data-session-end-dialog]')`,
+  );
+  // Each entry shows its speaker before its text; the popups add none of their own.
+  const texts = await value(cdp, entries);
+  assertEqual(texts.length, 6, `The transcript has other entries: ${JSON.stringify(texts)}`);
+  for (const [index, text] of [
+    "Your name?",
+    "Ada",
+    "Closed with Enter",
+    "Closed with Escape",
+    "Closed with Space",
+    "Closed after the reload",
+  ].entries())
+    assertEqual(
+      texts[index].endsWith(text),
+      true,
+      `Entry ${index} is ${texts[index]}, not ${text}`,
+    );
+}
+
+/**
+ * The `export-text` package's `exportText` dialogs (PLAYER-UI "Foreground interaction presentation"): the title and the
+ * text in a read-only field while the composer takes no answer, Copy, a refused copy that leaves the text selected and
+ * points to Download, Download as a UTF-8 text file with the script's file name, a click beside the dialog that does not
+ * close it, Close, and a reload that shows the waiting dialog again. Nothing of them reaches the transcript.
+ */
+async function exportTextScenario(cdp, origin, profile) {
+  const downloads = join(profile, "export-text-downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=export-text`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const title = `(document.querySelector('[data-export-text-title]')?.textContent.trim() ?? null)`;
+  const field = `document.querySelector('[data-export-text-field]')`;
+  const status = `document.querySelector('[data-export-text-status]')?.textContent.trim()`;
+  const json = JSON.stringify({
+    name: "Corner time ü",
+    minutes: 15,
+    lines: ["Face the wall", "Hands behind your back 😀"],
+  });
+  const preset = `-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${Buffer.from(json, "utf8").toString("base64")}\n-----END CORNERTIME CUSTOM PUNISHMENT-----`;
+  await waitFor(cdp, `${title} === 'Your preset'`, 8_000, "The exportText dialog did not open");
+  assertEqual(await value(cdp, `${field}.value`), preset, "The dialog's text");
+  assertEqual(await value(cdp, `${field}.readOnly`), true, "The text field is not read-only");
+  await waitFor(
+    cdp,
+    `document.activeElement?.matches('[data-export-text-copy]') === true`,
+    2_000,
+    "Copy did not take focus",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-composer-input]').disabled`),
+    true,
+    "The composer takes an answer while the dialog waits",
+  );
+  // Copy writes the whole text.
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.__copied = text; } } });`,
+  );
+  await physicalClick(cdp, "[data-export-text-copy]");
+  await waitFor(cdp, `${status} === 'Copied.'`);
+  assertEqual(await value(cdp, `window.__copied`), preset, "Copy did not write the text");
+  // A clipboard that refuses, as Android's does above about 1 MB, where the browser does not copy the selection
+  // either, leaves the text selected and points to Download.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('too large', 'NotAllowedError')) } }); document.execCommand = () => false;`,
+  );
+  await physicalClick(cdp, "[data-export-text-copy]");
+  await waitFor(cdp, `${status}?.includes('use Download') === true`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const area = ${field}; return document.activeElement === area && area.selectionStart === 0 && area.selectionEnd === area.value.length; })()`,
+    ),
+    true,
+    "The refused copy did not select the text",
+  );
+  await evaluate(cdp, `delete document.execCommand;`);
+  // Download saves the text in UTF-8 under the script's file name.
+  await evaluate(
+    cdp,
+    `window.__fileType = null; const create = URL.createObjectURL; URL.createObjectURL = (file) => { window.__fileType = file.type; return create.call(URL, file); };`,
+  );
+  await physicalClick(cdp, "[data-export-text-download]");
+  let downloaded = null;
+  const deadline = Date.now() + 8_000;
+  while (downloaded === null && Date.now() < deadline) {
+    if ((await readdir(downloads)).includes("preset.txt"))
+      downloaded = await readFile(join(downloads, "preset.txt"), "utf8");
+    else await delay(50);
+  }
+  assertEqual(downloaded, preset, "The downloaded file");
+  assertEqual(await value(cdp, `window.__fileType`), "text/plain;charset=utf-8", "The file's type");
+  // A click beside the dialog does not close it; Close does, and the script goes on.
+  await backdropClick(cdp);
+  await delay(300);
+  assertEqual(await value(cdp, title), "Your preset", "A click beside the dialog closed it");
+  await physicalClick(cdp, "[data-export-text-close]");
+  await waitFor(cdp, `${title} === 'Copy or download'`, 8_000, "Close did not continue the script");
+  assertEqual(
+    await value(cdp, `${field}.value`),
+    "A reload shows this one again",
+    "The second dialog's text",
+  );
+  await reloadKept(cdp, "A reload shows this one again");
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `${field}?.value === 'A reload shows this one again'`,
+    8_000,
+    "The reload lost the dialog",
+  );
+  await physicalClick(cdp, "[data-export-text-close]");
+  await waitFor(cdp, `${title} === null && !!document.querySelector('[data-session-end-dialog]')`);
+  // Each entry shows its speaker before its text; the dialogs add none of their own.
+  const texts = await value(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`,
+  );
+  assertEqual(texts.length, 2, `The transcript has other entries: ${JSON.stringify(texts)}`);
+  for (const [index, text] of ["Closed the preset", "Closed after the reload"].entries())
+    assertEqual(
+      texts[index].endsWith(text),
+      true,
+      `Entry ${index} is ${texts[index]}, not ${text}`,
+    );
+}
+
+/**
+ * `openUrl` (V30 §33), on a package served as a catalog that names pages of the smoke's own server: right after the
+ * player's click the Player opens the address in a new tab at once and the script goes on; with `alwaysButton: true` it
+ * shows the button, here with its `buttonText:`, also right after a click, and its click opens the address; without a
+ * recent click it shows the button "Open link"; after a reload it never opens the address by itself, also not after the
+ * click on Continue, but shows the button. Each address opens once, in a tab without an opener.
+ */
+async function openUrlScenario(cdp, origin, debugPort) {
+  const address = (page) => `${origin}/open-url-target/${page}`;
+  CATALOGS.set("/dev-package/open-url/catalog.json", {
+    images: [],
+    media: [],
+    sources: [
+      {
+        path: "main.tease",
+        source: [
+          'showButton "Go"',
+          `openUrl("${address(1)}")`,
+          'say "Opened at once", instant',
+          'showButton "Next"',
+          `openUrl("${address(2)}", alwaysButton: true, buttonText: "Claim your reward")`,
+          'say "Opened from its button", instant',
+          `openUrl("${address(3)}")`,
+          'say "Opened after the reload", instant',
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    problems: [],
+  });
+  const tabs = async () =>
+    (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).filter(
+      (target) => target.type === "page" && target.url.startsWith(address("")),
+    );
+  const waitForTabs = async (count, message) => {
+    const deadline = Date.now() + 8_000;
+    while ((await tabs()).length < count) {
+      if (Date.now() > deadline) throw new Error(message);
+      await delay(50);
+    }
+  };
+  const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
+  const said = (text) => `${entries}.some((entry) => entry.endsWith(${JSON.stringify(text)}))`;
+  const button = `document.querySelector('[data-open-url]')?.textContent.trim() ?? null`;
+  const answer = `[...document.querySelectorAll('[data-foreground-controls] button')].map((control) => control.textContent.trim()).join()`;
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=open-url`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `(${answer}) === 'Go'`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  // The click on Go lets the browser open the first address at once.
+  await waitForTabs(1, "The first address did not open at once");
+  await waitFor(
+    cdp,
+    said("Opened at once"),
+    8_000,
+    "The script did not go on after the tab opened",
+  );
+  const [first] = await tabs();
+  const tab = await connectCdp(first.webSocketDebuggerUrl);
+  try {
+    await waitFor(tab, `document.readyState === 'complete'`);
+    assertEqual(await value(tab, "window.opener === null"), true, "The new tab has an opener");
+    assertEqual(await value(tab, "location.href"), address(1), "The tab shows another address");
+  } finally {
+    tab.close();
+  }
+  // The player comes back to the Player's tab, which the new tab covered. Right after the click on Next the second
+  // address, written with alwaysButton: true, still waits for its own button.
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, `(${answer}) === 'Next'`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `(${button}) === 'Claim your reward'`,
+    8_000,
+    "alwaysButton: true shows no button",
+  );
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "alwaysButton: true opened the address without its click");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(2, "The button did not open the second address");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, said("Opened from its button"), 8_000, "The script did not go on");
+  // That tab took the click's activation, so the third address waits for the button "Open link".
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The third address shows no button");
+  assertEqual((await tabs()).length, 2, "The third address opened without a click");
+  // A reload brings the waiting request back as history: Continue is a click, but it does not open the address.
+  await reloadKept(cdp, address(3));
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The reload lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 2, "The reload opened the third address by itself");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(3, "The button did not open the third address after the reload");
+  await waitFor(cdp, said("Opened after the reload"), 8_000, "The script did not go on");
+  assertEqual(
+    JSON.stringify((await tabs()).map((target) => target.url).sort()),
+    JSON.stringify([address(1), address(2), address(3)]),
+    "An address opened twice",
+  );
+  // Only the clicks on Go and Next answer; the addresses and their buttons add nothing to the transcript.
+  const texts = await value(cdp, entries);
+  assertEqual(
+    texts.filter(
+      (text) =>
+        text.includes("Open link") || text.includes("Claim") || text.includes("open-url-target"),
+    ).length,
+    0,
+    `The transcript shows an address or its button: ${JSON.stringify(texts)}`,
+  );
+  for (const target of await tabs())
+    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
+
+  // Debug's Return, and turning Debug off, reinstate the session with its waiting request: it keeps its button and
+  // opens only from the click, though Back, Return, and the switch were clicks.
+  CATALOGS.set("/dev-package/open-url-rewind/catalog.json", {
+    images: [],
+    media: [],
+    sources: [
+      {
+        path: "main.tease",
+        source: [
+          'showButton "Go"',
+          `openUrl("${address(4)}")`,
+          `openUrl("${address(5)}")`,
+          'say "Opened after Return", instant',
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    problems: [],
+  });
+  await navigate(cdp, `${origin}/player/?dev&package=open-url-rewind`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `(${answer}) === 'Go'`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitForTabs(1, "The fourth address did not open at once");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The fifth address shows no button");
+  const backToGo = async () => {
+    await evaluate(
+      cdp,
+      `document.querySelectorAll('.transcript-entry [data-back-to-here]')[0].setAttribute('data-smoke-back', '')`,
+    );
+    await settledClick(cdp, "[data-smoke-back]");
+    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
+  };
+  await backToGo();
+  await settledClick(cdp, "[data-rewind-return]");
+  await waitFor(cdp, `!document.querySelector('[data-rewind-inspection]')`, 5_000, "No Return");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Return lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "Return opened the waiting address by itself");
+  await backToGo();
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('[data-debug-active]')`);
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]')`,
+    5_000,
+    "Debug stayed on",
+  );
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Turning Debug off lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "Turning Debug off opened the waiting address by itself");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(2, "The button did not open the fifth address");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, said("Opened after Return"), 8_000, "The script did not go on");
+  for (const target of await tabs())
+    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
+}
+
 async function preselectScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   await navigate(cdp, `${origin}/player/?package=preselect`);
@@ -6084,6 +6544,66 @@ async function sessionEndScenario(cdp, origin) {
       windowsVirtualKeyCode: 27,
     });
   await waitFor(cdp, onStartPage, 5_000, "Escape did not close the end dialog for the start page");
+}
+
+/**
+ * The screen wake lock (PLAYER-UI "Session start and user activation"): held from Start, released by the browser while
+ * the minimized window hides the page and asked for again once it shows, and none from `exit` on.
+ */
+async function wakeLockScenario(cdp, origin) {
+  // The Player's requests, and the sentinels the browser granted, which tell whether it still holds each.
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__wakeLocks = [];
+      window.__wakeLockRequests = 0;
+      const request = WakeLock.prototype.request;
+      WakeLock.prototype.request = function (...args) {
+        window.__wakeLockRequests++;
+        return request.apply(this, args).then((sentinel) => {
+          window.__wakeLocks.push(sentinel);
+          return sentinel;
+        });
+      };`,
+  });
+  const { windowId } = (await cdp.call("Browser.getWindowForTarget")).result;
+  const locks = (requests, held) =>
+    `window.__wakeLockRequests === ${requests} && window.__wakeLocks.filter((sentinel) => !sentinel.released).length === ${held}`;
+  try {
+    await navigate(cdp, `${origin}/player/?package=session-end`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    assertEqual(await value(cdp, locks(0, 0)), true, "The start page asked for a wake lock");
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(cdp, locks(1, 1), 5_000, "Start did not take a wake lock");
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } });
+    await waitFor(
+      cdp,
+      `document.visibilityState === 'hidden' && ${locks(1, 0)}`,
+      5_000,
+      "The hidden page kept its wake lock or asked for one",
+    );
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+    await waitFor(
+      cdp,
+      `document.visibilityState === 'visible' && ${locks(2, 1)}`,
+      5_000,
+      "The page shown again did not take a new wake lock",
+    );
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Finish'`,
+    );
+    await settledClick(cdp, "[data-foreground-controls] button");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-session-end-dialog]') && ${locks(2, 0)}`,
+      8_000,
+      "The wake lock was still held once the script exited",
+    );
+  } finally {
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
 }
 
 /**

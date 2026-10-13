@@ -642,6 +642,7 @@ async function toggleFullscreen() {
           :images="player.images"
           :capture="player.imageCapture"
           :debug-countdown="debug.countdownText.value"
+          :popup-modal="debug.time.value === null"
           @update:session="player.update"
         >
           <template #end>

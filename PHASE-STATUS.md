@@ -21,7 +21,9 @@ accept syntax, architecture, or implementation details.
   deterministic random, weighted choice, and distributions, rounding, numeric, exponential, logarithm, angle,
   `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, `takeLast`, `indexOf`,
   `lastIndexOf`, `count`, and `get` with `default:`, `+` on two texts or two lists, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle`/`reverse` and set
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, `toJson`/`fromJson`/`toBase64`/`fromBase64` for data
+  that other programs exchange, with stored files as data URLs, `fileFromBase64`/`fileToBase64` for stored files of any
+  type, list `addAll`, `sort`/`shuffle`/`reverse` and set
   operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
   (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
   shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets
@@ -39,7 +41,9 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   permanent buttons (`showPermanentButton`, `button.remove()`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
-  protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, where a paced
+  protected compact interactions on one typed foreground family, which also holds `showPopup`'s dialog outside the
+  chat, `exportText`'s dialog in which the player copies or downloads a text, and `openUrl`, which the Player settles
+  once a new tab shows the address; and ADR 0018 resumable `say` pacing, where a paced
   `say` lasts its reading time before anything after it runs, with typed skip settlement. A `say` used as a value gives a `messageHandle`
   whose `text` changes the message in place and whose `remove()` takes it out of the conversation
   ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows, announces politely, and Debug explains and

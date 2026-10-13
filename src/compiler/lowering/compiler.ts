@@ -1,5 +1,6 @@
 import type {
   Block,
+  CallArgument,
   Expression,
   TimerParts,
   SayParts,
@@ -13,6 +14,9 @@ import type {
   InteractionExpression,
   ShowButtonParts,
   ShowPermanentButtonParts,
+  ShowPopupParts,
+  OpenUrlStatement,
+  ExportTextStatement,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -54,8 +58,10 @@ import type {
   TagQueryExpressionPlan,
   UnitPlan,
 } from "../../plan/model.js";
+import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
+import { canonicalWebUrl } from "../../web-url.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
+import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralValue } from "../../duration.js";
@@ -359,6 +365,15 @@ export class InstructionCompiler {
         return;
       case "hideCameraStatement":
         this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
+        return;
+      case "showPopupStatement":
+        yield* compileChild(this.#lowerShowPopupTask(statement, false));
+        return;
+      case "openUrlStatement":
+        yield* compileChild(this.#lowerOpenUrlTask(statement));
+        return;
+      case "exportTextStatement":
+        yield* compileChild(this.#lowerExportTextTask(statement));
         return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
@@ -1273,6 +1288,11 @@ export class InstructionCompiler {
       if (lowered === null) throw new TypeError("A showButton value lowered without a result.");
       return lowered;
     }
+    if (expression.kind === "showPopupExpression") {
+      const lowered = yield* compileChild(this.#lowerShowPopupTask(expression, true));
+      if (lowered === null) throw new TypeError("A showPopup value lowered without a result.");
+      return lowered;
+    }
     if (expression.kind === "sayExpression") {
       const lowered = yield* compileChild(this.#lowerSayTask(expression, true));
       if (lowered === null) throw new TypeError("A say value lowered without a handle.");
@@ -1321,6 +1341,9 @@ export class InstructionCompiler {
       const result = this.#consumeInteractionResult(transientTemporary, expression.span);
       if (tags !== null) this.#emitTemporaryCleanup(tags.temporaryIds, expression.span);
       return result;
+    }
+    if (isFileStoreCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerFileStoreTask(expression));
     }
     if (
       expression.kind === "callExpression" &&
@@ -1664,6 +1687,205 @@ export class InstructionCompiler {
     }
     this.#emitTemporaryCleanup(preparedTemporaryIds, parts.span);
     return lowered;
+  }
+
+  /**
+   * Lowers a `showPopup` (V30 §31). A static message and button text embed the popup's UI; otherwise the requesting
+   * speaker is captured, as for any interaction, and the written arguments are evaluated once, in written order, into
+   * temporaries that the popup reads when it opens. As a value, the popup yields its elapsed waiting time, as a button
+   * does.
+   */
+  *#lowerShowPopupTask(
+    parts: ShowPopupParts,
+    valueWanted: boolean,
+  ): CompileTask<LoweredExpression | null> {
+    const expectedResult = valueWanted ? "duration" : "none";
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const message = parts.arguments.find(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    if (message === undefined) throw new TypeError("A popup without a message reached lowering.");
+    const buttonText = parts.arguments.find((argument) => argument !== message);
+    const staticMessage = staticVisibleText(message.value);
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_POPUP_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    if (staticMessage !== undefined && staticButtonText !== undefined) {
+      const instruction = {
+        interactionKind: "popup",
+        target: "standardChat",
+        speaker: null,
+        expectedResult,
+        ui: { kind: "popup", message: staticMessage, buttonText: staticButtonText, accessibleName },
+        span: copySpan(parts.span),
+      } as const;
+      if (valueWanted) return this.#emitResultInteraction(instruction, parts.span);
+      this.instructions.push({ kind: "interaction", ...instruction, destinationTemporary: null });
+      return null;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, parts.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of parts.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    const preparedUi: PreparedInteractionUiPayload = {
+      kind: "popup",
+      messageTemporary: temporaries.get(message)!,
+      ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+      accessibleName,
+    };
+    let lowered: LoweredExpression | null = null;
+    if (valueWanted) {
+      lowered = this.#emitPreparedResultInteraction(
+        "popup",
+        "duration",
+        speakerTemporary,
+        preparedUi,
+        parts.span,
+      );
+    } else {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "popup",
+        target: "standardChat",
+        speakerTemporary,
+        destinationTemporary: null,
+        expectedResult: "none",
+        preparedUi,
+        span: copySpan(parts.span),
+      });
+    }
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], parts.span);
+    return lowered;
+  }
+
+  /**
+   * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address, button text,
+   * and `alwaysButton:` embed the request; the address is checked and made canonical here. Otherwise the arguments are
+   * evaluated once, in written order, into temporaries that the request checks when it opens.
+   */
+  *#lowerOpenUrlTask(statement: OpenUrlStatement): CompileTask<void> {
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const [address] = statement.arguments;
+    if (address === undefined) throw new TypeError("openUrl without an address reached lowering.");
+    const named = (name: string) =>
+      statement.arguments.find(
+        (argument) => argument.kind === "namedArgument" && argument.name.name === name,
+      );
+    const buttonText = named("buttonText");
+    const alwaysButton = named("alwaysButton");
+    const written = staticVisibleText(address.value);
+    const url = written === undefined ? null : canonicalWebUrl(written);
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_OPEN_URL_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    let writtenAlways = alwaysButton?.value;
+    while (writtenAlways?.kind === "parenthesizedExpression")
+      writtenAlways = writtenAlways.expression;
+    const staticAlways =
+      writtenAlways === undefined
+        ? false
+        : writtenAlways.kind === "booleanLiteral"
+          ? writtenAlways.value
+          : undefined;
+    if (url !== null && staticButtonText !== undefined && staticAlways !== undefined) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "url",
+        target: "standardChat",
+        speaker: null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: {
+          kind: "url",
+          url,
+          buttonText: staticButtonText,
+          alwaysButton: staticAlways,
+          accessibleName,
+        },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    const alwaysButtonTemporary =
+      alwaysButton === undefined ? undefined : temporaries.get(alwaysButton);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "url",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "url",
+        urlTemporary: temporaries.get(address)!,
+        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+        ...(alwaysButtonTemporary === undefined ? {} : { alwaysButtonTemporary }),
+        accessibleName,
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
+  }
+
+  /**
+   * Lowers an `exportText` (V30 §31), which waits until the player closes its dialog. The written arguments are
+   * evaluated once, in written order, into temporaries that the dialog reads when it opens; its text is never embedded,
+   * as it may be as long as any text.
+   */
+  *#lowerExportTextTask(statement: ExportTextStatement): CompileTask<void> {
+    const [text] = statement.arguments;
+    if (text === undefined) throw new TypeError("exportText without its text reached lowering.");
+    const named = (name: string) =>
+      statement.arguments.find(
+        (argument) => argument.kind === "namedArgument" && argument.name.name === name,
+      );
+    const title = named("title");
+    const fileName = named("fileName");
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const titleTemporary = title === undefined ? undefined : temporaries.get(title);
+    const fileNameTemporary = fileName === undefined ? undefined : temporaries.get(fileName);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "export",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "export",
+        textTemporary: temporaries.get(text)!,
+        ...(titleTemporary === undefined ? {} : { titleTemporary }),
+        ...(fileNameTemporary === undefined ? {} : { fileNameTemporary }),
+        accessibleName: { kind: "localizedDefault", key: "continue" },
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
   }
 
   /**
@@ -2210,6 +2432,77 @@ export class InstructionCompiler {
       span: copySpan(span),
     });
     return this.#consumeInteractionResult(transientTemporary, span);
+  }
+
+  /**
+   * A call that may use the Player's file store (V30 §13 and §33). Its arguments are evaluated in written order into
+   * temporaries, unless they are literals, so that the instruction reads the same values when it runs again with the
+   * Player's answer; they are cleared once it gave its result.
+   */
+  *#lowerFileStoreTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    if (expression.callee.kind !== "identifier")
+      throw new TypeError("A file store call reached lowering without its name.");
+    const call = expression.callee.name;
+    if (
+      call !== "fileFromBase64" &&
+      call !== "fileToBase64" &&
+      call !== "toJson" &&
+      call !== "fromJson"
+    )
+      throw new TypeError(`'${call}' is not a file store call.`);
+    const lowered = yield* compileChild(
+      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+    );
+    const operands: Record<"value" | "default" | "files", ExpressionPlan | null> = {
+      value: null,
+      default: null,
+      files: null,
+    };
+    const temporaryIds: number[] = [];
+    expression.arguments.forEach((argument, index) => {
+      const operand = lowered[index]!;
+      temporaryIds.push(...operand.temporaryIds);
+      let plan = operand.plan;
+      if (plan.kind !== "temporary" && plan.kind !== "literal") {
+        const temporaryId = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "storeTemporary",
+          temporaryId,
+          value: plan,
+          expectBoolean: false,
+          span: copySpan(argument.value.span),
+        });
+        temporaryIds.push(temporaryId);
+        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+      }
+      const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
+      if (name !== "value" && name !== "default" && name !== "files")
+        throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
+      operands[name] = plan;
+    });
+    if (operands.value === null)
+      throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const destinationTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "fileStore",
+      call,
+      value: operands.value,
+      default: operands.default,
+      files: operands.files,
+      destinationTemporary,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    return {
+      plan: {
+        kind: "temporary",
+        temporaryId: destinationTemporary,
+        span: copySpan(expression.span),
+      },
+      temporaryIds: [destinationTemporary],
+    };
   }
 
   #consumeInteractionResult(transientTemporary: number, span: SourceSpan): LoweredExpression {
@@ -2768,6 +3061,7 @@ export class InstructionCompiler {
         current.expression.kind === "interactionExpression" ||
         current.expression.kind === "sayExpression" ||
         current.expression.kind === "showButtonExpression" ||
+        current.expression.kind === "showPopupExpression" ||
         current.expression.kind === "timerExpression" ||
         current.expression.kind === "playMediaExpression" ||
         current.expression.kind === "showCameraExpression" ||
@@ -2779,6 +3073,7 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
+        isFileStoreCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -3132,6 +3427,8 @@ function assembleExpression(
         throw new TypeError("takePhoto() reached pure expression assembly.");
       if (isAskImageCall(expression))
         throw new TypeError("askImage() reached pure expression assembly.");
+      if (isFileStoreCall(expression))
+        throw new TypeError("A file store call reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),
@@ -3197,6 +3494,7 @@ function assembleExpression(
     case "interactionExpression":
     case "sayExpression":
     case "showButtonExpression":
+    case "showPopupExpression":
     case "timerExpression":
     case "playMediaExpression":
     case "showCameraExpression":

@@ -52,10 +52,14 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   choice: "Choice",
   input: "Answer",
   image: "Image request",
+  popup: "Popup",
+  url: "Web address",
+  export: "Text export",
   pacing: "Pacing",
   media: "Media",
   save: "Save",
   photo: "Photo",
+  file: "Stored file",
 };
 const callLabels = {
   function: (name: string) => `${name}()`,

@@ -498,7 +498,7 @@ test("a capture is session media and needs no durable storage", async () => {
   const media = new CapturedMediaStore(null, urls, "package");
   const entry = media.add("image", new Blob(["x"], { type: "image/png" }));
   assert.equal(media.holds(entry.reference, "image"), true);
-  assert.equal(media.resolve(entry.reference).state, "ready");
+  assert.equal(media.resolve(entry.reference, "image").state, "ready");
   await assert.rejects(media.promote([entry.reference]), CapturedMediaNotStoredError);
   // The capture stays usable for the session.
   assert.equal(media.holds(entry.reference, "image"), true);
@@ -518,18 +518,18 @@ test("a promoted reference resolves to the same media in a later run and new cap
   earlier.close();
   let changes = 0;
   const later = new CapturedMediaStore(repository, urls, "package", () => changes++);
-  assert.deepEqual(later.resolve(kept), { state: "loading" });
+  assert.deepEqual(later.resolve(kept, "image"), { state: "loading" });
   await flush();
   assert.equal(changes, 1);
-  assert.deepEqual(later.resolve(kept), { state: "ready", url: "blob:7" });
+  assert.deepEqual(later.resolve(kept, "image"), { state: "ready", url: "blob:7" });
   assert.equal(await (await later.read(kept))?.data.text(), "earlier");
   const captured = later.add("image", new Blob(["later"], { type: "image/png" }));
   assert.notEqual(captured.reference, kept);
   // Another package never resolves it.
   const other = new CapturedMediaStore(repository, urls, "other package");
-  other.resolve(kept);
+  other.resolve(kept, "image");
   await flush();
-  assert.deepEqual(other.resolve(kept), { state: "missing" });
+  assert.deepEqual(other.resolve(kept, "image"), { state: "missing" });
 });
 
 test("a promotion that an earlier attempt already committed counts as stored", async () => {
@@ -572,13 +572,17 @@ test("invalid stored records never resolve", async () => {
   );
   repository.records.set(`package captured-media:`, { ...valid, reference: "captured-media:" });
   const store = new CapturedMediaStore(repository, urls, "package");
-  for (let index = 1; index <= invalid.length; index++) store.resolve(reference(index));
+  for (let index = 1; index <= invalid.length; index++) store.resolve(reference(index), "image");
   await flush();
   for (let index = 1; index <= invalid.length; index++)
-    assert.deepEqual(store.resolve(reference(index)), { state: "missing" }, `record ${index}`);
-  assert.deepEqual(store.resolve("captured-media:"), { state: "missing" });
+    assert.deepEqual(
+      store.resolve(reference(index), "image"),
+      { state: "missing" },
+      `record ${index}`,
+    );
+  assert.deepEqual(store.resolve("captured-media:", "image"), { state: "missing" });
   // A package asset path is never treated as captured media.
-  assert.deepEqual(store.resolve("images/coast.svg"), { state: "missing" });
+  assert.deepEqual(store.resolve("images/coast.svg", "image"), { state: "missing" });
   assert.equal(store.holds("images/coast.svg", "image"), false);
 });
 

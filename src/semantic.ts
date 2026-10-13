@@ -29,6 +29,9 @@ import type {
   FunctionParameter,
   LabelTarget,
   LetStatement,
+  OpenUrlStatement,
+  ExportTextStatement,
+  ShowPopupParts,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -67,7 +70,7 @@ import {
 } from "./project-paths.js";
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
-import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import { runsOnItsOwn, sessionDeclarations, setsDefaultSpeaker } from "./project-globals.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -185,6 +188,7 @@ const semanticCode = {
   fileName: "TSV056",
   invalidFileTarget: "TSV057",
   invalidCameraHandleMember: "TSV059",
+  noSpeaker: "TSV063",
 } as const;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
@@ -306,6 +310,8 @@ class ProjectNames {
   /** Each global and speaker declaration with its position in the session-start order. */
   readonly #orders = new Map<GlobalStatement | SpeakerDeclaration, number>();
 
+  #setsDefaultSpeaker: boolean | undefined;
+
   public constructor(
     readonly files: readonly ProjectProgram[],
     options: SemanticValidationOptions,
@@ -374,6 +380,12 @@ class ProjectNames {
               order: null,
             },
           });
+  }
+
+  /** Whether a file sets the default speaker anywhere, which a message without `as` needs for its `speaker`. */
+  public get setsDefaultSpeaker(): boolean {
+    this.#setsDefaultSpeaker ??= setsDefaultSpeaker(this.files.map((file) => file.program));
+    return this.#setsDefaultSpeaker;
   }
 
   /** The position of a global or speaker in the session-start order. */
@@ -590,6 +602,9 @@ class SemanticValidator {
           "stopAudio",
           "showPermanentButton",
           "askImage",
+          "showPopup",
+          "openUrl",
+          "exportText",
           // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
           "pi",
           // The engine reads `debugMode` from the session.
@@ -1334,6 +1349,21 @@ class SemanticValidator {
       case "hideCameraStatement":
       case "stopAudioStatement":
         return;
+      case "showPopupStatement":
+        this.#validateShowPopupArguments(statement);
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
+      case "openUrlStatement":
+        this.#validateOpenUrlArguments(statement);
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
+      case "exportTextStatement":
+        this.#validateExportTextArguments(statement);
+        for (const argument of statement.arguments)
+          this.#validateExpression(argument.value, scope, null);
+        return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
         this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
@@ -1887,7 +1917,16 @@ class SemanticValidator {
         return;
       }
       case "identifier":
-        if (expression.name === "speaker" && contextualSpeaker !== null) return;
+        if (expression.name === "speaker" && contextualSpeaker !== null) {
+          // Without `as`, a message has the default speaker, which a script that never sets one cannot have.
+          if (contextualSpeaker === "speaker" && !this.project.setsDefaultSpeaker)
+            this.#report(
+              semanticCode.noSpeaker,
+              "This message has no speaker, so 'speaker' has no value: it names none with 'as', and the script never sets a default speaker. Give it one with 'as name', or set a default speaker with 'speaker name'.",
+              expression.span,
+            );
+          return;
+        }
         // Protected, so never a binding: the engine reads it from the session.
         if (expression.name === "debugMode") return;
         const binding = scope.resolve(expression.name);
@@ -1896,7 +1935,10 @@ class SemanticValidator {
           if (
             this.#builtins.has(expression.name) ||
             expression.name === "takePhoto" ||
-            expression.name === "askImage"
+            expression.name === "askImage" ||
+            expression.name === "showPopup" ||
+            expression.name === "openUrl" ||
+            expression.name === "exportText"
           ) {
             this.#report(
               semanticCode.functionValue,
@@ -1956,6 +1998,11 @@ class SemanticValidator {
         return;
       case "showButtonExpression":
         yield* compileChild(this.#validateShowButtonTask(expression, scope));
+        return;
+      case "showPopupExpression":
+        this.#validateShowPopupArguments(expression);
+        for (const argument of expression.arguments)
+          yield* compileChild(this.#validateExpressionTask(argument.value, scope, null));
         return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
@@ -2031,6 +2078,13 @@ class SemanticValidator {
               yield* compileChild(
                 this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
               );
+          } else if (name === "openUrl" || name === "exportText") {
+            // A statement of its own is an `openUrlStatement` or an `exportTextStatement`.
+            this.#report(
+              semanticCode.functionValue,
+              `${name}(...) gives no value, so it can only be a statement of its own.`,
+              expression.callee.span,
+            );
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
@@ -2539,8 +2593,112 @@ class SemanticValidator {
     }
   }
 
+  /**
+   * `showPopup` takes its message first, without a name or as `message:`, and an optional `buttonText:` (V30 §31). A
+   * repeated name is reported with the other arguments.
+   */
+  #validateShowPopupArguments(parts: ShowPopupParts): void {
+    this.#validateDistinctNamedArguments(parts);
+    let message = false;
+    for (const [index, argument] of parts.arguments.entries()) {
+      if (argument.kind === "positionalArgument") {
+        if (index > 0 || message)
+          this.#report(
+            semanticCode.argumentCount,
+            'showPopup takes only its message without a name, first. Name the button text, as in \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
+            argument.span,
+          );
+        message = true;
+        continue;
+      }
+      const name = argument.name.name;
+      if (name === "message") {
+        if (message)
+          this.#report(
+            semanticCode.argumentCount,
+            "showPopup takes one message: give it without a name or as message:, not both.",
+            argument.name.span,
+          );
+        message = true;
+      } else if (name !== "buttonText") {
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `showPopup has no argument '${name}'. It takes a message and buttonText:.`,
+          argument.name.span,
+        );
+      }
+    }
+    if (!message)
+      this.#report(
+        semanticCode.missingNamedArgument,
+        "showPopup needs a message, as in 'showPopup \"Task completed\"'.",
+        parts.span,
+      );
+  }
+
+  /**
+   * `openUrl` takes one web address without a name, first, and the optional `buttonText:` and `alwaysButton:` (V30
+   * §33). A repeated name is reported with the other arguments.
+   */
+  #validateOpenUrlArguments(statement: OpenUrlStatement): void {
+    this.#validateDistinctNamedArguments(statement);
+    const addresses = statement.arguments.filter(
+      (argument) => argument.kind === "positionalArgument",
+    );
+    const addressed =
+      addresses.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
+    if (!addressed)
+      this.#report(
+        semanticCode.argumentCount,
+        "openUrl takes one web address without a name, first, as in 'openUrl(\"https://example.com\")'.",
+        statement.span,
+      );
+    for (const argument of statement.arguments)
+      if (
+        argument.kind === "namedArgument" &&
+        argument.name.name !== "buttonText" &&
+        argument.name.name !== "alwaysButton" &&
+        // A named address without a positional one is the error above.
+        (addressed || argument.name.name !== "url")
+      )
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `openUrl has no argument '${argument.name.name}'. It takes a web address, buttonText:, and alwaysButton:.`,
+          argument.name.span,
+        );
+  }
+
+  /**
+   * `exportText` takes one text without a name, first, and the optional `title:` and `fileName:` (V30 §31). A repeated
+   * name is reported with the other arguments.
+   */
+  #validateExportTextArguments(statement: ExportTextStatement): void {
+    this.#validateDistinctNamedArguments(statement);
+    const texts = statement.arguments.filter((argument) => argument.kind === "positionalArgument");
+    const given = texts.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
+    if (!given)
+      this.#report(
+        semanticCode.argumentCount,
+        "exportText takes one text without a name, first, as in 'exportText(report, title: \"Your report\")'.",
+        statement.span,
+      );
+    for (const argument of statement.arguments)
+      if (
+        argument.kind === "namedArgument" &&
+        argument.name.name !== "title" &&
+        argument.name.name !== "fileName" &&
+        // A named text without a positional one is the error above.
+        (given || argument.name.name !== "text")
+      )
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `exportText has no argument '${argument.name.name}'. It takes a text, title:, and fileName:.`,
+          argument.name.span,
+        );
+  }
+
   #validateDistinctNamedArguments(
-    expression: Extract<Expression, { kind: "callExpression" }>,
+    expression: Pick<Extract<Expression, { kind: "callExpression" }>, "arguments">,
   ): void {
     const names = new Set<string>();
     for (const argument of expression.arguments) {
@@ -2849,6 +3007,7 @@ class SemanticValidator {
         case "interactionExpression":
         case "sayExpression":
         case "showButtonExpression":
+        case "showPopupExpression":
         case "timerExpression":
         case "playMediaExpression":
         case "showCameraExpression":
@@ -3038,6 +3197,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "dictLiteral" ||
     kind === "rangeExpression" ||
     kind === "showButtonExpression" ||
+    kind === "showPopupExpression" ||
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
     kind === "showCameraExpression" ||
@@ -3098,6 +3258,7 @@ function findFirstInteraction(
     kind:
       | "interactionExpression"
       | "showButtonExpression"
+      | "showPopupExpression"
       | "playMediaExpression"
       | "showCameraExpression"
       | "sayExpression"
@@ -3110,6 +3271,7 @@ function findFirstInteraction(
     if (
       current.kind === "interactionExpression" ||
       current.kind === "showButtonExpression" ||
+      current.kind === "showPopupExpression" ||
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
       current.kind === "sayExpression" ||
@@ -3153,6 +3315,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
     expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
     expression.kind === "showCameraExpression" ||
@@ -3191,6 +3354,7 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
     expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
     expression.kind === "showCameraExpression" ||
@@ -3210,7 +3374,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     (expression.kind === "interactionExpression" &&
       expression.interactionKind !== "booleans" &&
       expression.interactionKind !== "form") ||
-    expression.kind === "showButtonExpression"
+    expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression"
   );
 }
 

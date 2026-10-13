@@ -93,8 +93,9 @@ which appears when the host persists script storage.
   Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
     Advanced: the stored JSON form), checked before it is stored. An Advanced value whose stored form would be longer
-    than a text can be opens with an empty field and says so; it can still be replaced or deleted. A value changed
-    meanwhile, as `==` compares it, is reported, not overwritten. The edit is stored in this browser first, showing
+    than a text can be opens with an empty field and says so; it can still be replaced or deleted. A draft that long
+    keeps its type when Advanced is chosen and says so too. A value changed meanwhile, as `==` compares it, is
+    reported, not overwritten. The edit is stored in this browser first, showing
     Saving…; only once that succeeded does a running
     session take it through `applyExternalStorageEdit`, so its next `load` reads it like any saved value, which ignores
     a value of another type than the load's (V30 §25), while values it already loaded stay; when storing fails, nothing
@@ -279,8 +280,10 @@ their changes and removals, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
 saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
-as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a
-recorded image answer or capture, or a saved value); Player and browser details add the presentation settings, screen
+as the last good state when that state cannot be checkpointed; photos add the chosen originals of the photos the export
+refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,
+such as in a variable of the replay's state), where a state's `storedFiles`, which names every stored file the session
+knew, does not count as referring to one; Player and browser details add the presentation settings, screen
 geometry, pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path
 or a file URL outside another URL, is replaced in every readable section, and replay data containing it is left out
 entirely, since changing it would change the replay; such detection in free text is best effort and cannot prove text

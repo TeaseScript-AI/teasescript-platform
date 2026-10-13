@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 
 const props = defineProps<{
   class?: HTMLAttributes["class"];
-  variant?: "default" | "embedded";
+  /** `code` is the default field in a monospace font, for text such as data to copy. */
+  variant?: "default" | "embedded" | "code";
   defaultValue?: string | number;
   modelValue?: string | number;
 }>();
@@ -27,6 +28,7 @@ const modelValue = useVModel(props, "modelValue", emits, {
         props.variant === 'embedded'
           ? 'min-h-0 rounded-none border-0 shadow-none focus-visible:ring-0'
           : 'min-h-[60px] rounded-md border border-input shadow-sm focus-visible:ring-1 focus-visible:ring-ring',
+        props.variant === 'code' && 'font-mono',
         props.class,
       )
     "

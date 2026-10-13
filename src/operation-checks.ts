@@ -2,6 +2,7 @@ import type { CallExpression, Expression, Identifier, ScalarTypeName } from "./a
 import {
   booleanFromText,
   CONVERSION_RESULTS,
+  DATA_TEXT_FUNCTIONS,
   describeConversionResult,
   isConversionName,
   isTemporalConversionResult,
@@ -9,13 +10,17 @@ import {
   MIN_MAX_BUILTINS,
   TEMPORAL_CONVERSIONS,
   temporalTextProblem,
+  unwritableJsonReason,
+  WRITABLE_JSON_FIX,
   type ConversionResult,
 } from "./conversions.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
+import { misspelledPropertyHint } from "./object-properties.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   CALENDAR_DURATION_TYPE,
+  containsType,
   DATE_TYPE,
   DATETIME_TYPE,
   describeValue,
@@ -65,12 +70,15 @@ export interface OperationProblem {
   readonly fix?: string;
 }
 
+/** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
+const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
+
 /**
  * Compile-time problems with a member read (`call` is `null`) or method call: unknown text members, members of values
  * that have none, and visible misuse of text operation and `join` arguments, also on a receiver of unknown type for the
- * methods only text or only lists have. On a receiver of unknown type, the arguments of the other methods are checked
- * where no receiver with the method takes them. Objects, speakers, handles, unions, and the other list and set members
- * are left to the type check's own rules or to the runtime.
+ * methods only text or only lists have. On a receiver of unknown type, a method that no value has is reported, and the
+ * arguments of the other methods are checked where no receiver with the method takes them. Objects, speakers, handles,
+ * unions, and the other list and set members are left to the type check's own rules or to the runtime.
  */
 export function memberProblems(
   receiver: Expression,
@@ -88,10 +96,7 @@ export function memberProblems(
     const member = TEXT_MEMBERS.get(name);
     if (member === undefined)
       return problem(unknownTextMemberMessage(name, call === null ? "property" : "method"));
-    if (member.parameters === null)
-      return call === null
-        ? []
-        : problem("'length' is a property, not a method. Write .length without parentheses.");
+    if (member.parameters === null) return call === null ? [] : problem(LENGTH_PROPERTY);
     if (call === null)
       return problem(
         `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
@@ -115,6 +120,13 @@ export function memberProblems(
     // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections,
     // and text and lists both have `reverse` without arguments.
     if (call === null) return [];
+    // A name that no value has as a method fails on every receiver; every value with `length` has it as a property.
+    if (!METHOD_NAMES.has(name))
+      return problem(
+        name === "length"
+          ? LENGTH_PROPERTY
+          : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
+      );
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
       return takeProblems(name, undefined, property, call, typeOf);
@@ -308,6 +320,8 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (DATA_TEXT_FUNCTIONS.has(name) || name === "fileFromBase64" || name === "fileToBase64")
+    return dataTextProblems(name, call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -349,6 +363,116 @@ export function builtinCallProblems(
   }
   return problems;
 }
+
+/**
+ * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, `fromBase64(text, default:)`,
+ * `fileFromBase64(text, default:)`, or `fileToBase64(file)` (V30 §13 and §33): their arguments, a required `default:`
+ * that is missing, a `files:` of `toJson` or `fromJson` that is not true or false, text to read that can never be text,
+ * and a value that is or may hold one that `toJson` cannot write. The text of `toBase64` and the file of `fileToBase64`
+ * are checked where they are called.
+ */
+function dataTextProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const reads = name === "fromJson" || name === "fromBase64" || name === "fileFromBase64";
+  const takesFiles = name === "toJson" || name === "fromJson";
+  const problems: OperationProblem[] = [];
+  const positional: Expression[] = [];
+  let fallback = false;
+  let files: Expression | undefined;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    else if (reads && argument.name.name === "default") fallback = true;
+    else if (takesFiles && argument.name.name === "files") files = argument.value;
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: reads
+          ? `${name}(...) has no parameter '${argument.name.name}'. ${takesFiles ? "Its named arguments are 'default:' and 'files:'." : "Its only named argument is 'default:'."}`
+          : takesFiles
+            ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'files:'.`
+            : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (files !== undefined) {
+    const type = typeOf(files);
+    const candidates = members(forUse(type)).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "boolean"))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `'files:' takes true or false (boolean), not ${describeValue(type)}.`,
+        span: files.span,
+      });
+  }
+  if (positional.length !== 1)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      span: call.span,
+    });
+  else if (reads && !fallback)
+    problems.push({
+      kind: "argumentCount",
+      message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
+      span: call.span,
+    });
+  if (problems.length > 0 || name === "toBase64" || name === "fileToBase64") return problems;
+  const value = positional[0]!;
+  const type = typeOf(value);
+  if (reads) {
+    // As for a conversion, a value that may be text is read when the script runs.
+    const candidates = members(forUse(type)).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `${name}(...) reads text (string), not ${describeValue(type)}.`,
+        span: value.span,
+      });
+    return problems;
+  }
+  let unwritable: StaticType | undefined;
+  containsType(type, (part) => {
+    if (
+      !SESSION_HANDLE_KINDS.has(part.kind) &&
+      part.kind !== "range" &&
+      !isScalar(part, "calendarDuration", "script")
+    )
+      return false;
+    unwritable = part;
+    return true;
+  });
+  if (unwritable !== undefined) {
+    const kind = describeValue(unwritable);
+    const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+    problems.push({
+      kind: "invalidOperand",
+      message:
+        resolved(type) === unwritable
+          ? `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
+          : `toJson(...) cannot write ${kind}, which ${reason}, and this is ${describeValue(type)}. ${WRITABLE_JSON_FIX}`,
+      span: value.span,
+    });
+  }
+  return problems;
+}
+
+/** The handles of what a script started or showed, which exist only in the current session. */
+const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "timer",
+  "media",
+  "camera",
+  "permanentButton",
+  "messageHandle",
+]);
 
 /**
  * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are
@@ -704,6 +828,20 @@ const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
   positionalMethod("toDateTime"),
   positionalMethod("toSeconds"),
   positionalMethod("toMilliseconds"),
+]);
+
+/**
+ * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
+ * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
+ * numbers, objects, and speakers, have none.
+ */
+const METHOD_NAMES: ReadonlySet<string> = new Set([
+  ...[...TEXT_MEMBERS.values()]
+    .filter((member) => member.parameters !== null)
+    .map(({ name }) => name),
+  LIST_JOIN.name,
+  ...COLLECTION_METHODS,
+  ...POSITIONAL_METHODS.keys(),
 ]);
 
 /**

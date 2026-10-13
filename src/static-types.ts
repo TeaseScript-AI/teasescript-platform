@@ -849,6 +849,8 @@ function firstParts(type: StaticType): StaticType[] {
 export interface PropertyRead {
   readonly name: string;
   readonly tables: readonly PropertyTable[];
+  /** Whether its error names the properties its objects can have, which takes a second walk of their places. */
+  readonly named: boolean;
 }
 
 /** For each table, the tables that keep its objects in a property, with that property. */
@@ -870,7 +872,8 @@ interface PropertyPath {
  * script runs (#845). It cannot when the property is in none of the tables whose objects may reach that place: the
  * place's own, their sources, and, for a place inside a property of another, that property of every table whose objects
  * may reach the other place. A read that no object can satisfy gives the properties its objects can have, in table
- * order; any other gives `undefined`, also when objects whose properties the compiler cannot know may reach the place.
+ * order, when its error names them, and none otherwise; any other gives `undefined`, also when objects whose properties
+ * the compiler cannot know may reach the place.
  */
 export function missingPropertyReads(
   reads: readonly PropertyRead[],
@@ -908,9 +911,10 @@ export function missingPropertyReads(
   const missing: (readonly string[] | undefined)[] = reads.map(() => undefined);
   for (const [name, indexes] of byName) {
     const places = new PropertyPlaces(name, holders, root, extend);
-    for (const index of indexes)
-      if (!places.read(reads[index]!.tables))
-        missing[index] = places.properties(reads[index]!.tables);
+    for (const index of indexes) {
+      const { tables, named } = reads[index]!;
+      if (!places.read(tables)) missing[index] = named ? places.properties(tables) : [];
+    }
   }
   return missing;
 }

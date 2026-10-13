@@ -84,7 +84,8 @@ The broader parenthesized V30 APIs and their advanced parameters remain deferred
 implemented in its V30 call form (`let picture = askImage("Add an image")`, and with `allowSkip: true` a `string?`
 that is `null` when the player skips it; see [Image input](RUNTIME.md#image-input) and
 [V30 §20](specifications/accepted-syntaxes-v30.md#skipping-a-file-input)),
-and `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
+`askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms)),
+`showPopup`, `openUrl`, and `exportText` ([Popups, web addresses, and exported text](#popups-web-addresses-and-exported-text));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
@@ -154,6 +155,52 @@ instruction without producing a result or binding. See [timer semantics](specifi
 `askText` normalizes line endings to `LF`, otherwise preserves submitted text, and rejects whitespace-only input. It does not automatically trim, change case, or apply Unicode normalization.
 
 `askNumber` trims surrounding whitespace, accepts the ordinary TeaseScript decimal and scientific-number forms on one line, returns a finite number, and records the trimmed submitted text in the transcript rather than reformatting it. Locale decimal commas, thousands separators, units, and natural-language phrases are not accepted by the deterministic first POC.
+
+### Popups, web addresses, and exported text
+
+```tease
+showPopup "Task completed"
+showPopup(message: "Well done, ${name}", buttonText: "Continue")
+openUrl("https://example.com")
+openUrl("https://example.com", buttonText: "Claim your reward")
+openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your reward")
+```
+
+`showPopup` shows its message in a dialog outside the chat with one button, `OK` unless `buttonText:` renames it, and
+waits until the player closes it; neither enters the transcript, and like `showButton` it returns its elapsed time
+([§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)). The call form also takes the
+message without its name, first. A block may interrupt it like any interaction ([Runtime](RUNTIME.md#generic-foreground-interactions)).
+
+`openUrl` takes one web address first, without a name: text that is an `http` or `https` URL, never a list (compile
+error `TSV043` for a written one, runtime error `TSR050` otherwise). It waits until the address is open in a new tab:
+usually at once, and when the browser needs a click from the player first, the Player shows a button for it, which
+never shows the address. `buttonText:` is the button's text, "Open link" by default, with the rules of `showPopup`'s,
+and `alwaysButton: true` shows the button also right after a click, so the player opens the tab with it; either way the
+script goes on once the tab is open ([§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)).
+
+```tease
+exportText(toBase64(toJson(preset)), title: "Your preset", fileName: "preset.txt")
+```
+
+`exportText` takes its text first, without a name, and the optional `title:`, shown text, "Copy or download" by
+default, and `fileName:`, text, "text.txt" by default. It shows the title and the text in a dialog outside the chat
+with Copy, Download, and Close, and waits until the player closes it; nothing enters the transcript, and it gives no
+value ([§31](specifications/accepted-syntaxes-v30.md#export-text)). The text may be as long as any text. A text or file
+name that is not text is compile error `TSV043` for a known type and runtime error `TSR050` otherwise.
+
+```tease
+let shared = toJson({ name: name, photo: takePhoto() })
+let preset = fromJson(text, default: null)
+let picture = fileFromBase64(base64, default: null)
+```
+
+`toJson` writes every stored file a value holds, a photo or a file from `fileFromBase64`, as a `data:` URL with the
+type its first bytes give, and `fromJson` stores each data URL of an image, audio, or video type as a file again and
+gives its reference; `files: false` keeps both as text. `fileFromBase64(text, default:)` stores the bytes of Base64
+text or of a `data:…;base64,` URL as a file and gives its reference, or the default for text that is not Base64, and
+`fileToBase64(file)` gives a stored file's bytes as Base64. A stored file is shown only when it is an image; other files
+can be kept, passed along, and turned back into Base64 ([§33](specifications/accepted-syntaxes-v30.md#stored-files),
+[stored files](RUNTIME.md#stored-files)).
 
 ### Compact choices
 
@@ -330,14 +377,18 @@ The current function subset includes:
 Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
 `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and `get` with
 `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
-`toNumber`, `toInteger`, and `toBoolean` with `default:`, the numeric functions `round` (also with `decimals:`),
+`toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
+`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §33 file functions
+`fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the numeric functions `round` (also
+with `decimals:`),
 `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
 the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
 `linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
 `randomBeta`, and `randomPert`, and the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
-with that method takes them; other values are checked when the operation runs.
+with that method takes them; a method that no value has is `TSV043` also on a receiver of unknown type, as is any method
+of a speaker; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, parameters, and function results keep one type, including types

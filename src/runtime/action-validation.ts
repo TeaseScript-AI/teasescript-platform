@@ -19,6 +19,7 @@ import {
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isCanonicalTagList } from "../tags.js";
+import { canonicalWebUrl } from "../web-url.js";
 import {
   type Instruction,
   type InteractionChoiceOption,
@@ -27,6 +28,10 @@ import {
   type InteractionUiPayload,
   type InstructionPlan,
   type PlanSourceLocation,
+  DEFAULT_EXPORT_FILE_NAME,
+  DEFAULT_EXPORT_TITLE,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
+  DEFAULT_POPUP_BUTTON_TEXT,
 } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -53,6 +58,12 @@ import {
 } from "../image-input.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
+import {
+  base64FileType,
+  holdsStoredFile,
+  isRecognizedFileType,
+  isStandardBase64,
+} from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
@@ -256,7 +267,85 @@ function validForegroundActionKind(
       hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
     );
   }
+  if (action.kind === "fileStore") {
+    return (
+      validFileStoreAction(action, snapshot, plan) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
+    );
+  }
   return false;
+}
+
+/**
+ * A pending file store: the files its instruction's call stores, each once with the type its bytes give, or the stored
+ * files of this session it reads, each once. `fileFromBase64` and `fileToBase64` have exactly one.
+ */
+function validFileStoreAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    !hasExactKeys(action, [
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "destinationTemporary",
+      "createdAtMs",
+      "requestEventSequence",
+      "operation",
+      "files",
+      "references",
+    ]) ||
+    !positiveSafeInteger(action.destinationTemporary) ||
+    !validSessionTime(action.createdAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    action.createdAtMs > snapshot.currentSessionTimeMs ||
+    !Array.isArray(action.files) ||
+    !Array.isArray(action.references) ||
+    !Array.isArray(snapshot.storedFiles)
+  )
+    return false;
+  const known = snapshot.storedFiles;
+  const files = action.files;
+  const references = action.references;
+  const stores =
+    action.operation === "store" &&
+    references.length === 0 &&
+    files.length > 0 &&
+    files.every(
+      (file: unknown) =>
+        isPlainRecord(file) &&
+        hasExactKeys(file, ["type", "base64"]) &&
+        typeof file.base64 === "string" &&
+        isStandardBase64(file.base64) &&
+        file.type === base64FileType(file.base64),
+    ) &&
+    new Set(files.map((file: Record<string, unknown>) => file.base64)).size === files.length;
+  const reads =
+    action.operation === "read" &&
+    files.length === 0 &&
+    references.length > 0 &&
+    references.every(
+      (reference: unknown) => typeof reference === "string" && holdsStoredFile(known, reference),
+    ) &&
+    new Set(references).size === references.length;
+  if (!stores && !reads) return false;
+  if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
+  const owner = plan.instructions[action.owningInstruction];
+  if (owner?.kind !== "fileStore") return false;
+  const count = Math.max(files.length, references.length);
+  return (
+    (owner.call === "fileFromBase64" || owner.call === "fromJson") === stores &&
+    (owner.call === "fileFromBase64" || owner.call === "fileToBase64" ? count === 1 : true) &&
+    // `fromJson` keeps only files of a recognized type.
+    (owner.call !== "fromJson" ||
+      files.every((file: Record<string, unknown>) => isRecognizedFileType(String(file.type))))
+  );
 }
 
 /** A pending `save`/`delete` exists only for persistent storage and carries a storable value or `null`. */
@@ -346,6 +435,7 @@ function validSettlementShapeAndKind(
       "mediaPlayback",
       "storageWrite",
       "capture",
+      "fileStore",
     ]) &&
     (settlement.actionKind === "chatPacingGate" ||
       settlement.settlementKind === "completed" ||
@@ -383,8 +473,9 @@ function validSettlementIdentityAndEventSequences(
     );
   }
   if (settlement.actionKind !== "interaction") return true;
-  // A button that timed out publishes no player transcript.
-  if (settlement.settlementKind === "timedOut") return settlement.transcriptEventSequence === null;
+  // A button that timed out, a closed popup or exportText, and an opened `openUrl` publish no player transcript.
+  if (settlement.settlementKind === "timedOut" || silentInteraction(settlement.interactionKind))
+    return settlement.transcriptEventSequence === null;
   return (
     positiveSafeInteger(settlement.transcriptEventSequence) &&
     settlement.requestEventSequence < settlement.transcriptEventSequence &&
@@ -766,6 +857,10 @@ export function validateInteractionResultHandoffState(
     }
     return;
   }
+  if (isPlainRecord(handoff) && handoff.actionKind === "fileStore") {
+    validateFileStoreHandoff(handoff, snapshot, plan, errors);
+    return;
+  }
   if (
     !isPlainRecord(handoff) ||
     !hasExactKeys(handoff, [
@@ -878,6 +973,80 @@ export function validateInteractionResultHandoffState(
       "Runtime interaction result handoff does not match its canonical plan instruction.",
     );
   }
+}
+
+/**
+ * The Player's answer to a file store, handed off to its instruction, which runs next and has not given its result: a
+ * list of texts, or `null` after a failure, as its retained settlement records.
+ */
+function validateFileStoreHandoff(
+  handoff: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const result = handoff.result;
+  const settlement = snapshot.lastSettlement;
+  if (
+    !hasExactKeys(handoff, [
+      "actionKind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "result",
+    ]) ||
+    !positiveSafeInteger(handoff.actionId) ||
+    !nonNegativeSafeInteger(handoff.owningInstruction) ||
+    handoff.continuationInstruction !== handoff.owningInstruction ||
+    snapshot.nextInstruction !== handoff.owningInstruction ||
+    !positiveSafeInteger(handoff.destinationTemporary) ||
+    (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
+    !(
+      result === null ||
+      (isPlainRecord(result) &&
+        hasExactKeys(result, ["kind", "items"]) &&
+        result.kind === "list" &&
+        Array.isArray(result.items) &&
+        result.items.length > 0 &&
+        // An empty file's Base64 is empty.
+        result.items.every((item: unknown) => typeof item === "string"))
+    ) ||
+    snapshot.foregroundAction !== null ||
+    !isOneOf(snapshot.status, ["running", "failed"]) ||
+    !isPlainRecord(settlement) ||
+    settlement.actionKind !== "fileStore" ||
+    settlement.actionId !== handoff.actionId ||
+    settlement.owningInstruction !== handoff.owningInstruction ||
+    settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
+    settlement.destinationTemporary !== handoff.destinationTemporary ||
+    (settlement.outcome === "failed") !== (result === null) ||
+    // The stored files' references are the answer.
+    (settlement.outcome === "stored" && !sameItems(result, settlement.references)) ||
+    !validInteractionResultHandoffOwner(handoff, snapshot, plan) ||
+    !Array.isArray(snapshot.temporaries) ||
+    snapshot.temporaries.some(
+      (temporary) => isPlainRecord(temporary) && temporary.id === handoff.destinationTemporary,
+    )
+  ) {
+    errors.push("Runtime file store answer handoff is malformed.");
+    return;
+  }
+  if (plan === undefined) return;
+  const instruction = plan.instructions[handoff.owningInstruction];
+  if (
+    instruction?.kind !== "fileStore" ||
+    instruction.destinationTemporary !== handoff.destinationTemporary
+  )
+    errors.push("Runtime file store answer handoff does not match its plan instruction.");
+}
+
+/** Whether `list` is a list value whose items are exactly `items`, in order. */
+function sameItems(list: unknown, items: unknown): boolean {
+  if (!isPlainRecord(list) || !Array.isArray(list.items) || !Array.isArray(items)) return false;
+  const listed: readonly unknown[] = list.items;
+  return listed.length === items.length && listed.every((item, index) => item === items[index]);
 }
 
 /** The code that asked receives the result: the running context, at the asking instruction. */
@@ -1091,7 +1260,7 @@ function validInteractionAction(
   )
     return false;
   const expected =
-    action.interactionKind === "button"
+    action.interactionKind === "button" || silentInteraction(action.interactionKind)
       ? action.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1115,10 +1284,12 @@ function validInteractionAction(
     !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)
   )
     return false;
+  // A button or a popup used as a value gives one; an `openUrl` or an `exportText` never does.
   if (
     action.destinationTemporary !== null
-      ? !positiveSafeInteger(action.destinationTemporary)
-      : action.interactionKind !== "button"
+      ? !positiveSafeInteger(action.destinationTemporary) ||
+        valuelessInteraction(action.interactionKind)
+      : action.interactionKind !== "button" && !silentInteraction(action.interactionKind)
   )
     return false;
   if (
@@ -1272,6 +1443,36 @@ function preparedInteractionUiMatchesAction(
           actual.background)
     );
   }
+  // The temporaries keep the canonical address and the button text the request opened with.
+  if (prepared.kind === "url")
+    return (
+      runtimeTemporaryValue(temporaries, prepared.urlTemporary) === actual.url &&
+      (prepared.buttonTextTemporary === undefined
+        ? actual.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT
+        : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText) &&
+      (prepared.alwaysButtonTemporary === undefined
+        ? actual.alwaysButton === false
+        : runtimeTemporaryValue(temporaries, prepared.alwaysButtonTemporary) ===
+          actual.alwaysButton)
+    );
+  if (prepared.kind === "popup") {
+    return (
+      runtimeTemporaryValue(temporaries, prepared.messageTemporary) === actual.message &&
+      (prepared.buttonTextTemporary === undefined
+        ? actual.buttonText === DEFAULT_POPUP_BUTTON_TEXT
+        : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText)
+    );
+  }
+  if (prepared.kind === "export")
+    return (
+      runtimeTemporaryValue(temporaries, prepared.textTemporary) === actual.text &&
+      (prepared.titleTemporary === undefined
+        ? actual.title === DEFAULT_EXPORT_TITLE
+        : runtimeTemporaryValue(temporaries, prepared.titleTemporary) === actual.title) &&
+      (prepared.fileNameTemporary === undefined
+        ? actual.fileName === DEFAULT_EXPORT_FILE_NAME
+        : runtimeTemporaryValue(temporaries, prepared.fileNameTemporary) === actual.fileName)
+    );
   if (prepared.kind === "text" || prepared.kind === "number") {
     const hint =
       prepared.hintTemporary === null
@@ -1399,12 +1600,18 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             ]
           : kind === "form"
             ? ["kind", "shape", "fields", "hint", "submit", "cancel", "timeout", "accessibleName"]
-            : [
-                "kind",
-                "options",
-                "accessibleName",
-                ...("preselected" in value ? ["preselected"] : []),
-              ];
+            : kind === "popup"
+              ? ["kind", "message", "buttonText", "accessibleName"]
+              : kind === "url"
+                ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
+                : kind === "export"
+                  ? ["kind", "text", "title", "fileName", "accessibleName"]
+                  : [
+                      "kind",
+                      "options",
+                      "accessibleName",
+                      ...("preselected" in value ? ["preselected"] : []),
+                    ];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1431,7 +1638,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
     return true;
   };
   const expectedKey =
-    kind === "button"
+    kind === "button" || silentInteraction(kind)
       ? "continue"
       : kind === "number"
         ? "number"
@@ -1459,6 +1666,25 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
       (!("background" in value) || isNormalizedOpaqueColor(value.background))
     );
   }
+  if (kind === "popup")
+    return count(value.message) && count(value.buttonText) && !measurementExhausted;
+  // The address is canonical.
+  if (kind === "url")
+    return (
+      count(value.url) &&
+      count(value.buttonText) &&
+      !measurementExhausted &&
+      canonicalWebUrl(value.url) === value.url &&
+      typeof value.alwaysButton === "boolean"
+    );
+  // The exported text may be as long as any text, outside the interaction's text limit.
+  if (kind === "export")
+    return (
+      typeof value.text === "string" &&
+      count(value.title) &&
+      count(value.fileName) &&
+      !measurementExhausted
+    );
   if (kind === "form") return validFormUi(value, count) && !measurementExhausted;
   if (kind === "image")
     return (
@@ -1522,6 +1748,20 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   } else if (actual.accessibleName.key !== expected.accessibleName.key) return false;
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
+  if (expected.kind === "popup")
+    return actual.message === expected.message && actual.buttonText === expected.buttonText;
+  if (expected.kind === "url")
+    return (
+      actual.url === expected.url &&
+      actual.buttonText === expected.buttonText &&
+      actual.alwaysButton === expected.alwaysButton
+    );
+  if (expected.kind === "export")
+    return (
+      actual.text === expected.text &&
+      actual.title === expected.title &&
+      actual.fileName === expected.fileName
+    );
   if (expected.kind === "text" || expected.kind === "number")
     return (
       actual.hint === expected.hint &&
@@ -1678,6 +1918,52 @@ function validCaptureSettlement(
   );
 }
 
+/** A settled file store; only one that stored files records their references, which this session knows. */
+function validFileStoreSettlement(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  const known = new Set<unknown>(Array.isArray(snapshot.storedFiles) ? snapshot.storedFiles : []);
+  if (
+    !hasExactKeys(settlement, [
+      "actionId",
+      "actionKind",
+      "settlementKind",
+      "outcome",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "requestEventSequence",
+      "completionEventSequence",
+      "completedAtMs",
+      "references",
+    ]) ||
+    !isOneOf(settlement.outcome, ["stored", "read", "failed"]) ||
+    (settlement.ownerCallFrameId !== null && !positiveSafeInteger(settlement.ownerCallFrameId)) ||
+    !positiveSafeInteger(settlement.destinationTemporary) ||
+    !Array.isArray(settlement.references) ||
+    (settlement.outcome === "stored") !== settlement.references.length > 0 ||
+    // Stored files stay known for the rest of the session.
+    !settlement.references.every((reference: unknown) => known.has(reference)) ||
+    new Set(settlement.references).size !== settlement.references.length ||
+    !validSessionTime(settlement.completedAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    settlement.completedAtMs > snapshot.currentSessionTimeMs
+  )
+    return false;
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const owner = plan.instructions[settlement.owningInstruction];
+  return (
+    owner?.kind === "fileStore" &&
+    owner.destinationTemporary === settlement.destinationTemporary &&
+    (settlement.outcome === "failed" ||
+      (settlement.outcome === "stored") ===
+        (owner.call === "fileFromBase64" || owner.call === "fromJson"))
+  );
+}
+
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
@@ -1729,6 +2015,8 @@ function validSettlementKindData(
   }
   if (settlement.actionKind === "capture")
     return validCaptureSettlement(settlement, snapshot, plan);
+  if (settlement.actionKind === "fileStore")
+    return validFileStoreSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "mediaPlayback") {
     return (
       hasExactKeys(settlement, [
@@ -1779,7 +2067,8 @@ function validSettlementKindData(
     !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    (timedOut
+    // A timed-out button or form, a closed popup or exportText, and an opened `openUrl` add nothing to the transcript.
+    (timedOut || silentInteraction(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
         settlement.requestEventSequence >= settlement.completionEventSequence
@@ -1798,7 +2087,9 @@ function validSettlementKindData(
   )
     return false;
   let resultValid: boolean;
-  if (settlement.interactionKind === "button") {
+  if (valuelessInteraction(settlement.interactionKind)) {
+    resultValid = settlement.result === null && settlement.destinationTemporary === null;
+  } else if (elapsedInteraction(settlement.interactionKind)) {
     resultValid =
       settlement.destinationTemporary === null
         ? settlement.result === null
@@ -1842,7 +2133,8 @@ function validSettlementKindData(
   if (!resultValid) return false;
 
   if (
-    (settlement.interactionKind !== "button" || settlement.destinationTemporary !== null) &&
+    !valuelessInteraction(settlement.interactionKind) &&
+    (!elapsedInteraction(settlement.interactionKind) || settlement.destinationTemporary !== null) &&
     !positiveSafeInteger(settlement.destinationTemporary)
   )
     return false;
@@ -1911,8 +2203,34 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
+/** A popup, an `openUrl`, or an `exportText`: an interaction that adds nothing to the transcript. */
+function silentInteraction(kind: unknown): boolean {
+  return kind === "popup" || kind === "url" || kind === "export";
+}
+
+/** An `openUrl` or an `exportText`: an interaction that never gives a value. */
+function valuelessInteraction(kind: unknown): boolean {
+  return kind === "url" || kind === "export";
+}
+
+/** A button or a popup: an interaction that, used as a value, gives its elapsed waiting time (V30 §21, §31). */
+function elapsedInteraction(kind: unknown): boolean {
+  return kind === "button" || kind === "popup";
+}
+
 function isInteractionKind(value: unknown): value is InteractionKind {
-  return isOneOf(value, ["button", "text", "number", "choice", "temporal", "image", "form"]);
+  return isOneOf(value, [
+    "button",
+    "text",
+    "number",
+    "choice",
+    "temporal",
+    "image",
+    "form",
+    "popup",
+    "url",
+    "export",
+  ]);
 }
 
 /** A form's answers: an object, dict, or list of runtime values. Its recorded UI decides which. */
@@ -1999,6 +2317,25 @@ function preparedUiFitsPresentedUi(
     return false;
   if (prepared.kind === "button")
     return "background" in ui === (prepared.backgroundTemporary !== undefined);
+  // The temporaries are cleared after completion; the recorded request was checked by its shape. A request without
+  // `buttonText:` or `alwaysButton:` shows the defaults.
+  if (prepared.kind === "url")
+    return (
+      (prepared.buttonTextTemporary !== undefined ||
+        ui.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT) &&
+      (prepared.alwaysButtonTemporary !== undefined || ui.alwaysButton === false)
+    );
+  // A popup without `buttonText:` shows the default text.
+  if (prepared.kind === "popup")
+    return (
+      prepared.buttonTextTemporary !== undefined || ui.buttonText === DEFAULT_POPUP_BUTTON_TEXT
+    );
+  // An `exportText` without `title:` or `fileName:` shows the defaults.
+  if (prepared.kind === "export")
+    return (
+      (prepared.titleTemporary !== undefined || ui.title === DEFAULT_EXPORT_TITLE) &&
+      (prepared.fileNameTemporary !== undefined || ui.fileName === DEFAULT_EXPORT_FILE_NAME)
+    );
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
@@ -2096,7 +2433,7 @@ function validSettlementChronology(
   );
 }
 
-/** A button's elapsed waiting time: a finite, non-negative duration. */
+/** A button's or popup's elapsed waiting time: a finite, non-negative duration. */
 function validElapsedResult(
   value: unknown,
 ): value is { readonly kind: "duration"; readonly milliseconds: number } {
@@ -2136,10 +2473,11 @@ function validSettlementProvenance(
 ): boolean {
   const owningInstruction = settlement.owningInstruction;
   const continuationInstruction = settlement.continuationInstruction;
+  // A file store's instruction runs again with the answer.
   if (
     !nonNegativeSafeInteger(owningInstruction) ||
     !nonNegativeSafeInteger(continuationInstruction) ||
-    continuationInstruction !== owningInstruction + 1
+    continuationInstruction !== owningInstruction + (settlement.actionKind === "fileStore" ? 0 : 1)
   )
     return false;
   if (plan === undefined) return true;
@@ -2155,7 +2493,9 @@ function validSettlementProvenance(
             ? "storageWrite"
             : settlement.actionKind === "capture"
               ? "capture"
-              : "say";
+              : settlement.actionKind === "fileStore"
+                ? "fileStore"
+                : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = functionHoldingInstruction(plan, owningInstruction);
   return definition === undefined
@@ -2176,13 +2516,19 @@ function validForegroundActionOwnership(
     !nonNegativeSafeInteger(continuationInstruction) ||
     snapshot.nextInstruction !== owningInstruction ||
     owningInstruction >= plan.instructions.length ||
-    continuationInstruction !== owningInstruction + 1 ||
-    !["wait", "interaction", "say", "playMedia", "storageWrite", "capture"].includes(
+    // A file store's instruction runs again with the answer.
+    continuationInstruction !== owningInstruction + (action.kind === "fileStore" ? 0 : 1) ||
+    !["wait", "interaction", "say", "playMedia", "storageWrite", "capture", "fileStore"].includes(
       plan.instructions[owningInstruction]?.kind ?? "",
     )
   )
     return false;
   const owner = plan.instructions[owningInstruction];
+  if (
+    (action.kind === "fileStore") !== (owner?.kind === "fileStore") ||
+    (owner?.kind === "fileStore" && action.destinationTemporary !== owner.destinationTemporary)
+  )
+    return false;
   if (
     (action.kind === "capture") !== (owner?.kind === "capture") ||
     (owner?.kind === "capture" &&

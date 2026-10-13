@@ -1,4 +1,8 @@
-export type CapturedMediaKind = "image" | "audio" | "video";
+/**
+ * What a stored record is: a photo, a chosen image, or a recording, or a file a script stored (V30 §33), as its type
+ * gives it. A `file` is of no recognized type and is never shown or played.
+ */
+export type CapturedMediaKind = "image" | "audio" | "video" | "file";
 
 export interface CapturedMediaEntry {
   /** Opaque, serializable identity; the only value about captured media that may reach runtime or checkpoint state. */
@@ -70,7 +74,9 @@ export type CapturedMediaResolution =
 const REFERENCE_PREFIX = "captured-media:";
 const REFERENCE_PATTERN =
   /^captured-media:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[1-9][0-9]{0,15}$/u;
-const KINDS: readonly unknown[] = ["image", "audio", "video"] satisfies CapturedMediaKind[];
+const KINDS: readonly unknown[] = ["image", "audio", "video", "file"] satisfies CapturedMediaKind[];
+/** The type of a stored file of no recognized type. */
+const FILE_TYPE = "application/octet-stream";
 
 function isKind(value: unknown): value is CapturedMediaKind {
   return KINDS.includes(value);
@@ -182,6 +188,24 @@ export class CapturedMediaStore {
     return this.#records.get(reference)?.kind === kind;
   }
 
+  /** Whether this store holds `reference` or knows it stored durably, of any kind, without reading storage. */
+  knows(reference: string): boolean {
+    return this.#records.has(reference) || this.#durable.has(reference);
+  }
+
+  /**
+   * Of `candidates`, the references of media this store holds or has stored durably: one read of the stored references,
+   * none of their media. Text that only has the shape of a reference is not among them.
+   */
+  async storedReferences(candidates: Iterable<string>): Promise<Set<string>> {
+    const wanted = [...candidates];
+    const found = new Set(wanted.filter((reference) => this.knows(reference)));
+    if (found.size === wanted.length || this.#repository === null || this.#closed) return found;
+    const stored = new Set(await this.#repository.listReferences(this.#namespace));
+    for (const reference of wanted) if (stored.has(reference)) found.add(reference);
+    return found;
+  }
+
   /**
    * Stores the session media among `references` durably; references this store does not hold are ordinary data and
    * ignored. Idempotent: media already stored, also by an earlier attempt, is kept as it is.
@@ -243,10 +267,16 @@ export class CapturedMediaStore {
     return this.#load(reference);
   }
 
-  /** A browser URL for display or playback; starts reading an unknown stored reference. */
-  resolve(reference: string): CapturedMediaResolution {
+  /**
+   * A browser URL for display or playback of media of `kind`; starts reading an unknown stored reference. Media of
+   * another kind is missing for it, so a stored file of no recognized type never resolves for display.
+   */
+  resolve(reference: string, kind: CapturedMediaKind): CapturedMediaResolution {
     const record = this.#records.get(reference);
-    if (record !== undefined) return { state: "ready", url: this.#url(record) };
+    if (record !== undefined)
+      return record.kind === kind
+        ? { state: "ready", url: this.#url(record) }
+        : { state: "missing" };
     if (
       this.#closed ||
       this.#repository === null ||
@@ -347,7 +377,7 @@ function validRecord(
     stored.reference !== reference ||
     !isKind(kind) ||
     typeof mimeType !== "string" ||
-    !mimeType.startsWith(`${kind}/`)
+    !(kind === "file" ? mimeType === FILE_TYPE : mimeType.startsWith(`${kind}/`))
   )
     return null;
   const data =

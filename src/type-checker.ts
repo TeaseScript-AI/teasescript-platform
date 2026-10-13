@@ -12,6 +12,9 @@ import type {
   Identifier,
   InteractionExpression,
   LetStatement,
+  OpenUrlStatement,
+  ExportTextStatement,
+  ShowPopupParts,
   LoadExpression,
   MediaParts,
   Program,
@@ -69,7 +72,8 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -528,9 +532,15 @@ type DeferredCheck = {
       readonly value: StaticType;
     }
   | {
-      /** A read of a property that its object's tables lacked, also by `+=` or `-=` (#845). */
+      /**
+       * A read of a property that the tables of its objects lacked (#845): a property access, also by `+=` or `-=`, or
+       * the property a list function reads from each element, such as `by: "count"`.
+       */
       readonly kind: "property";
-      readonly read: PropertyAccessExpression;
+      readonly site: Expression;
+      readonly span: SourceSpan;
+      /** The error, or a function for it given the properties that the objects read can have. */
+      readonly message: string | ((properties: readonly string[]) => string);
     }
 );
 
@@ -999,10 +1009,13 @@ class TypeChecker {
   readonly #deferred: DeferredCheck[] = [];
 
   /**
-   * The tables of the objects of each property read that they lacked, or `null` when a check of the same read found a
-   * value it cannot decide for (see {@link #noteMissingProperty}).
+   * The property of each property read and the tables of its objects that lacked it, or `null` when a check of the same
+   * read found a value it cannot decide for (see {@link #noteMissingProperty}).
    */
-  readonly #missingReads = new Map<PropertyAccessExpression, PropertyTable[] | null>();
+  readonly #missingReads = new Map<
+    Expression,
+    { readonly name: string; readonly tables: PropertyTable[]; readonly named: boolean } | null
+  >();
 
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
@@ -1604,6 +1617,20 @@ class TypeChecker {
       case "showCameraStatement":
       case "hideCameraStatement":
       case "stopAudioStatement":
+        this.#suspend();
+        return true;
+      case "showPopupStatement":
+        yield* compileChild(this.#showPopupTask(statement, scope));
+        // The popup waits until the player closes it.
+        this.#suspend();
+        return true;
+      case "openUrlStatement":
+        yield* compileChild(this.#openUrlTask(statement, scope));
+        this.#suspend();
+        return true;
+      case "exportTextStatement":
+        yield* compileChild(this.#exportTextTask(statement, scope));
+        // The dialog waits until the player closes it.
         this.#suspend();
         return true;
       case "saveStatement": {
@@ -2230,7 +2257,7 @@ class TypeChecker {
             }
           }
           // `+=` and `-=` read the property first.
-          else this.#noteMissingProperty(target, object);
+          else this.#noteMissingAccess(target, object);
           return;
         }
         const before = this.diagnostics.length;
@@ -3702,6 +3729,10 @@ class TypeChecker {
         yield* compileChild(this.#showButtonTask(expression, scope));
         this.#suspend();
         return DURATION_TYPE;
+      case "showPopupExpression":
+        yield* compileChild(this.#showPopupTask(expression, scope));
+        this.#suspend();
+        return DURATION_TYPE;
       case "timerExpression":
         yield* compileChild(this.#timerTask(expression, scope));
         this.#suspend();
@@ -4344,6 +4375,76 @@ class TypeChecker {
     if (sources.length === 2 && !sources[0] && !sources[1])
       this.#report(typeCode.invalidOperand, IMAGE_NO_SOURCE_MESSAGE, expression.span);
     return skippable ? optional(STRING_TYPE) : STRING_TYPE;
+  }
+
+  /** The message and `buttonText:` of `showPopup` are shown text. */
+  *#showPopupTask(parts: ShowPopupParts, scope: Scope): CompileTask<void> {
+    for (const argument of parts.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      if (name === "message") this.#checkShownText(argument.value, type, "a popup message");
+      else if (name === "buttonText")
+        this.#checkShownText(argument.value, type, "the text of a popup's button");
+    }
+  }
+
+  /**
+   * `openUrl` takes a web address as text. A list is never one (V30 §16), and a written address must be an `http` or
+   * `https` URL; other values are checked when the statement runs. `buttonText:` is shown text and `alwaysButton:` is
+   * true or false.
+   */
+  *#openUrlTask(statement: OpenUrlStatement, scope: Scope): CompileTask<void> {
+    for (const argument of statement.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      if (argument.kind === "namedArgument") {
+        if (argument.name.name === "buttonText")
+          this.#checkShownText(argument.value, type, "the text of an openUrl button");
+        else if (argument.name.name === "alwaysButton")
+          this.#reportUnless(
+            type,
+            (member) => isScalar(member, "boolean"),
+            argument.value,
+            "'alwaysButton:' takes true or false",
+          );
+        continue;
+      }
+      const label = expressionLabel(argument.value) ?? "list";
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "string"),
+        argument.value,
+        "openUrl needs a web address in text (string)",
+        () =>
+          members(type).some((member) => resolved(member).kind === "list")
+            ? ` A list is never an address. Select one, such as '${label}[0]' or '${label}.random'.`
+            : "",
+      );
+      const text = staticText(argument.value);
+      if (text !== undefined && canonicalWebUrl(text) === null)
+        this.#report(
+          typeCode.invalidOperand,
+          `${OPEN_URL_RULE}. ${OPEN_URL_FIX}`,
+          argument.value.span,
+        );
+    }
+  }
+
+  /** `exportText` takes its text and `fileName:` as text (string); `title:` is shown text. */
+  *#exportTextTask(statement: ExportTextStatement, scope: Scope): CompileTask<void> {
+    for (const argument of statement.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "text";
+      if (name === "title") this.#checkShownText(argument.value, type, "the title of exportText");
+      else if (name === "text" || name === "fileName")
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          argument.value,
+          name === "text"
+            ? "exportText needs its text as text (string)"
+            : "'fileName:' takes text (string)",
+        );
+    }
   }
 
   /** A written `types:` or `mime:` list holds at least one entry, and each written text is valid. */
@@ -5206,31 +5307,53 @@ class TypeChecker {
       });
   }
 
-  /**
-   * Notes a read of a property from a value of type `object`. When every value it may be is an object whose properties
-   * the compiler knows, and none has the property, the end of the check reports the read if no object at that place can
-   * have it when the script runs (#845); any other read the runtime checks (TSR017).
-   */
-  #noteMissingProperty(read: PropertyAccessExpression, object: StaticType): void {
+  /** Notes a property access, also by `+=` or `-=` (see {@link #noteMissingProperty}). */
+  #noteMissingAccess(read: PropertyAccessExpression, object: StaticType): void {
     const name = read.property.name;
+    this.#noteMissingProperty(
+      read,
+      name,
+      object,
+      read.property.span,
+      (properties) =>
+        missingPropertyMessage(expressionLabel(read.object), name, properties) +
+        misspelledPropertyHint(name, properties),
+    );
+  }
+
+  /**
+   * Notes a read of the property `name` from a value of type `object` at `site`. When every value it may be is an
+   * object whose properties the compiler knows, and none has the property, the end of the check reports `message` at
+   * `span` if no object at that place can have it when the script runs (#845); a message that names the properties the
+   * objects can have is a function of them. Any other read the runtime checks (TSR017, or TSR060 for a list function).
+   */
+  #noteMissingProperty(
+    site: Expression,
+    name: string,
+    object: StaticType,
+    span: SourceSpan,
+    message: string | ((properties: readonly string[]) => string),
+  ): void {
     const objects = members(object).map(resolved);
     const tables = objects.flatMap((member) =>
       member.kind === "object" && member.properties !== null && !member.properties.has(name)
         ? [member.properties]
         : [],
     );
-    const noted = this.#missingReads.get(read);
+    const noted = this.#missingReads.get(site);
     if (tables.length < objects.length) {
-      if (noted !== undefined) this.#missingReads.set(read, null);
+      if (noted !== undefined) this.#missingReads.set(site, null);
     } else if (noted === undefined) {
-      this.#missingReads.set(read, tables);
+      this.#missingReads.set(site, { name, tables, named: typeof message !== "string" });
       this.#deferred.push({
         kind: "property",
         file: this.#file,
         at: this.diagnostics.length,
-        read,
+        site,
+        span,
+        message,
       });
-    } else if (noted !== null) for (const table of tables) noted.push(table);
+    } else if (noted !== null) for (const table of tables) noted.tables.push(table);
   }
 
   /**
@@ -5246,30 +5369,29 @@ class TypeChecker {
     >();
     const current = this.#file;
     // Every store, copy, and decision is known now, so it decides which properties the objects of a read can have.
-    const reads: PropertyAccessExpression[] = [];
+    const sites: Expression[] = [];
     const checked: PropertyRead[] = [];
-    for (const [read, tables] of this.#missingReads)
-      if (tables !== null) {
-        reads.push(read);
-        checked.push({ name: read.property.name, tables });
+    for (const [site, read] of this.#missingReads)
+      if (read !== null) {
+        sites.push(site);
+        checked.push(read);
       }
     const verdicts = missingPropertyReads(checked);
-    const missing = new Map(reads.map((read, index) => [read, verdicts[index]]));
+    const missing = new Map(sites.map((site, index) => [site, verdicts[index]]));
     for (const check of this.#deferred) {
       let found: readonly Diagnostic[] = [];
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
       } else if (check.kind === "property") {
-        const names = missing.get(check.read);
+        const names = missing.get(check.site);
         if (names !== undefined) {
           this.#file = check.file;
           const before = this.diagnostics.length;
-          const name = check.read.property.name;
+          const { message } = check;
           this.#report(
             typeCode.invalidOperand,
-            missingPropertyMessage(expressionLabel(check.read.object), name, names) +
-              misspelledPropertyHint(name, names),
-            check.read.property.span,
+            typeof message === "string" ? message : message(names),
+            check.span,
           );
           found = this.diagnostics.splice(before);
         }
@@ -5442,8 +5564,12 @@ class TypeChecker {
         // A built-in takes each argument as it was evaluated, before later arguments run.
         values.push(this.#capture(argument.value));
       }
-      if (entry === undefined && this.#builtins.has(callee.name))
-        return this.#builtinType(callee.name, expression, values);
+      if (entry === undefined && this.#builtins.has(callee.name)) {
+        const type = this.#builtinType(callee.name, expression, values);
+        // A file store call may wait for the Player, and a block may run before it gives its result.
+        if (isFileStoreCall(expression)) this.#suspend();
+        return type;
+      }
       return UNKNOWN_TYPE;
     }
     if (callee.kind !== "propertyAccessExpression") {
@@ -5589,9 +5715,18 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // Every member of a union must have the method (ADR 0021 rule 3.5).
+    // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
+    // another member has the method, the runtime checks a speaker.
     const all = members(value);
-    const results = all.map((member) => memberMethodType(member, method));
+    const typed = all.map((member) => memberMethodType(member, method));
+    const elsewhere = all.some(
+      (member, index) => typed[index] !== undefined && resolved(member).kind !== "speaker",
+    );
+    const results = elsewhere
+      ? typed
+      : all.map((member, index) =>
+          resolved(member).kind === "speaker" ? undefined : typed[index],
+        );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
       const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
@@ -5686,7 +5821,9 @@ class TypeChecker {
               ? handleMemberMessage(failing.kind, method, "call")
               : failing.kind === "permanentButton"
                 ? `Permanent buttons have no method '${method}'. Use remove().`
-                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+                : failing.kind === "speaker" && all.length === 1
+                  ? speakerMethodMessage(method, expressionLabel(callee.object))
+                  : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -5962,6 +6099,8 @@ class TypeChecker {
         },
       );
       this.#reportProblems(check.problems);
+      for (const read of check.reads)
+        this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
       return check.type;
     }
     const argument = expression.arguments[0];
@@ -6071,6 +6210,34 @@ class TypeChecker {
       case "toAbsoluteDateTime":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
+      case "toJson":
+      case "fromJson":
+      case "toBase64":
+      case "fromBase64":
+      case "fileFromBase64":
+      case "fileToBase64": {
+        // The JSON or Base64 text of a value or a stored file, and what such text holds (V30 §13 and §33).
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        if ((name === "toBase64" || name === "fileToBase64") && problems.length === 0)
+          this.#reportUnless(
+            value!,
+            (member) => isScalar(member, "string"),
+            argument!.value,
+            name === "toBase64"
+              ? "toBase64(...) encodes text (string)"
+              : "fileToBase64(...) reads a stored file, which is text (string)",
+          );
+        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, or the
+        // result is the default.
+        if (name === "fromJson") return UNKNOWN_TYPE;
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
+          ? union([STRING_TYPE, values[fallback]!])
+          : STRING_TYPE;
+      }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
           this.#reportUnless(
@@ -6143,7 +6310,7 @@ class TypeChecker {
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length) {
-      this.#noteMissingProperty(expression, object);
+      this.#noteMissingAccess(expression, object);
       const type = all.length === 1 ? types[0]! : union(types.map((type) => type!));
       // A set member is read as a copy (ADR 0014), so what changes the copy decides or widens nothing in the set.
       if (LIST_ELEMENT_READS.has(name) && all.some((member) => resolved(member).kind === "set"))
@@ -7534,6 +7701,9 @@ interface LoopEffects {
 const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "sayStatement",
   "showButtonStatement",
+  "showPopupStatement",
+  "openUrlStatement",
+  "exportTextStatement",
   "waitStatement",
   "timerStatement",
   "playMediaStatement",
@@ -7575,7 +7745,8 @@ type EffectWork =
 
 /**
  * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later.
+ * include those of the loops inside it, but not those of timer or media blocks it starts, which run later, nor those of
+ * code that a literal rules out, which never runs.
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Map<string, Sharing>();
@@ -7586,6 +7757,8 @@ function programEffects(program: Program): ProgramEffects {
   };
   let callsFiles = false;
   let entersMain = false;
+  // The value that literals give each condition the walk asks about.
+  const conditions = new Map<Expression, boolean | undefined>();
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -7615,6 +7788,7 @@ function programEffects(program: Program): ProgramEffects {
         (expression.kind === "interactionExpression" ||
           expression.kind === "sayExpression" ||
           expression.kind === "showButtonExpression" ||
+          expression.kind === "showPopupExpression" ||
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
           expression.kind === "showCameraExpression" ||
@@ -7631,6 +7805,26 @@ function programEffects(program: Program): ProgramEffects {
         if (root !== null) write(root, "changes", loop, inside);
       }
       handlers(expression);
+      if (
+        expression.kind === "binaryExpression" &&
+        (expression.operator === "and" ||
+          expression.operator === "or" ||
+          expression.operator === "otherwise")
+      ) {
+        // The operands of an `and`, `or`, or `otherwise` chain after a literal that decides its result never run, so
+        // they are part of no loop.
+        let runs = true;
+        for (const operand of chainOperands(expression)) {
+          work.push({ expression: operand, loop: runs ? loop : null, inside });
+          // A condition that literals decide is never null either.
+          const decides =
+            expression.operator === "otherwise"
+              ? isNonNullLiteral(operand) || literalCondition(operand, conditions) !== undefined
+              : literalCondition(operand, conditions) === (expression.operator === "or");
+          runs &&= !decides;
+        }
+        continue;
+      }
       for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
       continue;
     }
@@ -7665,16 +7859,34 @@ function programEffects(program: Program): ProgramEffects {
           if (parameter.defaultValue !== null)
             work.push({ expression: parameter.defaultValue, loop: null, inside: true });
         continue;
+      case "ifStatement": {
+        // A branch that a literal condition rules out never runs, so it is part of no loop.
+        const condition = literalCondition(statement.condition, conditions);
+        enter(statement.thenBlock.statements, condition === false ? null : loop, inside);
+        if (statement.elseBlock !== null)
+          enter(
+            statement.elseBlock.kind === "ifStatement"
+              ? [statement.elseBlock]
+              : statement.elseBlock.statements,
+            condition === true ? null : loop,
+            inside,
+          );
+        break;
+      }
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, node, inside);
+        // A body that a literal rules out never runs, so it is part of no loop, and its own loop changes nothing.
+        const runs = literalCondition(statement.condition, conditions) !== false;
+        enter(statement.body.statements, runs ? node : null, inside);
         work.push({ expression: statement.condition, loop: node, inside });
         continue;
       }
       case "repeatStatement":
-      case "forStatement":
-        enter(statement.body.statements, loopNode(statement.body, loop), inside);
+      case "forStatement": {
+        const node = loopNode(statement.body, loop);
+        enter(statement.body.statements, runsNoTime(statement) ? null : node, inside);
         break;
+      }
       default:
         enter(nestedStatements(statement), loop, inside);
     }
@@ -7697,6 +7909,96 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
+}
+
+/** The operands of a chain of one operator, from the left; a part in parentheses is an operand of its own. */
+function chainOperands(root: Extract<Expression, { kind: "binaryExpression" }>): Expression[] {
+  const operands: Expression[] = [];
+  let left: Expression = root;
+  while (left.kind === "binaryExpression" && left.operator === root.operator) {
+    operands.push(left.right);
+    left = left.left;
+  }
+  operands.push(left);
+  return operands.reverse();
+}
+
+/**
+ * The value that literals give a condition, as the type check decides it: `true` or `false`, also in parentheses or
+ * after `not`, and an `and` chain with an operand that is `false` this way, or whose operands are all `true`, and an
+ * `or` chain the other way round. `known` keeps the value of each part, so each part is evaluated once, without native
+ * recursion.
+ */
+function literalCondition(
+  condition: Expression,
+  known: Map<Expression, boolean | undefined>,
+): boolean | undefined {
+  const pending = [condition];
+  while (pending.length > 0) {
+    const node = pending.at(-1)!;
+    if (known.has(node)) {
+      pending.pop();
+      continue;
+    }
+    const parts = conditionParts(node);
+    const unknown = parts.filter((part) => !known.has(part));
+    if (unknown.length > 0) {
+      for (const part of unknown) pending.push(part);
+      continue;
+    }
+    pending.pop();
+    const values = parts.map((part) => known.get(part));
+    known.set(node, conditionValue(node, values));
+  }
+  return known.get(condition);
+}
+
+/** The parts whose values decide a condition: what stands in parentheses or after `not`, or a chain's operands. */
+function conditionParts(node: Expression): readonly Expression[] {
+  if (node.kind === "parenthesizedExpression") return [node.expression];
+  if (node.kind === "unaryExpression" && node.operator === "not") return [node.operand];
+  if (node.kind === "binaryExpression" && (node.operator === "and" || node.operator === "or"))
+    return chainOperands(node);
+  return [];
+}
+
+/** A condition's value from the values of its {@link conditionParts}, or `undefined` when literals do not decide it. */
+function conditionValue(
+  node: Expression,
+  values: readonly (boolean | undefined)[],
+): boolean | undefined {
+  if (node.kind === "booleanLiteral") return node.value;
+  if (node.kind === "parenthesizedExpression") return values[0];
+  if (node.kind === "unaryExpression" && node.operator === "not")
+    return values[0] === undefined ? undefined : !values[0];
+  if (node.kind !== "binaryExpression" || (node.operator !== "and" && node.operator !== "or"))
+    return undefined;
+  const decides = node.operator === "or";
+  if (values.includes(decides)) return decides;
+  return values.every((value) => value === !decides) ? !decides : undefined;
+}
+
+/** A literal other than `null`, also in parentheses, so a fallback after it never runs. */
+function isNonNullLiteral(expression: Expression): boolean {
+  return [
+    "numberLiteral",
+    "durationLiteral",
+    "stringLiteral",
+    "booleanLiteral",
+    "listLiteral",
+    "setLiteral",
+    "dictLiteral",
+    "objectLiteral",
+  ].includes(unwrap(expression).kind);
+}
+
+/** Whether the body of a `repeat` or `for` loop certainly runs no time, as the type check decides it. */
+function runsNoTime(
+  statement: Extract<Statement, { kind: "repeatStatement" | "forStatement" }>,
+): boolean {
+  if (statement.kind === "forStatement") return isEmptyLiteral(statement.iterable);
+  const times = staticNumber(statement.count);
+  return times !== undefined && times < 1;
 }
 
 /** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
@@ -7976,6 +8278,10 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return mediaOperands(statement);
     case "showImageStatement":
       return [statement.image];
+    case "showPopupStatement":
+    case "openUrlStatement":
+    case "exportTextStatement":
+      return statement.arguments.map((argument) => argument.value);
     case "saveStatement":
       return [statement.value, statement.key];
     case "deleteStatement":
@@ -8051,7 +8357,9 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
 /** A call of a built-in without effects on script variables or time. */
 function isPureBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
-  return callee.kind === "identifier" && PURE_BUILTINS.has(callee.name);
+  return (
+    callee.kind === "identifier" && PURE_BUILTINS.has(callee.name) && !isFileStoreCall(expression)
+  );
 }
 
 // Places -------------------------------------------------------------------------------------------------------------
@@ -8975,6 +9283,14 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
   ["messageHandle", "Message"],
   ["permanentButton", "Permanent button"],
 ]);
+
+/**
+ * The message for a method call on a receiver that is a speaker, which has properties but no methods (V30 §37). In a
+ * union, the example property would first need a check that the value is a speaker, so a union gets the plain message.
+ */
+function speakerMethodMessage(method: string, label: string | null): string {
+  return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
+}
 
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(

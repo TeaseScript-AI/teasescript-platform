@@ -201,6 +201,12 @@ export {
 } from "./runtime/operations/complete-action.js";
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
 export {
+  fileType,
+  OCTET_STREAM,
+  storedFileKind,
+  type StoredFileKind,
+} from "./runtime/stored-files.js";
+export {
   updateInteraction,
   type InteractionUpdateOutcome,
 } from "./runtime/operations/update-interaction.js";
@@ -301,6 +307,9 @@ export type {
   RuntimeCaptureActionSettlementSnapshot,
   RuntimeCaptureActionSnapshot,
   RuntimeDelayActionSnapshot,
+  RuntimeFileStoreActionSettlementSnapshot,
+  RuntimeFileStoreActionSnapshot,
+  RuntimeFileToStore,
   RuntimeInteractionActionSnapshot,
   RuntimeMediaActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
@@ -401,6 +410,9 @@ export type {
   WaitStatement,
   TimerStatement,
   ShowImageStatement,
+  ShowPopupStatement,
+  OpenUrlStatement,
+  ExportTextStatement,
   HideImageStatement,
   MediaCue,
   MediaHandlers,

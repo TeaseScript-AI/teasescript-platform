@@ -1322,6 +1322,7 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "callFunction" ||
     instruction.kind === "interaction" ||
     instruction.kind === "capture" ||
+    instruction.kind === "fileStore" ||
     instruction.kind === "startTimer" ||
     instruction.kind === "playMedia" ||
     instruction.kind === "showCamera" ||
@@ -2015,6 +2016,8 @@ function validateFunctionPrologue(
           "jump",
           "showPermanentButton",
           "startTimer",
+          // A default may store or read files, as it may call a function that does.
+          "fileStore",
         ])
       ) {
         errors.push(

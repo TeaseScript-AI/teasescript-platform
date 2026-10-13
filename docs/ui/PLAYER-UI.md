@@ -463,6 +463,14 @@ session is created only when Start is activated; Continue resumes a kept session
 devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
 are tracked in #469.
 
+While a session plays, the Player keeps the screen on with the browser's screen wake lock, so a long wait without input
+does not let the screen dim, turn off, or lock. It asks for the lock at the Start or Continue click, also when a camera
+opens first, and holds it while the session runs or waits, also while Debug holds the session at an inspected state or a
+random draw. The browser releases the lock while the page is hidden; the Player asks again when the page is shown while
+the session still plays. The Player releases it once the session ends with `exit`, so the end dialog has none, once an
+error stops the session, and once the start page shows or the page is left. Where the browser has no wake lock, such as
+on plain HTTP, or refuses one, such as on low battery, the session plays as before and the Player says nothing.
+
 ## Session end and failure
 
 An ordinary end opens the end dialog by itself: **The end**, a review placeholder, and **Close**, which takes focus. The
@@ -493,12 +501,12 @@ The error dialog, Player Settings, and the Debug panel open one **Download debug
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
 saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
-with a thumbnail, size, and where they were used, each with its own checkbox. The dialog warns that the file is not
-encrypted and that removing credentials and paths from text is best effort, so the player checks the preview; it states
-the file's size and whether the error can be replayed exactly, and previews what the file contains; every change
-prepares the file again, and **Download debug export** saves exactly that file from the player's press. An export larger
-than an issue attachment allows is not offered. The dialog fits narrow screens and scrolls, and its rows and buttons are
-at least 44px tall.
+with a thumbnail, size, and the recorded call or saved value that used them, if any, each with its own checkbox. The
+dialog warns that the file is not encrypted and that removing credentials and paths from text is best effort, so the
+player checks the preview; it states the file's size and whether the error can be replayed exactly, and previews what
+the file contains; every change prepares the file again, and **Download debug export** saves exactly that file from the
+player's press. An export larger than an issue attachment allows is not offered. The dialog fits narrow screens and
+scrolls, and its rows and buttons are at least 44px tall.
 
 ## Player notices
 
@@ -578,7 +586,9 @@ load ("Video playback is not supported by this Player yet."), so the script cont
 such package file is a warning [player notice](#player-notices), once per session and authored path, for example
 "Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
 video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
-video playback itself is missing; captured photos and chosen images are no package files and are never reported. An
+video playback itself is missing; captured photos, chosen images, and stored files are no package files and are never
+reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
+and video are not played ([stored files](../RUNTIME.md#stored-files)). An
 authored Stage image has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage
 rendering are not yet implemented in the Player; the development preview's Stage media picker can override the Stage
 for layout comparison.
@@ -910,6 +920,35 @@ answer without an image." A request without `allowSkip: true` shows no Skip.
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
+
+`showPopup` adds no controls to the chat. A dialog over the session, in the look of the other Player dialogs, shows
+the popup's message, which names the dialog, and one button with its `buttonText`, `OK` by default, which takes focus.
+The button, by click, Enter, or Space, and Escape close it, not a click beside it; closing it continues the script and
+adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
+until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
+panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
+the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup, an
+`exportText` dialog, or an `openUrl` button waits, the composer shows no hint.
+
+`exportText` opens a dialog like a popup's, named by its title, with the text in a read-only monospace field that wraps
+long lines and scrolls, and the buttons **Copy**, which takes focus, **Download**, and **Close**. Copy writes the whole
+text to the clipboard and confirms it; when the browser refuses or cannot, as Android's clipboard does above about 1 MB,
+Copy tries the browser's older copy of the selected text, and otherwise leaves the text selected with a short hint to
+copy it by hand or use Download. Download saves the text as a UTF-8 file with the script's file name, made only then.
+Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
+script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
+Debug runs, and its return after a block or a reload, are a popup's.
+
+`openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
+form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes
+on, with nothing in the chat. Otherwise, when the browser does not open the tab, and always for an `openUrl` written
+with `alwaysButton: true`, it shows a button where `showButton` shows its button: its `buttonText`, **Open link** by
+default, never the address, which may be meant as a surprise; the composer takes no answer; default focus goes to the
+button instead of the composer, and the player's click opens the tab and lets the script go on. A request that a reload,
+a restore, Debug's rewind, or its Return brought back always shows the button, also when turning Debug off reinstates
+its session: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
+address, so the page there cannot reach the Player; the browser sends it at most the Player's origin as referrer.
+Neither the address nor the button enters the transcript.
 
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the

@@ -3,6 +3,7 @@ import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
+import { canonicalWebUrl } from "../web-url.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -1173,9 +1174,73 @@ function validateInstruction(
         errors,
       );
       return;
+    case "fileStore":
+      validateFileStoreInstruction(value, path, temporaryCount, errors);
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+/**
+ * A `fileStore` instruction runs again once the Player answered, so each operand is a temporary or a literal, which
+ * reads the same both times; `default:` belongs to the reading calls and `files:` to the JSON ones.
+ */
+function validateFileStoreInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !hasExactKeys(value, [
+      "kind",
+      "call",
+      "value",
+      "default",
+      "files",
+      "destinationTemporary",
+      "span",
+    ])
+  ) {
+    errors.push(planError("TSC002", "File store instruction has an invalid shape.", path));
+    return;
+  }
+  const call = value.call;
+  if (
+    call !== "fileFromBase64" &&
+    call !== "fileToBase64" &&
+    call !== "toJson" &&
+    call !== "fromJson"
+  ) {
+    errors.push(planError("TSC002", "File store call is invalid.", `${path}.call`));
+    return;
+  }
+  const takesDefault = call === "fileFromBase64" || call === "fromJson";
+  const takesFiles = call === "toJson" || call === "fromJson";
+  if (takesDefault !== (value.default !== null))
+    errors.push(planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.default`));
+  if (!takesFiles && value.files !== null)
+    errors.push(planError("TSC002", `${call}(...) takes no files:.`, `${path}.files`));
+  for (const name of ["value", "default", "files"] as const) {
+    const operand = value[name];
+    if (operand === null && name !== "value") continue;
+    if (!isRecord(operand) || (operand.kind !== "temporary" && operand.kind !== "literal"))
+      errors.push(
+        planError(
+          "TSC002",
+          "A file store operand must be a temporary or a literal.",
+          `${path}.${name}`,
+        ),
+      );
+    else validateExpression(operand, `${path}.${name}`, errors, false, temporaryCount);
+  }
+  validateTemporaryId(
+    value.destinationTemporary,
+    `${path}.destinationTemporary`,
+    temporaryCount,
+    errors,
+  );
 }
 
 function validatePlayMediaInstruction(
@@ -1315,18 +1380,31 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image", "form"])) {
+  if (
+    !isOneOf(kind, [
+      "button",
+      "text",
+      "number",
+      "choice",
+      "temporal",
+      "image",
+      "form",
+      "popup",
+      "url",
+      "export",
+    ])
+  ) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
-  // A form reads its fields when it opens, so it is always prepared.
-  if (kind === "form" && !prepared)
-    errors.push(planError("TSC002", "A form interaction must be prepared.", path));
+  // A form reads its fields when it opens, and `exportText` its text, so both are always prepared.
+  if ((kind === "form" || kind === "export") && !prepared)
+    errors.push(planError("TSC002", `A ${kind} interaction must be prepared.`, path));
   if (value.target !== "standardChat")
     errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
   const ui = prepared ? value.preparedUi : value.ui;
   const expected =
-    kind === "button"
+    kind === "button" || kind === "popup" || kind === "url" || kind === "export"
       ? value.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1348,7 +1426,17 @@ function validateInteractionInstruction(
       ),
     );
   }
-  if (kind !== "button" || value.destinationTemporary !== null) {
+  // `openUrl` and `exportText` give no value.
+  if (kind === "url" || kind === "export") {
+    if (value.destinationTemporary !== null)
+      errors.push(
+        planError(
+          "TSC002",
+          `${kind === "url" ? "openUrl" : "exportText"} has no result destination.`,
+          `${path}.destinationTemporary`,
+        ),
+      );
+  } else if ((kind !== "button" && kind !== "popup") || value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
       `${path}.destinationTemporary`,
@@ -1418,7 +1506,16 @@ function validateStaticInteractionUi(
               "types",
               "mime",
             ]
-          : ["kind", "options", "accessibleName", ...("preselected" in ui ? ["preselected"] : [])];
+          : kind === "popup"
+            ? ["kind", "message", "buttonText", "accessibleName"]
+            : kind === "url"
+              ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
+              : [
+                  "kind",
+                  "options",
+                  "accessibleName",
+                  ...("preselected" in ui ? ["preselected"] : []),
+                ];
   if (
     !hasExactKeys(ui, uiKeys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1473,6 +1570,20 @@ function validateStaticInteractionUi(
     measurementExhausted,
     errors,
   );
+  if (kind === "popup") {
+    countString(ui.message, `${path}.message`);
+    countString(ui.buttonText, `${path}.buttonText`);
+  }
+  if (kind === "url") {
+    // The address is canonical.
+    if (countString(ui.url, `${path}.url`) && canonicalWebUrl(ui.url) !== ui.url)
+      errors.push(planError("TSC002", "The web address of openUrl is invalid.", `${path}.url`));
+    countString(ui.buttonText, `${path}.buttonText`);
+    if (typeof ui.alwaysButton !== "boolean")
+      errors.push(
+        planError("TSC002", "openUrl's alwaysButton must be a boolean.", `${path}.alwaysButton`),
+      );
+  }
   if (kind === "button") {
     countString(ui.buttonLabel, `${path}.buttonLabel`);
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
@@ -1602,14 +1713,37 @@ function validatePreparedInteractionUi(
           ? ["kind", "requestTemporary", "accessibleName"]
           : kind === "form"
             ? ["kind", "requestTemporary", "shape", "accessibleName"]
-            : [
-                "kind",
-                "optionsTemporary",
-                "values",
-                "accessibleName",
-                ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
-                ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
-              ];
+            : kind === "popup"
+              ? [
+                  "kind",
+                  "messageTemporary",
+                  "accessibleName",
+                  ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
+                ]
+              : kind === "url"
+                ? [
+                    "kind",
+                    "urlTemporary",
+                    "accessibleName",
+                    ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
+                    ...("alwaysButtonTemporary" in ui ? ["alwaysButtonTemporary"] : []),
+                  ]
+                : kind === "export"
+                  ? [
+                      "kind",
+                      "textTemporary",
+                      "accessibleName",
+                      ...("titleTemporary" in ui ? ["titleTemporary"] : []),
+                      ...("fileNameTemporary" in ui ? ["fileNameTemporary"] : []),
+                    ]
+                  : [
+                      "kind",
+                      "optionsTemporary",
+                      "values",
+                      "accessibleName",
+                      ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                      ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
+                    ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1688,6 +1822,26 @@ function validatePreparedInteractionUi(
     if ("backgroundTemporary" in ui)
       addTemporary(ui.backgroundTemporary, `${path}.backgroundTemporary`);
     if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
+    return;
+  }
+  if (kind === "popup") {
+    addTemporary(ui.messageTemporary, `${path}.messageTemporary`);
+    if ("buttonTextTemporary" in ui)
+      addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
+    return;
+  }
+  if (kind === "url") {
+    addTemporary(ui.urlTemporary, `${path}.urlTemporary`);
+    if ("buttonTextTemporary" in ui)
+      addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
+    if ("alwaysButtonTemporary" in ui)
+      addTemporary(ui.alwaysButtonTemporary, `${path}.alwaysButtonTemporary`);
+    return;
+  }
+  if (kind === "export") {
+    addTemporary(ui.textTemporary, `${path}.textTemporary`);
+    if ("titleTemporary" in ui) addTemporary(ui.titleTemporary, `${path}.titleTemporary`);
+    if ("fileNameTemporary" in ui) addTemporary(ui.fileNameTemporary, `${path}.fileNameTemporary`);
     return;
   }
   if (kind === "text" || kind === "number" || kind === "temporal") {
@@ -1840,7 +1994,7 @@ function validateInteractionAccessibleName(
     );
   }
   const expectedKey =
-    kind === "button"
+    kind === "button" || kind === "popup" || kind === "url" || kind === "export"
       ? "continue"
       : kind === "number"
         ? "number"
@@ -2211,6 +2365,24 @@ function validateExpressionNode(
       ) {
         errors.push(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
+        );
+      }
+      // The file functions, and `toJson` and `fromJson` unless a literal `files: false` keeps files out, may wait for
+      // the Player's file store; they lower to a file store instruction.
+      if (
+        isRecord(value.callee) &&
+        value.callee.kind === "identifier" &&
+        (value.callee.name === "fileFromBase64" ||
+          value.callee.name === "fileToBase64" ||
+          ((value.callee.name === "toJson" || value.callee.name === "fromJson") &&
+            !keepsFilesOut(value.arguments)))
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            `${value.callee.name}() must be lowered to a file store instruction.`,
+            path,
+          ),
         );
       }
       // `askImage(...)` and `askBooleans(...)` wait for the player; they lower to an interaction.
@@ -2640,4 +2812,20 @@ function invalidPlan(
   path: string,
 ): PlanValidationResult {
   return Object.freeze({ valid: false, errors: Object.freeze([planError(code, message, path)]) });
+}
+
+/** Whether the arguments of a `toJson` or `fromJson` call hold a literal `files: false`. */
+function keepsFilesOut(callArguments: unknown): boolean {
+  return (
+    Array.isArray(callArguments) &&
+    callArguments.some(
+      (argument) =>
+        isRecord(argument) &&
+        argument.kind === "named" &&
+        argument.name === "files" &&
+        isRecord(argument.value) &&
+        argument.value.kind === "literal" &&
+        argument.value.value === false,
+    )
+  );
 }

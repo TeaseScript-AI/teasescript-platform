@@ -1324,6 +1324,77 @@ let pause = max(1 minute, remaining)
 let boundedLevel = max(1, min(level, 10))
 ```
 
+### JSON and Base64
+**Status:** Accepted (Owner decision, 2026-10-13)
+
+These protected functions exchange data with other programs as text:
+
+```text
+toJson(value)
+fromJson(text, default: value)
+toBase64(text)
+fromBase64(text, default: value)
+```
+
+`toJson` and `fromJson` also take `files:`, `true` or `false`, `true` by default.
+
+`toJson` writes a value as compact JSON text:
+
+| Value | JSON |
+| --- | --- |
+| text, `integer`, `number`, `true` and `false`, `null` | the same |
+| list, set | an array, a set in its order |
+| dict, object | an object, in key order |
+| `date`, `time`, `datetime` | ISO text, as `.toISO()` gives it |
+| `absoluteDateTime` | ISO text in UTC, ending in `Z` |
+| `duration` | its number of milliseconds |
+| `speaker` | an object with a copy of its properties |
+
+A `calendarDuration`, `range`, `script`, `timer`, `media`, `messageHandle`, or permanent button cannot be written: that
+is a compile error where the types show it, and a runtime error otherwise.
+
+`fromJson` reads JSON text. An object becomes a dict in the order of its keys, an array a list, whose elements may be of
+different types, and text, numbers, `true`, `false`, and `null` stay what they are; a whole number becomes an `integer`
+and any other number a `number`. A key that appears more than once keeps its first position with its last value, as in
+a dict ([§40](#40-dictionaries)). A date or time comes back as text, which `toDate`, `toTime`, `toDateTime`, and
+`toAbsoluteDateTime` read. The compiler does not know the result's type: test it with `is`, or declare it, and the
+runtime checks it as any value whose type is not known:
+
+```text
+let tasks: string[] = fromJson(saved, default: [])
+let preset = fromJson(text, default: null)
+if preset is dict {
+    say "${preset.length} settings"
+}
+```
+
+`toBase64` encodes text as UTF-8 in standard Base64, with padding and without line breaks. `fromBase64` decodes Base64
+into UTF-8 text. It ignores spaces and line breaks, accepts the URL alphabet (`-` and `_` instead of `+` and `/`), and
+does not need the padding.
+
+`fromJson` and `fromBase64` need their `default:`, which may be any value, also `null`; a call without one is a compile
+error. Text that is not JSON, or that is not Base64 or whose bytes are not UTF-8, gives the default, never a runtime
+error.
+
+```text
+let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
+let decoded = fromJson(fromBase64(text, default: ""), default: null)
+```
+
+**Files (Owner decisions, 2026-10-13):** with files, `toJson` writes every stored file reference, of a photo or of a
+file from `fileFromBase64` ([§33](#stored-files)), as a data URL, `data:<type>;base64,…`, with the type its bytes give.
+`fromJson` turns data URLs back into stored files and gives their references; only a data URL whose bytes are of an
+image, audio, or video type of [§33](#stored-files) becomes a file, and any other data URL stays text. `files: false` keeps references
+in `toJson` and data URLs in `fromJson` as text. A package path such as `"images/a.jpg"` and any other text are never
+embedded or converted: a text is a stored file reference only when the session knows it as one, never by its shape.
+`toJson` and `fromJson` wait briefly for the Player's file store only when files are involved.
+
+```text
+let exported = toJson(preset)                     // its photos as data URLs
+let imported = fromJson(exported, default: null)  // stored files again
+let plain = toJson(preset, files: false)          // references stay text
+```
+
 ### Numeric functions
 **Status:** Accepted (Owner decision, 2026-10-07)
 
@@ -3956,6 +4027,39 @@ Rules:
 - `showPopup` has one confirmation button.
 - Yes/no questions use `askBoolean(...)`, not `showPopup`.
 
+**Status (Owner decision, 2026-10-13):** the popup is a dialog outside the chat with its message and one button, which
+closes it. The player can only close it, and `buttonText` only renames the button.
+
+**Status (Owner decision, 2026-10-13):** `showPopup`, in both forms, returns how long the popup was open until the
+player closed it as a `duration`, exactly like the elapsed waiting time `showButton` returns
+([§21](#21-blocking-button)). The return value may be ignored.
+
+```text
+let t = showPopup "Stand in the corner. Click when you're done."
+if t < 5 min {
+    say "Back already? Again."
+}
+```
+
+### Export text
+**Status:** Accepted (Owner decision, 2026-10-13)
+
+```text
+exportText(report)
+exportText(report, title: "Your report", fileName: "report.json")
+```
+
+`exportText` shows a dialog with its title and the text in a read-only code field, which scrolls when the text is
+long, and the buttons Copy, Download, and Close. The script waits until the player closes it, as for `showPopup`.
+
+- `title` is optional and defaults to `"Copy or download"`. `fileName` is optional and defaults to `"text.txt"`.
+- Copy copies the whole text. When the browser refuses or cannot copy it, the text is selected for copying, with a short
+  hint to use Download.
+- Download saves the text as the file `fileName`, of type `text/plain;charset=utf-8`.
+- Nothing enters the transcript. A reload while it waits shows it again. Copying and downloading are the player's own
+  actions, which a replay never does.
+- `exportText` gives no value.
+
 ### System notification
 
 ```text
@@ -4060,6 +4164,29 @@ openUrl("https://example.com")
 
 `openUrl(...)` performs navigation and returns no value.
 
+Button text and a button that always shows:
+
+```text
+openUrl("https://example.com", buttonText: "Claim your reward")
+openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your reward")
+```
+
+**Status (Owner decisions, 2026-10-13):** `openUrl(...)` waits until the URL is open in a new tab. That is usually
+immediate, and when the browser needs a click from the player first, the Player shows a button for it where
+`showButton` shows its button, without the URL. After a reload, a restore, or a replay the Player never opens the URL
+by itself: a restored waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another written URL is
+a compile error, and another value fails at runtime.
+
+Rules:
+
+- `buttonText` is optional and is the text of the button, `"Open link"` by default, with the rules of `showPopup`'s
+  `buttonText`.
+- `alwaysButton` is optional, `true` or `false`, and defaults to `false`. With `true` the Player always shows the
+  button, also right after a click, and the script waits for the click on it. With `false` the Player opens the URL at
+  once after a recent click and shows the button only when the browser needs that click.
+- Either way the script goes on once the tab is open.
+- A wrong type or an unknown named argument is a compile error, as for other named arguments.
+
 How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
 
 `takePhoto()` **status (Owner decisions, 2026-10-02):** `takePhoto()` captures silently from the camera stream the
@@ -4074,6 +4201,43 @@ the `save` fails like any failed persistent write (§25): the script continues w
 previous value, the photo stays usable for the current session, and no reference is persisted that would look valid
 after a reload without its photo. A string is a usable media reference only when the trusted Player media store resolves
 it; a well-formed string, including one returned by `load`, grants no access by itself.
+
+### Stored files
+**Status:** Accepted (Owner decisions, 2026-10-13)
+
+```text
+fileFromBase64(text, default: value)
+fileToBase64(file)
+```
+
+`fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
+store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
+line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
+`default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
+them as plain Base64 text. Storing a file and reading one each take a short wait, as a photo does. The result is
+recorded: a restore or a replay can reuse a recorded result without asking the store again. The Base64 text may be as long as any text.
+
+A file's type comes from its first bytes, never from a file name or the type in a data URL:
+
+| Kind | Types |
+| --- | --- |
+| Image | JPEG, PNG, GIF, WebP |
+| Audio | MP3, Ogg, WAV, M4A |
+| Video | MP4, WebM |
+
+Any other file is `application/octet-stream`. A stored file of any other type, such as SVG or HTML, is never shown or
+played: a script can only store it, pass it along, or turn it back into Base64. This rule is about stored files, whose
+bytes can come from outside the package; it does not apply to HTML or custom UI that the package's own code provides
+([`LIBRARIES.md`](../LIBRARIES.md#package-libraries)). An image works where a photo reference works, such as
+`showImage` and `save`/`load`. A stored file has the lifecycle of a photo (`takePhoto()` status above).
+
+```text
+let picture = fileFromBase64(base64, default: null)
+if picture != null {
+    showImage picture
+    save picture as "picture"
+}
+```
 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
@@ -4396,6 +4560,11 @@ speaker mistressVera
 ```
 
 This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
+
+**Status (Owner decision, 2026-10-13):** a message that names no speaker with `as` while no default speaker is set
+has no speaker, and `speaker` in it has no value. If no file of the package has a `speaker` statement that sets the
+default speaker, `speaker` in a message without `as` is compile error `TSV063`. Otherwise reading it in a message that
+has no speaker is runtime error `TSR071`.
 
 A speaker is global ([ADR 0022](../decisions/0022-multi-file-scripts.md)): declared anywhere in any file of a package,
 also inside a block or function, it is known in every file. Its name is unique in the package like that of a global

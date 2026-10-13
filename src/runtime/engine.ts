@@ -1,6 +1,8 @@
+import { executeFileStore } from "./actions/file-store.js";
 import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { leaveScopes, resolveCaptures } from "./captures.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
+import { sayStagesSelectively } from "./say-staging.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../temporal.js";
 import {
@@ -15,6 +17,10 @@ import {
   type PlanSourceLocation,
   type PlanTag,
   type PreparedInteractionUiPayload,
+  DEFAULT_EXPORT_FILE_NAME,
+  DEFAULT_EXPORT_TITLE,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
+  DEFAULT_POPUP_BUTTON_TEXT,
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
@@ -217,6 +223,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "../web-url.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
@@ -1392,6 +1399,9 @@ function executePlannedInstruction(
       );
       return;
     }
+    case "fileStore":
+      executeFileStore(instruction, snapshot, evaluator, events);
+      return;
     case "startTimer":
       startTimer(instruction, snapshot, evaluator, events);
       return;
@@ -1572,6 +1582,77 @@ function materializeInteractionUi(
       ...(prepared.backgroundTemporary === undefined
         ? {}
         : { background: backgroundColor(read(prepared.backgroundTemporary).value) }),
+      accessibleName: prepared.accessibleName,
+    };
+  } else if (prepared.kind === "popup") {
+    ui = {
+      kind: "popup",
+      message: readText(prepared.messageTemporary),
+      buttonText:
+        prepared.buttonTextTemporary === undefined
+          ? DEFAULT_POPUP_BUTTON_TEXT
+          : readText(prepared.buttonTextTemporary),
+      accessibleName: prepared.accessibleName,
+    };
+  } else if (prepared.kind === "url") {
+    // A web address is checked and made canonical as the request opens; the temporary keeps the canonical form.
+    const temporary = read(prepared.urlTemporary);
+    const url = typeof temporary.value === "string" ? canonicalWebUrl(temporary.value) : null;
+    if (url === null)
+      throw fault(
+        "TSR050",
+        `${OPEN_URL_RULE}, but this is ${describeShownValue(temporary.value)}. ${OPEN_URL_FIX}`,
+        span,
+      );
+    stagedWrites.push({ temporaryId: temporary.id, value: url });
+    const buttonText =
+      prepared.buttonTextTemporary === undefined
+        ? DEFAULT_OPEN_URL_BUTTON_TEXT
+        : readText(prepared.buttonTextTemporary);
+    const always =
+      prepared.alwaysButtonTemporary === undefined
+        ? false
+        : read(prepared.alwaysButtonTemporary).value;
+    if (typeof always !== "boolean")
+      throw fault(
+        "TSR050",
+        `'alwaysButton:' of openUrl takes true or false, but this is ${describeShownValue(always)}. Write true or false.`,
+        span,
+      );
+    ui = {
+      kind: "url",
+      url,
+      buttonText,
+      alwaysButton: always,
+      accessibleName: prepared.accessibleName,
+    };
+  } else if (prepared.kind === "export") {
+    // The text and the file name are taken as they are, so only text is either.
+    const text = read(prepared.textTemporary).value;
+    if (typeof text !== "string")
+      throw fault(
+        "TSR050",
+        `exportText needs its text as text (string), but this is ${describeShownValue(text)}.`,
+        span,
+      );
+    const fileName =
+      prepared.fileNameTemporary === undefined
+        ? DEFAULT_EXPORT_FILE_NAME
+        : read(prepared.fileNameTemporary).value;
+    if (typeof fileName !== "string")
+      throw fault(
+        "TSR050",
+        `'fileName:' of exportText takes text (string), but this is ${describeShownValue(fileName)}.`,
+        span,
+      );
+    ui = {
+      kind: "export",
+      text,
+      title:
+        prepared.titleTemporary === undefined
+          ? DEFAULT_EXPORT_TITLE
+          : readText(prepared.titleTemporary),
+      fileName,
       accessibleName: prepared.accessibleName,
     };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
@@ -1867,6 +1948,10 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
+  else if (ui.kind === "popup") strings.push(ui.message, ui.buttonText);
+  else if (ui.kind === "url") strings.push(ui.url, ui.buttonText);
+  // The exported text may be as long as any text.
+  else if (ui.kind === "export") strings.push(ui.title, ui.fileName);
   else if (ui.kind === "form") {
     // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
     for (const text of formUiTexts(ui)) strings.push(text);
@@ -1895,7 +1980,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its labels, hints, prefill or choice values, or file filters.`,
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, title, labels, hints, prefill or choice values, file filters, file name, or web address.`,
         span,
       );
     aggregate += bytes;
@@ -2557,6 +2642,24 @@ function cloneInteractionUi(
       accessibleName,
     };
   }
+  if (ui.kind === "popup")
+    return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
+  if (ui.kind === "url")
+    return {
+      kind: "url",
+      url: ui.url,
+      buttonText: ui.buttonText,
+      alwaysButton: ui.alwaysButton,
+      accessibleName,
+    };
+  if (ui.kind === "export")
+    return {
+      kind: "export",
+      text: ui.text,
+      title: ui.title,
+      fileName: ui.fileName,
+      accessibleName,
+    };
   if (ui.kind === "button")
     return {
       kind: "button",
@@ -2689,8 +2792,9 @@ function advance(snapshot: RuntimeSnapshot): void {
 /**
  * A `say` instruction evaluates visible text, pacing, and speaker output before
  * it can know whether its complete transition is representable. Evaluate that
- * work against a private canonical-state clone so a rejected pacing value cannot
- * retain RNG, warning, event, or action changes.
+ * work against a private stage so a rejected pacing value cannot retain RNG,
+ * warning, event, or action changes: copies of the parts the say changes in
+ * place, or a canonical-state clone when an expression may change any other.
  */
 function executeSayAtomically(
   instruction: Extract<Instruction, { kind: "say" }>,
@@ -2698,8 +2802,8 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = sayEvaluatesNoExpression(instruction)
-    ? expressionFreeSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
+  const stagedSnapshot = sayStagesSelectively(instruction)
+    ? selectiveSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
     : stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
@@ -2728,24 +2832,12 @@ function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
 }
 
 /**
- * Whether `executeSay` evaluates no expression of this say: its text is literal or prepared, without explicit
- * presentation, at smart or instant pacing. Any expression, even a read, can change nested state before a later step
- * rejects the say, so every other say keeps the deep staging clone.
+ * Staging for a say whose expressions change no state but the generator (`sayStagesSelectively`). Such a say replaces
+ * root fields and changes in place only the generator, the speaker warning list, and for a result-bearing say its
+ * temporaries and live messages, so it copies those and shares everything else read-only. Every field is listed so
+ * that a new snapshot field must be classified here.
  */
-function sayEvaluatesNoExpression(instruction: Extract<Instruction, { kind: "say" }>): boolean {
-  return (
-    (instruction.textTemporary !== undefined || instruction.value.kind === "literal") &&
-    instruction.presentation === null &&
-    (instruction.pacing === "smart" || instruction.pacing === "instant")
-  );
-}
-
-/**
- * Staging for a say that evaluates no expression. Such a say replaces root fields and changes only the speaker
- * warning list in place, and a result-bearing say also its temporaries and live messages, so it copies those and shares
- * everything else read-only. Every field is listed so that a new snapshot field must be classified here.
- */
-function expressionFreeSayStagingClone(
+function selectiveSayStagingClone(
   snapshot: RuntimeSnapshot,
   givesHandle: boolean,
 ): RuntimeSnapshot {
@@ -2758,7 +2850,7 @@ function expressionFreeSayStagingClone(
     speakers: snapshot.speakers,
     defaultSpeaker: snapshot.defaultSpeaker,
     contextualSpeaker: snapshot.contextualSpeaker,
-    // No random draw is reachable; the copy is constant-size.
+    // A draw advances the generator in place; the copy is constant-size.
     rng: { ...snapshot.rng },
     warnedSpeakerIds: [...snapshot.warnedSpeakerIds],
     loopFrames: snapshot.loopFrames,
@@ -2787,6 +2879,7 @@ function expressionFreeSayStagingClone(
     pendingTimerHandlers: snapshot.pendingTimerHandlers,
     stageImage: snapshot.stageImage,
     capturedImages: snapshot.capturedImages,
+    storedFiles: snapshot.storedFiles,
     scriptStorage: snapshot.scriptStorage,
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia,

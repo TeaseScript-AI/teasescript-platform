@@ -44,6 +44,7 @@ const text = ref("");
 const flag = ref(false);
 const problem = ref<string | null>(null);
 const saving = ref(false);
+const TOO_LARGE = "This value is too large to show as text. Enter a new value to replace it, or delete it.";
 
 function typeOf(value: SerializableRuntimeValue): ValueType {
   if (typeof value === "string") return "text";
@@ -73,7 +74,7 @@ watch(
       text.value = textFor(value, type.value);
     } catch (error) {
       if (!(error instanceof CheckpointError) || error.info.code !== "TSK004") throw error;
-      problem.value = "This value is too large to show as text. Enter a new value to replace it, or delete it.";
+      problem.value = TOO_LARGE;
     }
   },
   { immediate: true },
@@ -82,7 +83,7 @@ watch(
 // A change of type carries the draft over in the new type's form, so nothing typed is lost unseen: text and numbers
 // keep their text, the stored JSON form becomes or gives up a plain value where it is one, and Yes/no takes "true".
 let shownType: ValueType = type.value;
-function convertDraft() {
+function convertDraft(event: Event) {
   const from = shownType;
   const to = type.value;
   shownType = to;
@@ -96,11 +97,20 @@ function convertDraft() {
   }
   if (to === "advanced" && from !== "advanced") {
     const number = Number(text.value.trim());
-    text.value = JSON.stringify(
-      from !== "text" && NUMBER.test(text.value.trim()) && Number.isFinite(number)
-        ? number
-        : text.value,
-    );
+    try {
+      text.value = serializeValidatedRuntimeJson(
+        from !== "text" && NUMBER.test(text.value.trim()) && Number.isFinite(number)
+          ? number
+          : text.value,
+      );
+    } catch (error) {
+      if (!(error instanceof CheckpointError) || error.info.code !== "TSK004") throw error;
+      // A draft whose stored form would be longer than a text can be keeps its type and text and says so, as on open.
+      type.value = shownType = from;
+      // The type returns within the same update, so no render shows it: the select is set back here.
+      if (event.target instanceof HTMLSelectElement) event.target.value = from;
+      problem.value = TOO_LARGE;
+    }
     return;
   }
   if (from === "advanced" && to !== "advanced") {

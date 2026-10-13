@@ -5,6 +5,7 @@ import { compileSource } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { Story } from "./helpers/story-session.js";
 
 function said(source: string, seed?: number): string[] {
   const result = runValidSource(source, seed);
@@ -41,6 +42,15 @@ test("statistics of a list of numbers", () => {
       ].join("\n"),
     ),
     ["31 3.875 3.5 2.748376143938713 1 9", "1 1 1.75 6.9 9", "7 2 2.138089935299395"],
+  );
+});
+
+test("median and percentile sort a copy and leave the list in its order", () => {
+  assert.deepEqual(
+    said(
+      'let scores = [3, 9, 1]\nsay "${median(scores)} ${percentile(scores, 100)} ${scores.join(" ")}"\nexit',
+    ),
+    ["3 9 3 9 1"],
   );
 });
 
@@ -166,6 +176,82 @@ test("statistics report empty lists, values they cannot read, and percentages ou
   ];
   for (const [call, code, message] of cases)
     assert.deepEqual(failure(`${DYNAMIC}say ${call}\nexit`), [code, message], call);
+});
+
+test("a property that code checked later gives the elements reaches by:, y:, x:, and weight:", () => {
+  // Every call reads `count`, which is 0 and 2; with those weights, randomWeighted can only choose the second element.
+  const calls: [string, string][] = [
+    ['sum(items, by: "count")', "2"],
+    ['average(items, by: "count")', "1"],
+    ['median(items, by: "count")', "1"],
+    ['percentile(items, 50, by: "count")', "1"],
+    ['stddev(items, by: "count")', "1.4142135623730951"],
+    ['min(items, by: "count")', "0"],
+    ['max(items, by: "count")', "2"],
+    ['linearRegression(items, y: "count").slope', "2"],
+    ['linearRegression(items, x: "count", y: "n").slope', "1"],
+    ['randomWeighted(items, weight: "count").name', "b"],
+  ];
+  const start = 'let items = [{ name: "a", n: 1 }, { name: "b", n: 3 }]';
+  const report = `say "${calls.map(([call]) => `\${${call}}`).join(" ")}"`;
+  const expected = [calls.map(([, value]) => value).join(" ")];
+  // A function that only a timer block calls is checked after the top level, but runs during the wait.
+  const story = new Story(
+    [
+      start,
+      "timer async 1 s {",
+      "    fill()",
+      "}",
+      "wait 2 s",
+      report,
+      "exit",
+      "function fill {",
+      "    items[0].count = 0",
+      "    items[1].count = 2",
+      "}",
+    ].join("\n"),
+  ).at(10_000);
+  assert.equal(story.snapshot.failure, null);
+  assert.deepEqual(
+    story.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    expected,
+  );
+  // In a loop, the second pass reads the property that code later in the body added.
+  assert.deepEqual(
+    said(
+      [
+        start,
+        "let pass = 0",
+        "while pass < 2 {",
+        "    if pass == 1 {",
+        `        ${report}`,
+        "    }",
+        "    items[0].count = 0",
+        "    items[1].count = 2",
+        "    pass += 1",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    expected,
+  );
+  // A property that no code gives the elements stays a compile error.
+  assert.deepEqual(
+    diagnostics(`${start}\n${report}\nexit`),
+    calls.map(([call]) => [
+      "TSV043",
+      `${call.slice(0, call.indexOf("("))}(...): the objects in this list have no property 'count'.`,
+      '"count"',
+    ]),
+  );
+  // Code that gives only one element the property compiles, and the runtime reports the other.
+  const partly = new Story(
+    `${start}\ntimer async 1 s {\n    items[0].count = 2\n}\nwait 2 s\nsay "\${sum(items, by: "count")}"\nexit`,
+  ).at(10_000);
+  assert.deepEqual(
+    [partly.snapshot.failure?.code, partly.snapshot.failure?.message],
+    ["TSR060", "sum(...): an object in the list has no property 'count'."],
+  );
 });
 
 test("statistics and trends keep their precision for equal, close, tiny, and huge values", () => {
@@ -433,6 +519,21 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
     "TSR016",
     "Sets have no method 'indexOf'.",
   ]);
+});
+
+test("a number, text, or boolean equals only the same value of its kind, also among lists, and 0 equals -0", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let mixed: (number | boolean | string | number[])[] = [[1], true, "1", 1, 0, 1]',
+        'say "${mixed.indexOf(1)} ${mixed.lastIndexOf(1)} ${mixed.indexOf(-0)} ${mixed.lastIndexOf(true)} ${mixed.indexOf("1")} ${mixed.indexOf(false)} ${mixed.lastIndexOf([1])} ${mixed.contains(0)}"',
+        "mixed.remove(1)",
+        'say "${mixed.length} ${mixed.indexOf(1)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["3 5 4 1 2 null 0 true", "5 4"],
+  );
 });
 
 test("get gives the element at an index, or its default for an index the list does not have", () => {

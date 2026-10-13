@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 87;
+export const INSTRUCTION_PLAN_VERSION = 91;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -163,6 +163,7 @@ export type Instruction =
   | StopAudioInstruction
   | InteractionInstruction
   | CaptureInstruction
+  | FileStoreInstruction
   | GotoInstruction
   | TransferInstruction
   | SetFallbackInstruction
@@ -543,11 +544,30 @@ export interface StopAudioInstruction extends InstructionBase {
   readonly kind: "stopAudio";
 }
 
+/** The text of a popup's button when `showPopup` gives no `buttonText:` (V30 §31). */
+export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
+/** The text of the button of `openUrl` when it gives no `buttonText:` (V30 §33). */
+export const DEFAULT_OPEN_URL_BUTTON_TEXT = "Open link";
+/** The title of the dialog of `exportText` when it gives no `title:` (V30 §31). */
+export const DEFAULT_EXPORT_TITLE = "Copy or download";
+/** The name of the file that `exportText` downloads when it gives no `fileName:` (V30 §31). */
+export const DEFAULT_EXPORT_FILE_NAME = "text.txt";
+
 export type InteractionKind =
-  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form";
+  | "button"
+  | "text"
+  | "number"
+  | "choice"
+  | "temporal"
+  | "image"
+  | "form"
+  | "popup"
+  | "url"
+  | "export";
 /**
- * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
- * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
+ * `choice` is the value of the selected choice option; a button or popup used as a value yields a `duration`;
+ * `temporal` is the date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's
+ * answers.
  */
 export type InteractionResultDomain =
   "none" | "string" | "number" | "choice" | "duration" | "temporal" | "form";
@@ -616,6 +636,40 @@ export type InteractionUiPayload =
        * it is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
        */
       readonly preselected?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `showPopup` (V30 §31): a dialog outside the chat with the message and one button, which closes it. Neither
+       * enters the transcript.
+       */
+      readonly kind: "popup";
+      readonly message: string;
+      readonly buttonText: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `openUrl` (V30 §33): the Player opens the canonical web address `url` in a new tab, at once after the player's
+       * recent click, otherwise, and always with `alwaysButton`, from its button with `buttonText` where `showButton`
+       * shows its button.
+       */
+      readonly kind: "url";
+      readonly url: string;
+      readonly buttonText: string;
+      readonly alwaysButton: boolean;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `exportText` (V30 §31): a dialog outside the chat with the title and the text, which the player may copy or
+       * download as a file named `fileName`, until they close it. None of it enters the transcript. The text may be as
+       * long as any text; it does not count toward the interaction's text limit.
+       */
+      readonly kind: "export";
+      readonly text: string;
+      readonly title: string;
+      readonly fileName: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -762,6 +816,34 @@ export type PreparedInteractionUiPayload =
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
+      readonly kind: "popup";
+      /** Hold the evaluated message and button text until the popup opens, then their text. */
+      readonly messageTemporary: number;
+      /** Absent when the button keeps its default text. */
+      readonly buttonTextTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "url";
+      /** Holds the evaluated address until the request opens, then its canonical form. */
+      readonly urlTemporary: number;
+      /** Holds the evaluated button text until the request opens, then its text; absent for the default text. */
+      readonly buttonTextTemporary?: number;
+      /** Holds the evaluated `alwaysButton:`; absent for `false`. */
+      readonly alwaysButtonTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "export";
+      /** Hold the evaluated text, title, and file name until the dialog opens, then their text. */
+      readonly textTemporary: number;
+      /** Absent when the dialog keeps its default title. */
+      readonly titleTemporary?: number;
+      /** Absent when the file keeps its default name. */
+      readonly fileNameTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
       readonly kind: "image";
       /**
        * An object holding the written arguments of `askImage`, by name and in source order, with the question as
@@ -846,6 +928,28 @@ export interface CaptureInstruction extends InstructionBase {
    * the image catalog with them (ADR 0023). `null` without `tags:`.
    */
   readonly tags: ExpressionPlan | null;
+  readonly destinationTemporary: number;
+}
+
+/** The calls that may use the Player's file store, which `fileStore` instructions run. */
+export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "toJson" | "fromJson";
+
+/**
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, or a `toJson` or `fromJson` without a written
+ * `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store or read
+ * them and waits, with the instruction itself as the continuation, and once the answer is handed off it runs again and
+ * gives the result. Without files it gives the result at once. Its operands are temporaries or literals, so both runs
+ * read the same values.
+ */
+export interface FileStoreInstruction extends InstructionBase {
+  readonly kind: "fileStore";
+  readonly call: FileStoreCall;
+  /** The text, file, or value. */
+  readonly value: ExpressionPlan;
+  /** The `default:` of `fileFromBase64` and `fromJson`; `null` for the others. */
+  readonly default: ExpressionPlan | null;
+  /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
+  readonly files: ExpressionPlan | null;
   readonly destinationTemporary: number;
 }
 

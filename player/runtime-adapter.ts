@@ -35,6 +35,7 @@ import {
   type CapturedMediaAdmission,
   type CaptureUnavailableReason,
   type RuntimeCaptureActionSnapshot,
+  type RuntimeFileStoreActionSnapshot,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
   type RuntimeSessionCall,
@@ -113,6 +114,11 @@ export interface PlayerRuntimeSession {
   readonly revision: number;
   /** What this publication shows; see `PlayerRuntimeState`. */
   readonly state: PlayerRuntimeState;
+  /**
+   * The first event sequence this session's own runs emitted: a restored session came with the events before it, as
+   * history. `0` for a session that started fresh.
+   */
+  readonly liveEventSequence: number;
   readonly events: readonly InterpreterEvent[];
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
@@ -425,6 +431,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly debugMode?: boolean;
   /** Which random draws the host decides or pauses at from Start (`docs/RUNTIME.md#controlled-randomness`). */
   readonly randomControl?: RandomControlOptions;
+  /** The references of the stored files the stored values hold, which the host's file store vouches for (V30 §33). */
+  readonly storedFiles?: readonly string[];
 }
 
 /**
@@ -526,6 +534,7 @@ export function createPlayerRuntimeSession(
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
     ...(options.debugMode === undefined ? {} : { debugMode: options.debugMode }),
+    ...(options.storedFiles === undefined ? {} : { storedFiles: options.storedFiles }),
   });
   const recorder = options.recorder ?? null;
   const debugTrace = options.debugTrace ?? null;
@@ -654,7 +663,13 @@ function restoredSession(
   debugTrace: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
   const runtime = createRuntimeSession(plan, snapshot);
-  const session = emptySession(runtime.plan, runtime, recorder, debugTrace);
+  const session = emptySession(
+    runtime.plan,
+    runtime,
+    recorder,
+    debugTrace,
+    snapshot.nextEventSequence,
+  );
   if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
   // Restored values are trustworthy, but their history is not part of the checkpoint.
   debugTrace?.reset("restore");
@@ -706,6 +721,28 @@ export function playerRuntimeForeground(
         accessibleName,
         label: action.ui.buttonLabel,
         ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
+      });
+    case "popup":
+      return Object.freeze({
+        kind: "popup",
+        accessibleName,
+        message: action.ui.message,
+        buttonText: action.ui.buttonText,
+      });
+    case "url":
+      return Object.freeze({
+        kind: "open-url",
+        accessibleName,
+        url: action.ui.url,
+        buttonText: action.ui.buttonText,
+      });
+    case "export":
+      return Object.freeze({
+        kind: "export-text",
+        accessibleName,
+        title: action.ui.title,
+        text: action.ui.text,
+        fileName: action.ui.fileName,
       });
     case "text":
       return Object.freeze({
@@ -909,10 +946,14 @@ export type PlayerDebugWaitKind =
   | "choice"
   | "input"
   | "image"
+  | "popup"
+  | "url"
+  | "export"
   | "pacing"
   | "media"
   | "save"
-  | "photo";
+  | "photo"
+  | "file";
 
 /** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
 export interface PlayerDebugCall {
@@ -983,7 +1024,10 @@ function debugWaitKind(
     case "interaction":
       return action.interactionKind === "button" ||
         action.interactionKind === "choice" ||
-        action.interactionKind === "image"
+        action.interactionKind === "image" ||
+        action.interactionKind === "popup" ||
+        action.interactionKind === "url" ||
+        action.interactionKind === "export"
         ? action.interactionKind
         : "input";
     case "chatPacingGate":
@@ -994,6 +1038,8 @@ function debugWaitKind(
       return "save";
     case "capture":
       return "photo";
+    case "fileStore":
+      return "file";
   }
 }
 
@@ -1140,6 +1186,49 @@ export function answerPlayerRuntimeCapture(
       ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
       : { kind: "unavailable", reason: answer.reason };
   const request = { actionId, actionKind: "capture", payload };
+  const operation = session.engine.call(
+    session,
+    "completeAction",
+    [request],
+    (runtime, admission) =>
+      runtime.completeAction(
+        request,
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
+      ),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation, "completed"),
+    outcome: operation.outcome,
+  });
+}
+
+/** The file store the session waits for, or `null`. */
+export function activePlayerRuntimeFileStore(
+  state: PlayerRuntimeState,
+): RuntimeFileStoreActionSnapshot | null {
+  const action = state.status === "waiting" ? state.foregroundAction : null;
+  return action?.kind === "fileStore" ? action : null;
+}
+
+/** The Player's answer to a file store: the stored files' references, the read files' Base64, or a failure. */
+export type PlayerFileStoreAnswer =
+  | { readonly kind: "stored"; readonly references: readonly string[] }
+  | { readonly kind: "read"; readonly files: readonly string[] }
+  | { readonly kind: "failed" };
+
+/**
+ * Answers a pending file store and continues on success. A stored file's reference is accepted only when
+ * `capturedMedia` vouches for it. On `executionPending` the host runs the session and offers the same answer again.
+ */
+export function answerPlayerRuntimeFileStore(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  answer: PlayerFileStoreAnswer,
+  capturedMedia?: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const request = { actionId, actionKind: "fileStore", payload: answer };
   const operation = session.engine.call(
     session,
     "completeAction",
@@ -1536,6 +1625,59 @@ export function skipPlayerRuntimeImage(
   return completePlayerAction(session, action, { kind: "skip" });
 }
 
+/**
+ * The `openUrl` the Player can settle now, or `null`: the presented request, while nothing else can run and scene time
+ * has caught up, so that settling it cannot be refused once the tab is open. `atOnce` says whether the Player may open
+ * it without the click on its button: this session's own run requested it, written without `alwaysButton: true`. A
+ * request that a restore, a rewind, or a reload brought back is not live, and the Player never opens it by itself.
+ */
+export function playerRuntimeUrlRequest(
+  session: PlayerRuntimeSession,
+): { readonly actionId: number; readonly url: string; readonly atOnce: boolean } | null {
+  const { state } = session;
+  const action = activeInteraction(state);
+  if (
+    action?.ui.kind !== "url" ||
+    state.status !== "waiting" ||
+    state.runnable ||
+    state.randomDraw !== null ||
+    state.currentSessionTimeMs < state.observedSessionTimeMs
+  )
+    return null;
+  return Object.freeze({
+    actionId: action.actionId,
+    url: action.ui.url,
+    atOnce: !action.ui.alwaysButton && action.requestEventSequence >= session.liveEventSequence,
+  });
+}
+
+/** Reports that the Player opened the presented `openUrl`'s address in a new tab, which continues the script. */
+export function openPlayerRuntimeUrl(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "url") return null;
+  return completePlayerAction(session, action, { kind: "opened" });
+}
+
+/** Closes the presented popup, which continues the script. */
+export function closePlayerRuntimePopup(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "popup") return null;
+  return completePlayerAction(session, action, { kind: "activate" });
+}
+
+/** Closes the presented `exportText` dialog, which continues the script; copying and downloading leave it open. */
+export function closePlayerRuntimeExport(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "export") return null;
+  return completePlayerAction(session, action, { kind: "close" });
+}
+
 export function activatePlayerRuntimeButton(
   session: PlayerRuntimeSession,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
@@ -1645,7 +1787,7 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 
 /**
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
- * `save`, `delete` or `takePhoto()` waits for the host, or the session is paused at a random draw.
+ * `save`, `delete`, `takePhoto()`, or file store waits for the host, or the session is paused at a random draw.
  */
 export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
   const pending = state.foregroundAction?.kind;
@@ -1653,7 +1795,8 @@ export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
     state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
     pending === "storageWrite" ||
-    pending === "capture"
+    pending === "capture" ||
+    pending === "fileStore"
   );
 }
 
@@ -2083,6 +2226,7 @@ function emptySession(
   runtime: RuntimeSession,
   recorder: DebugRecorder | null,
   debugTrace: RuntimeDebugContext | null,
+  liveEventSequence = 0,
 ): PlayerRuntimeSession {
   const engine = new PlayerRuntimeEngine(runtime, 0);
   return Object.freeze({
@@ -2090,6 +2234,7 @@ function emptySession(
     engine,
     revision: 0,
     state: engine.stateAt({ revision: 0, recorder: null }),
+    liveEventSequence,
     recorder,
     debugTrace,
     events: [],

@@ -126,6 +126,25 @@ export function isConversionResult(result: ConversionResult, value: unknown): bo
 /** `min` and `max` of two or more numbers or durations (V30 §13). */
 export const MIN_MAX_BUILTINS: ReadonlySet<string> = new Set(["min", "max"]);
 
+/** The functions that turn values into JSON or Base64 text and back, to exchange data with other programs (V30 §13). */
+export const DATA_TEXT_FUNCTIONS: ReadonlySet<string> = new Set([
+  "toJson",
+  "fromJson",
+  "toBase64",
+  "fromBase64",
+]);
+
+/**
+ * Why `toJson` cannot write a value, after "which": a handle exists only in the current session, and a calendar duration,
+ * a range, and a script reference have no JSON form.
+ */
+export function unwritableJsonReason(session: boolean): string {
+  return session ? "exists only in the current session" : "has no JSON form";
+}
+
+export const WRITABLE_JSON_FIX =
+  "Write plain values, such as text, numbers, lists, or dicts, instead.";
+
 /**
  * The number written in `text`: the decimal or scientific form `askNumber` accepts, with surrounding whitespace
  * ignored, or `undefined` when the text is not such a finite number.

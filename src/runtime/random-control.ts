@@ -447,6 +447,12 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
       return instruction.image === null ? [] : [instruction.image];
     case "capture":
       return instruction.tags === null ? [] : [instruction.tags];
+    case "fileStore":
+      return [
+        instruction.value,
+        ...(instruction.default === null ? [] : [instruction.default]),
+        ...(instruction.files === null ? [] : [instruction.files]),
+      ];
     case "storageWrite":
       return instruction.value === null ? [instruction.key] : [instruction.value, instruction.key];
     case "playMedia":

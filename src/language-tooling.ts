@@ -893,6 +893,12 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "showImageStatement":
       children.push({ kind: "expression", node: statement.image });
       return;
+    case "showPopupStatement":
+    case "openUrlStatement":
+    case "exportTextStatement":
+      for (const argument of statement.arguments)
+        children.push({ kind: "expression", node: argument.value });
+      return;
     case "saveStatement":
       children.push({ kind: "expression", node: statement.value });
       children.push({ kind: "expression", node: statement.key });
@@ -999,6 +1005,10 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       children.push({ kind: "expression", node: expression.callee });
       if (expression.presentation !== undefined)
         children.push({ kind: "expression", node: expression.presentation });
+      for (const argument of expression.arguments)
+        children.push({ kind: "expression", node: argument.value });
+      return;
+    case "showPopupExpression":
       for (const argument of expression.arguments)
         children.push({ kind: "expression", node: argument.value });
       return;

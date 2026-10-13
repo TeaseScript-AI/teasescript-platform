@@ -103,6 +103,8 @@ export function expressionChildren(expression: Expression): readonly Expression[
         ...(expression.presentation === undefined ? [] : [expression.presentation]),
         ...expression.arguments.map((argument) => argument.value),
       ];
+    case "showPopupExpression":
+      return expression.arguments.map((argument) => argument.value);
     case "unaryExpression":
     case "unitExpression":
       return [expression.operand];

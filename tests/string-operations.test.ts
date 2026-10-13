@@ -188,6 +188,24 @@ test("split keeps empty parts, replace is literal, and list join converts scalar
   );
 });
 
+test("every split gives a list of its own, which can change without changing the text or another split", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let line = "a,b"',
+        'let first = line.split(",")',
+        'first.add("c")',
+        'first[0] = "z"',
+        'let letters = "ab".split("")',
+        'letters[1] = "y"',
+        'say "${line} ${first.join("+")} ${line.split(",").join("+")} ${letters.join("+")} ${"ab".split("").join("+")}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["a,b z+b+c a+b a+y a+b"],
+  );
+});
+
 test("positions stay on code points for combining marks, expanding case, and lone surrogates", () => {
   assert.deepEqual(
     said(
@@ -482,7 +500,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "TSR017",
       "The value null has no property 'length'. Check that it is not null first.",
     ],
-    ["say value.nope()\nexit", { value: "abc" }, "TSR016", "Text has no method 'nope'."],
+    ["say value.add(1)\nexit", { value: "abc" }, "TSR016", "Text has no method 'add'."],
     [
       "say value.size\nexit",
       { value: "abc" },

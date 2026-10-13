@@ -59,6 +59,8 @@ export interface RuntimeResumeEquivalenceOptions {
     snapshot: RuntimeSnapshot,
     events: readonly InterpreterEvent[],
   ) => number | null;
+  /** Runs the plan this makes from the compiled one instead, such as one whose says all stage deeply. */
+  readonly transformPlan?: (plan: InstructionPlan) => InstructionPlan;
 }
 
 /** How the simulated Player makes progress while execution waits. */
@@ -114,7 +116,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: source must compile without diagnostics`,
   );
   assert.notEqual(compiled.plan, null, `${scenario}: compilation must produce a plan`);
-  const plan = compiled.plan!;
+  const plan = options.transformPlan?.(compiled.plan!) ?? compiled.plan!;
 
   const initialPlanValidation = validateInstructionPlan(plan);
   assert.equal(

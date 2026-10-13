@@ -89,6 +89,7 @@ import {
   visibleText,
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
+import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -125,6 +126,7 @@ import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
+  clearSerializableDict,
   clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
@@ -141,6 +143,7 @@ import {
   SerializableValueError,
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
+  setOwnedSerializableDictValue,
   type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
@@ -236,6 +239,7 @@ import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
   CONVERSION_RESULTS,
+  DATA_TEXT_FUNCTIONS,
   describeConversionResult,
   isConversionName,
   isConversionResult,
@@ -413,6 +417,9 @@ export class Evaluator {
           expression.temporaryId,
           expression.span,
         );
+        // A prepared message reads `speaker` from the temporary that holds its speaker, `null` when it has none.
+        if (value === null && speakerTemporaries(this.plan).has(expression.temporaryId))
+          throw noSpeaker(expression.span);
         this.trace?.readTemporary(this.callFrameId(), expression.temporaryId, value);
         return value;
       }
@@ -706,7 +713,11 @@ export class Evaluator {
           pending.pop();
           continue;
         }
-        if (expression.kind === "identifier") {
+        // The contextual `speaker` is no variable, so it is read as a value below, like any other expression.
+        if (
+          expression.kind === "identifier" &&
+          !(expression.name === "speaker" && this.snapshot.contextualSpeaker !== null)
+        ) {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           trace?.readBinding(location.frame.id, expression.name, location.binding.value);
@@ -859,13 +870,11 @@ export class Evaluator {
           }
           if (frame.stage === 2) {
             // A later entry with an equal key replaces the earlier one in its position.
-            const entryValue = result.owned
-              ? result.value
-              : cloneCapturedSerializableValue(result.value);
-            const existing = getSerializableDictEntry(frame.dict!, frame.key!);
-            if (existing === undefined)
-              frame.dict!.entries.push({ key: frame.key!, value: entryValue });
-            else existing.value = entryValue;
+            setOwnedSerializableDictValue(
+              frame.dict!,
+              frame.key!,
+              result.owned ? result.value : cloneCapturedSerializableValue(result.value),
+            );
             frame.index += 1;
           }
           if (frame.index < expression.entries.length) {
@@ -1205,6 +1214,8 @@ export class Evaluator {
   }
 
   #unknownName(name: string, span: SourceSpan): RuntimeFault {
+    // `speaker` is no variable: a message with a speaker reads it before any lookup, so this message has none.
+    if (name === "speaker") return noSpeaker(span);
     return (
       this.#unsetVariable(name, span) ??
       fault(
@@ -2062,6 +2073,8 @@ export class Evaluator {
           expression.arguments[0]?.value,
           expression.span,
         );
+      if (DATA_TEXT_FUNCTIONS.has(name))
+        return this.#dataTextFunction(name, positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
@@ -2531,7 +2544,7 @@ export class Evaluator {
     if (name === "clear") {
       if (receiver.entries.length > 0) {
         freezePreparedReferenceDescendants(this.snapshot, receiver);
-        receiver.entries.length = 0;
+        clearSerializableDict(receiver);
       }
       return null;
     }
@@ -3332,6 +3345,64 @@ export class Evaluator {
       : withoutNegativeZero(Math.trunc(number));
   }
 
+  /**
+   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13), `toJson` and `fromJson` with `files: false`. Text that
+   * does not read as JSON or Base64, or a value that is not text, gives the `default:` of a reading function, never a
+   * runtime error.
+   */
+  #dataTextFunction(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const reads = name === "fromJson" || name === "fromBase64";
+    // Only a `toJson` or `fromJson` with a written `files: false` is an ordinary call; with files it is a file store.
+    const takesFiles = name === "toJson" || name === "fromJson";
+    if (takesFiles && named.files !== undefined && named.files !== false)
+      throw fault(
+        "TSR028",
+        internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
+        span,
+      );
+    const names = Object.keys(named).filter((key) => !takesFiles || key !== "files");
+    if (
+      positional.length !== 1 ||
+      (reads ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
+    )
+      throw fault(
+        "TSR028",
+        reads
+          ? `${name}(...) takes one text and a default:, such as ${name}(text, default: null).`
+          : `${name}(...) takes one ${name === "toJson" ? "value" : "text"} and no named arguments.`,
+        span,
+      );
+    const value = positional[0]!;
+    if (name === "toJson")
+      return jsonText(
+        value,
+        (speaker) => this.speakerById(speaker.speakerId, span).properties,
+        span,
+      );
+    if (name === "toBase64") {
+      if (typeof value !== "string")
+        throw fault(
+          "TSR059",
+          `toBase64(...) encodes text (string), not ${describeRuntimeValue(value)}.`,
+          span,
+        );
+      return base64Text(value, span);
+    }
+    const read =
+      typeof value !== "string"
+        ? undefined
+        : name === "fromJson"
+          ? valueFromJson(value)
+          : textFromBase64(value);
+    // JSON's null is a value; only text that does not read gives the default.
+    return read === undefined ? named.default! : read;
+  }
+
   /** `min` or `max` of two or more values that are all numbers, all durations, or all date or time values of one kind. */
   #minMaxBuiltin(
     name: string,
@@ -3565,6 +3636,9 @@ export class Evaluator {
     value: SerializableRuntimeValue,
     last = false,
   ): number {
+    // A scalar equals only the same scalar, as strict equality compares it; runtime numbers are never NaN.
+    if (value === null || typeof value !== "object")
+      return last ? items.lastIndexOf(value) : items.indexOf(value);
     for (let step = 0; step < items.length; step += 1) {
       const index = last ? items.length - 1 - step : step;
       if (serializableEquals(items[index]!, value)) return index;
@@ -4441,6 +4515,34 @@ function notComparable(
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
+}
+
+/** `speaker` in a message that names no speaker with `as` while no default speaker is set (V30 §37). */
+function noSpeaker(span: SourceSpan): RuntimeFault {
+  return fault(
+    "TSR071",
+    "This message has no speaker, so 'speaker' has no value: it names none with 'as', and no default speaker is set. Give it one with 'as name', or set a default speaker with 'speaker name' before it.",
+    span,
+  );
+}
+
+const speakerTemporaryIds = new WeakMap<InstructionPlan, ReadonlySet<number>>();
+
+/** The temporaries that hold the speaker of a prepared message for its `speaker` reads, collected once per plan. */
+function speakerTemporaries(plan: InstructionPlan): ReadonlySet<number> {
+  let ids = speakerTemporaryIds.get(plan);
+  if (ids === undefined) {
+    ids = new Set(
+      plan.instructions.flatMap((instruction) =>
+        instruction.kind === "prepareSayContextualSpeaker" ||
+        instruction.kind === "prepareInteractionSpeaker"
+          ? [instruction.destinationTemporary]
+          : [],
+      ),
+    );
+    speakerTemporaryIds.set(plan, ids);
+  }
+  return ids;
 }
 
 interface EvaluatedExpression {

@@ -17,10 +17,7 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import { describeRuntimeValue, isAnyDuration, isDuration } from "./value-predicates.js";
-import {
-  createCapturedSerializableList,
-  type SerializableRuntimeValue,
-} from "./serializable-values.js";
+import type { SerializableRuntimeValue } from "./serializable-values.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -194,8 +191,9 @@ export function callStringMethod(
       const startOffset = utf16Offset(text, start);
       return text.slice(startOffset, utf16Offset(text, end, startOffset, start));
     }
+    // The parts are a new array of text that nothing else holds, so the list takes it without a copy.
     case "split": {
-      if (texts[0] === "") return createCapturedSerializableList(Array.from(text));
+      if (texts[0] === "") return { kind: "list", items: Array.from(text) };
       const parts: string[] = [];
       let last = 0;
       for (const match of literalMatches(text, texts[0]!, false)) {
@@ -203,7 +201,7 @@ export function callStringMethod(
         last = match + texts[0]!.length;
       }
       parts.push(text.slice(last));
-      return createCapturedSerializableList(parts);
+      return { kind: "list", items: parts };
     }
     case "replace": {
       // Only a longer replacement can make the text longer; then the matches are counted first, unless even a match at

@@ -17,6 +17,9 @@ export type Statement =
   | HideImageStatement
   | ShowCameraStatement
   | HideCameraStatement
+  | ShowPopupStatement
+  | OpenUrlStatement
+  | ExportTextStatement
   | ShowPermanentButtonStatement
   | PlayMediaStatement
   | StopAudioStatement
@@ -193,6 +196,43 @@ export interface ShowCameraExpression {
 /** `hideCamera`: hides every camera view. */
 export interface HideCameraStatement {
   readonly kind: "hideCameraStatement";
+  readonly span: SourceSpan;
+}
+
+/**
+ * Shared data of `showPopup <message>`, or the call `showPopup(message: ..., buttonText: ...)` (V30 §31), whose message
+ * may also be written without its name, first. The command form is one positional argument. It waits until the player
+ * closes the popup.
+ */
+export interface ShowPopupParts {
+  readonly arguments: readonly CallArgument[];
+  readonly span: SourceSpan;
+}
+
+/** A popup whose elapsed-time result is ignored. */
+export interface ShowPopupStatement extends ShowPopupParts {
+  readonly kind: "showPopupStatement";
+}
+
+/** A popup used as a value; like `showButton`, it evaluates to the elapsed waiting time as a `duration`. */
+export interface ShowPopupExpression extends ShowPopupParts {
+  readonly kind: "showPopupExpression";
+}
+
+/** `openUrl(<url>)` (V30 §33): offers the player the URL to open; it gives no value. */
+export interface OpenUrlStatement {
+  readonly kind: "openUrlStatement";
+  readonly arguments: readonly CallArgument[];
+  readonly span: SourceSpan;
+}
+
+/**
+ * `exportText(<text>, title: ..., fileName: ...)` (V30 §31): shows the text for the player to copy or download, and
+ * waits until the player closes it; it gives no value.
+ */
+export interface ExportTextStatement {
+  readonly kind: "exportTextStatement";
+  readonly arguments: readonly CallArgument[];
   readonly span: SourceSpan;
 }
 
@@ -624,6 +664,7 @@ export type Expression =
   | InteractionExpression
   | SayExpression
   | ShowButtonExpression
+  | ShowPopupExpression
   | TimerExpression
   | PlayMediaExpression
   | ShowCameraExpression

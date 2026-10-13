@@ -104,6 +104,11 @@ export function requiredInstructionTemporaries(
     case "capture":
       if (instruction.tags !== null) collect(instruction.tags);
       break;
+    case "fileStore":
+      collect(instruction.value);
+      if (instruction.default !== null) collect(instruction.default);
+      if (instruction.files !== null) collect(instruction.files);
+      break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);
       collect(instruction.key);
@@ -126,6 +131,22 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.backgroundTemporary);
           if (instruction.preparedUi.timeoutTemporary !== undefined)
             output.add(instruction.preparedUi.timeoutTemporary);
+        } else if (instruction.preparedUi.kind === "url") {
+          output.add(instruction.preparedUi.urlTemporary);
+          if (instruction.preparedUi.buttonTextTemporary !== undefined)
+            output.add(instruction.preparedUi.buttonTextTemporary);
+          if (instruction.preparedUi.alwaysButtonTemporary !== undefined)
+            output.add(instruction.preparedUi.alwaysButtonTemporary);
+        } else if (instruction.preparedUi.kind === "popup") {
+          output.add(instruction.preparedUi.messageTemporary);
+          if (instruction.preparedUi.buttonTextTemporary !== undefined)
+            output.add(instruction.preparedUi.buttonTextTemporary);
+        } else if (instruction.preparedUi.kind === "export") {
+          output.add(instruction.preparedUi.textTemporary);
+          if (instruction.preparedUi.titleTemporary !== undefined)
+            output.add(instruction.preparedUi.titleTemporary);
+          if (instruction.preparedUi.fileNameTemporary !== undefined)
+            output.add(instruction.preparedUi.fileNameTemporary);
         } else if (
           instruction.preparedUi.kind === "image" ||
           instruction.preparedUi.kind === "form"
@@ -167,6 +188,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
     case "capture":
+    case "fileStore":
       return new Set([instruction.destinationTemporary]);
     case "say":
       return instruction.destinationTemporary === undefined
