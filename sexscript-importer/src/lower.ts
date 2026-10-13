@@ -16110,8 +16110,8 @@ function isJsonValue(node: AstNode | null, context: LowerContext): boolean {
     return isJsonValue(asNode(node.left), context);
   const called =
     node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
-  if (called === null || !context.functions.has(called)) return false;
-  // A closure of the file itself, else one of another file.
+  if (called === null) return false;
+  // A closure of the file itself, else one of another file, such as a module's method that another module calls.
   const own = context.mapUses.jsonClosures.get(context.sourceName)?.get(called);
   return own ?? context.mapUses.jsonFunctions.has(called);
 }
