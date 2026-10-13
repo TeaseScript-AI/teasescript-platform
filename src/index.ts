@@ -403,6 +403,7 @@ export type {
   ShowImageStatement,
   ShowPopupStatement,
   OpenUrlStatement,
+  ExportTextStatement,
   HideImageStatement,
   MediaCue,
   MediaHandlers,

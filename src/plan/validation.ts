@@ -1327,19 +1327,20 @@ function validateInteractionInstruction(
       "form",
       "popup",
       "url",
+      "export",
     ])
   ) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
-  // A form reads its fields when it opens, so it is always prepared.
-  if (kind === "form" && !prepared)
-    errors.push(planError("TSC002", "A form interaction must be prepared.", path));
+  // A form reads its fields when it opens, and `exportText` its text, so both are always prepared.
+  if ((kind === "form" || kind === "export") && !prepared)
+    errors.push(planError("TSC002", `A ${kind} interaction must be prepared.`, path));
   if (value.target !== "standardChat")
     errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
   const ui = prepared ? value.preparedUi : value.ui;
   const expected =
-    kind === "button" || kind === "popup" || kind === "url"
+    kind === "button" || kind === "popup" || kind === "url" || kind === "export"
       ? value.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1361,11 +1362,15 @@ function validateInteractionInstruction(
       ),
     );
   }
-  // `openUrl` gives no value.
-  if (kind === "url") {
+  // `openUrl` and `exportText` give no value.
+  if (kind === "url" || kind === "export") {
     if (value.destinationTemporary !== null)
       errors.push(
-        planError("TSC002", "openUrl has no result destination.", `${path}.destinationTemporary`),
+        planError(
+          "TSC002",
+          `${kind === "url" ? "openUrl" : "exportText"} has no result destination.`,
+          `${path}.destinationTemporary`,
+        ),
       );
   } else if ((kind !== "button" && kind !== "popup") || value.destinationTemporary !== null) {
     validateTemporaryId(
@@ -1659,14 +1664,22 @@ function validatePreparedInteractionUi(
                     ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
                     ...("alwaysButtonTemporary" in ui ? ["alwaysButtonTemporary"] : []),
                   ]
-                : [
-                    "kind",
-                    "optionsTemporary",
-                    "values",
-                    "accessibleName",
-                    ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
-                    ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
-                  ];
+                : kind === "export"
+                  ? [
+                      "kind",
+                      "textTemporary",
+                      "accessibleName",
+                      ...("titleTemporary" in ui ? ["titleTemporary"] : []),
+                      ...("fileNameTemporary" in ui ? ["fileNameTemporary"] : []),
+                    ]
+                  : [
+                      "kind",
+                      "optionsTemporary",
+                      "values",
+                      "accessibleName",
+                      ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+                      ...("booleanPrefill" in ui ? ["booleanPrefill"] : []),
+                    ];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1759,6 +1772,12 @@ function validatePreparedInteractionUi(
       addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
     if ("alwaysButtonTemporary" in ui)
       addTemporary(ui.alwaysButtonTemporary, `${path}.alwaysButtonTemporary`);
+    return;
+  }
+  if (kind === "export") {
+    addTemporary(ui.textTemporary, `${path}.textTemporary`);
+    if ("titleTemporary" in ui) addTemporary(ui.titleTemporary, `${path}.titleTemporary`);
+    if ("fileNameTemporary" in ui) addTemporary(ui.fileNameTemporary, `${path}.fileNameTemporary`);
     return;
   }
   if (kind === "text" || kind === "number" || kind === "temporal") {
@@ -1911,7 +1930,7 @@ function validateInteractionAccessibleName(
     );
   }
   const expectedKey =
-    kind === "button" || kind === "popup" || kind === "url"
+    kind === "button" || kind === "popup" || kind === "url" || kind === "export"
       ? "continue"
       : kind === "number"
         ? "number"

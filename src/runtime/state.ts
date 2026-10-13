@@ -965,6 +965,14 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       alwaysButton: ui.alwaysButton,
       accessibleName,
     };
+  if (ui.kind === "export")
+    return {
+      kind: "export",
+      text: ui.text,
+      title: ui.title,
+      fileName: ui.fileName,
+      accessibleName,
+    };
   if (ui.kind === "button")
     return {
       kind: "button",

@@ -13,6 +13,7 @@ import type {
   InteractionExpression,
   LetStatement,
   OpenUrlStatement,
+  ExportTextStatement,
   ShowPopupParts,
   LoadExpression,
   MediaParts,
@@ -1625,6 +1626,11 @@ class TypeChecker {
         return true;
       case "openUrlStatement":
         yield* compileChild(this.#openUrlTask(statement, scope));
+        this.#suspend();
+        return true;
+      case "exportTextStatement":
+        yield* compileChild(this.#exportTextTask(statement, scope));
+        // The dialog waits until the player closes it.
         this.#suspend();
         return true;
       case "saveStatement": {
@@ -4419,6 +4425,24 @@ class TypeChecker {
           typeCode.invalidOperand,
           `${OPEN_URL_RULE}. ${OPEN_URL_FIX}`,
           argument.value.span,
+        );
+    }
+  }
+
+  /** `exportText` takes its text and `fileName:` as text (string); `title:` is shown text. */
+  *#exportTextTask(statement: ExportTextStatement, scope: Scope): CompileTask<void> {
+    for (const argument of statement.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "text";
+      if (name === "title") this.#checkShownText(argument.value, type, "the title of exportText");
+      else if (name === "text" || name === "fileName")
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          argument.value,
+          name === "text"
+            ? "exportText needs its text as text (string)"
+            : "'fileName:' takes text (string)",
         );
     }
   }
@@ -7670,6 +7694,7 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "showButtonStatement",
   "showPopupStatement",
   "openUrlStatement",
+  "exportTextStatement",
   "waitStatement",
   "timerStatement",
   "playMediaStatement",
@@ -8246,6 +8271,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return [statement.image];
     case "showPopupStatement":
     case "openUrlStatement":
+    case "exportTextStatement":
       return statement.arguments.map((argument) => argument.value);
     case "saveStatement":
       return [statement.value, statement.key];

@@ -28,6 +28,8 @@ import {
   type InteractionUiPayload,
   type InstructionPlan,
   type PlanSourceLocation,
+  DEFAULT_EXPORT_FILE_NAME,
+  DEFAULT_EXPORT_TITLE,
   DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
 } from "../plan/model.js";
@@ -386,7 +388,7 @@ function validSettlementIdentityAndEventSequences(
     );
   }
   if (settlement.actionKind !== "interaction") return true;
-  // A button that timed out, a closed popup, and an opened `openUrl` publish no player transcript.
+  // A button that timed out, a closed popup or exportText, and an opened `openUrl` publish no player transcript.
   if (settlement.settlementKind === "timedOut" || silentInteraction(settlement.interactionKind))
     return settlement.transcriptEventSequence === null;
   return (
@@ -1119,10 +1121,11 @@ function validInteractionAction(
     !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)
   )
     return false;
-  // A button or a popup used as a value gives one; an `openUrl` never does.
+  // A button or a popup used as a value gives one; an `openUrl` or an `exportText` never does.
   if (
     action.destinationTemporary !== null
-      ? !positiveSafeInteger(action.destinationTemporary) || action.interactionKind === "url"
+      ? !positiveSafeInteger(action.destinationTemporary) ||
+        valuelessInteraction(action.interactionKind)
       : action.interactionKind !== "button" && !silentInteraction(action.interactionKind)
   )
     return false;
@@ -1297,6 +1300,16 @@ function preparedInteractionUiMatchesAction(
         : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText)
     );
   }
+  if (prepared.kind === "export")
+    return (
+      runtimeTemporaryValue(temporaries, prepared.textTemporary) === actual.text &&
+      (prepared.titleTemporary === undefined
+        ? actual.title === DEFAULT_EXPORT_TITLE
+        : runtimeTemporaryValue(temporaries, prepared.titleTemporary) === actual.title) &&
+      (prepared.fileNameTemporary === undefined
+        ? actual.fileName === DEFAULT_EXPORT_FILE_NAME
+        : runtimeTemporaryValue(temporaries, prepared.fileNameTemporary) === actual.fileName)
+    );
   if (prepared.kind === "text" || prepared.kind === "number") {
     const hint =
       prepared.hintTemporary === null
@@ -1428,12 +1441,14 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
               ? ["kind", "message", "buttonText", "accessibleName"]
               : kind === "url"
                 ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
-                : [
-                    "kind",
-                    "options",
-                    "accessibleName",
-                    ...("preselected" in value ? ["preselected"] : []),
-                  ];
+                : kind === "export"
+                  ? ["kind", "text", "title", "fileName", "accessibleName"]
+                  : [
+                      "kind",
+                      "options",
+                      "accessibleName",
+                      ...("preselected" in value ? ["preselected"] : []),
+                    ];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1498,6 +1513,14 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
       !measurementExhausted &&
       canonicalWebUrl(value.url) === value.url &&
       typeof value.alwaysButton === "boolean"
+    );
+  // The exported text may be as long as any text, outside the interaction's text limit.
+  if (kind === "export")
+    return (
+      typeof value.text === "string" &&
+      count(value.title) &&
+      count(value.fileName) &&
+      !measurementExhausted
     );
   if (kind === "form") return validFormUi(value, count) && !measurementExhausted;
   if (kind === "image")
@@ -1569,6 +1592,12 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       actual.url === expected.url &&
       actual.buttonText === expected.buttonText &&
       actual.alwaysButton === expected.alwaysButton
+    );
+  if (expected.kind === "export")
+    return (
+      actual.text === expected.text &&
+      actual.title === expected.title &&
+      actual.fileName === expected.fileName
     );
   if (expected.kind === "text" || expected.kind === "number")
     return (
@@ -1827,7 +1856,7 @@ function validSettlementKindData(
     !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    // A timed-out button or form, a closed popup, and an opened `openUrl` add nothing to the transcript.
+    // A timed-out button or form, a closed popup or exportText, and an opened `openUrl` add nothing to the transcript.
     (timedOut || silentInteraction(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
@@ -1847,7 +1876,7 @@ function validSettlementKindData(
   )
     return false;
   let resultValid: boolean;
-  if (settlement.interactionKind === "url") {
+  if (valuelessInteraction(settlement.interactionKind)) {
     resultValid = settlement.result === null && settlement.destinationTemporary === null;
   } else if (elapsedInteraction(settlement.interactionKind)) {
     resultValid =
@@ -1893,7 +1922,7 @@ function validSettlementKindData(
   if (!resultValid) return false;
 
   if (
-    settlement.interactionKind !== "url" &&
+    !valuelessInteraction(settlement.interactionKind) &&
     (!elapsedInteraction(settlement.interactionKind) || settlement.destinationTemporary !== null) &&
     !positiveSafeInteger(settlement.destinationTemporary)
   )
@@ -1963,9 +1992,14 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
-/** A popup or an `openUrl`: an interaction that adds nothing to the transcript. */
+/** A popup, an `openUrl`, or an `exportText`: an interaction that adds nothing to the transcript. */
 function silentInteraction(kind: unknown): boolean {
-  return kind === "popup" || kind === "url";
+  return kind === "popup" || kind === "url" || kind === "export";
+}
+
+/** An `openUrl` or an `exportText`: an interaction that never gives a value. */
+function valuelessInteraction(kind: unknown): boolean {
+  return kind === "url" || kind === "export";
 }
 
 /** A button or a popup: an interaction that, used as a value, gives its elapsed waiting time (V30 §21, §31). */
@@ -1984,6 +2018,7 @@ function isInteractionKind(value: unknown): value is InteractionKind {
     "form",
     "popup",
     "url",
+    "export",
   ]);
 }
 
@@ -2083,6 +2118,12 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "popup")
     return (
       prepared.buttonTextTemporary !== undefined || ui.buttonText === DEFAULT_POPUP_BUTTON_TEXT
+    );
+  // An `exportText` without `title:` or `fileName:` shows the defaults.
+  if (prepared.kind === "export")
+    return (
+      (prepared.titleTemporary !== undefined || ui.title === DEFAULT_EXPORT_TITLE) &&
+      (prepared.fileNameTemporary !== undefined || ui.fileName === DEFAULT_EXPORT_FILE_NAME)
     );
   if (prepared.kind === "text" || prepared.kind === "number")
     return (

@@ -35,7 +35,7 @@ export type ResolvedInteraction =
   | {
       readonly ok: true;
       readonly result: InteractionResultValue;
-      /** `null` for a popup and an `openUrl`, which add nothing to the transcript. */
+      /** `null` for a popup, an `openUrl`, and an `exportText`, which add nothing to the transcript. */
       readonly transcriptText: string | null;
       /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
       readonly shownOptions?: readonly (number | null)[] | null;
@@ -88,6 +88,12 @@ export function resolveInteractionCompletion(
     return payload.kind === "opened" && Object.keys(payload).length === 1
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "openUrl completion requires { kind: 'opened' } only." };
+  }
+  // Copying and downloading are the Player's own; only closing the dialog completes it.
+  if (action.interactionKind === "export") {
+    return payload.kind === "close" && Object.keys(payload).length === 1
+      ? { ok: true, result: null, transcriptText: null }
+      : { ok: false, message: "exportText completion requires { kind: 'close' } only." };
   }
   if (action.interactionKind === "text") {
     if (

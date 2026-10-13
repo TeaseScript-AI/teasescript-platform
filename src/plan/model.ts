@@ -547,9 +547,22 @@ export interface StopAudioInstruction extends InstructionBase {
 export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
 /** The text of the button of `openUrl` when it gives no `buttonText:` (V30 §33). */
 export const DEFAULT_OPEN_URL_BUTTON_TEXT = "Open link";
+/** The title of the dialog of `exportText` when it gives no `title:` (V30 §31). */
+export const DEFAULT_EXPORT_TITLE = "Copy or download";
+/** The name of the file that `exportText` downloads when it gives no `fileName:` (V30 §31). */
+export const DEFAULT_EXPORT_FILE_NAME = "text.txt";
 
 export type InteractionKind =
-  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup" | "url";
+  | "button"
+  | "text"
+  | "number"
+  | "choice"
+  | "temporal"
+  | "image"
+  | "form"
+  | "popup"
+  | "url"
+  | "export";
 /**
  * `choice` is the value of the selected choice option; a button or popup used as a value yields a `duration`;
  * `temporal` is the date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's
@@ -644,6 +657,18 @@ export type InteractionUiPayload =
       readonly url: string;
       readonly buttonText: string;
       readonly alwaysButton: boolean;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `exportText` (V30 §31): a dialog outside the chat with the title and the text, which the player may copy or
+       * download as a file named `fileName`, until they close it. None of it enters the transcript. The text may be as
+       * long as any text; it does not count toward the interaction's text limit.
+       */
+      readonly kind: "export";
+      readonly text: string;
+      readonly title: string;
+      readonly fileName: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -805,6 +830,16 @@ export type PreparedInteractionUiPayload =
       readonly buttonTextTemporary?: number;
       /** Holds the evaluated `alwaysButton:`; absent for `false`. */
       readonly alwaysButtonTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "export";
+      /** Hold the evaluated text, title, and file name until the dialog opens, then their text. */
+      readonly textTemporary: number;
+      /** Absent when the dialog keeps its default title. */
+      readonly titleTemporary?: number;
+      /** Absent when the file keeps its default name. */
+      readonly fileNameTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

@@ -15,6 +15,8 @@ import {
   type PlanSourceLocation,
   type PlanTag,
   type PreparedInteractionUiPayload,
+  DEFAULT_EXPORT_FILE_NAME,
+  DEFAULT_EXPORT_TITLE,
   DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
   instructionSourcePath,
@@ -1619,6 +1621,35 @@ function materializeInteractionUi(
       alwaysButton: always,
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "export") {
+    // The text and the file name are taken as they are, so only text is either.
+    const text = read(prepared.textTemporary).value;
+    if (typeof text !== "string")
+      throw fault(
+        "TSR050",
+        `exportText needs its text as text (string), but this is ${describeShownValue(text)}.`,
+        span,
+      );
+    const fileName =
+      prepared.fileNameTemporary === undefined
+        ? DEFAULT_EXPORT_FILE_NAME
+        : read(prepared.fileNameTemporary).value;
+    if (typeof fileName !== "string")
+      throw fault(
+        "TSR050",
+        `'fileName:' of exportText takes text (string), but this is ${describeShownValue(fileName)}.`,
+        span,
+      );
+    ui = {
+      kind: "export",
+      text,
+      title:
+        prepared.titleTemporary === undefined
+          ? DEFAULT_EXPORT_TITLE
+          : readText(prepared.titleTemporary),
+      fileName,
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
@@ -1914,6 +1945,8 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "popup") strings.push(ui.message, ui.buttonText);
   else if (ui.kind === "url") strings.push(ui.url, ui.buttonText);
+  // The exported text may be as long as any text.
+  else if (ui.kind === "export") strings.push(ui.title, ui.fileName);
   else if (ui.kind === "form") {
     // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
     for (const text of formUiTexts(ui)) strings.push(text);
@@ -1942,7 +1975,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, labels, hints, prefill or choice values, file filters, or web address.`,
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, title, labels, hints, prefill or choice values, file filters, file name, or web address.`,
         span,
       );
     aggregate += bytes;
@@ -2612,6 +2645,14 @@ function cloneInteractionUi(
       url: ui.url,
       buttonText: ui.buttonText,
       alwaysButton: ui.alwaysButton,
+      accessibleName,
+    };
+  if (ui.kind === "export")
+    return {
+      kind: "export",
+      text: ui.text,
+      title: ui.title,
+      fileName: ui.fileName,
       accessibleName,
     };
   if (ui.kind === "button")
