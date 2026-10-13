@@ -1,4 +1,4 @@
-import { storedFileKind, type RuntimeFileStoreActionSnapshot } from "../src/index.js";
+import { Sha256, storedFileKind, type RuntimeFileStoreActionSnapshot } from "../src/index.js";
 import type { CapturedMediaStore } from "./captured-media.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import {
@@ -13,7 +13,8 @@ export type FileStoreMedia = Pick<CapturedMediaStore, "add" | "read" | "holds">;
 
 /**
  * The Player's answer to a file store (V30 §13 and §33): it keeps each file to store as session media of the kind of
- * its type, as a new photo is kept, or reads the bytes of each stored file. When it cannot, it answers that it failed.
+ * its type, as a new photo is kept, or reads the bytes of each stored file, or their SHA-256. When it cannot, it answers
+ * that it failed.
  */
 export async function answerFileStore(
   action: RuntimeFileStoreActionSnapshot,
@@ -31,17 +32,33 @@ export async function answerFileStore(
             ).reference,
         ),
       };
-    const files: string[] = [];
+    const answers: string[] = [];
     for (const reference of action.references) {
       const record = await media.read(reference);
       if (record === null) return { kind: "failed" };
-      files.push(base64FromBytes(new Uint8Array(await record.data.arrayBuffer())));
+      const data = await record.data.arrayBuffer();
+      answers.push(
+        action.operation === "hash" ? await sha256Hex(data) : base64FromBytes(new Uint8Array(data)),
+      );
     }
-    return { kind: "read", files };
+    return action.operation === "hash"
+      ? { kind: "hashed", hashes: answers }
+      : { kind: "read", files: answers };
   } catch {
     // Such as a file too large for this browser's memory.
     return { kind: "failed" };
   }
+}
+
+/**
+ * The SHA-256 of `data` as 64 lowercase hexadecimal digits: the browser's digest, or outside a secure context, such as
+ * a Player over plain HTTP on a local network, where the browser has none, the engine's, which gives the same.
+ */
+async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  const subtle = typeof crypto === "undefined" ? undefined : crypto.subtle;
+  if (subtle === undefined) return new Sha256().update(new Uint8Array(data)).hex();
+  const digest = new Uint8Array(await subtle.digest("SHA-256", data));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
