@@ -196,6 +196,7 @@ async function main() {
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
+      await photoColourScenario(cdp, origin);
       await messageUpdatesScenario(cdp, origin);
       await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -209,7 +210,7 @@ async function main() {
       await exportTextScenario(cdp, origin, profile);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their place beside the timer rail on a short screen, and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their place beside the timer rail on a short screen, and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, colours that follow the Stage photo, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();
@@ -2504,6 +2505,92 @@ async function lateImageScenario(cdp, origin) {
     await value(cdp, `document.querySelectorAll('[data-player-notice]').length`),
     0,
     "A late failure of a removed image was reported",
+  );
+}
+
+/**
+ * Photo colours (`photo-colour` package): the green Stage photo colours the background and the theme's surfaces in
+ * both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the theme's; and the
+ * empty Stage after `hideImage` gives every theme colour back.
+ */
+async function photoColourScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  // The theme's colour roles on the document root, and the HSL hue of a colour as the screen shows it.
+  const roles = `Object.fromEntries([...document.documentElement.style].filter((name) => /^--(theme|story-accent)-/.test(name)).map((name) => [name, document.documentElement.style.getPropertyValue(name)]))`;
+  const hue = (colour) =>
+    `(() => { const probe = document.createElement('span'); probe.style.color = ${colour}; document.body.append(probe); const context = document.createElement('canvas').getContext('2d'); context.fillStyle = getComputedStyle(probe).color; probe.remove(); context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; const max = Math.max(r, g, b), min = Math.min(r, g, b); if (max === min) return null; const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min); return Math.round(((h * 60) % 360 + 360) % 360); })()`;
+  const green = (degrees) => degrees !== null && degrees > 80 && degrees < 160;
+  const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
+  const differing = (first, second) =>
+    Object.keys({ ...first, ...second }).filter((name) => first[name] !== second[name]);
+  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
+  const chooseAccent = async (option) => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-setting="photo-accent"]')`);
+    await physicalClick(cdp, `[data-player-setting="photo-accent"] input[value="${option}"]`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-player-setting="photo-accent"] input[value="${option}"]').checked`,
+    );
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  };
+  await navigate(cdp, `${origin}/player/?package=photo-colour`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  const theme = await value(cdp, roles);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
+  // Let the fade to the photo's colour end.
+  await delay(900);
+  const withPhoto = await value(cdp, roles);
+  for (const [name, colour] of [
+    [
+      "background",
+      `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`,
+    ],
+    ["canvas role", `'var(--theme-surface-canvas)'`],
+    ["accent", `'var(--theme-accent-solid)'`],
+  ])
+    assertEqual(green(await value(cdp, hue(colour))), true, `The ${name} is not the photo's green`);
+  // B: only the accent goes back to the theme's.
+  await chooseAccent("theme");
+  const themeAccent = await value(cdp, roles);
+  const changed = differing(withPhoto, themeAccent);
+  assertEqual(changed.length > 0, true, "B did not change the accent");
+  assertEqual(
+    changed.filter((name) => !accent(name)).join(", "),
+    "",
+    "B changed more than the accent",
+  );
+  assertEqual(
+    differing(theme, themeAccent).filter(accent).join(", "),
+    "",
+    "B did not give the theme's accent back",
+  );
+  await chooseAccent("photo");
+  assertEqual(
+    differing(withPhoto, await value(cdp, roles)).join(", "),
+    "",
+    "A did not restore the photo accent",
+  );
+  await physicalClick(cdp, '[aria-label="Switch to dark theme"]');
+  await waitFor(cdp, `document.documentElement.dataset.playerTheme === 'dark'`);
+  assertEqual(
+    green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
+    true,
+    "The dark canvas is not green",
+  );
+  await physicalClick(cdp, '[aria-label="Switch to light theme"]');
+  await waitFor(cdp, `document.documentElement.dataset.playerTheme === 'light'`);
+  // The empty Stage gives the theme's own colours back.
+  const press = `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === 'Hide')`;
+  await waitFor(cdp, `!!${press}`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
+  assertEqual(
+    differing(theme, await value(cdp, roles)).join(", "),
+    "",
+    "The empty Stage's colours are not the theme's",
   );
 }
 

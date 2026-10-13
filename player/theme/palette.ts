@@ -12,6 +12,23 @@ export interface PlayerThemeIntent {
   readonly contrast: "standard" | "high";
 }
 
+/** The surface tones of one mode, as HCT tones. */
+export interface SurfaceTones {
+  readonly canvas: number;
+  readonly chrome: number;
+  readonly raised: number;
+  readonly floating: number;
+  readonly control: number;
+}
+
+/** Surfaces in a Stage photo's colour, in place of the intent's surface hue, tint and tones. */
+export interface PhotoSurfaces {
+  readonly hue: number;
+  /** Surface chroma before each role's tint factor. */
+  readonly chroma: number;
+  readonly tones: SurfaceTones;
+}
+
 export interface ContrastDiagnostic {
   readonly foreground: string;
   readonly background: string;
@@ -20,7 +37,7 @@ export interface ContrastDiagnostic {
   readonly passes: boolean | null;
 }
 
-export function generatePlayerTheme(intent: PlayerThemeIntent) {
+export function generatePlayerTheme(intent: PlayerThemeIntent, photo?: PhotoSurfaces | null) {
   if (
     !intent ||
     !["light", "dark"].includes(intent.mode) ||
@@ -38,12 +55,18 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const high = intent.contrast === "high";
   const textTarget = high ? 7 : 4.5;
   // Material-oriented surface hierarchy; tuning remains provisional.
-  const tones = {
-    light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
-    dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
-  }[intent.mode];
-  const hue = ((intent.surfaceHue % 360) + 360) % 360;
-  const chroma = intent.monochrome ? 0 : intent.surfaceTint * intent.surfaceMaxChroma;
+  const tones: SurfaceTones =
+    photo?.tones ??
+    {
+      light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
+      dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
+    }[intent.mode];
+  const hue = (((photo?.hue ?? intent.surfaceHue) % 360) + 360) % 360;
+  const chroma = photo
+    ? photo.chroma
+    : intent.monochrome
+      ? 0
+      : intent.surfaceTint * intent.surfaceMaxChroma;
   // Tint lives principally in the canvas. Less chroma in nested surfaces keeps the
   // high end of light tint usable without turning every layer into the same wash.
   const surface = (tone: number, tint = 1) =>

@@ -84,6 +84,7 @@ const props = defineProps<{
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
 const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
+const photoAccentOption = defineModel<"photo" | "theme">("photoAccentOption", { required: true });
 // Testing: whether the tools menu offers the Debug panel. PlayerApp owns it; it is not a stored preference.
 const debugMenu = defineModel<boolean>("debugMenu", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
@@ -930,6 +931,17 @@ async function updateSidebarVisibility(open: boolean) {
                       <label class="flex items-start gap-2">
                         <input v-model="titlebarOption" type="radio" name="titlebar-option" value="overlap" />
                         B · Auto-hide, controls right
+                      </label>
+                    </fieldset>
+                    <fieldset class="grid gap-2 border-t pt-4 text-sm" data-player-setting="photo-accent">
+                      <legend class="font-medium">Photo accent · A/B test</legend>
+                      <label class="flex items-start gap-2">
+                        <input v-model="photoAccentOption" type="radio" name="photo-accent-option" value="photo" />
+                        A · Accent follows the photo
+                      </label>
+                      <label class="flex items-start gap-2">
+                        <input v-model="photoAccentOption" type="radio" name="photo-accent-option" value="theme" />
+                        B · Theme accent
                       </label>
                     </fieldset>
                     <section class="grid gap-2 border-t pt-4 text-sm" data-player-setting="testing">
