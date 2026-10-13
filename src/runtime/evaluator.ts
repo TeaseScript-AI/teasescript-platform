@@ -417,6 +417,9 @@ export class Evaluator {
           expression.temporaryId,
           expression.span,
         );
+        // A prepared message reads `speaker` from the temporary that holds its speaker, `null` when it has none.
+        if (value === null && speakerTemporaries(this.plan).has(expression.temporaryId))
+          throw noSpeaker(expression.span);
         this.trace?.readTemporary(this.callFrameId(), expression.temporaryId, value);
         return value;
       }
@@ -1211,6 +1214,8 @@ export class Evaluator {
   }
 
   #unknownName(name: string, span: SourceSpan): RuntimeFault {
+    // `speaker` is no variable: a message with a speaker reads it before any lookup, so this message has none.
+    if (name === "speaker") return noSpeaker(span);
     return (
       this.#unsetVariable(name, span) ??
       fault(
@@ -4501,6 +4506,34 @@ function notComparable(
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
+}
+
+/** `speaker` in a message that names no speaker with `as` while no default speaker is set (V30 §37). */
+function noSpeaker(span: SourceSpan): RuntimeFault {
+  return fault(
+    "TSR071",
+    "This message has no speaker, so 'speaker' has no value: it names none with 'as', and no default speaker is set. Give it one with 'as name', or set a default speaker with 'speaker name' before it.",
+    span,
+  );
+}
+
+const speakerTemporaryIds = new WeakMap<InstructionPlan, ReadonlySet<number>>();
+
+/** The temporaries that hold the speaker of a prepared message for its `speaker` reads, collected once per plan. */
+function speakerTemporaries(plan: InstructionPlan): ReadonlySet<number> {
+  let ids = speakerTemporaryIds.get(plan);
+  if (ids === undefined) {
+    ids = new Set(
+      plan.instructions.flatMap((instruction) =>
+        instruction.kind === "prepareSayContextualSpeaker" ||
+        instruction.kind === "prepareInteractionSpeaker"
+          ? [instruction.destinationTemporary]
+          : [],
+      ),
+    );
+    speakerTemporaryIds.set(plan, ids);
+  }
+  return ids;
 }
 
 interface EvaluatedExpression {
