@@ -4225,10 +4225,11 @@ A file's type comes from its first bytes, never from a file name or the type in 
 | Audio | MP3, Ogg, WAV, M4A |
 | Video | MP4, WebM |
 
-Any other file is `application/octet-stream`. SVG, HTML, and any file whose type is not on this list are never shown or
-played: a script can only store them, pass them along, or turn them back into Base64. An image works where a photo
-reference works, such as `showImage` and `save`/`load`. A stored file has the lifecycle of a photo
-(`takePhoto()` status above).
+Any other file is `application/octet-stream`. A stored file of any other type, such as SVG or HTML, is never shown or
+played: a script can only store it, pass it along, or turn it back into Base64. This rule is about stored files, whose
+bytes can come from outside the package; it does not apply to HTML or custom UI that the package's own code provides
+([`LIBRARIES.md`](../LIBRARIES.md#package-libraries)). An image works where a photo reference works, such as
+`showImage` and `save`/`load`. A stored file has the lifecycle of a photo (`takePhoto()` status above).
 
 ```text
 let picture = fileFromBase64(base64, default: null)
