@@ -31,6 +31,30 @@ test("requires explicit own registration for an inherited builtin name", () => {
   assert.equal(calls, 1);
 });
 
+test("a call reaches the function that a host's builtin record gives when its instruction runs", () => {
+  const compiled = compile(
+    "let first = answer()\nlet ignored = swap()\nlet second = answer()\nexit",
+    ["answer", "swap"],
+  );
+  let current: RuntimeBuiltinFunction = () => 1;
+  // A frozen record's getter can still give another function: the record is read again for each instruction.
+  const builtins = Object.freeze({
+    get answer() {
+      return current;
+    },
+    swap: () => {
+      current = () => 2;
+      return 0;
+    },
+  });
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
+  assert.equal(result.snapshot.status, "halted");
+  const values = new Map(
+    result.snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
+  );
+  assert.deepEqual([values.get("first"), values.get("second")], [1, 2]);
+});
+
 test("keeps core builtin precedence over injected names", () => {
   const compiled = compile("let output = random()\nexit", []);
   let injectedCalls = 0;
