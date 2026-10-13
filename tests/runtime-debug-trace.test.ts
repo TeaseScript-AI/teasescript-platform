@@ -717,16 +717,16 @@ test("speaker and handle properties are state that every name for them reads", (
       "let same = t",
       "same.pause()",
       "speaker guide",
-      'say "${guide.firstName} ${speaker.firstName} ${t.remaining} ${t.repeatDuration}"',
+      'say "${guide.firstName} ${speaker.firstName} ${speaker.firstName.uppercase()} ${t.remaining} ${t.repeatDuration}"',
       "exit",
     ].join("\n"),
   );
   assertComplete(played);
-  const [byName, contextual, remaining, repeat] = causes(
+  const [byName, contextual, receiver, remaining, repeat] = causes(
     played.trace,
-    outputOf(played, "Bea Bea 2 seconds 5 seconds"),
+    outputOf(played, "Bea Bea BEA 2 seconds 5 seconds"),
   );
-  for (const interpolation of [byName!, contextual!]) {
+  for (const interpolation of [byName!, contextual!, receiver!]) {
     const steps = lineage(played.trace, interpolation.id);
     assert.ok(
       steps.some((step) => step.kind === "assignment" && step.target === "guide.firstName"),

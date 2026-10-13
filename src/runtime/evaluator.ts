@@ -706,7 +706,11 @@ export class Evaluator {
           pending.pop();
           continue;
         }
-        if (expression.kind === "identifier") {
+        // The contextual `speaker` is no variable, so it is read as a value below, like any other expression.
+        if (
+          expression.kind === "identifier" &&
+          !(expression.name === "speaker" && this.snapshot.contextualSpeaker !== null)
+        ) {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           trace?.readBinding(location.frame.id, expression.name, location.binding.value);

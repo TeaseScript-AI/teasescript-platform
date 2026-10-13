@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
+import { Story } from "./helpers/story-session.js";
 
 function diagnostics(source: string): [string, string, string][] {
   return compileSource(source).diagnostics.map((diagnostic) => [
@@ -90,6 +91,61 @@ test("a method call on a speaker is a compile error", () => {
   // In a union, the property example would need a check first, so the error only names the method the speaker lacks.
   const union = `${VERA}function use(x: speaker | string) {\n    x.foo()\n}\nexit`;
   assert.deepEqual(diagnostics(union), [["TSV043", "A speaker has no method 'foo'.", "foo"]]);
+});
+
+const CAST = 'speaker vera {\n    title: "Mistress"\n    toys: ["rope", "cane"]\n}';
+
+test("a method on a property of the contextual speaker runs as on the speaker's name", () => {
+  const result = runValidSource(
+    [
+      CAST,
+      'say as vera "${speaker.title.uppercase()}"',
+      'say as vera speaker.title.contains("ist")',
+      'say as vera "${speaker.toys.join(", ")}: ${speaker.toys[1].uppercase()}"',
+      "speaker vera",
+      'say "${(speaker.title).lowercase()} ${vera.title.uppercase()}"',
+      // A plain property read, arithmetic on one, and an interaction with 'as', which prepares its speaker apart.
+      'say "${speaker.title} ${speaker.title.length + 1}"',
+      'showButton as vera "${speaker.title.uppercase()}"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), [
+    "MISTRESS",
+    "true",
+    "rope, cane: CANE",
+    "mistress MISTRESS",
+    "Mistress 9",
+  ]);
+  const button = result.snapshot.foregroundAction;
+  assert.ok(button?.kind === "interaction" && button.ui.kind === "button");
+  assert.equal(button.ui.buttonLabel, "MISTRESS");
+});
+
+test("the contextual speaker is a method receiver in timer and button blocks and in a pacing", () => {
+  const story = new Story(
+    [
+      CAST,
+      "speaker vera",
+      'showPermanentButton "Kneel" {',
+      '    say "${speaker.title.lowercase()}", instant',
+      "}",
+      "timer async 1 s {",
+      '    say as vera "${speaker.toys.join(" and ")}", instant',
+      "}",
+      'say as vera "Wait.", speaker.toys.count("cane") * 3 s',
+      'say "Done.", instant',
+      "exit",
+    ].join("\n"),
+  );
+  story.at(1_000);
+  assert.equal(story.press(1), "pressed");
+  story.at(2_999);
+  assert.deepEqual(story.said(), ["Wait.", "rope and cane", "mistress"]);
+  story.at(3_000);
+  assert.deepEqual(story.said(), ["Wait.", "rope and cane", "mistress", "Done."]);
+  assert.equal(story.snapshot.failure, null);
 });
 
 test("a method that some value has compiles on a value of unknown type", () => {
