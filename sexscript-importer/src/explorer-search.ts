@@ -1693,7 +1693,7 @@ function scopeValues(snapshot: Data): Map<number, Map<string, unknown>> {
 }
 
 /** A condition way that directed search aims at. */
-interface Target {
+export interface Target {
   readonly instruction: number;
   /** 0 continues with the next instruction (condition true, loop entered), 1 goes to the target. */
   readonly way: 0 | 1;
@@ -5511,11 +5511,23 @@ const NO_PATH = "no execution path from the session start";
 const STORAGE_FIXED =
   "only behind a condition on stored values that this package's saves never meet";
 
-function lineCoverage(
+/** What line coverage reads of a session: what play and clock steps executed, and the ways their conditions took. */
+export type CoveredSession = Pick<
+  Session,
+  | "visited"
+  | "chosenVisited"
+  | "clockVisited"
+  | "branches"
+  | "chosenBranches"
+  | "clockBranches"
+  | "operations"
+>;
+
+export function lineCoverage(
   plan: Data,
   instructions: readonly Data[],
   files: readonly string[],
-  session: Session,
+  session: CoveredSession,
   sources: ReadonlyMap<string, string>,
   unreachable: { readonly fromStart: Uint8Array; readonly withStorage: Uint8Array },
   constants: ReadonlyMap<number, boolean>,

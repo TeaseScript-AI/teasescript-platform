@@ -4,8 +4,8 @@
  * where every answer was tried and no play ended from inside. It is reported with the shortest play that came into it,
  * qualified: no way out was found, as far as the relevant state tells places apart.
  */
-import type { Data, ExplorerInput, StorageEntry } from "../explorer.ts";
-import type { DrawEvent, Played } from "./runner.ts";
+import type { Data, ExplorerInput, RandomChoice, StorageEntry } from "../explorer.ts";
+import { withChosenDraws, type DrawEvent, type Played } from "./runner.ts";
 
 /** What a trap's witness needs of a play: its inputs, the outcomes its draws had, and how its session started. */
 interface Witness {
@@ -27,6 +27,8 @@ export interface Trap {
    * session started (storage and wall clock, when not the usual).
    */
   readonly inputs: readonly ExplorerInput[];
+  /** The outcomes its start drew that the play fixed (see `withChosenDraws`). */
+  readonly random?: readonly RandomChoice[];
   readonly draws: readonly { occurrence: number; outcome: Data }[];
   readonly storage?: readonly StorageEntry[];
   readonly wallClockMs?: number;
@@ -131,7 +133,10 @@ export class Places {
         kind: "loop",
         states: places.length + (known?.states ?? 0),
         locations,
-        inputs: entry.witness.inputs.slice(0, entry.step),
+        ...withChosenDraws(
+          entry.witness.inputs.slice(0, entry.step),
+          entry.witness.draws.filter((draw) => draw.step <= entry.step),
+        ),
         // The outcomes of the draws made before it.
         draws: entry.witness.draws
           .filter((draw) => draw.step <= entry.step)

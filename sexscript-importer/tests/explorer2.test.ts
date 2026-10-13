@@ -58,7 +58,7 @@ test(
 );
 
 test(
-  "explorer V2 goes back to a menu answer once another answer changed what the menu's code reads, finds a choice read three menus later, starts a session at another time of day for a condition on the clock, and comes back for a later visit with a value an earlier one saved",
+  "explorer V2 goes back to a menu answer once another answer changed what the menu's code reads, finds a choice read three menus later, starts a session at another time of day for a condition on the clock, types the codes conditions compare an answer with, and comes back for a later visit with a value an earlier one saved",
   { skip: "reason" in loaded ? loaded.reason : false },
   () => {
     const sources = {
@@ -71,6 +71,20 @@ test(
         'if color == "blue" {\n  say "Blue it is."\n}\nexit\n',
       // Only a session started before six in the morning says it.
       night: 'showButton "Start"\nif getDateTime().hour < 6 {\n  say "Up so late?"\n}\nexit\n',
+      // A second phase a week after the first, which answered the toy question: a later visit with the toy needs the
+      // stored start of the first phase and a clock past the week too.
+      phase:
+        'let started: number? = load "phase", default: null\n' +
+        'if started != null and getAbsoluteDateTime().toSeconds() - started < 7 * 24 * 3600 {\n  say "Later."\n  exit\n}\n' +
+        "if started == null {\n" +
+        '  let answers = askForm "What do you have?", fields: dict{ "toys.camera": { value: false, text: "camera" } }\n' +
+        "  for key in answers {\n    save answers[key] as key\n  }\n" +
+        '  save getAbsoluteDateTime().toSeconds() as "phase"\n  showButton "Done"\n  exit\n}\n' +
+        'showButton "Again"\nif load("toys.camera", default: false) == true {\n  say "Camera."\n}\nexit\n',
+      // Codes typed at one ask, each compared further on: the solver types the ones the conditions compare with.
+      codes:
+        'let q = askInteger prefill: 0\nif q == 523174 {\n  say "First code."\n}\nif q == 10000000 {\n' +
+        '  say "Second code."\n}\nif q == 85685614 {\n  say "Third code."\n}\nexit\n',
       // Only a later visit, from a state the first one saved, says it.
       visit:
         'let level: number = load "level", default: 0\nif level == 2 {\n  say "Welcome back."\n}\n' +
@@ -140,22 +154,40 @@ test(
       laterDraw:
         "let started = getAbsoluteDateTime()\nlet n = randomInteger(0..=1)\nlet limit = 65 - n * 5\n" +
         'let a = askChoice next: "Next"\nif getAbsoluteDateTime() - started == limit * 1 min {\n  say "Reached."\n}\nexit\n',
+      // A draw of a thousand outcomes whose condition compares a value made from it: several rounds of candidates.
+      rounds:
+        'showButton "Roll"\nlet n = randomInteger(0..=1000)\nif n * 2 == 1234 {\n  say "Reached."\n}\nexit\n',
+      // A helper given another helper's result, given the text to look for.
+      nested:
+        "global function containsAt(text, token) {\n  return text.contains(token)\n}\n" +
+        'global function pass(value) {\n  return value\n}\nlet text = askText "Text?"\n' +
+        'if pass(containsAt(text, "@")) {\n  say "Reached."\n}\nexit\n',
+      // One draw of a thousand outcomes among others: the number its condition compares it with is tried first.
+      thousand:
+        "let a = randomInteger(0..=1000)\nlet b = randomInteger(0..=1000)\nlet n = randomInteger(0..=1000)\n" +
+        'if n == 617 {\n  say "Reachable."\n}\nexit\n',
+      // A helper checks the typed answer character by character: the texts its conditions compare with make one.
+      digits:
+        'global function isNumber(text) {\n  for character in text.split("") {\n' +
+        '    if not (character >= "0" and character <= "9") {\n      return false\n    }\n  }\n  return text != ""\n}\n' +
+        'let guess = askText "Your guess?"\nif isNumber(guess) == true {\n  say "A number."\n}\nexit\n',
       // Each `and` reads its right side only once its left side holds.
       rare: 'showButton "Roll"\nif chance(1) and chance(1) and chance(1) {\n  say "Rare."\n}\nexit\n',
     };
-    for (const [name, source] of Object.entries(complete)) {
-      const result = run(source);
-      assert.deepEqual(
-        [
-          result.search.stoppedBy,
-          result.search.audit.result,
-          result.coverage.percent,
-          result.traps.length,
-        ],
-        ["exhausted", "complete", 100, 0],
-        name,
-      );
-    }
+    for (const [name, source] of Object.entries(complete))
+      for (const seed of [1, 2]) {
+        const result = run(source, seed);
+        assert.deepEqual(
+          [
+            result.search.stoppedBy,
+            result.search.audit.result,
+            result.coverage.percent,
+            result.traps.length,
+          ],
+          ["exhausted", "complete", 100, 0],
+          `${name}, seed ${seed}`,
+        );
+      }
     // With this seed, both ways of the outer `x == y` are covered before the inner target is: its origins still count.
     const guarded =
       'showButton "Draw"\nlet x = randomInteger(0..=3)\nlet y = randomInteger(0..=3)\n' +
@@ -173,6 +205,19 @@ test(
     });
     assert.ok(isRecord(plan));
     const witness = found[0]!;
+    // Its later visit starts with what a first one saved: the report shows that visit first, and the six its roll needs.
+    assert.equal(witness.earlier?.length, 1);
+    assert.equal(witness.earlier[0]!.storage, undefined);
+    assert.deepEqual(
+      witness.inputs.at(-1)?.random?.map((choice) => choice.outcome),
+      [{ kind: "number", value: 6 }],
+    );
+    // A condition on a value the script sets itself says so, not that its setter was not reached.
+    const fixed = run('let x = 2\nshowButton "Go"\nif x == 3 {\n  say "Three."\n}\nexit\n');
+    assert.deepEqual(
+      fixed.coverage.unvisitedBranches.map((branch) => branch.reason),
+      ["no answer, random outcome, or saved data changes what it reads"],
+    );
     const replayed = new Runner(loaded.runtime, loaded.engine, plan, 1).play(
       {
         inputs: witness.inputs,
@@ -200,5 +245,95 @@ test(
       { maxSteps: 1, maxStepInstructions: 1_000_000, origins: false },
     );
     assert.equal(played.end, "exit");
+    // A play that measures a condition's distance where it runs keeps a whole run's behaviour: the decisions it records,
+    // and the failure at the instruction budget, also in a run after a wait.
+    const loops = [
+      'showButton "Go"\nlet i = 0\nwhile i < 500 {\n  i += 1\n}\nif i == 5 {\n  say "Five."\n}\nexit\n',
+      'showButton "Go"\nlet i = 0\nrepeat 20 {\n  i += 1\n}\nwait 1 s\nwhile i < 500 {\n  i += 1\n}\n' +
+        'if i == 5 {\n  say "Five."\n}\nexit\n',
+    ];
+    for (const [index, loop] of loops.entries()) {
+      const looping = loaded.engine.compileProject([{ path: "main.tease", source: loop }], {
+        builtins: [],
+      }).plan;
+      assert.ok(isRecord(looping));
+      const at = (Array.isArray(looping.instructions) ? looping.instructions : []).findIndex(
+        (instruction) =>
+          isRecord(instruction) &&
+          instruction.kind === "jumpIfFalse" &&
+          isRecord(instruction.condition) &&
+          instruction.condition.operator === "==",
+      );
+      const button = {
+        inputs: [{ kind: "button" as const, label: "Go" }],
+        draws: new Map(),
+        inherited: [],
+      };
+      for (const budget of [1_000_000, 100]) {
+        const runner = new Runner(loaded.runtime, loaded.engine, looping, 1);
+        const plain = runner.play(button, {
+          maxSteps: 1,
+          maxStepInstructions: budget,
+          origins: false,
+        });
+        const measuring = runner.play(button, {
+          maxSteps: 1,
+          maxStepInstructions: budget,
+          origins: false,
+          measure: {
+            at: 1,
+            instruction: at,
+            read: (snapshot) => {
+              const i = (Array.isArray(snapshot.globals) ? snapshot.globals : [])
+                .concat(
+                  ...(Array.isArray(snapshot.frames) ? snapshot.frames : []).map((frame) =>
+                    isRecord(frame) && Array.isArray(frame.bindings) ? frame.bindings : [],
+                  ),
+                )
+                .find((binding) => isRecord(binding) && binding.name === "i");
+              const value = isRecord(i) && typeof i.value === "number" ? i.value : NaN;
+              return { distance: Math.abs(value - 5), values: [value] };
+            },
+          },
+        });
+        const shape = (each: typeof plain) => [
+          each.end,
+          each.failure?.code,
+          each.decisions.map((decision) => `${decision.instruction}:${decision.way}`),
+        ];
+        assert.deepEqual(shape(measuring), shape(plain), `loop ${index}, budget ${budget}`);
+        if (budget > 100) assert.equal(measuring.measured?.distance, 495);
+      }
+    }
+    // A traced replay knows the scope of each name across calls: after a function left for another file by `goto` and
+    // a timer block returned, a condition there reads its own file's answer.
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'let x = askInteger prefill: 1\nif x == 1 {\n  say "before", instant\n}\n' +
+          'function leave {\n  goto "other.tease"\n}\nleave()\nexit\n',
+      },
+      {
+        path: "other.tease",
+        source:
+          'let x = askInteger prefill: 2\ntimer async 0 s {}\nwait 1 s\nif x == 2 {\n  say "after", instant\n}\nexit\n',
+      },
+    ];
+    const both = loaded.engine.compileProject(files, { builtins: [] }).plan;
+    assert.ok(isRecord(both));
+    const traced = new Runner(loaded.runtime, loaded.engine, both, 1).play(
+      {
+        inputs: [
+          { kind: "text", text: "1" },
+          { kind: "text", text: "2" },
+        ],
+        draws: new Map(),
+        inherited: [],
+      },
+      { maxSteps: 2, maxStepInstructions: 10_000, origins: true },
+    );
+    const after = traced.decisions.at(-1);
+    assert.deepEqual([...(after?.origins ?? [])], ["i1"]);
   },
 );

@@ -74,14 +74,8 @@ function duration(milliseconds: number): string {
 
 /** One input as a player would do it. */
 function playerStep(input: Fields): string {
-  const random = records(input.random);
   const luck =
-    (input.photo === true ? " (taking a photo)" : "") +
-    (random.length === 0
-      ? ""
-      : ` (with ${random.length === 1 ? "a random draw" : "random draws"} coming out a particular way, at ${random
-          .map((choice) => `\`${text(choice.site)}\``)
-          .join(", ")})`);
+    (input.photo === true ? " (taking a photo)" : "") + drawsShown(records(input.random));
   switch (input.kind) {
     case "option":
       return `choose "${text(input.label)}"${luck}`;
@@ -117,6 +111,24 @@ function clockTime(milliseconds: number): string {
   return `${new Date(milliseconds).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** Random draws a step needs to come out a certain way, as words after the step: what each came out, and where. */
+function drawsShown(random: Fields[]): string {
+  if (random.length === 0) return "";
+  // A number or a truth value as it came out, an item of a list by its place (from 1), a shuffle as the new order.
+  const outcomes = random.map((choice) => {
+    const outcome = fields(choice.outcome);
+    if ("value" in outcome) return JSON.stringify(outcome.value);
+    if (typeof outcome.index === "number") return `item ${outcome.index + 1}`;
+    if (Array.isArray(outcome.order))
+      return `the order ${outcome.order.map((place) => Number(place) + 1).join(", ")}`;
+    return null;
+  });
+  const told = outcomes.map((outcome) => outcome ?? "a particular way").join(", ");
+  return ` (with ${random.length === 1 ? "a random draw" : "random draws"} coming out ${told}, at ${random
+    .map((choice) => `\`${text(choice.site)}\``)
+    .join(", ")})`;
+}
+
 /** The steps of a path across visits, as a numbered list per visit, with when each visit starts. */
 function playerSteps(path: Fields): string[] {
   const visits = [...records(path.earlier), path];
@@ -124,13 +136,17 @@ function playerSteps(path: Fields): string[] {
   let before = FIRST_VISIT_MS;
   visits.forEach((visit, index) => {
     const at = typeof visit.wallClockMs === "number" ? visit.wallClockMs : before;
+    // A first visit with saved data comes after play the path does not show (an explorer that no longer knew it).
+    const stored = index === 0 ? records(visit.storage).length : 0;
     const when =
       index === 0
-        ? `a new player, starting ${clockTime(at)}`
+        ? `${stored > 0 ? `a player with ${plural(stored, "saved value")} from earlier play` : "a new player"}, starting ${clockTime(at)}`
         : `starting ${clockTime(at)}${at > before ? `, ${duration(at - before)} after visit ${index} started` : ""}`;
     before = at;
     lines.push(`   - Visit ${index + 1} (${when}):`);
     const inputs = records(visit.inputs);
+    const starting = records(visit.random);
+    if (starting.length > 0) lines.push(`     - as the visit starts${drawsShown(starting)}`);
     if (inputs.length === 0) lines.push("     - nothing to do: it happens as the visit starts");
     inputs.forEach((input, step) => lines.push(`     ${step + 1}. ${playerStep(input)}`));
   });
@@ -225,7 +241,7 @@ function ownLines(branch: Fields): number {
   return typeof branch.ownLines === "number" ? branch.ownLines : count(branch.behindLines);
 }
 
-/** What the playtester found out about a stored value a missed way needs, in words. */
+/** What the playtester found out about a missed way (a stored value it needs, what explorer V2 tried), in words. */
 const STORED_REASONS: readonly [RegExp, string][] = [
   [/no explored session stored it/u, "no visit saved the value it would need"],
   [
@@ -233,6 +249,12 @@ const STORED_REASONS: readonly [RegExp, string][] = [
     "a visit that started from saved data that meets this did not get back to this point",
   ],
   [/best reached: .* after (\d+) sessions?/u, "the closest value took $1 visit(s)"],
+  [/what sets it is in code no play reached/u, "what sets it is in code no play reached"],
+  [
+    /no answer, random outcome, or saved data tried turned it/u,
+    "no answer, random outcome, or saved data tried turned it",
+  ],
+  [/the time ran out (while|before) the playtester tried it/u, "the time ran out $1 it was tried"],
 ];
 
 /** A missed way in one line: where, the condition as written, and what is known of how far play got. */
