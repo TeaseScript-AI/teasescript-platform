@@ -14,7 +14,12 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { recordContinueCapture } from "../src/runtime/operations/continue-capture.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeSnapshot } from "../src/runtime/state.js";
-import { temporalCapturesProblem } from "../src/runtime/temporal-captures.js";
+import {
+  temporalCaptureAt,
+  temporalCaptureShownAt,
+  temporalCapturesProblem,
+  type RuntimeTemporalCapture,
+} from "../src/runtime/temporal-captures.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -301,6 +306,41 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
     iso(START + 10_010),
     iso(START + 20_081),
   ]);
+});
+
+test("the capture in force and the one an action was shown with are the last that apply, also at one boundary", () => {
+  const capture = (boundaryMs: number, sinceEventSequence: number): RuntimeTemporalCapture => ({
+    boundaryMs,
+    sinceEventSequence,
+    epochMs: START + boundaryMs,
+    context: NEUTRAL,
+  });
+  // Two captures share the boundary 5 s: the one recorded later is in force from its event on.
+  const captures = [capture(0, 0), capture(5_000, 3), capture(5_000, 7), capture(9_000, 9)];
+  const at = (atMs: number) => captures.indexOf(temporalCaptureAt(captures, atMs));
+  assert.deepEqual(
+    [at(0), at(4_999), at(5_000), at(8_999), at(9_000), at(20_000)],
+    [0, 0, 2, 2, 3, 3],
+  );
+  // Before the first boundary, which execution never reaches, the first capture.
+  assert.equal(temporalCaptureAt(captures.slice(1), 1_000), captures[1]);
+  const shown = (atMs: number, eventSequence: number) => {
+    const found = temporalCaptureShownAt(captures, atMs, eventSequence);
+    return found === undefined ? undefined : captures.indexOf(found);
+  };
+  assert.deepEqual(
+    [
+      shown(5_000, 2),
+      shown(5_000, 3),
+      shown(5_000, 6),
+      shown(5_000, 7),
+      shown(20_000, 8),
+      shown(20_000, 9),
+    ],
+    [0, 1, 1, 2, 2, 3],
+  );
+  // An action requested before every capture the list still has was shown with none of them.
+  assert.equal(temporalCaptureShownAt(captures.slice(1), 5_000, 2), undefined);
 });
 
 test("an open choice keeps the capture it was shown with through Continues, interrupts, and compaction", () => {
