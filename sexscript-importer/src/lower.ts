@@ -2250,6 +2250,7 @@ function lowerFileOnce(
     Object.assign(context, fileTests(body));
     context.java = javaFileState(body, options.javaResources ?? null);
     context.photoVariables = photoVariables(body);
+    markSkippableFiles(body, context);
     // A lookup reads the type of the dict's values, as an index reads a list's element type.
     const listElements = new Map(context.types.listElements ?? []);
     for (const [key, type] of context.mapUses.dictionaryValues) {
@@ -13722,6 +13723,26 @@ function isRepeatableIndex(node: AstNode): boolean {
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
 /** List positions that the code compares with null, which read past the end as null (see lowerIndex). */
 const nullComparedReads = new WeakSet<AstNode>();
+/** getFile() calls whose value a variable takes that the code tests for null (markSkippableFiles). */
+const skippableFiles = new WeakSet<AstNode>();
+
+/**
+ * Marks the getFile() calls whose value goes into a variable that the code compares with null: legacy gave null for
+ * a cancelled chooser, which the script handles there.
+ */
+function markSkippableFiles(body: AstNode, context: LowerContext): void {
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? asNode(node.left) : null;
+    const right = assigns ? asNode(node.right) : null;
+    if (target?.kind !== "variable" || right === null || callParts(right)?.name !== "getFile")
+      return;
+    if (legacyApiCall(right, context)?.name !== "getFile") return;
+    const key = bindingKey(target, context.bindings);
+    if (key !== null && context.mapUses.nullTested.has(key)) skippableFiles.add(right);
+  });
+}
 /** Expressions whose null the code takes as Groovy did: a side of `==` or `!=`, and a value written into a text. */
 const nullTolerantReads = new WeakSet<AstNode>();
 /**
@@ -18498,9 +18519,25 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_FILE_PHOTO",
         "warning",
-        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
+        skippableFiles.has(node)
+          ? "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did."
+          : "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
         node.span,
       );
+      // A variable the script tests for null took a cancelled chooser's null: askImage() offers to skip and gives null
+      // then (#857), and takes the title as its question, said as prose as every text (owner decisions 2026-10-11).
+      const title = call.arguments[0];
+      if (
+        skippableFiles.has(node) &&
+        (title === undefined || onlyOf(inferType(title, context.types), STRING))
+      )
+        return {
+          kind: "call",
+          name: "askImage",
+          positional: args.slice(0, 1),
+          named: { allowSkip: { kind: "literal", value: true } },
+          ...(args.length > 0 ? { prose: true as const } : {}),
+        };
       if (call.arguments.length > 0 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
         return null;
       return { kind: "call", name: "askImage", positional: [], named: {} };

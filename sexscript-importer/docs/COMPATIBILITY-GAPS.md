@@ -697,8 +697,10 @@ draw in loops, and only 6 read a literal base path. A clean mapping needs overla
 background's own pixel size, or an image-size query.
 
 Legacy `getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
-with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05; a cancelled chooser gave null, which
-askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
+with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05). A cancelled chooser gave null: where the
+variable that takes the file is compared with null, the script handles that, so it becomes
+`askImage prose (title, allowSkip: true)` (#857), which also offers to skip and gives null then; elsewhere the title is
+said before `askImage()`, which waits for an image. `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 Legacy `getImage()` returned the path of the webcam picture it saved, `<folder>/images/captured/<number>.jpeg`, and
 `getFile()` the chosen file's path; scripts tested them (`endsWith(".jpg")`, `contains("captured")`), which the opaque

@@ -45,6 +45,9 @@ if (System.getProperty("user.language") == "de") show("Hallo") else show("Hello"
 show("You report at " + new java.text.SimpleDateFormat("HH:mm").format(new java.util.Date()) + ".")
 // A photo copied to a package image path is shown wherever the script shows that path.
 def proof = getFile("Upload the picture?")
+// A chooser the player cancelled gave null, which a script that tests for it handles: askImage() offers to skip then.
+def scan = getFile("Show me your scan")
+if (scan == null) show("No scan, then.")
 new File("images/proof/photo.jpg").delete()
 new File("images/proof/photo.jpg") << new File(proof).getBytes()
 setImage("proof/photo.jpg")

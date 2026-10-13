@@ -37,9 +37,8 @@ say prose "You knelt ${seconds} seconds", instant
 say as system "Open this link: https://example.com/rules", instant
 showButton "Continue"
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
-// NOTE SX_FILE_PHOTO line 19: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
-say prose "Pick a photo of yourself", instant
-let photo = askImage()
+// NOTE SX_FILE_PHOTO line 19: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did.
+let photo = askImage prose ("Pick a photo of yourself", allowSkip: true)
 // Without a title, there is nothing to say before the request.
 // NOTE SX_FILE_PHOTO line 21: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let another = askImage()

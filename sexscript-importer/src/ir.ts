@@ -383,7 +383,10 @@ export type IrExpression =
       local?: true;
       /** A value of a type the conversion does not know, which keeps a variable it is assigned to open. */
       open?: true;
-      /** An `askBooleans` whose `message:` is said as prose, `askBooleans prose "Which?", texts: names` (#852). */
+      /**
+       * An ask whose question is said as prose: `askBooleans prose "Which?", texts: names` (#852), whose `message:` it
+       * is, or `askImage prose ("Show me", allowSkip: true)`.
+       */
       prose?: true;
     }
   /** Interpolated string: literal text segments and `${...}` values in source order. */

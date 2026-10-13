@@ -466,7 +466,9 @@ export function emitExpression(expression: IrExpression): string {
       const named = Object.entries(expression.named).map(
         ([name, value]) => `${name}: ${emitExpression(value)}`,
       );
-      return `${expression.name}(${[...positional, ...named].join(", ")})`;
+      // An ask's question in prose takes the mode before the ask's parentheses (V30 §20).
+      const mode = expression.prose === true ? " prose " : "";
+      return `${expression.name}${mode}(${[...positional, ...named].join(", ")})`;
     }
   }
 }
