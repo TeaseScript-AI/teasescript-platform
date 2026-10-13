@@ -717,14 +717,29 @@ async function playOnce(
             track.chose(site, option);
           });
         } else if (kind === "image") {
-          // askImage: the composer's attach button opens a file picker, which gets the answer picture.
-          taken.push(`${site} → [picture]`);
+          // askImage: the composer's attach button opens a file picker, which gets the answer picture as the preview, and
+          // "Use image" answers with it. A request that allows a skip is skipped as often as it is answered, so a script's
+          // way for a missing picture is played too.
+          const counts = track.tries.get(site) ?? [0, 0];
+          track.tries.set(site, counts);
+          const skip =
+            (await page.evaluate(() => document.querySelector("[data-image-skip]") !== null)) &&
+            counts[1]! < counts[0]!;
+          taken.push(`${site} → ${skip ? "[skip]" : "[picture]"}`);
           stopped = await answer(`the picture at ${site}`, async () => {
-            const [chooser] = await Promise.all([
-              page.waitForEvent("filechooser", { timeout: 5_000 }),
-              page.click("[data-composer-attach]", { timeout: 5_000 }),
-            ]);
-            await chooser.setFiles(answerImage);
+            if (skip) await page.click("[data-image-skip]", { timeout: 5_000 });
+            else {
+              const [chooser] = await Promise.all([
+                page.waitForEvent("filechooser", { timeout: 5_000 }),
+                page.click("[data-composer-attach]", { timeout: 5_000 }),
+              ]);
+              await chooser.setFiles(answerImage);
+              // "Use image" is inactive until the Player has checked the picture.
+              const use = '[data-image-control="use"]:not([aria-disabled="true"])';
+              await page.waitForSelector(use, { timeout: 5_000 });
+              await page.click(use, { timeout: 5_000 });
+            }
+            counts[skip ? 1 : 0] = counts[skip ? 1 : 0]! + 1;
           });
         } else if (kind === "form" && state.options.length > 0) {
           // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all
