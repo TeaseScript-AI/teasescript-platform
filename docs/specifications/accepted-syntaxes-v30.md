@@ -1336,6 +1336,8 @@ toBase64(text)
 fromBase64(text, default: value)
 ```
 
+`toJson` and `fromJson` also take `files:`, `true` or `false`, `true` by default.
+
 `toJson` writes a value as compact JSON text:
 
 | Value | JSON |
@@ -1377,6 +1379,20 @@ error.
 ```text
 let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
 let decoded = fromJson(fromBase64(text, default: ""), default: null)
+```
+
+**Files (Owner decisions, 2026-10-13):** with files, `toJson` writes every stored file reference, of a photo or of a
+file from `fileFromBase64` ([§33](#stored-files)), as a data URL, `data:<type>;base64,…`, with the type its bytes give.
+`fromJson` turns data URLs back into stored files and gives their references; only a data URL of an image, audio, or
+video type of [§33](#stored-files) becomes a file, and any other data URL stays text. `files: false` keeps references
+in `toJson` and data URLs in `fromJson` as text. A package path such as `"images/a.jpg"` and any other text are never
+embedded or converted: a text is a stored file reference only when the session knows it as one, never by its shape.
+`toJson` and `fromJson` wait briefly for the Player's file store only when files are involved.
+
+```text
+let exported = toJson(preset)                     // its photos as data URLs
+let imported = fromJson(exported, default: null)  // stored files again
+let plain = toJson(preset, files: false)          // references stay text
 ```
 
 ### Numeric functions
@@ -4185,6 +4201,42 @@ the `save` fails like any failed persistent write (§25): the script continues w
 previous value, the photo stays usable for the current session, and no reference is persisted that would look valid
 after a reload without its photo. A string is a usable media reference only when the trusted Player media store resolves
 it; a well-formed string, including one returned by `load`, grants no access by itself.
+
+### Stored files
+**Status:** Accepted (Owner decisions, 2026-10-13)
+
+```text
+fileFromBase64(text, default: value)
+fileToBase64(file)
+```
+
+`fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
+store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
+line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
+`default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
+them as plain Base64 text. Storing and reading the store take a short wait, as a photo does. The result is recorded, so
+a restore or a replay does not need the store again. The Base64 text may be as long as any text.
+
+A file's type comes from its first bytes, never from a file name or the type in a data URL:
+
+| Kind | Types |
+| --- | --- |
+| Image | JPEG, PNG, GIF, WebP |
+| Audio | MP3, Ogg, WAV, M4A |
+| Video | MP4, WebM |
+
+Any other file is `application/octet-stream`. SVG, HTML, and any file whose type is not on this list are never shown or
+played: a script can only store them, pass them along, or turn them back into Base64. An image works where a photo
+reference works, such as `showImage` and `save`/`load`. A stored file has the lifecycle of a photo
+(`takePhoto()` status above).
+
+```text
+let picture = fileFromBase64(base64, default: null)
+if picture != null {
+    showImage picture
+    save picture as "picture"
+}
+```
 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
