@@ -61,7 +61,7 @@ import type {
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
+import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralValue } from "../../duration.js";
@@ -1342,6 +1342,9 @@ export class InstructionCompiler {
       if (tags !== null) this.#emitTemporaryCleanup(tags.temporaryIds, expression.span);
       return result;
     }
+    if (isFileStoreCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerFileStoreTask(expression));
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -2431,6 +2434,77 @@ export class InstructionCompiler {
     return this.#consumeInteractionResult(transientTemporary, span);
   }
 
+  /**
+   * A call that may use the Player's file store (V30 §13 and §33). Its arguments are evaluated in written order into
+   * temporaries, unless they are literals, so that the instruction reads the same values when it runs again with the
+   * Player's answer; they are cleared once it gave its result.
+   */
+  *#lowerFileStoreTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    if (expression.callee.kind !== "identifier")
+      throw new TypeError("A file store call reached lowering without its name.");
+    const call = expression.callee.name;
+    if (
+      call !== "fileFromBase64" &&
+      call !== "fileToBase64" &&
+      call !== "toJson" &&
+      call !== "fromJson"
+    )
+      throw new TypeError(`'${call}' is not a file store call.`);
+    const lowered = yield* compileChild(
+      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+    );
+    const operands: Record<"value" | "default" | "files", ExpressionPlan | null> = {
+      value: null,
+      default: null,
+      files: null,
+    };
+    const temporaryIds: number[] = [];
+    expression.arguments.forEach((argument, index) => {
+      const operand = lowered[index]!;
+      temporaryIds.push(...operand.temporaryIds);
+      let plan = operand.plan;
+      if (plan.kind !== "temporary" && plan.kind !== "literal") {
+        const temporaryId = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "storeTemporary",
+          temporaryId,
+          value: plan,
+          expectBoolean: false,
+          span: copySpan(argument.value.span),
+        });
+        temporaryIds.push(temporaryId);
+        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+      }
+      const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
+      if (name !== "value" && name !== "default" && name !== "files")
+        throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
+      operands[name] = plan;
+    });
+    if (operands.value === null)
+      throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const destinationTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "fileStore",
+      call,
+      value: operands.value,
+      default: operands.default,
+      files: operands.files,
+      destinationTemporary,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    return {
+      plan: {
+        kind: "temporary",
+        temporaryId: destinationTemporary,
+        span: copySpan(expression.span),
+      },
+      temporaryIds: [destinationTemporary],
+    };
+  }
+
   #consumeInteractionResult(transientTemporary: number, span: SourceSpan): LoweredExpression {
     const ordinaryTemporary = this.#allocateTemporary();
     this.instructions.push({
@@ -2999,6 +3073,7 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
+        isFileStoreCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -3352,6 +3427,8 @@ function assembleExpression(
         throw new TypeError("takePhoto() reached pure expression assembly.");
       if (isAskImageCall(expression))
         throw new TypeError("askImage() reached pure expression assembly.");
+      if (isFileStoreCall(expression))
+        throw new TypeError("A file store call reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

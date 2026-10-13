@@ -71,6 +71,7 @@ import {
 } from "./serializable-values.js";
 import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 import { validateCaptureState } from "./capture-validation.js";
+import { addStoredFile } from "./stored-files.js";
 import {
   contextHoldsInstruction,
   rootFitsFunction,
@@ -161,6 +162,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "pendingTimerHandlers",
   "stageImage",
   "capturedImages",
+  "storedFiles",
   "scriptStorage",
   "scriptStoragePersistent",
   "settledMedia",
@@ -376,14 +378,18 @@ export interface RuntimeFileCallFrameSnapshot {
 export type RuntimeFrameSnapshot = RuntimeCallFrameSnapshot | RuntimeFileCallFrameSnapshot;
 
 export interface RuntimeInteractionResultHandoffSnapshot {
-  /** Which foreground action produced the result: an interaction or a capture. */
-  readonly actionKind: "interaction" | "capture";
+  /** Which foreground action produced the result: an interaction, a capture, or a file store. */
+  readonly actionKind: "interaction" | "capture" | "fileStore";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
-  /** A capture's result is its captured-media reference, or `null` when its camera was unavailable. */
+  /**
+   * A capture's result is its captured-media reference, or `null` when its camera was unavailable. A file store's is the
+   * Player's answer, a list of the stored files' references or of the read files' Base64, or `null` when it failed; its
+   * instruction runs again with it, and its destination stays empty until then.
+   */
   readonly result: InteractionResultValue;
 }
 
@@ -455,6 +461,12 @@ export interface RuntimeSnapshot {
    * order. Tag queries search them after the plan's images (ADR 0023).
    */
   readonly capturedImages: RuntimeCapturedImageSnapshot[];
+  /**
+   * The references of the files in the Player's file store that this session knows, in ascending order: those the host
+   * named at Start, photos, image answers, and files the script stored. `toJson` writes these, and only these, as data
+   * URLs, and `fileToBase64` reads only these.
+   */
+  readonly storedFiles: string[];
   /** This session's view of script storage: loaded from the host at start, changed by `save` and `delete`. */
   readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
   /** Whether a host provider persists script storage, so `save` and `delete` wait for its acknowledgement. */
@@ -498,6 +510,11 @@ export interface FreshRuntimeOptions {
   readonly persistentScriptStorage?: boolean;
   /** What the protected `debugMode` reads at first; `false` without one. `setDebugMode` changes it later. */
   readonly debugMode?: boolean;
+  /**
+   * The references of stored files that the stored values hold, which the host's file store vouches for, so that
+   * `toJson` and `fileToBase64` know them as files (V30 §33).
+   */
+  readonly storedFiles?: readonly string[];
   readonly maxCallDepth?: number;
   readonly initialSessionTimeMs?: number;
   readonly baseDelayMs?: number;
@@ -599,6 +616,12 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   }
   const debugMode = capturedOptions.debugMode === undefined ? false : capturedOptions.debugMode;
   if (typeof debugMode !== "boolean") throw new TypeError("debugMode must be a boolean.");
+  const storedFiles = capturedOptions.storedFiles === undefined ? [] : capturedOptions.storedFiles;
+  if (!Array.isArray(storedFiles) || !storedFiles.every(isStoredFileReference))
+    throw new TypeError("storedFiles must be a list of stored file references.");
+  const knownFiles: string[] = [];
+  // EVIDENCE: validation: every entry passed isStoredFileReference above.
+  for (const reference of storedFiles as string[]) addStoredFile(knownFiles, reference);
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     if (scriptGlobals.has(name))
@@ -661,6 +684,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     pendingTimerHandlers: [],
     stageImage: null,
     capturedImages: [],
+    storedFiles: knownFiles,
     // EVIDENCE: validation: validateScriptStorageEntries accepted these captured entries above.
     scriptStorage: sortScriptStorage(scriptStorage as RuntimeScriptStorageEntrySnapshot[]),
     scriptStoragePersistent: persistentScriptStorage,
@@ -760,6 +784,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     })),
     stageImage: snapshot.stageImage,
     capturedImages: snapshot.capturedImages.map(cloneCapturedImage),
+    storedFiles: [...snapshot.storedFiles],
     scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia.map((media) => ({ ...media })),
@@ -887,6 +912,12 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     };
   if (action.kind === "storageWrite")
     return { ...action, value: cloneCapturedSerializableValue(action.value) };
+  if (action.kind === "fileStore")
+    return {
+      ...action,
+      files: action.files.map((file) => ({ ...file })),
+      references: [...action.references],
+    };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -1021,6 +1052,8 @@ function cloneSettlement(
     settlement.actionKind === "capture"
   )
     return { ...settlement };
+  if (settlement.actionKind === "fileStore")
+    return { ...settlement, references: [...settlement.references] };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",
@@ -1335,6 +1368,11 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!validCapturedImages(value.capturedImages)) {
     errors.push(
       "Runtime capturedImages must list unique captured references, each with canonical tags in name order.",
+    );
+  }
+  if (!validStoredFiles(value.storedFiles)) {
+    errors.push(
+      "Runtime storedFiles must list stored file references in ascending order, each once.",
     );
   }
   const scriptStorageFailure = validateScriptStorageEntries(
@@ -3014,6 +3052,7 @@ function validateStatusConsistency(
         "mediaPlayback",
         "storageWrite",
         "capture",
+        "fileStore",
       ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -3197,6 +3236,9 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "capture" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime capture result destination is already occupied.");
+  }
+  if (instruction.kind === "fileStore" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime file store result destination is already occupied.");
   }
   if (
     instruction.kind === "say" &&
@@ -4096,6 +4138,22 @@ function cloneCapturedImage(image: RuntimeCapturedImageSnapshot): RuntimeCapture
 }
 
 /** Captured references are unique, non-empty, and fit an interaction string; each carries canonical tags. */
+/** A reference to a stored file, as a capture or file store gives it: non-empty text that fits an answer. */
+function isStoredFileReference(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && interactionStringFits(value);
+}
+
+function validStoredFiles(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  let previous: string | null = null;
+  for (const reference of value) {
+    if (!isStoredFileReference(reference) || (previous !== null && previous >= reference))
+      return false;
+    previous = reference;
+  }
+  return true;
+}
+
 function validCapturedImages(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
   const references = new Set<string>();

@@ -3341,8 +3341,9 @@ export class Evaluator {
   }
 
   /**
-   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13). Text that does not read as JSON or Base64, or a value
-   * that is not text, gives the `default:` of a reading function, never a runtime error.
+   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13), `toJson` and `fromJson` with `files: false`. Text that
+   * does not read as JSON or Base64, or a value that is not text, gives the `default:` of a reading function, never a
+   * runtime error.
    */
   #dataTextFunction(
     name: string,
@@ -3351,7 +3352,15 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const reads = name === "fromJson" || name === "fromBase64";
-    const names = Object.keys(named);
+    // Only a `toJson` or `fromJson` with a written `files: false` is an ordinary call; with files it is a file store.
+    const takesFiles = name === "toJson" || name === "fromJson";
+    if (takesFiles && named.files !== undefined && named.files !== false)
+      throw fault(
+        "TSR028",
+        internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
+        span,
+      );
+    const names = Object.keys(named).filter((key) => !takesFiles || key !== "files");
     if (
       positional.length !== 1 ||
       (reads ? names.length !== 1 || names[0] !== "default" : names.length !== 0)

@@ -30,6 +30,7 @@ import {
   type RuntimeSession,
   type RuntimeSessionResult,
   type RuntimeSnapshot,
+  type StoredFileKind,
 } from "../src/index.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
@@ -184,7 +185,7 @@ export interface DebugOperation {
 
 export interface DebugAdmissionQuery {
   readonly reference: string;
-  readonly kind: "image";
+  readonly kind: StoredFileKind;
   readonly result: boolean;
 }
 
@@ -605,7 +606,12 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
       exactly(found, queryPath, ["reference", "kind", "result"]);
       return {
         reference: string(found["reference"], `${queryPath}.reference`),
-        kind: oneOf(found["kind"], `${queryPath}.kind`, ["image"] as const),
+        kind: oneOf(found["kind"], `${queryPath}.kind`, [
+          "image",
+          "audio",
+          "video",
+          "file",
+        ] as const),
         result: boolean(found["result"], `${queryPath}.result`),
       };
     },
@@ -852,7 +858,7 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
     const queries = [...operation.admissionQueries];
     let unexpected: string | null = null;
     const capturedMedia = {
-      holds(reference: string, kind: "image"): boolean {
+      holds(reference: string, kind: StoredFileKind): boolean {
         const query = queries.shift();
         if (query === undefined || query.reference !== reference || query.kind !== kind) {
           unexpected ??= `the engine asked whether ${kind} ${reference} is stored, which was not recorded`;
@@ -935,7 +941,7 @@ function dispatch(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   operation: DebugOperation,
-  capturedMedia: { holds(reference: string, kind: "image"): boolean },
+  capturedMedia: { holds(reference: string, kind: StoredFileKind): boolean },
 ): {
   snapshot: RuntimeSnapshot;
   events: readonly InterpreterEvent[];
@@ -993,7 +999,7 @@ export function rebuildRecordedSession(
       throw new Error(`call ${operation.seq} (${operation.kind}) threw ${operation.thrown}`);
     const queries = [...operation.admissionQueries];
     const capturedMedia = {
-      holds(reference: string, kind: "image"): boolean {
+      holds(reference: string, kind: StoredFileKind): boolean {
         const query = queries.shift();
         if (query === undefined || query.reference !== reference || query.kind !== kind)
           throw new Error(
@@ -1021,7 +1027,7 @@ export function rebuildRecordedSession(
 function dispatchToSession(
   session: RuntimeSession,
   operation: DebugOperation,
-  capturedMedia: { holds(reference: string, kind: "image"): boolean },
+  capturedMedia: { holds(reference: string, kind: StoredFileKind): boolean },
 ): {
   readonly events: RuntimeSessionResult["events"];
   readonly outcome: string;

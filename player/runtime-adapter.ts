@@ -35,6 +35,7 @@ import {
   type CapturedMediaAdmission,
   type CaptureUnavailableReason,
   type RuntimeCaptureActionSnapshot,
+  type RuntimeFileStoreActionSnapshot,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
   type RuntimeSessionCall,
@@ -430,6 +431,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly debugMode?: boolean;
   /** Which random draws the host decides or pauses at from Start (`docs/RUNTIME.md#controlled-randomness`). */
   readonly randomControl?: RandomControlOptions;
+  /** The references of the stored files the stored values hold, which the host's file store vouches for (V30 §33). */
+  readonly storedFiles?: readonly string[];
 }
 
 /**
@@ -531,6 +534,7 @@ export function createPlayerRuntimeSession(
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
     ...(options.debugMode === undefined ? {} : { debugMode: options.debugMode }),
+    ...(options.storedFiles === undefined ? {} : { storedFiles: options.storedFiles }),
   });
   const recorder = options.recorder ?? null;
   const debugTrace = options.debugTrace ?? null;
@@ -948,7 +952,8 @@ export type PlayerDebugWaitKind =
   | "pacing"
   | "media"
   | "save"
-  | "photo";
+  | "photo"
+  | "file";
 
 /** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
 export interface PlayerDebugCall {
@@ -1033,6 +1038,8 @@ function debugWaitKind(
       return "save";
     case "capture":
       return "photo";
+    case "fileStore":
+      return "file";
   }
 }
 
@@ -1179,6 +1186,49 @@ export function answerPlayerRuntimeCapture(
       ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
       : { kind: "unavailable", reason: answer.reason };
   const request = { actionId, actionKind: "capture", payload };
+  const operation = session.engine.call(
+    session,
+    "completeAction",
+    [request],
+    (runtime, admission) =>
+      runtime.completeAction(
+        request,
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
+      ),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation, "completed"),
+    outcome: operation.outcome,
+  });
+}
+
+/** The file store the session waits for, or `null`. */
+export function activePlayerRuntimeFileStore(
+  state: PlayerRuntimeState,
+): RuntimeFileStoreActionSnapshot | null {
+  const action = state.status === "waiting" ? state.foregroundAction : null;
+  return action?.kind === "fileStore" ? action : null;
+}
+
+/** The Player's answer to a file store: the stored files' references, the read files' Base64, or a failure. */
+export type PlayerFileStoreAnswer =
+  | { readonly kind: "stored"; readonly references: readonly string[] }
+  | { readonly kind: "read"; readonly files: readonly string[] }
+  | { readonly kind: "failed" };
+
+/**
+ * Answers a pending file store and continues on success. A stored file's reference is accepted only when
+ * `capturedMedia` vouches for it. On `executionPending` the host runs the session and offers the same answer again.
+ */
+export function answerPlayerRuntimeFileStore(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  answer: PlayerFileStoreAnswer,
+  capturedMedia?: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const request = { actionId, actionKind: "fileStore", payload: answer };
   const operation = session.engine.call(
     session,
     "completeAction",
@@ -1737,7 +1787,7 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 
 /**
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
- * `save`, `delete` or `takePhoto()` waits for the host, or the session is paused at a random draw.
+ * `save`, `delete`, `takePhoto()`, or file store waits for the host, or the session is paused at a random draw.
  */
 export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
   const pending = state.foregroundAction?.kind;
@@ -1745,7 +1795,8 @@ export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
     state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
     pending === "storageWrite" ||
-    pending === "capture"
+    pending === "capture" ||
+    pending === "fileStore"
   );
 }
 

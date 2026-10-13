@@ -72,7 +72,7 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
   emptyImageFilterMessage,
@@ -5564,8 +5564,12 @@ class TypeChecker {
         // A built-in takes each argument as it was evaluated, before later arguments run.
         values.push(this.#capture(argument.value));
       }
-      if (entry === undefined && this.#builtins.has(callee.name))
-        return this.#builtinType(callee.name, expression, values);
+      if (entry === undefined && this.#builtins.has(callee.name)) {
+        const type = this.#builtinType(callee.name, expression, values);
+        // A file store call may wait for the Player, and a block may run before it gives its result.
+        if (isFileStoreCall(expression)) this.#suspend();
+        return type;
+      }
       return UNKNOWN_TYPE;
     }
     if (callee.kind !== "propertyAccessExpression") {
@@ -6209,23 +6213,28 @@ class TypeChecker {
       case "toJson":
       case "fromJson":
       case "toBase64":
-      case "fromBase64": {
-        // The JSON or Base64 text of a value, and what such text holds (V30 §13).
+      case "fromBase64":
+      case "fileFromBase64":
+      case "fileToBase64": {
+        // The JSON or Base64 text of a value or a stored file, and what such text holds (V30 §13 and §33).
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
         this.#reportProblems(problems);
-        if (name === "toBase64" && problems.length === 0)
+        if ((name === "toBase64" || name === "fileToBase64") && problems.length === 0)
           this.#reportUnless(
             value!,
             (member) => isScalar(member, "string"),
             argument!.value,
-            "toBase64(...) encodes text (string)",
+            name === "toBase64"
+              ? "toBase64(...) encodes text (string)"
+              : "fileToBase64(...) reads a stored file, which is text (string)",
           );
-        // What JSON holds is known only when the script runs; Base64 holds text, or the result is the default.
+        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, or the
+        // result is the default.
         if (name === "fromJson") return UNKNOWN_TYPE;
         const fallback = expression.arguments.findIndex(
           (item) => item.kind === "namedArgument" && item.name.name === "default",
         );
-        return name === "fromBase64" && fallback !== -1
+        return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
       }
@@ -8348,7 +8357,9 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
 /** A call of a built-in without effects on script variables or time. */
 function isPureBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
-  return callee.kind === "identifier" && PURE_BUILTINS.has(callee.name);
+  return (
+    callee.kind === "identifier" && PURE_BUILTINS.has(callee.name) && !isFileStoreCall(expression)
+  );
 }
 
 // Places -------------------------------------------------------------------------------------------------------------

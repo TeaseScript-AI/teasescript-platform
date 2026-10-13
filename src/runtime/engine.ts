@@ -1,3 +1,4 @@
+import { executeFileStore } from "./actions/file-store.js";
 import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { leaveScopes, resolveCaptures } from "./captures.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
@@ -1398,6 +1399,9 @@ function executePlannedInstruction(
       );
       return;
     }
+    case "fileStore":
+      executeFileStore(instruction, snapshot, evaluator, events);
+      return;
     case "startTimer":
       startTimer(instruction, snapshot, evaluator, events);
       return;
@@ -2875,6 +2879,7 @@ function selectiveSayStagingClone(
     pendingTimerHandlers: snapshot.pendingTimerHandlers,
     stageImage: snapshot.stageImage,
     capturedImages: snapshot.capturedImages,
+    storedFiles: snapshot.storedFiles,
     scriptStorage: snapshot.scriptStorage,
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia,

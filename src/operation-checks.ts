@@ -320,7 +320,8 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
-  if (DATA_TEXT_FUNCTIONS.has(name)) return dataTextProblems(name, call, typeOf);
+  if (DATA_TEXT_FUNCTIONS.has(name) || name === "fileFromBase64" || name === "fileToBase64")
+    return dataTextProblems(name, call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -364,35 +365,55 @@ export function builtinCallProblems(
 }
 
 /**
- * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, or `fromBase64(text, default:)` (V30
- * §13): their arguments, a required `default:` that is missing, text to read that can never be text, and a value that
- * is or may hold one that `toJson` cannot write. `toBase64`'s text is checked where it is called.
+ * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, `fromBase64(text, default:)`,
+ * `fileFromBase64(text, default:)`, or `fileToBase64(file)` (V30 §13 and §33): their arguments, a required `default:`
+ * that is missing, a `files:` of `toJson` or `fromJson` that is not true or false, text to read that can never be text,
+ * and a value that is or may hold one that `toJson` cannot write. The text of `toBase64` and the file of `fileToBase64`
+ * are checked where they are called.
  */
 function dataTextProblems(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const reads = name === "fromJson" || name === "fromBase64";
+  const reads = name === "fromJson" || name === "fromBase64" || name === "fileFromBase64";
+  const takesFiles = name === "toJson" || name === "fromJson";
   const problems: OperationProblem[] = [];
   const positional: Expression[] = [];
   let fallback = false;
+  let files: Expression | undefined;
   for (const argument of call.arguments) {
     if (argument.kind === "positionalArgument") positional.push(argument.value);
     else if (reads && argument.name.name === "default") fallback = true;
+    else if (takesFiles && argument.name.name === "files") files = argument.value;
     else
       problems.push({
         kind: "unknownNamedArgument",
         message: reads
-          ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`
-          : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+          ? `${name}(...) has no parameter '${argument.name.name}'. ${takesFiles ? "Its named arguments are 'default:' and 'files:'." : "Its only named argument is 'default:'."}`
+          : takesFiles
+            ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'files:'.`
+            : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
         span: argument.name.span,
+      });
+  }
+  if (files !== undefined) {
+    const type = typeOf(files);
+    const candidates = members(forUse(type)).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "boolean"))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `'files:' takes true or false (boolean), not ${describeValue(type)}.`,
+        span: files.span,
       });
   }
   if (positional.length !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
       span: call.span,
     });
   else if (reads && !fallback)
@@ -401,7 +422,7 @@ function dataTextProblems(
       message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
       span: call.span,
     });
-  if (problems.length > 0 || name === "toBase64") return problems;
+  if (problems.length > 0 || name === "toBase64" || name === "fileToBase64") return problems;
   const value = positional[0]!;
   const type = typeOf(value);
   if (reads) {

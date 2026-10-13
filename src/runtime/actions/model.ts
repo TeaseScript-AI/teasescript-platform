@@ -222,6 +222,38 @@ export interface RuntimeCaptureActionSnapshot {
   readonly requestEventSequence: number;
 }
 
+/** A file the Player's file store keeps: its type, from its first bytes, and its bytes as standard Base64. */
+export interface RuntimeFileToStore {
+  readonly type: string;
+  readonly base64: string;
+}
+
+/**
+ * A `fileStore` instruction waits while the Player stores files or reads stored ones (V30 §13 and §33). The Player
+ * completes it with the references of the stored files, the Base64 of the read ones, or a failure; the instruction then
+ * runs again with that answer, so its continuation is itself. Expiry blocks wait until it settles, so it is never
+ * suspended.
+ */
+export interface RuntimeFileStoreActionSnapshot {
+  readonly kind: "fileStore";
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  /** Where the instruction puts its result once it runs again. */
+  readonly destinationTemporary: number;
+  readonly createdAtMs: number;
+  readonly requestEventSequence: number;
+  /** Whether the Player stores `files` or reads `references`; the other list is empty. */
+  readonly operation: "store" | "read";
+  /** The files to store, each kept once. */
+  readonly files: readonly RuntimeFileToStore[];
+  /** The stored files to read, each named once. */
+  readonly references: readonly string[];
+}
+
 /** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */
 export type CaptureUnavailableReason =
   "unconfigured" | "denied" | "notFound" | "busy" | "unsupported" | "revoked" | "failed";
@@ -243,7 +275,8 @@ export type RuntimeForegroundActionSnapshot =
   | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot
   | RuntimeStorageWriteActionSnapshot
-  | RuntimeCaptureActionSnapshot;
+  | RuntimeCaptureActionSnapshot
+  | RuntimeFileStoreActionSnapshot;
 
 export type RuntimePendingActionSnapshot =
   | RuntimeDelayActionSnapshot
@@ -252,6 +285,7 @@ export type RuntimePendingActionSnapshot =
   | RuntimeMediaPlaybackActionSnapshot
   | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot
+  | RuntimeFileStoreActionSnapshot
   | RuntimeTimerActionSnapshot
   | RuntimeMediaActionSnapshot
   | RuntimePermanentButtonActionSnapshot;
@@ -271,7 +305,8 @@ export function requiredActionCompletionEvents(action: { readonly kind?: unknown
     action?.kind === "timer" ||
     action?.kind === "media" ||
     action?.kind === "mediaPlayback" ||
-    action?.kind === "permanentButton"
+    action?.kind === "permanentButton" ||
+    action?.kind === "fileStore"
   )
     return 1;
   return 0;
@@ -426,10 +461,32 @@ export interface RuntimeCaptureActionSettlementSnapshot {
   readonly unavailableReason: CaptureUnavailableReason | null;
 }
 
+/**
+ * A settled file store, retained so a repeated Player completion replays instead of storing or reading twice. The
+ * answer itself is handed off to the instruction, which runs again; only the references of stored files are kept here.
+ */
+export interface RuntimeFileStoreActionSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "fileStore";
+  readonly settlementKind: "completed";
+  /** `stored` or `read` as asked, or `failed` when the Player could not. */
+  readonly outcome: "stored" | "read" | "failed";
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly destinationTemporary: number;
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
+  /** The references of the stored files, in the order of the request; empty unless `stored`. */
+  readonly references: readonly string[];
+}
+
 export type RuntimeActionSettlementSnapshot =
   | RuntimeDelayActionSettlementSnapshot
   | RuntimeInteractionActionSettlementSnapshot
   | RuntimeChatPacingGateSettlementSnapshot
   | RuntimeMediaPlaybackSettlementSnapshot
   | RuntimeStorageWriteSettlementSnapshot
-  | RuntimeCaptureActionSettlementSnapshot;
+  | RuntimeCaptureActionSettlementSnapshot
+  | RuntimeFileStoreActionSettlementSnapshot;
