@@ -8,6 +8,7 @@ import {
   emptyTextMessage,
   endBeforeStartMessage,
   negativeMessage,
+  regexMemberMessage,
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
@@ -16,8 +17,10 @@ import {
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
-import { describeRuntimeValue, isAnyDuration, isDuration } from "./value-predicates.js";
-import type { SerializableRuntimeValue } from "./serializable-values.js";
+import { compileRegex } from "../regex.js";
+import type { RegexProgram } from "../regex-engine.js";
+import { describeRuntimeValue, isAnyDuration, isDuration, isRegex } from "./value-predicates.js";
+import type { SerializableRegex, SerializableRuntimeValue } from "./serializable-values.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -40,6 +43,7 @@ export function missingMemberMessage(
   name: string,
   use: "method" | "property",
 ): string {
+  if (isRegex(value)) return regexMemberMessage(name, use);
   const kind = describeRuntimeValue(value);
   const description =
     value === null ? "The value null" : kind.charAt(0).toUpperCase() + kind.slice(1);
@@ -154,6 +158,9 @@ export function callStringMethod(
   if (member?.parameters == null)
     throw fault("TSR016", unknownTextMemberMessage(name, "method"), span);
   checkTextArguments(member, positional, span);
+  const searched = positional[0];
+  if (searched !== undefined && isRegex(searched))
+    return regexSearch(text, name, regexProgram(searched, span));
   // EVIDENCE: invariant: checkTextArguments proved that every text parameter received text.
   const texts = positional as readonly string[];
   // EVIDENCE: invariant: checkTextArguments proved that every position and count is a whole number of 0 or more.
@@ -300,6 +307,74 @@ export function callStringMethod(
 }
 
 /**
+ * A search of `text` for a regex (V30 §8): `matches` the whole text, or `contains`, `indexOf`, `find`, or `capture` the
+ * first leftmost match. RE2 reports UTF-16 offsets, and the one position `indexOf` gives counts code points up to it.
+ */
+function regexSearch(text: string, name: string, program: RegexProgram): SerializableRuntimeValue {
+  switch (name) {
+    case "matches":
+      return program.matchesWhole(text);
+    case "contains":
+      return program.matchesPart(text);
+    case "indexOf": {
+      const match = program.firstMatch(text, false);
+      return match === null ? null : codePointCount(text, match[0]!);
+    }
+    case "find": {
+      const match = program.firstMatch(text, false);
+      return match === null ? null : text.slice(match[0], match[1]);
+    }
+    case "capture": {
+      // The whole match, then each group in opening-parenthesis order; a group that did not take part is null.
+      const match = program.firstMatch(text, true);
+      if (match === null) return null;
+      const groups: (string | null)[] = [];
+      for (let index = 0; index < match.length; index += 2)
+        groups.push(match[index]! < 0 ? null : text.slice(match[index], match[index + 1]));
+      return { kind: "list", items: groups };
+    }
+    default:
+      throw new Error(`Text operation '${name}' takes no regex.`);
+  }
+}
+
+/**
+ * `toRegex(text, default:)` (V30 §8): a regex of the pattern text, with its flags written inside it, such as `(?i)`.
+ * Text that RE2 rejects or that is over the regex limits, and a value that is not text, give the default, a regex or
+ * `null`, which is checked first.
+ */
+export function regexFromText(
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  const names = Object.keys(named);
+  if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
+    throw fault(
+      "TSR028",
+      "toRegex(...) takes one text and a default:, such as toRegex(text, default: null).",
+      span,
+    );
+  const fallback = named.default!;
+  if (fallback !== null && !isRegex(fallback))
+    throw fault(
+      "TSR058",
+      `toRegex(...) needs a regex or null as its default:, not ${describeRuntimeValue(fallback)}.`,
+      span,
+    );
+  const text = positional[0]!;
+  if (typeof text !== "string" || !compileRegex(text, "").ok) return fallback;
+  return { kind: "regex", source: text, flags: "" };
+}
+
+/** The compiled program of a regex value, which validation has already compiled once. */
+function regexProgram(regex: SerializableRegex, span: SourceSpan): RegexProgram {
+  const compiled = compileRegex(regex.source, regex.flags);
+  if (!compiled.ok) throw fault("TSR057", `This regex cannot be used: ${compiled.problem}`, span);
+  return compiled.program;
+}
+
+/**
  * Checks the arguments of a text operation or `join` against its parameters: their number, text where text is required,
  * non-empty text, and whole numbers of 0 or more for positions and counts. A position's upper bound depends on the text
  * and is checked by `substring`.
@@ -316,6 +391,17 @@ export function checkTextArguments(
   for (const [index, value] of positional.entries()) {
     const parameter = parameters[index]!;
     const position = parameter.kind === "position";
+    if (
+      (parameter.kind === "regex" && !isRegex(value)) ||
+      (parameter.kind === "textOrRegex" && typeof value !== "string" && !isRegex(value))
+    )
+      throw fault(
+        "TSR057",
+        argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
+          argumentFix(parameter, argumentKind(value)),
+        span,
+      );
+    if (parameter.kind === "regex" || parameter.kind === "textOrRegex") continue;
     if (parameter.kind === "text" || parameter.kind === "nonEmptyText") {
       if (typeof value !== "string")
         throw fault(

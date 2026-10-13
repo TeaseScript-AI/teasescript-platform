@@ -355,6 +355,7 @@ export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
 export const ABSOLUTE_DATE_TIME_TYPE = scalar("absoluteDateTime");
 export const SCRIPT_TYPE = scalar("script");
+export const REGEX_TYPE = scalar("regex");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -1994,6 +1995,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   datetime: "a date and time",
   absoluteDateTime: "an absolute date and time",
   script: "a script reference",
+  regex: "a regex",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */

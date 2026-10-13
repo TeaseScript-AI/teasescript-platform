@@ -1055,6 +1055,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "nullLiteral":
     case "numberLiteral":
     case "durationLiteral":
+    case "regexLiteral":
     case "showCameraExpression":
       return;
   }

@@ -1022,6 +1022,7 @@ export type AssignmentTargetPlan =
 
 export type ExpressionPlan =
   | LiteralExpressionPlan
+  | RegexExpressionPlan
   | DurationExpressionPlan
   | CalendarDurationExpressionPlan
   | IdentifierExpressionPlan
@@ -1052,6 +1053,13 @@ interface ExpressionPlanBase {
 export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly kind: "literal";
   readonly value: string | number | boolean | null;
+}
+
+/** A regex literal (V30 §8): its pattern and its flags, valid and in canonical order, as a regex value holds them. */
+export interface RegexExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "regex";
+  readonly source: string;
+  readonly flags: string;
 }
 
 /** An exact duration literal, in milliseconds. */
@@ -1162,7 +1170,8 @@ export type TypePlanName =
   | "camera"
   | "permanentButton"
   | "messageHandle"
-  | "script";
+  | "script"
+  | "regex";
 
 export interface TypePropertyPlan {
   readonly name: string;

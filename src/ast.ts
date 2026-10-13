@@ -481,7 +481,8 @@ export type ScalarTypeName =
   | "absoluteDateTime"
   | "duration"
   | "calendarDuration"
-  | "script";
+  | "script"
+  | "regex";
 
 /**
  * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).
@@ -650,6 +651,7 @@ export type Expression =
   | DurationLiteral
   | UnitExpression
   | StringLiteral
+  | RegexLiteral
   | ListLiteral
   | ObjectLiteral
   | SetLiteral
@@ -800,6 +802,17 @@ export type UnitExpression = {
   | { readonly calendar: false; readonly unit: DurationUnit }
   | { readonly calendar: true; readonly unit: CalendarDurationUnit }
 );
+
+/**
+ * A regex literal `/source/flags` (V30 §8): the pattern exactly as written between the slashes, and the flags as written
+ * after them, which the compiler checks.
+ */
+export interface RegexLiteral {
+  readonly kind: "regexLiteral";
+  readonly source: string;
+  readonly flags: string;
+  readonly span: SourceSpan;
+}
 
 export interface StringLiteral {
   readonly kind: "stringLiteral";

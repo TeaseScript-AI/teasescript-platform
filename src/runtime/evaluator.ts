@@ -117,6 +117,7 @@ import {
 import {
   callStringMethod,
   checkTextArguments,
+  regexFromText,
   missingMemberMessage,
   STRING_METHODS,
   stringLength,
@@ -176,6 +177,7 @@ import {
   isObject,
   isRange,
   isScriptReference,
+  isRegex,
   isSet,
   isSpeakerReference,
   isTemporal,
@@ -369,6 +371,7 @@ export class Evaluator {
       {
         kind:
           | "literal"
+          | "regex"
           | "duration"
           | "calendarDuration"
           | "identifier"
@@ -381,6 +384,8 @@ export class Evaluator {
     switch (expression.kind) {
       case "literal":
         return expression.value;
+      case "regex":
+        return { kind: "regex", source: expression.source, flags: expression.flags };
       case "debugMode":
         // The host sets it, so a read has no recorded origin.
         this.trace?.readState(
@@ -791,6 +796,7 @@ export class Evaluator {
       let owned = false;
       switch (expression.kind) {
         case "literal":
+        case "regex":
         case "duration":
         case "calendarDuration":
         case "identifier":
@@ -1776,7 +1782,7 @@ export class Evaluator {
     if (!value.items.every(isVisibleScalar))
       throw fault(
         "TSR021",
-        "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+        "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
         span,
       );
     return visibleText(
@@ -1788,8 +1794,8 @@ export class Evaluator {
 
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    // A script reference shows as the call that makes it, which is notation too.
-    if (isVisibleScalar(value) && !isScriptReference(value))
+    // A script reference shows as the call that makes it, and a regex as its literal, which are notation too.
+    if (isVisibleScalar(value) && !isScriptReference(value) && !isRegex(value))
       return visibleText(value, span, currentTemporalContext(this.snapshot));
     const notation = valueNotation(
       value,
@@ -1859,7 +1865,7 @@ export class Evaluator {
     if (!isVisibleScalar(item))
       throw fault(
         "TSR021",
-        "join() can only join text, numbers, true or false, null, durations, date and time values, and script references. Select an element or a property first.",
+        "join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes. Select an element or a property first.",
         span,
       );
     return visibleText(item, span, currentTemporalContext(this.snapshot));
@@ -2075,6 +2081,7 @@ export class Evaluator {
         );
       if (DATA_TEXT_FUNCTIONS.has(name))
         return this.#dataTextFunction(name, positional, named, expression.span);
+      if (name === "toRegex") return regexFromText(positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))

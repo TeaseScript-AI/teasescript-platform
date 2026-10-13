@@ -27,6 +27,7 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "fromJson",
   "toBase64",
   "fromBase64",
+  "toRegex",
   "round",
   "floor",
   "ceil",
@@ -84,6 +85,9 @@ const READING_METHODS: ReadonlySet<string> = new Set([
   "join",
   "startsWith",
   "endsWith",
+  "matches",
+  "find",
+  "capture",
   "substring",
   "split",
   "replace",
@@ -145,6 +149,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
           return false;
         break;
       case "literal":
+      case "regex":
       case "duration":
       case "calendarDuration":
       case "identifier":

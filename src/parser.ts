@@ -4068,6 +4068,17 @@ class Parser {
     if (this.#match(TokenKind.StringStart)) {
       return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseStringLiteral(token)));
     }
+    if (this.#match(TokenKind.RegexLiteral)) {
+      const source = tokenValue(token);
+      // The lexer reported a literal without its closing slash.
+      if (token.lexeme.length < source.length + 2) return null;
+      return Object.freeze({
+        kind: "regexLiteral",
+        source,
+        flags: token.lexeme.slice(source.length + 2),
+        span: copySpan(token.span),
+      });
+    }
     if (this.#match(TokenKind.LeftParenthesis)) {
       return yield* parseChild(this.#withinDelimiters(this.#parseParenthesized(token)));
     }
@@ -5436,6 +5447,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "media",
       "messageHandle",
       "script",
+      "regex",
     ] as const
   ).map((name) => [name, name]),
 );
@@ -5534,6 +5546,7 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.Identifier ||
     token.kind === TokenKind.NumberLiteral ||
     token.kind === TokenKind.StringStart ||
+    token.kind === TokenKind.RegexLiteral ||
     token.kind === TokenKind.KeywordSpeaker ||
     token.kind === TokenKind.KeywordSay ||
     token.kind === TokenKind.KeywordWait ||
