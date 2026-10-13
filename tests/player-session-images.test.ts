@@ -3,18 +3,18 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
 import {
-  answerPlayerRuntimeImage,
   createPlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   observePlayerRuntimeTime,
   playerRuntimeForeground,
+  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import type { DebugExportCandidate } from "../player/debug-export-assembly.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { CapturedMediaAdmission, SerializableRuntimeValue } from "../src/index.js";
+import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -29,8 +29,12 @@ interface ImageHost {
       file: File,
       filters: { types: readonly string[] | null; mime: readonly string[] | null },
     ): Promise<{ readonly reference: string } | { readonly message: string }>;
-    readonly admission: CapturedMediaAdmission;
     discard(reference: string): void;
+  };
+  /** The presented `askImage` request's steps: a chosen image becomes the preview, which "Use image" answers with. */
+  readonly imageCapture: {
+    choose(reference: string): boolean;
+    use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
   };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
@@ -106,10 +110,12 @@ async function chosen(host: ImageHost, name: string) {
   return stored.reference;
 }
 
+/** Makes a chosen image the request's preview and answers with it, as "Use image" does. */
 function answer(host: ImageHost, reference: string) {
   const session = host.session.value;
   assert.ok(session);
-  const result = answerPlayerRuntimeImage(session, reference, host.images.admission);
+  assert.equal(host.imageCapture.choose(reference), true);
+  const result = host.imageCapture.use(session);
   assert.equal(result?.outcome.kind, "completed");
   host.update(result!.session);
 }
@@ -154,7 +160,7 @@ test("a chosen image is session media: kept durably only when saved, and release
   assert.ok("message" in refused);
 
   const first = await chosen(host, "first.png");
-  assert.equal(host.images.admission.holds(first, "image"), true);
+  assert.notEqual(host.resolveAsset(first), null, "the chosen image is session media");
   answer(host, first);
   const second = await chosen(host, "second.png");
   answer(host, second);
@@ -165,11 +171,8 @@ test("a chosen image is session media: kept durably only when saved, and release
   assert.deepEqual(await repository.listReferences("images"), [second]);
   // Unmounting releases the session media; the saved image stays in durable storage.
   scope.stop();
-  await until(
-    () => !host.images.admission.holds(first, "image"),
-    "the session media was not released",
-  );
-  assert.equal(host.images.admission.holds(second, "image"), false);
+  await until(() => host.resolveAsset(first) === null, "the session media was not released");
+  assert.equal(host.resolveAsset(second), null);
   assert.deepEqual(await repository.listReferences("images"), [second]);
 });
 
@@ -211,7 +214,7 @@ test("a debug export candidate is the state when it was asked for, while play co
   assert.equal(candidate.photos.length, 1);
 });
 
-test("an image that never answered can be dropped, and the runtime admits only stored images", async (context) => {
+test("an image that never became the preview can be dropped, and Use image answers only with a stored image", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
   const host = scope.run(() =>
@@ -223,8 +226,10 @@ test("an image that never answered can be dropped, and the runtime admits only s
   await host.activate();
   const reference = await chosen(host, "late.png");
   host.images.discard(reference);
-  assert.equal(host.images.admission.holds(reference, "image"), false);
-  const result = answerPlayerRuntimeImage(host.session.value!, reference, host.images.admission);
+  assert.equal(host.resolveAsset(reference), null);
+  // The runtime admits only an image the store holds, also when a dropped one is offered as the preview.
+  assert.equal(host.imageCapture.choose(reference), true);
+  const result = host.imageCapture.use(host.session.value!);
   assert.equal(result?.outcome.kind, "invalidPayload");
   assert.equal(playerRuntimeForeground(result!.session)?.kind, "ask-image");
 });
