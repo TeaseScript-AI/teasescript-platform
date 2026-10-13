@@ -167,7 +167,7 @@ openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your rewar
 ```
 
 `showPopup` shows its message in a dialog outside the chat with one button, `OK` unless `buttonText:` renames it, and
-waits until the player closes it; neither enters the transcript, and it gives no value
+waits until the player closes it; neither enters the transcript, and like `showButton` it returns its elapsed time
 ([§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)). The call form also takes the
 message without its name, first. A block may interrupt it like any interaction ([Runtime](RUNTIME.md#generic-foreground-interactions)).
 

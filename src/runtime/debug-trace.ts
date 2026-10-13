@@ -42,7 +42,7 @@ export type RuntimeDebugRecordKind =
   | "return"
   /** An intermediate value the compiled code keeps between statements, such as a prepared message text. */
   | "temporary"
-  /** The accepted answer of a question, choice, button, or photo request, or a button's timeout. */
+  /** The accepted answer of a question, choice, button, popup, or photo request, or a button's timeout. */
   | "input"
   | "load"
   /** A `save` or `delete` that changed the session's storage view. */

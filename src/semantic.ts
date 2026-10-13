@@ -30,7 +30,7 @@ import type {
   LabelTarget,
   LetStatement,
   OpenUrlStatement,
-  ShowPopupStatement,
+  ShowPopupParts,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -1973,6 +1973,11 @@ class SemanticValidator {
       case "showButtonExpression":
         yield* compileChild(this.#validateShowButtonTask(expression, scope));
         return;
+      case "showPopupExpression":
+        this.#validateShowPopupArguments(expression);
+        for (const argument of expression.arguments)
+          yield* compileChild(this.#validateExpressionTask(argument.value, scope, null));
+        return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
         return;
@@ -2047,11 +2052,11 @@ class SemanticValidator {
               yield* compileChild(
                 this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
               );
-          } else if (name === "showPopup" || name === "openUrl") {
-            // A statement of its own is a `showPopupStatement` or an `openUrlStatement`.
+          } else if (name === "openUrl") {
+            // A statement of its own is an `openUrlStatement`.
             this.#report(
               semanticCode.functionValue,
-              `${name}(...) gives no value, so it can only be a statement of its own.`,
+              "openUrl(...) gives no value, so it can only be a statement of its own.",
               expression.callee.span,
             );
           } else if (binding?.declaration !== undefined) {
@@ -2566,10 +2571,10 @@ class SemanticValidator {
    * `showPopup` takes its message first, without a name or as `message:`, and an optional `buttonText:` (V30 §31). A
    * repeated name is reported with the other arguments.
    */
-  #validateShowPopupArguments(statement: ShowPopupStatement): void {
-    this.#validateDistinctNamedArguments(statement);
+  #validateShowPopupArguments(parts: ShowPopupParts): void {
+    this.#validateDistinctNamedArguments(parts);
     let message = false;
-    for (const [index, argument] of statement.arguments.entries()) {
+    for (const [index, argument] of parts.arguments.entries()) {
       if (argument.kind === "positionalArgument") {
         if (index > 0 || message)
           this.#report(
@@ -2601,7 +2606,7 @@ class SemanticValidator {
       this.#report(
         semanticCode.missingNamedArgument,
         "showPopup needs a message, as in 'showPopup \"Task completed\"'.",
-        statement.span,
+        parts.span,
       );
   }
 
@@ -2947,6 +2952,7 @@ class SemanticValidator {
         case "interactionExpression":
         case "sayExpression":
         case "showButtonExpression":
+        case "showPopupExpression":
         case "timerExpression":
         case "playMediaExpression":
         case "showCameraExpression":
@@ -3136,6 +3142,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "dictLiteral" ||
     kind === "rangeExpression" ||
     kind === "showButtonExpression" ||
+    kind === "showPopupExpression" ||
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
     kind === "showCameraExpression" ||
@@ -3196,6 +3203,7 @@ function findFirstInteraction(
     kind:
       | "interactionExpression"
       | "showButtonExpression"
+      | "showPopupExpression"
       | "playMediaExpression"
       | "showCameraExpression"
       | "sayExpression"
@@ -3208,6 +3216,7 @@ function findFirstInteraction(
     if (
       current.kind === "interactionExpression" ||
       current.kind === "showButtonExpression" ||
+      current.kind === "showPopupExpression" ||
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
       current.kind === "sayExpression" ||
@@ -3251,6 +3260,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
     expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
     expression.kind === "showCameraExpression" ||
@@ -3289,6 +3299,7 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
     expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
     expression.kind === "showCameraExpression" ||
@@ -3308,7 +3319,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     (expression.kind === "interactionExpression" &&
       expression.interactionKind !== "booleans" &&
       expression.interactionKind !== "form") ||
-    expression.kind === "showButtonExpression"
+    expression.kind === "showButtonExpression" ||
+    expression.kind === "showPopupExpression"
   );
 }
 

@@ -1361,17 +1361,13 @@ function validateInteractionInstruction(
       ),
     );
   }
-  // A popup and `openUrl` give no value.
-  if (kind === "popup" || kind === "url") {
+  // `openUrl` gives no value.
+  if (kind === "url") {
     if (value.destinationTemporary !== null)
       errors.push(
-        planError(
-          "TSC002",
-          "A popup or openUrl has no result destination.",
-          `${path}.destinationTemporary`,
-        ),
+        planError("TSC002", "openUrl has no result destination.", `${path}.destinationTemporary`),
       );
-  } else if (kind !== "button" || value.destinationTemporary !== null) {
+  } else if ((kind !== "button" && kind !== "popup") || value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
       `${path}.destinationTemporary`,

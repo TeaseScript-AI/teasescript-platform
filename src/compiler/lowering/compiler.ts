@@ -14,7 +14,7 @@ import type {
   InteractionExpression,
   ShowButtonParts,
   ShowPermanentButtonParts,
-  ShowPopupStatement,
+  ShowPopupParts,
   OpenUrlStatement,
   SpeakerDeclaration,
   SwitchCase,
@@ -366,7 +366,7 @@ export class InstructionCompiler {
         this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
         return;
       case "showPopupStatement":
-        yield* compileChild(this.#lowerShowPopupTask(statement));
+        yield* compileChild(this.#lowerShowPopupTask(statement, false));
         return;
       case "openUrlStatement":
         yield* compileChild(this.#lowerOpenUrlTask(statement));
@@ -1284,6 +1284,11 @@ export class InstructionCompiler {
       if (lowered === null) throw new TypeError("A showButton value lowered without a result.");
       return lowered;
     }
+    if (expression.kind === "showPopupExpression") {
+      const lowered = yield* compileChild(this.#lowerShowPopupTask(expression, true));
+      if (lowered === null) throw new TypeError("A showPopup value lowered without a result.");
+      return lowered;
+    }
     if (expression.kind === "sayExpression") {
       const lowered = yield* compileChild(this.#lowerSayTask(expression, true));
       if (lowered === null) throw new TypeError("A say value lowered without a handle.");
@@ -1680,34 +1685,39 @@ export class InstructionCompiler {
   /**
    * Lowers a `showPopup` (V30 §31). A static message and button text embed the popup's UI; otherwise the requesting
    * speaker is captured, as for any interaction, and the written arguments are evaluated once, in written order, into
-   * temporaries that the popup reads when it opens.
+   * temporaries that the popup reads when it opens. As a value, the popup yields its elapsed waiting time, as a button
+   * does.
    */
-  *#lowerShowPopupTask(statement: ShowPopupStatement): CompileTask<void> {
+  *#lowerShowPopupTask(
+    parts: ShowPopupParts,
+    valueWanted: boolean,
+  ): CompileTask<LoweredExpression | null> {
+    const expectedResult = valueWanted ? "duration" : "none";
     const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
-    const message = statement.arguments.find(
+    const message = parts.arguments.find(
       (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
     );
     if (message === undefined) throw new TypeError("A popup without a message reached lowering.");
-    const buttonText = statement.arguments.find((argument) => argument !== message);
+    const buttonText = parts.arguments.find((argument) => argument !== message);
     const staticMessage = staticVisibleText(message.value);
     const staticButtonText =
       buttonText === undefined ? DEFAULT_POPUP_BUTTON_TEXT : staticVisibleText(buttonText.value);
     if (staticMessage !== undefined && staticButtonText !== undefined) {
-      this.instructions.push({
-        kind: "interaction",
+      const instruction = {
         interactionKind: "popup",
         target: "standardChat",
         speaker: null,
-        destinationTemporary: null,
-        expectedResult: "none",
+        expectedResult,
         ui: { kind: "popup", message: staticMessage, buttonText: staticButtonText, accessibleName },
-        span: copySpan(statement.span),
-      });
-      return;
+        span: copySpan(parts.span),
+      } as const;
+      if (valueWanted) return this.#emitResultInteraction(instruction, parts.span);
+      this.instructions.push({ kind: "interaction", ...instruction, destinationTemporary: null });
+      return null;
     }
-    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, parts.span);
     const temporaries = new Map<CallArgument, number>();
-    for (const argument of statement.arguments)
+    for (const argument of parts.arguments)
       temporaries.set(
         argument,
         this.#materializeDedicatedInteractionValue(
@@ -1716,22 +1726,35 @@ export class InstructionCompiler {
         ).temporaryId,
       );
     const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
-    this.instructions.push({
-      kind: "interaction",
-      interactionKind: "popup",
-      target: "standardChat",
-      speakerTemporary,
-      destinationTemporary: null,
-      expectedResult: "none",
-      preparedUi: {
-        kind: "popup",
-        messageTemporary: temporaries.get(message)!,
-        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
-        accessibleName,
-      },
-      span: copySpan(statement.span),
-    });
-    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
+    const preparedUi: PreparedInteractionUiPayload = {
+      kind: "popup",
+      messageTemporary: temporaries.get(message)!,
+      ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+      accessibleName,
+    };
+    let lowered: LoweredExpression | null = null;
+    if (valueWanted) {
+      lowered = this.#emitPreparedResultInteraction(
+        "popup",
+        "duration",
+        speakerTemporary,
+        preparedUi,
+        parts.span,
+      );
+    } else {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "popup",
+        target: "standardChat",
+        speakerTemporary,
+        destinationTemporary: null,
+        expectedResult: "none",
+        preparedUi,
+        span: copySpan(parts.span),
+      });
+    }
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], parts.span);
+    return lowered;
   }
 
   /**
@@ -2915,6 +2938,7 @@ export class InstructionCompiler {
         current.expression.kind === "interactionExpression" ||
         current.expression.kind === "sayExpression" ||
         current.expression.kind === "showButtonExpression" ||
+        current.expression.kind === "showPopupExpression" ||
         current.expression.kind === "timerExpression" ||
         current.expression.kind === "playMediaExpression" ||
         current.expression.kind === "showCameraExpression" ||
@@ -3344,6 +3368,7 @@ function assembleExpression(
     case "interactionExpression":
     case "sayExpression":
     case "showButtonExpression":
+    case "showPopupExpression":
     case "timerExpression":
     case "playMediaExpression":
     case "showCameraExpression":

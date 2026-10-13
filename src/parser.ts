@@ -56,6 +56,7 @@ import type {
   LoadExpression,
   SaveStatement,
   ShowImageStatement,
+  ShowPopupParts,
   ShowPopupStatement,
   OpenUrlStatement,
   CalendarDurationUnit,
@@ -117,8 +118,8 @@ export interface StatementRange {
 }
 
 // Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
-// also has an expression form, used after `=`, an operator, or an opening delimiter. `showCamera`, like `timer`, is
-// not listed, so its value form may start a line after `:`.
+// and `showPopup` also have an expression form, used after `=`, an operator, or an opening delimiter. `showCamera`,
+// like `timer`, is not listed, so its value form may start a line after `:`.
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
@@ -522,23 +523,30 @@ class Parser {
     }
   }
 
+  *#parseShowPopupStatement(): ParseTask<ShowPopupStatement | null> {
+    const parts = yield* parseChild(this.#parseShowPopupParts());
+    if (parts === null) return null;
+    if (this.#check(TokenKind.Comma)) {
+      this.#reportShowPopupCommandComma(this.#peek());
+      return null;
+    }
+    return Object.freeze({ kind: "showPopupStatement", ...parts });
+  }
+
   /**
    * `showPopup <message>`, or the call `showPopup(...)` when a parenthesis follows (V30 §31). The command form takes only
-   * the message, as one positional argument.
+   * the message, as one positional argument. A comma after it that is not followed by `buttonText:` or `message:` is
+   * left to the enclosing statement, list, call, or object.
    */
-  *#parseShowPopupStatement(): ParseTask<ShowPopupStatement | null> {
+  *#parseShowPopupParts(): ParseTask<ShowPopupParts | null> {
     const command = this.#advance();
     if (this.#check(TokenKind.LeftParenthesis)) {
       const call = yield* parseChild(
         this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
       );
-      return Object.freeze({
-        kind: "showPopupStatement",
-        arguments: call.arguments,
-        span: copySpan(call.span),
-      });
+      return { arguments: call.arguments, span: copySpan(call.span) };
     }
-    const message = this.#parseExpression();
+    const message = yield* parseChild(this.#parseOr());
     if (message === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -547,17 +555,20 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    if (this.#check(TokenKind.Comma)) {
-      this.#reportToken(
-        parserDiagnosticCode.unsupportedInteractionForm,
-        'The command form of showPopup takes only the message. For other button text, write \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
-        this.#peek(),
-      );
-      this.#synchronizeStatement();
+    const offset = this.#offsetAfterComma();
+    const name = offset === null ? null : this.#peek(offset);
+    if (
+      offset !== null &&
+      name?.kind === TokenKind.Identifier &&
+      (name.lexeme === "buttonText" || name.lexeme === "message") &&
+      this.#peek(offset + 1).kind === TokenKind.Colon
+    ) {
+      let comma = offset - 1;
+      while (this.#peek(comma).kind !== TokenKind.Comma) comma -= 1;
+      this.#reportShowPopupCommandComma(this.#peek(comma));
       return null;
     }
-    return Object.freeze({
-      kind: "showPopupStatement",
+    return {
       arguments: Object.freeze([
         Object.freeze({
           kind: "positionalArgument",
@@ -566,7 +577,16 @@ class Parser {
         } satisfies PositionalArgument),
       ]),
       span: spanFrom(command.span, message.span),
-    });
+    };
+  }
+
+  #reportShowPopupCommandComma(comma: Token): void {
+    this.#reportToken(
+      parserDiagnosticCode.unsupportedInteractionForm,
+      'The command form of showPopup takes only the message. For other button text, write \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
+      comma,
+    );
+    this.#synchronizeStatement();
   }
 
   /** `openUrl(<url>)` (V30 §33), which has only the call form. */
@@ -3943,6 +3963,10 @@ class Parser {
     if (this.#checkIdentifier("showButton")) {
       const parts = yield* parseChild(this.#parseShowButtonParts());
       return parts === null ? null : Object.freeze({ kind: "showButtonExpression", ...parts });
+    }
+    if (this.#checkIdentifier("showPopup")) {
+      const parts = yield* parseChild(this.#parseShowPopupParts());
+      return parts === null ? null : Object.freeze({ kind: "showPopupExpression", ...parts });
     }
     if (this.#checkIdentifier("timer")) {
       const parts = yield* parseChild(this.#parseTimerParts());

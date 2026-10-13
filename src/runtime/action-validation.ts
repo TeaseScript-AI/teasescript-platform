@@ -1119,11 +1119,10 @@ function validInteractionAction(
     !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)
   )
     return false;
-  // Only a button may give a value; a popup and an `openUrl` never do.
+  // A button or a popup used as a value gives one; an `openUrl` never does.
   if (
     action.destinationTemporary !== null
-      ? !positiveSafeInteger(action.destinationTemporary) ||
-        silentInteraction(action.interactionKind)
+      ? !positiveSafeInteger(action.destinationTemporary) || action.interactionKind === "url"
       : action.interactionKind !== "button" && !silentInteraction(action.interactionKind)
   )
     return false;
@@ -1848,9 +1847,9 @@ function validSettlementKindData(
   )
     return false;
   let resultValid: boolean;
-  if (silentInteraction(settlement.interactionKind)) {
+  if (settlement.interactionKind === "url") {
     resultValid = settlement.result === null && settlement.destinationTemporary === null;
-  } else if (settlement.interactionKind === "button") {
+  } else if (elapsedInteraction(settlement.interactionKind)) {
     resultValid =
       settlement.destinationTemporary === null
         ? settlement.result === null
@@ -1894,8 +1893,8 @@ function validSettlementKindData(
   if (!resultValid) return false;
 
   if (
-    !silentInteraction(settlement.interactionKind) &&
-    (settlement.interactionKind !== "button" || settlement.destinationTemporary !== null) &&
+    settlement.interactionKind !== "url" &&
+    (!elapsedInteraction(settlement.interactionKind) || settlement.destinationTemporary !== null) &&
     !positiveSafeInteger(settlement.destinationTemporary)
   )
     return false;
@@ -1964,9 +1963,14 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
-/** A popup or an `openUrl`: an interaction that gives no value and adds nothing to the transcript. */
+/** A popup or an `openUrl`: an interaction that adds nothing to the transcript. */
 function silentInteraction(kind: unknown): boolean {
   return kind === "popup" || kind === "url";
+}
+
+/** A button or a popup: an interaction that, used as a value, gives its elapsed waiting time (V30 §21, §31). */
+function elapsedInteraction(kind: unknown): boolean {
+  return kind === "button" || kind === "popup";
 }
 
 function isInteractionKind(value: unknown): value is InteractionKind {
@@ -2177,7 +2181,7 @@ function validSettlementChronology(
   );
 }
 
-/** A button's elapsed waiting time: a finite, non-negative duration. */
+/** A button's or popup's elapsed waiting time: a finite, non-negative duration. */
 function validElapsedResult(
   value: unknown,
 ): value is { readonly kind: "duration"; readonly milliseconds: number } {

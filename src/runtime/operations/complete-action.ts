@@ -473,7 +473,7 @@ function completeInteraction(
   assertEventSequenceCapacity(current, transcriptText === null ? 1 : 2);
   const transcriptSequence = transcriptText === null ? null : takeSequence(current, 2);
   const completionSequence = takeSequence(current, 2);
-  // A button used as a value yields the scene time it waited; it never exceeds the timeout.
+  // A button or popup used as a value yields the scene time it waited; it never exceeds a button's timeout.
   const result =
     action.expectedResult === "duration"
       ? Object.freeze({
