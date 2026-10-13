@@ -125,6 +125,7 @@ import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
+  clearSerializableDict,
   clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
@@ -141,6 +142,7 @@ import {
   SerializableValueError,
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
+  setOwnedSerializableDictValue,
   type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
@@ -863,13 +865,11 @@ export class Evaluator {
           }
           if (frame.stage === 2) {
             // A later entry with an equal key replaces the earlier one in its position.
-            const entryValue = result.owned
-              ? result.value
-              : cloneCapturedSerializableValue(result.value);
-            const existing = getSerializableDictEntry(frame.dict!, frame.key!);
-            if (existing === undefined)
-              frame.dict!.entries.push({ key: frame.key!, value: entryValue });
-            else existing.value = entryValue;
+            setOwnedSerializableDictValue(
+              frame.dict!,
+              frame.key!,
+              result.owned ? result.value : cloneCapturedSerializableValue(result.value),
+            );
             frame.index += 1;
           }
           if (frame.index < expression.entries.length) {
@@ -2535,7 +2535,7 @@ export class Evaluator {
     if (name === "clear") {
       if (receiver.entries.length > 0) {
         freezePreparedReferenceDescendants(this.snapshot, receiver);
-        receiver.entries.length = 0;
+        clearSerializableDict(receiver);
       }
       return null;
     }

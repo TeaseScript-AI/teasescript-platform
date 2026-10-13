@@ -406,12 +406,54 @@ export function setCapturedSerializableProperty(
   else existing.value = copied;
 }
 
+/**
+ * The entries of a dict by key, so that finding a key does not compare it with every entry, and a dict literal of n keys
+ * is built in work in proportion to n instead of n². A dict builds its index at its first lookup, at most once and in
+ * work in proportion to its entries, as making it took: a copy, a restored dict, or one from the host is a new dict. Its
+ * entries change only through the functions below, which keep its index exact. The entries stay the dict's value, which
+ * checkpoints keep, and nothing reads the order of an index.
+ */
+const dictIndexes = new WeakMap<
+  SerializableRuntimeDict,
+  Map<string, SerializableRuntimeDictEntry>
+>();
+
+function dictIndex(dict: SerializableRuntimeDict): Map<string, SerializableRuntimeDictEntry> {
+  let index = dictIndexes.get(dict);
+  if (index === undefined) {
+    index = new Map();
+    for (const entry of dict.entries) index.set(entry.key, entry);
+    dictIndexes.set(dict, index);
+  }
+  return index;
+}
+
 /** The entry of a dict key, or `undefined` when the dict has no such key. */
 export function getSerializableDictEntry(
   dict: SerializableRuntimeDict,
   key: string,
 ): SerializableRuntimeDictEntry | undefined {
-  return dict.entries.find((entry) => entry.key === key);
+  return dictIndex(dict).get(key);
+}
+
+/**
+ * Stores an engine-owned value that no other value shares, as it is, under a key: a new key is added at the end, and a
+ * replaced entry keeps its position.
+ */
+export function setOwnedSerializableDictValue(
+  dict: SerializableRuntimeDict,
+  key: string,
+  value: SerializableRuntimeValue,
+): void {
+  const index = dictIndex(dict);
+  const existing = index.get(key);
+  if (existing !== undefined) {
+    existing.value = value;
+    return;
+  }
+  const entry = { key, value };
+  dict.entries.push(entry);
+  index.set(key, entry);
 }
 
 /**
@@ -423,10 +465,7 @@ export function setCapturedSerializableDictValue(
   key: string,
   value: SerializableRuntimeValue,
 ): void {
-  const existing = getSerializableDictEntry(dict, key);
-  const copied = cloneCapturedSerializableValue(value);
-  if (existing === undefined) dict.entries.push({ key, value: copied });
-  else existing.value = copied;
+  setOwnedSerializableDictValue(dict, key, cloneCapturedSerializableValue(value));
 }
 
 /**
@@ -449,13 +488,23 @@ export function dictProperty(
   }
 }
 
-/** Removes a key and returns its entry, or `undefined` when the dict has no such key. */
+/** Removes a key and returns its entry, or `undefined` when the dict has no such key; later entries move up. */
 export function removeSerializableDictEntry(
   dict: SerializableRuntimeDict,
   key: string,
 ): SerializableRuntimeDictEntry | undefined {
-  const index = dict.entries.findIndex((entry) => entry.key === key);
-  return index < 0 ? undefined : dict.entries.splice(index, 1)[0];
+  const index = dictIndex(dict);
+  const entry = index.get(key);
+  if (entry === undefined) return undefined;
+  index.delete(key);
+  dict.entries.splice(dict.entries.indexOf(entry), 1);
+  return entry;
+}
+
+/** Removes every entry. */
+export function clearSerializableDict(dict: SerializableRuntimeDict): void {
+  dict.entries.length = 0;
+  dictIndexes.delete(dict);
 }
 
 /**
