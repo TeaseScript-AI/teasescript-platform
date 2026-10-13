@@ -44,6 +44,15 @@ test("statistics of a list of numbers", () => {
   );
 });
 
+test("median and percentile sort a copy and leave the list in its order", () => {
+  assert.deepEqual(
+    said(
+      'let scores = [3, 9, 1]\nsay "${median(scores)} ${percentile(scores, 100)} ${scores.join(" ")}"\nexit',
+    ),
+    ["3 9 3 9 1"],
+  );
+});
+
 test("statistics read a property with by:, and durations give durations", () => {
   assert.deepEqual(
     said(

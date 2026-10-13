@@ -199,15 +199,15 @@ function percentage(value: SerializableRuntimeValue, span: SourceSpan): number {
  * close, tiny, and huge values and their cancellations give the nearest result, the same on every engine.
  */
 function statistic(name: string, values: readonly number[], share: number): number {
-  const exacts = values.map(exact);
-  const count = BigInt(values.length);
   switch (name) {
     case "sum":
-      return quotient(sum(exacts), ONE);
+      return quotient(sum(values.map(exact)), ONE);
     case "average":
-      return quotient(sum(exacts), whole(count));
+      return quotient(sum(values.map(exact)), whole(values.length));
     case "stddev": {
       // The sample standard deviation: the square root of (n × Σx² - (Σx)²) / (n × (n - 1)).
+      const exacts = values.map(exact);
+      const count = BigInt(values.length);
       const total = sum(exacts);
       const squares = sum(exacts.map((value) => multiply(value, value)));
       return squareRoot(
