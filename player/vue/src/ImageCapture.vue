@@ -11,16 +11,15 @@ defineProps<{ view: ImageCaptureView }>();
 <template>
   <div class="image-capture" data-image-capture :data-phase="view.phase">
     <div v-if="!view.track" class="image-capture-cover" />
-    <!-- The countdown before the photo, as large as the viewfinder allows; each number replaces the last. -->
-    <span
-      v-if="view.countdown !== null"
-      :key="view.countdown"
-      class="image-capture-countdown"
-      data-image-capture-countdown
-      role="status"
-    >
-      {{ view.countdown }}
-    </span>
+    <!--
+      The self-timer's countdown, as large as the viewfinder allows; each number replaces the last. The status region
+      stays while the step does, so a screen reader announces each number.
+    -->
+    <div class="image-capture-countdown" role="status">
+      <span v-if="view.countdown !== null" :key="view.countdown" data-image-capture-countdown>{{
+        view.countdown
+      }}</span>
+    </div>
     <!-- Why there is no picture, centred, and scrolling in a small viewfinder. -->
     <div class="image-capture-message">
       <div v-if="view.phase === 'opening'" class="image-capture-status">
@@ -92,6 +91,8 @@ defineProps<{ view: ImageCaptureView }>();
     0 0 0.08em var(--media-surface),
     0 0.02em 0.06em var(--media-shadow);
   pointer-events: none;
+}
+.image-capture-countdown > span {
   animation: image-capture-count 1s ease-out both;
 }
 @keyframes image-capture-count {
@@ -109,7 +110,7 @@ defineProps<{ view: ImageCaptureView }>();
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .image-capture-countdown {
+  .image-capture-countdown > span {
     animation: none;
     opacity: 0.8;
   }
