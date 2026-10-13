@@ -608,7 +608,9 @@ function storedPlace(slot: OpenType): OpenType | undefined {
 /**
  * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
  * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
- * deeper, or held a value the compiler cannot know, which a new slot would forget. Each slot is visited once.
+ * deeper, or held a value the compiler cannot know, which a new slot would forget. A value the compiler cannot know
+ * that the slot itself held does not count: the next check stores it again, into the decided type (#859). Each slot is
+ * visited once.
  */
 function replayableDecisions(): (decider: OpenType) => boolean {
   /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
@@ -616,24 +618,28 @@ function replayableDecisions(): (decider: OpenType) => boolean {
   return (decider) => {
     const onPath = new Set<OpenType>();
     const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
-    const enter = (slot: OpenType): void => {
+    const enter = (slot: OpenType, own = false): void => {
       onPath.add(slot);
-      frames.push({ slot, next: slotEdges(slot), clean: slot.heldUnknown === undefined });
+      frames.push({ slot, next: slotEdges(slot), clean: own || slot.heldUnknown === undefined });
     };
-    if (!verdicts.has(decider)) enter(decider);
+    // The verdict on the slot's own value is not kept for a slot that reaches this one.
+    const own = decider.heldUnknown !== undefined;
+    if (own || !verdicts.has(decider)) enter(decider, own);
+    let verdict = verdicts.get(decider);
     while (frames.length > 0) {
       const frame = frames[frames.length - 1]!;
       const next = frame.next.pop();
       if (next === undefined) {
         frames.pop();
         onPath.delete(frame.slot);
-        verdicts.set(frame.slot, frame.clean);
+        if (frame.slot === decider && own) verdict = frame.clean;
+        else verdicts.set(frame.slot, frame.clean);
         // What a slot reaches, the slots that reach it reach too.
         if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
       } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
       else if (!verdicts.has(next)) enter(next);
     }
-    return verdicts.get(decider)!;
+    return verdict ?? verdicts.get(decider)!;
   };
 }
 
@@ -2152,7 +2158,7 @@ class TypeChecker {
           // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
           if (checked !== statement.value)
             for (const member of members(nonNullType(receiver)).map(resolved))
-              if (isCollection(member)) flowInto(member.element, value);
+              if (isCollection(member)) this.#storeLoaded(member.element, value, statement.value);
           this.#recordRuntimeCheck(
             statement,
             elementStoreType(receiver) ?? UNKNOWN_TYPE,
@@ -2273,7 +2279,7 @@ class TypeChecker {
         ),
       );
       // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
-      if (checked !== statement.value) flowInto(place.type, value);
+      if (checked !== statement.value) this.#storeLoaded(place.type, value, statement.value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
@@ -7080,6 +7086,16 @@ class TypeChecker {
       !this.#rejectedDefaults.has(value)
       ? value.defaultValue
       : expression;
+  }
+
+  /**
+   * After a store checked a load's default, records what the loaded value of type `loaded` brings to a place of type
+   * `place`: the objects it may hold, and for a key computed at runtime, a value of unknown type, which a place that no
+   * value decided yet may then hold, as after any other value of unknown type (#859).
+   */
+  #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
+    if (resolved(loaded).kind === "unknown") settle(place, loaded, expression.span);
+    else flowInto(place, loaded);
   }
 
   /**
