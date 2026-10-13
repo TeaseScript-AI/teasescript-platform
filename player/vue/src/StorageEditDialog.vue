@@ -96,11 +96,17 @@ function convertDraft() {
   }
   if (to === "advanced" && from !== "advanced") {
     const number = Number(text.value.trim());
-    text.value = JSON.stringify(
-      from !== "text" && NUMBER.test(text.value.trim()) && Number.isFinite(number)
-        ? number
-        : text.value,
-    );
+    // A text whose stored form would be longer than a text can be stays as typed, as a draft that is no plain value
+    // does on the way back.
+    try {
+      text.value = serializeValidatedRuntimeJson(
+        from !== "text" && NUMBER.test(text.value.trim()) && Number.isFinite(number)
+          ? number
+          : text.value,
+      );
+    } catch (error) {
+      if (!(error instanceof CheckpointError) || error.info.code !== "TSK004") throw error;
+    }
     return;
   }
   if (from === "advanced" && to !== "advanced") {
