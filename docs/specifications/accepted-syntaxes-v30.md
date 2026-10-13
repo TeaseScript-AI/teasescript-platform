@@ -1461,6 +1461,49 @@ let imported = fromJson(exported, default: null)  // stored files again
 let plain = toJson(preset, files: false)          // references stay text
 ```
 
+### Hashes
+**Status:** Accepted (Owner decisions, 2026-10-13)
+
+```text
+hashText(text)
+hashFile(file)
+```
+
+`hashText` gives the SHA-256 of a text's UTF-8 bytes and `hashFile` the SHA-256 of a stored file's bytes
+([§33](#stored-files)), as 64 lowercase hexadecimal characters, the usual notation, so that a hash can be compared with
+the one another program, such as `sha256sum`, gives. They hash only text and files; any other value goes through
+`toJson` first, as in `hashText(toJson(settings))`.
+
+`hashText` gives its result at once. A lone surrogate counts as U+FFFD, as in `toBase64`. `hashFile` hashes the stored
+files that `fileToBase64` reads, and fails where `fileToBase64` fails: for another value, also a package path such as
+`"images/a.jpg"`, and for a file that the Player can no longer read. Reading the file takes a short wait, and the result
+is recorded as that of `fileToBase64`: a restore or a replay can reuse a recorded result without asking the store again.
+
+```text
+// A secret answer: the script holds its hash, not the answer.
+let answer = askText("What is the password?")
+if hashText(answer) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e" {
+    say "Correct."
+}
+
+// A code from a keyholder or another program that hashes the same text.
+let code = askText("The code from your keyholder")
+if code == hashText("week ${week} done") {
+    say "Released."
+}
+
+// Whether a file has changed: its hash against the one saved last time.
+let image = askImage("Show me your corner")
+if hashFile(image) == load("cornerHash", default: "") {
+    say "That is the same photo as last time."
+}
+save hashFile(image) as "cornerHash"
+```
+
+A hash hides a secret only when the secret has many possible values. A number from 1 to 1000 can be found by hashing all
+of them. A value that the script chooses itself with `random` can be recovered from the save, because the session's
+random generator is deterministic.
+
 ### Numeric functions
 **Status:** Accepted (Owner decision, 2026-10-07)
 
@@ -4280,8 +4323,9 @@ fileToBase64(file)
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
 `default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
-them as plain Base64 text. Storing a file and reading one each take a short wait, as a photo does. The result is
-recorded: a restore or a replay can reuse a recorded result without asking the store again. The Base64 text may be as long as any text.
+them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take
+a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a recorded result without asking
+the store again. The Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
