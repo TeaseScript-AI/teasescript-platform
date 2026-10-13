@@ -482,6 +482,8 @@ test("a null check also names a fallback of the value's type, but not for a valu
     ["integer", "say n + 1", "0"],
     ["number", "say n * 2", "0"],
     ["string", 'say n + "!"', '""'],
+    // Text reverse() gives a new text, so unlike a list's, it changes nothing.
+    ["string", "say n.reverse()", '""'],
     ["boolean", "if n {\n    say 1\n}", "false"],
     ["duration", "wait n", "..."],
     ["integer[]", "say n.count()", "..."],
@@ -506,6 +508,7 @@ test("a null check also names a fallback of the value's type, but not for a valu
     "let n: integer? = hide(1)\nn += 1",
     "let n: integer[]? = hide([1])\nn.add(2)",
     "let n: integer[]? = hide([1])\nn.sort()",
+    "let n: integer[]? = hide([1])\nn.reverse()",
     // Also a value that the changed place is part of.
     "let n: object? = hide({ toys: [1] })\nn.toys.add(2)",
     "let n: object? = hide({ toys: [1] })\n(n).toys.add(2)",

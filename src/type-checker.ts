@@ -89,6 +89,7 @@ import {
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
+  LIST_REORDERS,
   LIST_SEARCHES,
   mayBeMessage,
   memberProblems,
@@ -5452,7 +5453,7 @@ class TypeChecker {
     }
     const method = callee.property.name;
     // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
-    if (COLLECTION_CHANGES.has(method) || method === "sort" || method === "shuffle")
+    if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
       this.#noteChanged(callee.object);
     if (
       (method === "add" || method === "addAll" || method === "get") &&
@@ -5460,6 +5461,8 @@ class TypeChecker {
     )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
+    // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
+    if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
     // The receiver as it was evaluated, before the arguments run, for the checks of text operations and `join`. Only
     // they use it, so other methods, such as repeated `add` calls on a growing list, do not copy their receiver.
@@ -5644,7 +5647,8 @@ class TypeChecker {
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
-    // A set has no order to sort, shuffle, or take from, and no positions or repeated members to search for (V30 §16).
+    // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search for
+    // (V30 §16).
     else if (
       all.length === 1 &&
       isListOrSet(failing) &&
@@ -5739,8 +5743,8 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as evaluated,
-   * and gives its result (V30 §16).
+   * Checks `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as
+   * evaluated, and gives its result (V30 §16).
    */
   #collectionMethodType(
     method: string,
@@ -5751,7 +5755,7 @@ class TypeChecker {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
-    if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    if (LIST_REORDERS.has(method)) return NULL_TYPE;
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
@@ -8353,6 +8357,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     // A list reorders in place; a set keeps its insertion order (V30 §16).
     case "sort":
     case "shuffle":
+    case "reverse":
       return value.kind === "list" ? NULL_TYPE : undefined;
     // A part of a list is a new list.
     case "take":
@@ -8464,8 +8469,8 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
 /** Property names whose write on a media handle first waits for the previous message's pacing. */
 const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
-/** Whether a value of this type may be one of the given handles, including a value of unknown type. */
-function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera")[]): boolean {
+/** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
+function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera" | "list")[]): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
     return (

@@ -79,6 +79,27 @@ test("lengths and positions count code points", () => {
   );
 });
 
+test("reverse gives a new text with the code points in reverse order", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let word = "abc"',
+        "let backwards = word.reverse()",
+        'say "${backwards} ${word} ${"".reverse() == ""}"',
+        // A character outside the Basic Multilingual Plane is one code point, as `length` counts it.
+        'say "${"a😀b".reverse()} ${"a😀b".reverse().length}"',
+        // Longer than the part the runtime turns around at a time, with a surrogate pair across the boundary.
+        'let long = "😀".repeat(5000) + "a"',
+        'say long.reverse() == "a" + "😀".repeat(5000)',
+        // A call whose new text is not kept is allowed, as for the other text operations.
+        '"ignored".reverse()',
+        "exit",
+      ].join("\n"),
+    ),
+    ["cba abc true", "b😀a 3", "true"],
+  );
+});
+
 test("indexOf and lastIndexOf give null for a part that does not occur, so a position needs a check", () => {
   assert.deepEqual(
     said(
@@ -219,6 +240,12 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
       "TSV043",
       "'trim' is a method. Write trim() with parentheses.",
       "trim",
+    ],
+    [
+      'let t = "abc"\nsay t.reverse(1)\nexit',
+      "TSV020",
+      "reverse() takes no arguments, received 1.",
+      "t.reverse(1)",
     ],
     [
       "let count = 5\nsay count.uppercase()\nexit",
@@ -500,6 +527,7 @@ test("text operations have static result types", () => {
         'let found: boolean = t.contains("a") and t.startsWith("a") and t.endsWith("b")',
         'let parts: string[] = t.split(",")',
         'let joined: string = "${parts.join(" ")}${t.trim()}${t.repeat(2)}${t.padStart(5, "0")}"',
+        "let backwards: string = t.reverse()",
         "exit",
       ].join("\n"),
     ),

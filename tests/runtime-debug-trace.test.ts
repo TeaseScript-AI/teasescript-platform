@@ -546,6 +546,19 @@ test("interpolation selection and shuffle record the draws that chose the text",
   assert.ok(said.text.endsWith(`with the ${JSON.parse(tool!.preview!)}`));
 });
 
+test("reverse gives the list a new version, which the elements read after it come from", () => {
+  const played = traced(
+    ['let deck = ["ace", "king"]', "deck.reverse()", 'say "${deck.first}"', "exit"].join("\n"),
+  );
+  assertComplete(played);
+  const [card] = causes(played.trace, outputOf(played, "king"));
+  const reversed = causes(played.trace, card!)[0]!;
+  assert.deepEqual(
+    [reversed.kind, reversed.target, reversed.location?.line],
+    ["mutation", "deck", 2],
+  );
+});
+
 test("a repeating timer's random rounds and a block's shared variable stay traceable", () => {
   const played = traced(
     [

@@ -122,6 +122,24 @@ function* literalMatches(text: string, search: string, overlapping: boolean): Ge
   }
 }
 
+/** The number of UTF-16 code units `reverse` turns around at a time. */
+const REVERSE_BLOCK = 4096;
+
+/**
+ * The text with its code points in reverse order. It is turned around in blocks from its end, each starting on a code
+ * point so that a surrogate pair stays whole, which keeps a long text from becoming an array of all its characters.
+ */
+function reversedText(text: string): string {
+  const parts: string[] = [];
+  for (let end = text.length; end > 0;) {
+    let start = Math.max(0, end - REVERSE_BLOCK);
+    if (!isCodePointBoundary(text, start)) start -= 1;
+    parts.push(Array.from(text.slice(start, end)).reverse().join(""));
+    end = start;
+  }
+  return parts.join("");
+}
+
 /** The UTF-16 offset of the first literal match, or -1; an empty `search` matches at the start. */
 function firstMatch(text: string, search: string): number {
   if (search === "") return 0;
@@ -230,6 +248,8 @@ export function callStringMethod(
       checkTextLength(text.length - firstText.length + first.length, "uppercaseFirst", span);
       return first + text.slice(firstText.length);
     }
+    case "reverse":
+      return reversedText(text);
     case "repeat":
       checkTextLength(text.length * numbers[0]!, `repeat(${numbers[0]!})`, span);
       return text.repeat(numbers[0]!);
