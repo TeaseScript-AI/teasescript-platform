@@ -5653,9 +5653,18 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // Every member of a union must have the method (ADR 0021 rule 3.5).
+    // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
+    // another member has the method, the runtime checks a speaker.
     const all = members(value);
-    const results = all.map((member) => memberMethodType(member, method));
+    const typed = all.map((member) => memberMethodType(member, method));
+    const elsewhere = all.some(
+      (member, index) => typed[index] !== undefined && resolved(member).kind !== "speaker",
+    );
+    const results = elsewhere
+      ? typed
+      : all.map((member, index) =>
+          resolved(member).kind === "speaker" ? undefined : typed[index],
+        );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
       const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
