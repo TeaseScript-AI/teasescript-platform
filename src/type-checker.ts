@@ -538,11 +538,8 @@ type DeferredCheck = {
       readonly kind: "property";
       readonly site: Expression;
       readonly span: SourceSpan;
-      /**
-       * The error, given a function for the properties that the objects read can have, which walks their places again
-       * (see {@link missingPropertyReads}).
-       */
-      readonly message: (properties: () => readonly string[]) => string;
+      /** The error, or a function for it given the properties that the objects read can have. */
+      readonly message: string | ((properties: readonly string[]) => string);
     }
 );
 
@@ -1016,7 +1013,7 @@ class TypeChecker {
    */
   readonly #missingReads = new Map<
     Expression,
-    { readonly name: string; readonly tables: PropertyTable[] } | null
+    { readonly name: string; readonly tables: PropertyTable[]; readonly named: boolean } | null
   >();
 
   /** The checked expressions whose kept type is still the type of the place they read. */
@@ -5289,27 +5286,29 @@ class TypeChecker {
   /** Notes a property access, also by `+=` or `-=` (see {@link #noteMissingProperty}). */
   #noteMissingAccess(read: PropertyAccessExpression, object: StaticType): void {
     const name = read.property.name;
-    this.#noteMissingProperty(read, name, object, read.property.span, (properties) => {
-      const names = properties();
-      return (
-        missingPropertyMessage(expressionLabel(read.object), name, names) +
-        misspelledPropertyHint(name, names)
-      );
-    });
+    this.#noteMissingProperty(
+      read,
+      name,
+      object,
+      read.property.span,
+      (properties) =>
+        missingPropertyMessage(expressionLabel(read.object), name, properties) +
+        misspelledPropertyHint(name, properties),
+    );
   }
 
   /**
    * Notes a read of the property `name` from a value of type `object` at `site`. When every value it may be is an
    * object whose properties the compiler knows, and none has the property, the end of the check reports `message` at
-   * `span` if no object at that place can have it when the script runs (#845); any other read the runtime checks
-   * (TSR017, or TSR060 for a list function).
+   * `span` if no object at that place can have it when the script runs (#845); a message that names the properties the
+   * objects can have is a function of them. Any other read the runtime checks (TSR017, or TSR060 for a list function).
    */
   #noteMissingProperty(
     site: Expression,
     name: string,
     object: StaticType,
     span: SourceSpan,
-    message: (properties: () => readonly string[]) => string,
+    message: string | ((properties: readonly string[]) => string),
   ): void {
     const objects = members(object).map(resolved);
     const tables = objects.flatMap((member) =>
@@ -5321,7 +5320,7 @@ class TypeChecker {
     if (tables.length < objects.length) {
       if (noted !== undefined) this.#missingReads.set(site, null);
     } else if (noted === undefined) {
-      this.#missingReads.set(site, { name, tables });
+      this.#missingReads.set(site, { name, tables, named: typeof message !== "string" });
       this.#deferred.push({
         kind: "property",
         file: this.#file,
@@ -5360,11 +5359,16 @@ class TypeChecker {
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
       } else if (check.kind === "property") {
-        const properties = missing.get(check.site);
-        if (properties !== undefined) {
+        const names = missing.get(check.site);
+        if (names !== undefined) {
           this.#file = check.file;
           const before = this.diagnostics.length;
-          this.#report(typeCode.invalidOperand, check.message(properties), check.span);
+          const { message } = check;
+          this.#report(
+            typeCode.invalidOperand,
+            typeof message === "string" ? message : message(names),
+            check.span,
+          );
           found = this.diagnostics.splice(before);
         }
       } else {
@@ -6068,13 +6072,7 @@ class TypeChecker {
       );
       this.#reportProblems(check.problems);
       for (const read of check.reads)
-        this.#noteMissingProperty(
-          read.at,
-          read.name,
-          read.objects,
-          read.at.span,
-          () => read.message,
-        );
+        this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
       return check.type;
     }
     const argument = expression.arguments[0];
