@@ -1118,7 +1118,7 @@ class TypeChecker {
       // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
       // nothing, but earlier reads then know that the slot may hold such a value.
       const held = unknown.get(slot);
-      const decided =
+      const type =
         decider === null || decider === undefined
           ? undefined
           : !undecided(decider)
@@ -1126,9 +1126,6 @@ class TypeChecker {
             : replayable(decider)
               ? detachedType(decider.resolved!)
               : undefined;
-      // A variable's copy of a value the compiler cannot know may hold null (see `nullFromUnknown`).
-      const type =
-        decided !== undefined && decider!.nullFromUnknown === true ? optional(decided) : decided;
       const decision: Decision | undefined =
         type !== undefined
           ? { type, at: slot.resolvedAt ?? decider!.resolvedAt! }
@@ -2000,29 +1997,23 @@ class TypeChecker {
       statement.typeAnnotation === null ? null : this.#annotationType(statement.typeAnnotation);
     if (declared !== null && initializer.kind === "loadExpression")
       this.#loadReceivers.set(initializer, declared);
-    const value =
+    let value =
       initializer.kind === "playMediaExpression"
         ? yield* compileChild(this.#mediaTask(initializer, scope, name))
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      // A copy of a place that no value decided yet but that held a value the compiler cannot know, such as an element
-      // of `[]` after `add(load(key, default: null))`, holds that value too, which may be null: the value that later
-      // decides the variable's own copy decides it as optional (see `nullFromUnknown`), and the copied value is checked
-      // against the type it decides when the script runs, as a store of it would be (#859).
-      const held = members(value).some(
-        (part) => part.kind === "open" && part.heldUnknown !== undefined,
-      );
-      type = held ? placeType(value) : this.#newPlaceType(written, value);
-      if (held)
-        for (const part of members(type))
-          if (part.kind === "open" && part.heldUnknown !== undefined) part.nullFromUnknown = true;
+      // A place that no value decided yet but that held a value the compiler cannot know, such as an element of `[]`
+      // after `add(load(key, default: null))`, gives such a value, so the variable is of unknown type, as after any
+      // other (rule 1.7): a later value does not decide it, and a known place checks what it holds when the script runs
+      // (#859).
+      if (members(value).some((part) => part.kind === "open" && part.heldUnknown !== undefined))
+        value = UNKNOWN_TYPE;
+      type = this.#newPlaceType(written, value);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);
       type = this.#ownType(statement, type);
-      // A later check may start with the copy decided, so the check is kept without asking the value again.
-      if (held) this.#runtimeChecks.push({ site: statement, place: type, label: `'${name}'` });
       this.#reportMixedChoice(
         written,
         (type) =>

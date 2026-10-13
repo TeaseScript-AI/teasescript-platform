@@ -219,7 +219,7 @@ test("a fallback keeps a value that held only null where a later value decides i
   );
 });
 
-test("a copy of a value of unknown type from a list or dict makes nothing null where it goes (#859)", () => {
+test("a copy of a value of unknown type from a list or dict is of unknown type wherever it goes (#859)", () => {
   // The importer's reduction of a helper that fills a list from a parameter without a type and stores elements back.
   assert.deepEqual(
     diagnostics(`function sexscriptLegacyRandom(limit) {
@@ -254,9 +254,9 @@ exit`),
     const result = run(compiled.plan!, createImmediatePacingRuntimeSnapshot(compiled.plan!));
     return [said(result.events), result.snapshot.failure?.code ?? null];
   };
-  // The elements are values of unknown type, which a typed place checks when the script runs. A copy of one goes back
-  // twice, through a list literal, through a branch that may replace it, through a list that text decides, and after a
-  // null check.
+  // A copy of an element goes back twice, through a list literal, through a branch that may replace it, through a list
+  // that text decides, and after a null check. A typed place checks what reaches it when the script runs: a number,
+  // and null unless the null check replaced it.
   const holders = [
     {
       start: "let out = []\n    out.add(deck[0])\n    out.add(deck[1])",
@@ -269,31 +269,52 @@ exit`),
       result: '[out["a"], out["b"]]',
     },
   ];
-  const forms: ((at: (index: number) => string) => string)[] = [
-    (at) => `let temp = ${at(0)}\n    ${at(1)} = temp\n    ${at(0)} = temp`,
-    (at) =>
-      `let temp = ${at(0)}\n    let pair = [temp, temp]\n    ${at(1)} = pair[0]\n    ${at(0)} = pair[1]`,
-    (at) =>
-      `let temp = ${at(0)}\n    if deck.length > 5 {\n        temp = ${at(1)}\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
-    (at) =>
-      `let temp = ${at(0)}\n    let other = []\n    other.add(temp)\n    other.add("x")\n    ${at(1)} = other[0]\n    ${at(0)} = other[0]`,
-    (at) =>
-      `let temp = ${at(0)}\n    if temp == null {\n        temp = "z"\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+  const forms: [(at: (index: number) => string) => string, [string[], string | null]][] = [
+    [(at) => `let temp = ${at(0)}\n    ${at(1)} = temp\n    ${at(0)} = temp`, [[], "TSR058"]],
+    [
+      (at) =>
+        `let temp = ${at(0)}\n    let pair = [temp, temp]\n    ${at(1)} = pair[0]\n    ${at(0)} = pair[1]`,
+      [[], "TSR058"],
+    ],
+    [
+      (at) =>
+        `let temp = ${at(0)}\n    if deck.length > 5 {\n        temp = ${at(1)}\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+      [[], "TSR058"],
+    ],
+    [
+      (at) =>
+        `let temp = ${at(0)}\n    let other = []\n    other.add(temp)\n    other.add("x")\n    ${at(1)} = other[0]\n    ${at(0)} = other[0]`,
+      [[], "TSR058"],
+    ],
+    [
+      (at) =>
+        `let temp = ${at(0)}\n    if temp == null {\n        temp = "z"\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+      [["zz"], null],
+    ],
   ];
   for (const holder of holders)
-    for (const form of forms) {
+    for (const [form, none] of forms) {
       const script = (deck: string) =>
         `function helper(deck) {\n    ${holder.start}\n    ${form(holder.at)}\n    return ${holder.result}\n}\nlet imp: string[] = ["p", "q"]\nimp = helper(${deck})\nsay imp[0] + imp[1]\nexit`;
       const label = script('["a", "b"]');
       assert.deepEqual(ran(label), [["aa"], null], label);
       assert.deepEqual(ran(script("[1, 2]")), [[], "TSR058"], label);
-      assert.deepEqual(ran(script("[null, null]")), [[], "TSR058"], label);
+      assert.deepEqual(ran(script("[null, null]")), none, label);
     }
-  // A copy that the function returns.
+  // A copy that the function returns, and copies that a known value replaces on one path only.
   const first = (deck: string) =>
     `function first(deck) {\n    let out = []\n    out.add(deck[0])\n    let temp = out[0]\n    return temp\n}\nlet name: string = first(${deck})\nsay name\nexit`;
   assert.deepEqual(ran(first('["a"]')), [["a"], null]);
   assert.deepEqual(ran(first("[null]")), [[], "TSR058"]);
+  const named = (names: string) =>
+    `function pick(names) {\n    let chosen = []\n    chosen.add(names[0])\n    let name = chosen[0]\n    if name == "" {\n        name = "anonymous"\n    }\n    return name\n}\nlet picked: string = pick(${names})\nsay picked\nexit`;
+  assert.deepEqual(ran(named('["ann"]')), [["ann"], null]);
+  assert.deepEqual(ran(named('[""]')), [["anonymous"], null]);
+  assert.deepEqual(ran(named("[null]")), [[], "TSR058"]);
+  const grown = (lists: string) =>
+    `function grow(lists) {\n    let held = []\n    held.add(lists[0])\n    let items = held[0]\n    if items == null {\n        items = []\n    }\n    items.add(1)\n    return items.length\n}\nsay "\${grow(${lists})}"\nexit`;
+  assert.deepEqual(ran(grown("[[5]]")), [["2"], null]);
+  assert.deepEqual(ran(grown("[null]")), [["1"], null]);
 });
 
 test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
