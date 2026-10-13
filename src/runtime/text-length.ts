@@ -84,7 +84,7 @@ export function caseMappedLength(text: string, upper: boolean): number {
 }
 
 /** A whole number with thousands separators, such as 9,007,199,254,740,991. */
-function groupedDigits(value: number): string {
+export function groupedDigits(value: number): string {
   return BigInt(Math.round(value))
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
