@@ -68,7 +68,8 @@ say prose "${data["config"]["title"]} ${sexscriptLegacyJsonSize(inner)} ${data["
 // A map that takes the place of a parse is a dict as well, and a list's size is its length.
 // NOTE SX_JSON_PARSE line 30: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
 let fallbackValue = fromJson("null", default: null)
-fallbackValue = fallbackValue otherwise dict{ title: "Fallback" }
+// NOTE SX_JSON_VALUE line 31: This variable holds parsed JSON, whose keys its reads read as a dict's; Groovy kept this value as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.
+fallbackValue = fallbackValue otherwise fromJson(toJson({ title: "Fallback" }), default: null)
 // NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 say prose "${fallbackValue["title"]} ${sexscriptLegacyJsonSize(data["rolls"])}", instant

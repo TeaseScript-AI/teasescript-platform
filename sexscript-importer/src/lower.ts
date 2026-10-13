@@ -326,8 +326,6 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
-  /** Map literals that take the place of what a JsonSlurper's parseText() gave, or that such a literal holds: dicts. */
-  jsonMaps?: Set<AstNode>;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
   /** Variables that only ever hold null, a switch on which keeps only its default (nullOnlyVariables). */
@@ -5537,9 +5535,14 @@ function lowerDeclaration(
     );
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: PRIMITIVE_DEFAULTS.get(declaredType) ?? null }
-    : right.kind === "map"
-      ? namedMapLiteral(asNode(node.left)!, right, context)
-      : lowerExpression(right, context);
+    : jsonShaped(
+        asNode(node.left)!,
+        right,
+        right.kind === "map"
+          ? namedMapLiteral(asNode(node.left)!, right, context)
+          : lowerExpression(right, context),
+        context,
+      );
   if (value === null) {
     // The variable stays declared with a neutral value of its type, so the code that uses it still compiles.
     return [
@@ -7155,10 +7158,14 @@ function lowerAssignment(
     if (removal !== undefined)
       return [{ kind: "assign", target, operator: "=", value: removal, span }];
   }
-  const value =
+  const lowered =
     right.kind === "map" && variableTarget !== null && operator === "="
       ? namedMapLiteral(targetNode, right, context)
       : lowerExpression(right, context);
+  const value =
+    variableTarget !== null && operator === "="
+      ? jsonShaped(targetNode, right, lowered, context)
+      : lowered;
   if (value === null) {
     const targetName = variableTarget ?? "indexed target";
     return [
@@ -11759,7 +11766,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return { kind: "list", items: withAllRecordFields(items) };
     }
     case "map":
-      return lowerMapExpression(node, context, context.jsonMaps?.has(node) === true);
+      return lowerMapExpression(node, context);
     case "gstring":
       return lowerGString(node, context);
     case "array":
@@ -12133,6 +12140,42 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
 }
 
 /** A map literal stored in a variable: a dict for a dict variable, else an object that declares every used field. */
+/**
+ * A value that a variable holding what a JsonSlurper's parseText() gave takes instead, such as a map as a fallback,
+ * whose keys reads of the variable read as a dict's (isJsonValue): it goes through toJson() and fromJson(), so that its
+ * maps are dicts as well, as parsed JSON's are. A value that is parsed JSON itself, null, or no map or list stays.
+ */
+function jsonShaped(
+  target: AstNode,
+  right: AstNode,
+  value: IrExpression | null,
+  context: LowerContext,
+): IrExpression | null {
+  const key = bindingKey(target, context.bindings);
+  if (
+    value === null ||
+    key === null ||
+    !context.mapUses.jsonValues.has(key) ||
+    isNullConstant(right) ||
+    isJsonValue(right, context) ||
+    (inferType(right, context.types) & (OBJECT | LIST)) === 0
+  )
+    return value;
+  addDiagnostic(
+    context,
+    "SX_JSON_VALUE",
+    "warning",
+    "This variable holds parsed JSON, whose keys its reads read as a dict's; Groovy kept this value as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.",
+    right.span,
+  );
+  return {
+    kind: "call",
+    name: "fromJson",
+    positional: [{ kind: "call", name: "toJson", positional: [value], named: {} }],
+    named: { default: { kind: "literal", value: null } },
+  };
+}
+
 function namedMapLiteral(
   target: AstNode,
   node: AstNode,
@@ -12140,19 +12183,6 @@ function namedMapLiteral(
 ): IrExpression | null {
   const key = bindingKey(target, context.bindings) ?? "";
   const uses = context.mapUses;
-  // A map that takes the place of what a JsonSlurper's parseText() gave is a dict as well, whose keys reads read, and
-  // so are the maps that it and the lists in it hold.
-  if (uses.jsonValues.has(key)) {
-    const maps = (context.jsonMaps ??= new Set());
-    const visit = (part: AstNode | null): void => {
-      if (part?.kind === "map") {
-        maps.add(part);
-        for (const entry of nodeArray(part.entries)) visit(asNode(entry.value));
-      } else if (part?.kind === "list") for (const item of nodeArray(part.items)) visit(item);
-    };
-    visit(node);
-    return lowerMapExpression(node, context, true);
-  }
   if (!uses.dictionaries.has(key))
     return lowerMapExpression(node, context, false, uses.recordFields.get(key) ?? []);
   if (
