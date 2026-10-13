@@ -79,12 +79,23 @@ class Recording {
   answer(payload: Record<string, unknown>, stored: boolean | null = null) {
     const action = this.snapshot.foregroundAction;
     assert.ok(action?.kind === "interaction");
-    const request = {
-      actionId: action.actionId,
-      actionKind: action.kind,
-      interactionKind: action.interactionKind,
-      payload,
-    };
+    this.complete(
+      {
+        actionId: action.actionId,
+        actionKind: action.kind,
+        interactionKind: action.interactionKind,
+        payload,
+      },
+      stored,
+    );
+  }
+  /** Answers a pending file store; `stored` is the store's answer to each admission query, if any. */
+  storeFiles(payload: Record<string, unknown>, stored: boolean | null = null) {
+    const action = this.snapshot.foregroundAction;
+    assert.ok(action?.kind === "fileStore");
+    this.complete({ actionId: action.actionId, actionKind: action.kind, payload }, stored);
+  }
+  complete(request: Record<string, unknown>, stored: boolean | null) {
     const queries: DebugOperation["admissionQueries"][number][] = [];
     const result = completeAction(
       this.plan,
@@ -347,6 +358,45 @@ test("an image answer replays from the recorded store answer alone, without the 
   };
   const result = replayDebugExport(await roundTrip(withoutAnswer));
   assert.ok(result.kind === "diverged" && /was not recorded/.test(result.reason));
+});
+
+test("file stores replay from their recorded answers and store answers alone, without the files", async () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString(
+    "base64",
+  );
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64");
+  const compiled = compileProject([
+    {
+      path: "main.tease",
+      source: [
+        `let picture = fileFromBase64("${png}", default: "")`,
+        `let page = fileFromBase64("${svg}", default: "")`,
+        "let data = fileToBase64(page)",
+        "say toJson([picture]), instant",
+        "exit",
+      ].join("\n"),
+    },
+  ]);
+  assert.ok(compiled.plan);
+  const recording = new Recording(compiled.plan);
+  const page = "captured-media:11111111-1111-4111-8111-111111111111:2";
+  recording.storeFiles({ kind: "stored", references: [reference] }, true);
+  recording.storeFiles({ kind: "stored", references: [page] }, true);
+  recording.storeFiles({ kind: "read", files: [svg] });
+  recording.storeFiles({ kind: "read", files: [png] });
+  assert.equal(recording.snapshot.status, "halted");
+  const exported = recording.export();
+  // Each kept file was vouched for with the kind of its type; a read needs no store answer.
+  assert.deepEqual(
+    exported.replay!.operations.flatMap((operation) =>
+      operation.admissionQueries.map((query) => [query.reference, query.kind]),
+    ),
+    [
+      [reference, "image"],
+      [page, "file"],
+    ],
+  );
+  assert.equal(replayDebugExport(await roundTrip(exported)).kind, "reproduced");
 });
 
 test("without complete replay data an export is readable but not replayable", async () => {
