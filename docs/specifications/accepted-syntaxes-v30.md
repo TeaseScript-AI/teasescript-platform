@@ -170,8 +170,8 @@ let total = score +
     bonus
 ```
 
-Inside `()`, `[]`, and object literals, where a line break does not end the expression, an operator may also start
-the next line, as a comma may; the expression means the same as on one line:
+Inside `()`, `[]`, and object literals, where a line break does not end the expression, a binary operator may also
+start the next line, as a comma may; the expression means the same as on one line:
 
 ```text
 let total = (score
