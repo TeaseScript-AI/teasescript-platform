@@ -373,7 +373,7 @@ test("a regex literal is checked when the script compiles, with an explanation",
   for (const [literal, message, marked] of cases)
     assert.deepEqual(
       diagnostics(`let r = ${literal}\nexit`),
-      [["TSV063", message, marked]],
+      [["TSV064", message, marked]],
       literal,
     );
   // The largest regexes within the limits compile.
@@ -490,7 +490,7 @@ test("ignoring case for wide character ranges is bounded when a regex compiles",
   assert.deepEqual(
     diagnostics(`let r = /${wide(0x80)}${wide(0x81)}${wide(0x82)}/i\nexit`)[0]?.slice(0, 2),
     [
-      "TSV063",
+      "TSV064",
       "This regex is too large: ignoring case for its character ranges takes too much work. Use smaller ranges such as [a-z], or match both cases without the 'i' flag.",
     ],
   );
@@ -618,11 +618,11 @@ test("the size estimate is at least what RE2 compiles, so the limit is checked b
 test("a pattern cannot hold half of a character, and text with lone surrogates is searched by code point", () => {
   const half =
     "A regex cannot hold half of a character: '\\x{D83D}' is a surrogate, which stands for half of a character such as an emoji. Write the whole character, as in '\\x{1F600}'.";
-  assert.deepEqual(diagnostics("let r = /(\\x{D83D})/\nexit"), [["TSV063", half, "/(\\x{D83D})/"]]);
-  assert.equal(firstDiagnostic("let r = /[\\x{DE00}]/\nexit")?.[0], "TSV063");
+  assert.deepEqual(diagnostics("let r = /(\\x{D83D})/\nexit"), [["TSV064", half, "/(\\x{D83D})/"]]);
+  assert.equal(firstDiagnostic("let r = /[\\x{DE00}]/\nexit")?.[0], "TSV064");
   // RE2 takes any number of hex digits.
-  assert.equal(firstDiagnostic("let r = /(\\x{00000D83D})/\nexit")?.[0], "TSV063");
-  assert.equal(firstDiagnostic("let r = /\\x{000000000DE00}/\nexit")?.[0], "TSV063");
+  assert.equal(firstDiagnostic("let r = /(\\x{00000D83D})/\nexit")?.[0], "TSV064");
+  assert.equal(firstDiagnostic("let r = /\\x{000000000DE00}/\nexit")?.[0], "TSV064");
   assert.deepEqual(diagnostics("let r = /\\x{00000001F600}/\nexit"), []);
   // Quoted or escaped, the same characters are text.
   assert.deepEqual(diagnostics("let r = /\\Q\\x{D83D}\\E|\\\\x{D83D}/\nexit"), []);
@@ -685,7 +685,7 @@ test("the program-size limit holds at exactly 10,000 instructions, and long patt
   assert.deepEqual(
     firstDiagnostic(`let r = /[${"a".repeat(MAX_REGEX_LENGTH - 1)}]/\nexit`)?.slice(0, 2),
     [
-      "TSV063",
+      "TSV064",
       "This regex is too long: a regex may have at most 10,000 characters. Use a shorter pattern.",
     ],
   );
