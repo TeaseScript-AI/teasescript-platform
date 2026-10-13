@@ -200,8 +200,11 @@ type TypeContext = "statement" | "delimited" | "typeTest" | "delimitedTypeTest";
 type StorageDelimiter = "as" | "default";
 /** What the parsers over one token list share. */
 interface SharedParse {
-  /** For each token, whether its innermost enclosing opener is `(` or `[`, where a newline may continue a type (V30 §1). */
-  readonly bracketed: readonly boolean[];
+  /**
+   * For each token, its innermost enclosing opener, if any: inside `(` or `[` a newline may continue a type, and an
+   * expression directly inside `${` does not continue before an operator (V30 §1).
+   */
+  readonly openers: readonly (TokenKind | undefined)[];
   /** For each opening delimiter, the index of the delimiter that closes it, once one is looked up. */
   closers: ReadonlyMap<number, number> | null;
   /**
@@ -370,7 +373,7 @@ class Parser {
    * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
-  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §1). */
   #insideDelimiters = false;
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   readonly #shared: SharedParse;
@@ -378,7 +381,7 @@ class Parser {
   public constructor(
     private readonly tokens: readonly Token[],
     shared: SharedParse = {
-      bracketed: bracketContexts(tokens),
+      openers: innermostOpeners(tokens),
       closers: null,
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
@@ -3517,12 +3520,17 @@ class Parser {
       );
       return value;
     }
+    const opener = this.#shared.openers[this.#current];
     const type = yield* parseChild(
       this.#parseTypeTask(
-        this.#shared.bracketed[this.#current] === true ? "delimitedTypeTest" : "typeTest",
+        opener === TokenKind.LeftParenthesis || opener === TokenKind.LeftBracket
+          ? "delimitedTypeTest"
+          : "typeTest",
       ),
     );
     if (type === null) return value;
+    // A type test ends its operand too (see `#parseMultiplicative`).
+    this.#skipNewlinesBeforeOperator();
     return Object.freeze({
       kind: "typeTestExpression",
       value,
@@ -3679,12 +3687,15 @@ class Parser {
 
   *#parseMultiplicative(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseUnaryArithmetic());
-    while (
-      expression !== null &&
-      (this.#check(TokenKind.Star) ||
-        this.#check(TokenKind.Slash) ||
-        this.#check(TokenKind.Percent))
-    ) {
+    while (expression !== null) {
+      // Every operand but a type test ends here, so each level above finds an operator that starts the next line.
+      this.#skipNewlinesBeforeOperator();
+      if (
+        !this.#check(TokenKind.Star) &&
+        !this.#check(TokenKind.Slash) &&
+        !this.#check(TokenKind.Percent)
+      )
+        break;
       const operator = this.#advance();
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseUnaryArithmetic());
@@ -4670,7 +4681,7 @@ class Parser {
 
   /**
    * The offset of the token after a `,` and any newlines after it, or `null` without a comma. Inside delimiters a line
-   * break does not end the expression, so the comma may also start the next line there (V30 §2). Nested interactions
+   * break does not end the expression, so the comma may also start the next line there (V30 §1). Nested interactions
    * that end at the same token reuse one scan of the newlines.
    */
   #offsetAfterComma(): number | null {
@@ -5302,6 +5313,19 @@ class Parser {
     this.#skipNewlines();
   }
 
+  /**
+   * Inside `()`, `[]`, and object literals, where a line break does not end an expression, a binary operator may also
+   * start the next line (V30 §1): skips the newlines before one, so that it continues the expression. Elsewhere a
+   * newline before an operator ends the statement.
+   */
+  #skipNewlinesBeforeOperator(): void {
+    if (!this.#insideDelimiters || !this.#check(TokenKind.Newline)) return;
+    // V30 §1 does not list `${...}`, so its own expression ends at the newline, whatever encloses the string.
+    if (this.#shared.openers[this.#current] === TokenKind.InterpolationStart) return;
+    const after = this.#shared.newlineRuns.ends[this.#current]!;
+    if (startsBinaryOperator(this.tokens, after)) this.#current = after;
+  }
+
   #reportPositionalAfterNamed(span: SourceSpan): void {
     this.#reportSpan(
       parserDiagnosticCode.mixedArguments,
@@ -5628,16 +5652,36 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
  */
 function continuesExpression(kind: TokenKind): boolean {
   return (
+    isBinaryOperatorKind(kind) ||
+    kind === TokenKind.Comma ||
+    kind === TokenKind.KeywordNot ||
+    kind === TokenKind.Bang
+  );
+}
+
+/**
+ * Whether the token at `index` starts a binary operator, also a symbol that the parser reads as a word operator, such
+ * as `&&`, `||`, or `??`. After a value, `-` and `+` subtract and add; `not` and `!` only negate the value after them.
+ * A single `|` only separates the types of a union, which the type's own context continues (see `TypeContext`).
+ */
+function startsBinaryOperator(tokens: readonly Token[], index: number): boolean {
+  const token = tokens[index]!;
+  const next = tokens[index + 1];
+  if (token.kind === TokenKind.Question || token.kind === TokenKind.Pipe)
+    return next?.kind === token.kind && next.span.start.offset === token.span.end.offset;
+  return isBinaryOperatorKind(token.kind);
+}
+
+/** Binary operators, and the symbols `|` and `&` that the parser reads as `or` and `and`. */
+function isBinaryOperatorKind(kind: TokenKind): boolean {
+  return (
     isComparisonKind(kind) ||
     kind === TokenKind.KeywordIs ||
-    kind === TokenKind.Comma ||
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
-    kind === TokenKind.KeywordNot ||
     kind === TokenKind.KeywordOtherwise ||
     kind === TokenKind.Pipe ||
     kind === TokenKind.Ampersand ||
-    kind === TokenKind.Bang ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||
@@ -5726,12 +5770,12 @@ function newlineRuns(tokens: readonly Token[]): SharedParse["newlineRuns"] {
   return { starts, ends };
 }
 
-function bracketContexts(tokens: readonly Token[]): boolean[] {
-  const contexts: boolean[] = [];
+function innermostOpeners(tokens: readonly Token[]): (TokenKind | undefined)[] {
+  const contexts: (TokenKind | undefined)[] = [];
   const openers: TokenKind[] = [];
   for (const token of tokens) {
     const innermost = openers.at(-1);
-    contexts.push(innermost === TokenKind.LeftParenthesis || innermost === TokenKind.LeftBracket);
+    contexts.push(innermost);
     if (
       token.kind === TokenKind.LeftParenthesis ||
       token.kind === TokenKind.LeftBracket ||

@@ -156,7 +156,7 @@ let music = playAudio(file: "music/track.mp3", async: true, volume: 0.5)
 let toy = { type: "buttPlug", name: "Black plug", diameter: 4 cm }
 ```
 
-An operator must remain at the end of the continued line. It may not begin a new statement line:
+Outside brackets, an operator must remain at the end of the continued line. It may not begin a new statement line:
 
 ```text
 let total = score
@@ -168,6 +168,14 @@ Correct:
 ```text
 let total = score +
     bonus
+```
+
+Inside `()`, `[]`, and object literals, where a line break does not end the expression, a binary operator may also
+start the next line, as a comma may; the expression means the same as on one line:
+
+```text
+let total = (score
+    + bonus)
 ```
 
 A command and its first argument remain on the same line:
