@@ -1567,13 +1567,13 @@ export function skipPlayerRuntimeImage(
 
 /**
  * The `openUrl` the Player can settle now, or `null`: the presented request, while nothing else can run and scene time
- * has caught up, so that settling it cannot be refused once the tab is open. `live` says that this session's own run
- * requested it; a request that a restore, a rewind, or a reload brought back is not, and the Player never opens it by
- * itself.
+ * has caught up, so that settling it cannot be refused once the tab is open. `atOnce` says whether the Player may open
+ * it without the click on its button: this session's own run requested it, written without `alwaysButton: true`. A
+ * request that a restore, a rewind, or a reload brought back is not live, and the Player never opens it by itself.
  */
 export function playerRuntimeUrlRequest(
   session: PlayerRuntimeSession,
-): { readonly actionId: number; readonly url: string; readonly live: boolean } | null {
+): { readonly actionId: number; readonly url: string; readonly atOnce: boolean } | null {
   const { state } = session;
   const action = activeInteraction(state);
   if (
@@ -1587,7 +1587,7 @@ export function playerRuntimeUrlRequest(
   return Object.freeze({
     actionId: action.actionId,
     url: action.ui.url,
-    live: action.requestEventSequence >= session.liveEventSequence,
+    atOnce: !action.ui.alwaysButton && action.requestEventSequence >= session.liveEventSequence,
   });
 }
 

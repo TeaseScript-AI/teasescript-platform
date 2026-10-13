@@ -19,7 +19,7 @@ import {
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isCanonicalTagList } from "../tags.js";
-import { canonicalWebUrl, openUrlButtonText } from "../web-url.js";
+import { canonicalWebUrl } from "../web-url.js";
 import {
   type Instruction,
   type InteractionChoiceOption,
@@ -28,6 +28,7 @@ import {
   type InteractionUiPayload,
   type InstructionPlan,
   type PlanSourceLocation,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
 } from "../plan/model.js";
 import {
@@ -1277,9 +1278,18 @@ function preparedInteractionUiMatchesAction(
           actual.background)
     );
   }
-  // The temporary keeps the canonical address the request opened with.
+  // The temporaries keep the canonical address and the button text the request opened with.
   if (prepared.kind === "url")
-    return runtimeTemporaryValue(temporaries, prepared.urlTemporary) === actual.url;
+    return (
+      runtimeTemporaryValue(temporaries, prepared.urlTemporary) === actual.url &&
+      (prepared.buttonTextTemporary === undefined
+        ? actual.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT
+        : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText) &&
+      (prepared.alwaysButtonTemporary === undefined
+        ? actual.alwaysButton === false
+        : runtimeTemporaryValue(temporaries, prepared.alwaysButtonTemporary) ===
+          actual.alwaysButton)
+    );
   if (prepared.kind === "popup") {
     return (
       runtimeTemporaryValue(temporaries, prepared.messageTemporary) === actual.message &&
@@ -1418,7 +1428,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             : kind === "popup"
               ? ["kind", "message", "buttonText", "accessibleName"]
               : kind === "url"
-                ? ["kind", "url", "buttonText", "accessibleName"]
+                ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
                 : [
                     "kind",
                     "options",
@@ -1481,14 +1491,14 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
   }
   if (kind === "popup")
     return count(value.message) && count(value.buttonText) && !measurementExhausted;
-  // The address is canonical, and its button shows the label derived from it.
+  // The address is canonical.
   if (kind === "url")
     return (
       count(value.url) &&
       count(value.buttonText) &&
       !measurementExhausted &&
       canonicalWebUrl(value.url) === value.url &&
-      value.buttonText === openUrlButtonText(value.url)
+      typeof value.alwaysButton === "boolean"
     );
   if (kind === "form") return validFormUi(value, count) && !measurementExhausted;
   if (kind === "image")
@@ -1556,7 +1566,11 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.kind === "popup")
     return actual.message === expected.message && actual.buttonText === expected.buttonText;
   if (expected.kind === "url")
-    return actual.url === expected.url && actual.buttonText === expected.buttonText;
+    return (
+      actual.url === expected.url &&
+      actual.buttonText === expected.buttonText &&
+      actual.alwaysButton === expected.alwaysButton
+    );
   if (expected.kind === "text" || expected.kind === "number")
     return (
       actual.hint === expected.hint &&
@@ -2053,8 +2067,14 @@ function preparedUiFitsPresentedUi(
     return false;
   if (prepared.kind === "button")
     return "background" in ui === (prepared.backgroundTemporary !== undefined);
-  // The address temporary is cleared after completion; the recorded address was checked by its shape.
-  if (prepared.kind === "url") return true;
+  // The temporaries are cleared after completion; the recorded request was checked by its shape. A request without
+  // `buttonText:` or `alwaysButton:` shows the defaults.
+  if (prepared.kind === "url")
+    return (
+      (prepared.buttonTextTemporary !== undefined ||
+        ui.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT) &&
+      (prepared.alwaysButtonTemporary !== undefined || ui.alwaysButton === false)
+    );
   // A popup without `buttonText:` shows the default text.
   if (prepared.kind === "popup")
     return (

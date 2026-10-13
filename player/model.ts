@@ -92,8 +92,9 @@ export type PlayerForegroundPresentation =
     }
   | {
       /**
-       * `openUrl`: the button that opens `url` in a new tab, shown where `showButton` shows its button when the Player
-       * could not open it at once.
+       * `openUrl`: the button with `buttonText` ("Open link" by default) that opens `url` in a new tab, shown where
+       * `showButton` shows its button when the Player does not open it at once. It never shows the address, which may be
+       * a surprise.
        */
       readonly kind: "open-url";
       readonly accessibleName: string;

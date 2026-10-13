@@ -362,7 +362,7 @@ useEventListener(
  * `openUrl` (V30 §33): when this session's own run requested it and the player's recent click lets the browser open a
  * tab, the Player opens the address at once and settles the request, so its button never shows. Each request is tried
  * once, when it is first presented; a request a restore, rewind, or reload brought back is never opened by itself, and
- * neither is one whose tab the browser did not open: its button opens it.
+ * neither is one written with `alwaysButton: true` or one whose tab the browser did not open: its button opens it.
  */
 let urlTried: { readonly plan: unknown; readonly reset: number; readonly actionId: number } | null = null;
 watch(
@@ -375,11 +375,11 @@ watch(
       return;
     urlTried = { plan: session.plan, reset: props.reset, actionId: id };
     // Typically an answer the player just gave presents it, while that answer still holds the controls.
-    if (!playerRuntimeUrlRequest(session)?.live) return;
+    if (!playerRuntimeUrlRequest(session)?.atOnce) return;
     // Host input happens at the observed time; settling must not be refused once the tab is open.
     const observed = props.observeTime ? props.observeTime() : session;
     const request = observed ? playerRuntimeUrlRequest(observed) : null;
-    if (!observed || request?.actionId !== id || !request.live || !openUrlTab(request.url)) return;
+    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url)) return;
     const result = openPlayerRuntimeUrl(observed);
     if (result) emit("update:session", result.session);
   },

@@ -67,35 +67,23 @@ function transcript(session: PlayerRuntimeSession): string[] {
 }
 
 test("openUrl waits until the Player opened its web address, and nothing enters the transcript", () => {
-  for (const [form, url, buttonText] of [
-    ['openUrl("https://example.com")', "https://example.com/", "Open example.com"],
-    [
-      'openUrl("HTTPS://Example.COM:8443/a b?x=1#top")',
-      "https://example.com:8443/a%20b?x=1#top",
-      "Open example.com:8443",
-    ],
-    [
-      'let site = "http://example.org/page"\nopenUrl(site)',
-      "http://example.org/page",
-      "Open example.org",
-    ],
-    [
-      'let host = "example.net"\nopenUrl("https://${host}/")',
-      "https://example.net/",
-      "Open example.net",
-    ],
+  for (const [form, url] of [
+    ['openUrl("https://example.com")', "https://example.com/"],
+    ['openUrl("HTTPS://Example.COM:8443/a b?x=1#top")', "https://example.com:8443/a%20b?x=1#top"],
+    ['let site = "http://example.org/page"\nopenUrl(site)', "http://example.org/page"],
+    ['let host = "example.net"\nopenUrl("https://${host}/")', "https://example.net/"],
   ] as const) {
     let session = createPlayerRuntimeSession(
       `say "Before", instant\n${form}\nsay "After", instant\nexit`,
     );
     assert.equal(session.state.status, "waiting", form);
-    // The address is canonical; the button shows the working label "Open <host>".
+    // The Player opens the canonical address; its button, when it shows one, says "Open link".
     assert.deepEqual(
       playerRuntimeForeground(session),
-      { kind: "open-url", accessibleName: "Continue", url, buttonText },
+      { kind: "open-url", accessibleName: "Continue", url, buttonText: "Open link" },
       form,
     );
-    assert.deepEqual(playerRuntimeUrlRequest(session), { actionId: 1, url, live: true }, form);
+    assert.deepEqual(playerRuntimeUrlRequest(session), { actionId: 1, url, atOnce: true }, form);
     assert.equal(playerRuntimeDebugNow(session, 0).waitingAt?.kind, "url");
     const result = openPlayerRuntimeUrl(session);
     assert.equal(result?.outcome.kind, "completed", form);
@@ -105,16 +93,81 @@ test("openUrl waits until the Player opened its web address, and nothing enters 
   }
 });
 
+test("buttonText: names the button, and alwaysButton: true has the player click it also right after a click", () => {
+  for (const [form, buttonText, atOnce] of [
+    ['openUrl("https://example.com", buttonText: "Claim your reward")', "Claim your reward", true],
+    ['openUrl("https://example.com", alwaysButton: false)', "Open link", true],
+    [
+      'openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your reward")',
+      "Claim your reward",
+      false,
+    ],
+    [
+      'let n = 2\nlet always = n > 1\nopenUrl("https://example.com", buttonText: "Prize ${n}", alwaysButton: always)',
+      "Prize 2",
+      false,
+    ],
+    [
+      'let always = false\nopenUrl("https://example.com", alwaysButton: (always))',
+      "Open link",
+      true,
+    ],
+  ] as const) {
+    const session = createPlayerRuntimeSession(`${form}\nsay "After", instant\nexit`);
+    assert.deepEqual(
+      playerRuntimeForeground(session),
+      { kind: "open-url", accessibleName: "Continue", url: "https://example.com/", buttonText },
+      form,
+    );
+    assert.deepEqual(
+      playerRuntimeUrlRequest(session),
+      { actionId: 1, url: "https://example.com/", atOnce },
+      form,
+    );
+    // Either way the script goes on once the tab is open.
+    const result = openPlayerRuntimeUrl(session);
+    assert.equal(result?.outcome.kind, "completed", form);
+    assert.deepEqual(transcript(result.session), ["narrator: After"], form);
+  }
+  // The arguments are evaluated once, in written order, before the request opens, and a restore keeps them.
+  const { plan, snapshot } = started(
+    'let order: string[] = []\nfunction part(value: string): string {\n  order.add(value)\n  return value\n}\nfunction flag(value: boolean): boolean {\n  order.add("always")\n  return value\n}\nopenUrl(part("https://example.com/a"), alwaysButton: flag(true), buttonText: part("Go"))\nlet after = order\nexit',
+  );
+  assert.deepEqual(pendingUrl(snapshot).ui, {
+    kind: "url",
+    url: "https://example.com/a",
+    buttonText: "Go",
+    alwaysButton: true,
+    accessibleName: { kind: "localizedDefault", key: "continue" },
+  });
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot)));
+  assert.deepEqual(restored.snapshot, snapshot);
+  const finished = runUntilExit(plan, opened(plan, restored.snapshot).snapshot).snapshot;
+  assert.deepEqual(binding(finished, "after"), {
+    kind: "list",
+    items: ["https://example.com/a", "always", "Go"],
+  });
+  // A value the compiler could not check fails as the request opens.
+  const failed = createPlayerRuntimeSession(
+    'function go(always) {\n  openUrl("https://example.com", alwaysButton: always)\n}\ngo("yes")\nexit',
+  );
+  assert.equal(failed.state.failure?.code, "TSR050");
+  assert.equal(
+    failed.state.failure?.message,
+    `'alwaysButton:' of openUrl takes true or false, but this is text (string) "yes". Write true or false.`,
+  );
+});
+
 test("a restored openUrl is no live request, and opening it from its button continues once", () => {
   const source = 'openUrl("https://example.com/next")\nsay "After", instant\nexit';
   const session = createPlayerRuntimeSession(source);
-  assert.equal(playerRuntimeUrlRequest(session)?.live, true);
+  assert.equal(playerRuntimeUrlRequest(session)?.atOnce, true);
   // A reload or a rewind brings the request back as history: the Player never opens it by itself.
   const reloaded = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(playerRuntimeUrlRequest(reloaded), {
     actionId: 1,
     url: "https://example.com/next",
-    live: false,
+    atOnce: false,
   });
   assert.equal(playerRuntimeForeground(reloaded)?.kind, "open-url");
   const after = openPlayerRuntimeUrl(reloaded);
@@ -183,7 +236,7 @@ test("an address that is not an http or https URL fails when openUrl runs", () =
   }
 });
 
-test("snapshot validation refuses an openUrl whose address or button its request did not give", () => {
+test("snapshot validation refuses an openUrl that its request did not give or whose address is not canonical", () => {
   const { plan, snapshot } = started(
     'let site = "https://example.com/a"\nopenUrl(site)\nopenUrl("https://example.org/b")\nexit',
   );
@@ -191,7 +244,9 @@ test("snapshot validation refuses an openUrl whose address or button its request
   for (const ui of [
     { ...request.ui, url: "https://example.com/b" },
     { ...request.ui, url: "javascript:alert(1)" },
-    { ...request.ui, buttonText: "Open evil.example" },
+    { ...request.ui, url: "HTTPS://Example.COM/a" },
+    { ...request.ui, buttonText: "Claim your reward" },
+    { ...request.ui, alwaysButton: true },
   ]) {
     const edited = { ...snapshot, foregroundAction: { ...request, ui } };
     assert.equal(validateRuntimeSnapshot(edited, plan).valid, false, JSON.stringify(ui));
@@ -199,21 +254,19 @@ test("snapshot validation refuses an openUrl whose address or button its request
   const second = run(plan, opened(plan, snapshot).snapshot).snapshot;
   const written = pendingUrl(second);
   assert.equal(validateRuntimeSnapshot(second, plan).valid, true);
-  const edited = {
-    ...second,
-    foregroundAction: { ...written, ui: { ...written.ui, url: "https://example.org/c" } },
-  };
-  assert.equal(validateRuntimeSnapshot(edited, plan).valid, false);
+  for (const ui of [
+    { ...written.ui, url: "https://example.org/c" },
+    { ...written.ui, alwaysButton: "yes" },
+  ]) {
+    const edited = { ...second, foregroundAction: { ...written, ui } };
+    assert.equal(validateRuntimeSnapshot(edited, plan).valid, false, JSON.stringify(ui));
+  }
   const settled = opened(plan, second).snapshot;
   const settlement = settled.lastSettlement;
   assert.ok(settlement?.actionKind === "interaction");
   const transcribed = {
     ...settled,
-    lastSettlement: {
-      ...settlement,
-      transcriptText: "Open example.org",
-      transcriptEventSequence: 3,
-    },
+    lastSettlement: { ...settlement, transcriptText: "Open link", transcriptEventSequence: 3 },
   };
   assert.equal(validateRuntimeSnapshot(transcribed, plan).valid, false);
 });
@@ -228,6 +281,15 @@ test("openUrl is a reserved statement whose web address the compiler checks", ()
   assert.deepEqual(diagnostics('let urls = ["https://example.com"]\nopenUrl(urls[0])'), []);
   assert.deepEqual(diagnostics("openUrl(3)"), ["TSV043"]);
   assert.deepEqual(diagnostics('openUrl(url: "https://example.com")'), ["TSV020"]);
+  // Its button's text is shown text, and alwaysButton: is true or false.
+  assert.deepEqual(diagnostics('openUrl("https://example.com", buttonText: ["Go"])'), ["TSV040"]);
+  assert.deepEqual(diagnostics('openUrl("https://example.com", alwaysButton: "yes")'), ["TSV043"]);
+  assert.deepEqual(diagnostics('openUrl("https://example.com", target: "_self")'), ["TSV022"]);
+  assert.deepEqual(
+    diagnostics('openUrl("https://example.com", buttonText: "a", buttonText: "b")'),
+    ["TSV023"],
+  );
+  assert.deepEqual(diagnostics('openUrl(buttonText: "Go")'), ["TSV020"]);
   assert.deepEqual(diagnostics('openUrl("https://example.com", "https://example.org")'), [
     "TSV020",
   ]);

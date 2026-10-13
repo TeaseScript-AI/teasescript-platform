@@ -29,6 +29,7 @@ import type {
   FunctionParameter,
   LabelTarget,
   LetStatement,
+  OpenUrlStatement,
   ShowPopupStatement,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -1342,18 +1343,11 @@ class SemanticValidator {
         for (const argument of statement.arguments)
           this.#validateExpression(argument.value, scope, null);
         return;
-      case "openUrlStatement": {
-        const [first, ...rest] = statement.arguments;
-        if (first?.kind !== "positionalArgument" || rest.length > 0)
-          this.#report(
-            semanticCode.argumentCount,
-            "openUrl takes one web address without a name, as in 'openUrl(\"https://example.com\")'.",
-            statement.span,
-          );
+      case "openUrlStatement":
+        this.#validateOpenUrlArguments(statement);
         for (const argument of statement.arguments)
           this.#validateExpression(argument.value, scope, null);
         return;
-      }
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
         this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
@@ -2609,6 +2603,34 @@ class SemanticValidator {
         "showPopup needs a message, as in 'showPopup \"Task completed\"'.",
         statement.span,
       );
+  }
+
+  /**
+   * `openUrl` takes one web address without a name, first, and the optional `buttonText:` and `alwaysButton:` (V30
+   * §33). A repeated name is reported with the other arguments.
+   */
+  #validateOpenUrlArguments(statement: OpenUrlStatement): void {
+    this.#validateDistinctNamedArguments(statement);
+    const addresses = statement.arguments.filter(
+      (argument) => argument.kind === "positionalArgument",
+    );
+    if (addresses.length !== 1 || statement.arguments[0]?.kind !== "positionalArgument")
+      this.#report(
+        semanticCode.argumentCount,
+        "openUrl takes one web address without a name, first, as in 'openUrl(\"https://example.com\")'.",
+        statement.span,
+      );
+    // A named address is reported above, as an address that needs no name.
+    for (const argument of statement.arguments)
+      if (
+        argument.kind === "namedArgument" &&
+        !["url", "buttonText", "alwaysButton"].includes(argument.name.name)
+      )
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `openUrl has no argument '${argument.name.name}'. It takes a web address, buttonText:, and alwaysButton:.`,
+          argument.name.span,
+        );
   }
 
   #validateDistinctNamedArguments(

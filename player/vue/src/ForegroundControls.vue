@@ -232,7 +232,7 @@ function focusOut(event: FocusEvent) {
         />
       </template>
     </div>
-    <!-- An openUrl the Player could not open at once: the player's click opens it. -->
+    <!-- An openUrl the Player did not open at once: the player's click opens it. The address stays a surprise. -->
     <PlayerActionButton
       v-else-if="foreground.kind === 'open-url'"
       :disabled="disabled"

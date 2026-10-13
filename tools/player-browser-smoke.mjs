@@ -5460,9 +5460,10 @@ async function popupScenario(cdp, origin) {
 
 /**
  * `openUrl` (V30 §33), on a package served as a catalog that names pages of the smoke's own server: right after the
- * player's click the Player opens the address in a new tab at once and the script goes on; without a recent click it
- * shows the button "Open <host>", whose click opens it; after a reload it never opens the address by itself, also not
- * after the click on Continue, but shows the button. Each address opens once, in a tab without an opener.
+ * player's click the Player opens the address in a new tab at once and the script goes on; with `alwaysButton: true` it
+ * shows the button, here with its `buttonText:`, also right after a click, and its click opens the address; without a
+ * recent click it shows the button "Open link"; after a reload it never opens the address by itself, also not after the
+ * click on Continue, but shows the button. Each address opens once, in a tab without an opener.
  */
 async function openUrlScenario(cdp, origin, debugPort) {
   const address = (page) => `${origin}/open-url-target/${page}`;
@@ -5476,7 +5477,8 @@ async function openUrlScenario(cdp, origin, debugPort) {
           'showButton "Go"',
           `openUrl("${address(1)}")`,
           'say "Opened at once", instant',
-          `openUrl("${address(2)}")`,
+          'showButton "Next"',
+          `openUrl("${address(2)}", alwaysButton: true, buttonText: "Claim your reward")`,
           'say "Opened from its button", instant',
           `openUrl("${address(3)}")`,
           'say "Opened after the reload", instant',
@@ -5500,15 +5502,14 @@ async function openUrlScenario(cdp, origin, debugPort) {
   const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
   const said = (text) => `${entries}.some((entry) => entry.endsWith(${JSON.stringify(text)}))`;
   const button = `document.querySelector('[data-open-url]')?.textContent.trim() ?? null`;
-  const host = new URL(origin).host;
+  const answer = `[...document.querySelectorAll('[data-foreground-controls] button')].map((control) => control.textContent.trim()).join()`;
   await setViewport(cdp, 1280, 800);
   await navigate(cdp, `${origin}/player/?package=open-url`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`);
+  await waitFor(cdp, `(${answer}) === 'Go'`);
   await physicalClick(cdp, "[data-foreground-controls] button");
-  // The click on Go lets the browser open the first address at once; that tab takes the activation, so the second
-  // address waits for its button.
+  // The click on Go lets the browser open the first address at once.
   await waitForTabs(1, "The first address did not open at once");
   await waitFor(
     cdp,
@@ -5516,8 +5517,6 @@ async function openUrlScenario(cdp, origin, debugPort) {
     8_000,
     "The script did not go on after the tab opened",
   );
-  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The second address shows no button");
-  assertEqual((await tabs()).length, 1, "The second address opened without a click");
   const [first] = await tabs();
   const tab = await connectCdp(first.webSocketDebuggerUrl);
   try {
@@ -5527,18 +5526,31 @@ async function openUrlScenario(cdp, origin, debugPort) {
   } finally {
     tab.close();
   }
-  // The player comes back to the Player's tab, which the new tab covered.
+  // The player comes back to the Player's tab, which the new tab covered. Right after the click on Next the second
+  // address, written with alwaysButton: true, still waits for its own button.
   await cdp.call("Page.bringToFront");
+  await waitFor(cdp, `(${answer}) === 'Next'`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `(${button}) === 'Claim your reward'`,
+    8_000,
+    "alwaysButton: true shows no button",
+  );
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "alwaysButton: true opened the address without its click");
   await physicalClick(cdp, "[data-open-url]");
   await waitForTabs(2, "The button did not open the second address");
   await cdp.call("Page.bringToFront");
   await waitFor(cdp, said("Opened from its button"), 8_000, "The script did not go on");
-  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The third address shows no button");
+  // That tab took the click's activation, so the third address waits for the button "Open link".
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The third address shows no button");
+  assertEqual((await tabs()).length, 2, "The third address opened without a click");
   // A reload brings the waiting request back as history: Continue is a click, but it does not open the address.
   await reloadKept(cdp, address(3));
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `(${button}) === 'Open ${host}'`, 8_000, "The reload lost the button");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The reload lost the button");
   await delay(500);
   assertEqual((await tabs()).length, 2, "The reload opened the third address by itself");
   await physicalClick(cdp, "[data-open-url]");
@@ -5549,12 +5561,15 @@ async function openUrlScenario(cdp, origin, debugPort) {
     JSON.stringify([address(1), address(2), address(3)]),
     "An address opened twice",
   );
-  // Only the click on Go answers; the addresses and their buttons add nothing to the transcript.
+  // Only the clicks on Go and Next answer; the addresses and their buttons add nothing to the transcript.
   const texts = await value(cdp, entries);
   assertEqual(
-    texts.filter((text) => text.includes("Open ") || text.includes("open-url-target")).length,
+    texts.filter(
+      (text) =>
+        text.includes("Open link") || text.includes("Claim") || text.includes("open-url-target"),
+    ).length,
     0,
-    `The transcript shows an address: ${JSON.stringify(texts)}`,
+    `The transcript shows an address or its button: ${JSON.stringify(texts)}`,
   );
   for (const target of await tabs())
     await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);

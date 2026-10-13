@@ -3,7 +3,7 @@ import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
-import { canonicalWebUrl, openUrlButtonText } from "../web-url.js";
+import { canonicalWebUrl } from "../web-url.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -1444,7 +1444,7 @@ function validateStaticInteractionUi(
           : kind === "popup"
             ? ["kind", "message", "buttonText", "accessibleName"]
             : kind === "url"
-              ? ["kind", "url", "buttonText", "accessibleName"]
+              ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
               : [
                   "kind",
                   "options",
@@ -1509,14 +1509,16 @@ function validateStaticInteractionUi(
     countString(ui.message, `${path}.message`);
     countString(ui.buttonText, `${path}.buttonText`);
   }
-  // The address is canonical, and its button shows the label derived from it.
-  if (
-    kind === "url" &&
-    countString(ui.url, `${path}.url`) &&
-    countString(ui.buttonText, `${path}.buttonText`) &&
-    (canonicalWebUrl(ui.url) !== ui.url || ui.buttonText !== openUrlButtonText(ui.url))
-  )
-    errors.push(planError("TSC002", "The web address of openUrl is invalid.", `${path}.url`));
+  if (kind === "url") {
+    // The address is canonical.
+    if (countString(ui.url, `${path}.url`) && canonicalWebUrl(ui.url) !== ui.url)
+      errors.push(planError("TSC002", "The web address of openUrl is invalid.", `${path}.url`));
+    countString(ui.buttonText, `${path}.buttonText`);
+    if (typeof ui.alwaysButton !== "boolean")
+      errors.push(
+        planError("TSC002", "openUrl's alwaysButton must be a boolean.", `${path}.alwaysButton`),
+      );
+  }
   if (kind === "button") {
     countString(ui.buttonLabel, `${path}.buttonLabel`);
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
@@ -1654,7 +1656,13 @@ function validatePreparedInteractionUi(
                   ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
                 ]
               : kind === "url"
-                ? ["kind", "urlTemporary", "accessibleName"]
+                ? [
+                    "kind",
+                    "urlTemporary",
+                    "accessibleName",
+                    ...("buttonTextTemporary" in ui ? ["buttonTextTemporary"] : []),
+                    ...("alwaysButtonTemporary" in ui ? ["alwaysButtonTemporary"] : []),
+                  ]
                 : [
                     "kind",
                     "optionsTemporary",
@@ -1751,6 +1759,10 @@ function validatePreparedInteractionUi(
   }
   if (kind === "url") {
     addTemporary(ui.urlTemporary, `${path}.urlTemporary`);
+    if ("buttonTextTemporary" in ui)
+      addTemporary(ui.buttonTextTemporary, `${path}.buttonTextTemporary`);
+    if ("alwaysButtonTemporary" in ui)
+      addTemporary(ui.alwaysButtonTemporary, `${path}.alwaysButtonTemporary`);
     return;
   }
   if (kind === "text" || kind === "number" || kind === "temporal") {

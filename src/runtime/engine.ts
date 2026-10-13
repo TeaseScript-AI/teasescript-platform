@@ -15,6 +15,7 @@ import {
   type PlanSourceLocation,
   type PlanTag,
   type PreparedInteractionUiPayload,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
   instructionSourcePath,
   mainSourceSpan,
@@ -218,7 +219,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
-import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE, openUrlButtonText } from "../web-url.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "../web-url.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
@@ -1597,10 +1598,25 @@ function materializeInteractionUi(
         span,
       );
     stagedWrites.push({ temporaryId: temporary.id, value: url });
+    const buttonText =
+      prepared.buttonTextTemporary === undefined
+        ? DEFAULT_OPEN_URL_BUTTON_TEXT
+        : readText(prepared.buttonTextTemporary);
+    const always =
+      prepared.alwaysButtonTemporary === undefined
+        ? false
+        : read(prepared.alwaysButtonTemporary).value;
+    if (typeof always !== "boolean")
+      throw fault(
+        "TSR050",
+        `'alwaysButton:' of openUrl takes true or false, but this is ${describeShownValue(always)}. Write true or false.`,
+        span,
+      );
     ui = {
       kind: "url",
       url,
-      buttonText: openUrlButtonText(url),
+      buttonText,
+      alwaysButton: always,
       accessibleName: prepared.accessibleName,
     };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
@@ -2591,7 +2607,13 @@ function cloneInteractionUi(
   if (ui.kind === "popup")
     return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
   if (ui.kind === "url")
-    return { kind: "url", url: ui.url, buttonText: ui.buttonText, accessibleName };
+    return {
+      kind: "url",
+      url: ui.url,
+      buttonText: ui.buttonText,
+      alwaysButton: ui.alwaysButton,
+      accessibleName,
+    };
   if (ui.kind === "button")
     return {
       kind: "button",

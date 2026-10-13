@@ -4371,12 +4371,24 @@ class TypeChecker {
 
   /**
    * `openUrl` takes a web address as text. A list is never one (V30 §16), and a written address must be an `http` or
-   * `https` URL; other values are checked when the statement runs.
+   * `https` URL; other values are checked when the statement runs. `buttonText:` is shown text and `alwaysButton:` is
+   * true or false.
    */
   *#openUrlTask(statement: OpenUrlStatement, scope: Scope): CompileTask<void> {
     for (const argument of statement.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
-      if (argument.kind === "namedArgument") continue;
+      if (argument.kind === "namedArgument") {
+        if (argument.name.name === "buttonText")
+          this.#checkShownText(argument.value, type, "the text of an openUrl button");
+        else if (argument.name.name === "alwaysButton")
+          this.#reportUnless(
+            type,
+            (member) => isScalar(member, "boolean"),
+            argument.value,
+            "'alwaysButton:' takes true or false",
+          );
+        continue;
+      }
       const label = expressionLabel(argument.value) ?? "list";
       this.#reportUnless(
         type,

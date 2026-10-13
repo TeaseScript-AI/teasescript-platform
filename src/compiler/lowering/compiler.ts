@@ -57,8 +57,8 @@ import type {
   TagQueryExpressionPlan,
   UnitPlan,
 } from "../../plan/model.js";
-import { DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
-import { canonicalWebUrl, openUrlButtonText } from "../../web-url.js";
+import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
+import { canonicalWebUrl } from "../../web-url.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -1735,17 +1735,34 @@ export class InstructionCompiler {
   }
 
   /**
-   * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address is checked
-   * and made canonical here; any other is evaluated into a temporary, which the request checks and makes canonical when
-   * it opens.
+   * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address, button text,
+   * and `alwaysButton:` embed the request; the address is checked and made canonical here. Otherwise the arguments are
+   * evaluated once, in written order, into temporaries that the request checks when it opens.
    */
   *#lowerOpenUrlTask(statement: OpenUrlStatement): CompileTask<void> {
     const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
-    const argument = statement.arguments[0];
-    if (argument === undefined) throw new TypeError("openUrl without an address reached lowering.");
-    const written = staticVisibleText(argument.value);
+    const [address] = statement.arguments;
+    if (address === undefined) throw new TypeError("openUrl without an address reached lowering.");
+    const named = (name: string) =>
+      statement.arguments.find(
+        (argument) => argument.kind === "namedArgument" && argument.name.name === name,
+      );
+    const buttonText = named("buttonText");
+    const alwaysButton = named("alwaysButton");
+    const written = staticVisibleText(address.value);
     const url = written === undefined ? null : canonicalWebUrl(written);
-    if (url !== null) {
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_OPEN_URL_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    let writtenAlways = alwaysButton?.value;
+    while (writtenAlways?.kind === "parenthesizedExpression")
+      writtenAlways = writtenAlways.expression;
+    const staticAlways =
+      writtenAlways === undefined
+        ? false
+        : writtenAlways.kind === "booleanLiteral"
+          ? writtenAlways.value
+          : undefined;
+    if (url !== null && staticButtonText !== undefined && staticAlways !== undefined) {
       this.instructions.push({
         kind: "interaction",
         interactionKind: "url",
@@ -1753,16 +1770,30 @@ export class InstructionCompiler {
         speaker: null,
         destinationTemporary: null,
         expectedResult: "none",
-        ui: { kind: "url", url, buttonText: openUrlButtonText(url), accessibleName },
+        ui: {
+          kind: "url",
+          url,
+          buttonText: staticButtonText,
+          alwaysButton: staticAlways,
+          accessibleName,
+        },
         span: copySpan(statement.span),
       });
       return;
     }
     const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
-    const urlTemporary = this.#materializeDedicatedInteractionValue(
-      yield* compileChild(this.#lowerExpressionTask(argument.value)),
-      argument.value.span,
-    ).temporaryId;
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    const alwaysButtonTemporary =
+      alwaysButton === undefined ? undefined : temporaries.get(alwaysButton);
     this.instructions.push({
       kind: "interaction",
       interactionKind: "url",
@@ -1770,10 +1801,16 @@ export class InstructionCompiler {
       speakerTemporary,
       destinationTemporary: null,
       expectedResult: "none",
-      preparedUi: { kind: "url", urlTemporary, accessibleName },
+      preparedUi: {
+        kind: "url",
+        urlTemporary: temporaries.get(address)!,
+        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+        ...(alwaysButtonTemporary === undefined ? {} : { alwaysButtonTemporary }),
+        accessibleName,
+      },
       span: copySpan(statement.span),
     });
-    this.#emitTemporaryCleanup([speakerTemporary, urlTemporary], statement.span);
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
   }
 
   /**

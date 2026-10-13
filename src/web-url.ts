@@ -19,11 +19,3 @@ export const OPEN_URL_RULE =
   "openUrl opens only web addresses that start with 'http://' or 'https://'";
 /** The fix both name. */
 export const OPEN_URL_FIX = "Write a full address, such as 'https://example.com'.";
-
-/**
- * The text of the button that opens `url`, a canonical web address, when the browser does not open it at once. The text
- * is not settled yet; "Open" and the address's host is the working label.
- */
-export function openUrlButtonText(url: string): string {
-  return `Open ${new URL(url).host}`;
-}

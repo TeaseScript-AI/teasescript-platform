@@ -958,7 +958,13 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
   if (ui.kind === "popup")
     return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
   if (ui.kind === "url")
-    return { kind: "url", url: ui.url, buttonText: ui.buttonText, accessibleName };
+    return {
+      kind: "url",
+      url: ui.url,
+      buttonText: ui.buttonText,
+      alwaysButton: ui.alwaysButton,
+      accessibleName,
+    };
   if (ui.kind === "button")
     return {
       kind: "button",

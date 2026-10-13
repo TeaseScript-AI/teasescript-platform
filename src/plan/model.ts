@@ -545,6 +545,8 @@ export interface StopAudioInstruction extends InstructionBase {
 
 /** The text of a popup's button when `showPopup` gives no `buttonText:` (V30 §31). */
 export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
+/** The text of the button of `openUrl` when it gives no `buttonText:` (V30 §33). */
+export const DEFAULT_OPEN_URL_BUTTON_TEXT = "Open link";
 
 export type InteractionKind =
   "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup" | "url";
@@ -634,11 +636,13 @@ export type InteractionUiPayload =
   | {
       /**
        * `openUrl` (V30 §33): the Player opens the canonical web address `url` in a new tab, at once after the player's
-       * recent click, otherwise from a button with `buttonText` where `showButton` shows its button.
+       * recent click, otherwise, and always with `alwaysButton`, from its button with `buttonText` where `showButton`
+       * shows its button.
        */
       readonly kind: "url";
       readonly url: string;
       readonly buttonText: string;
+      readonly alwaysButton: boolean;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -796,6 +800,10 @@ export type PreparedInteractionUiPayload =
       readonly kind: "url";
       /** Holds the evaluated address until the request opens, then its canonical form. */
       readonly urlTemporary: number;
+      /** Holds the evaluated button text until the request opens, then its text; absent for the default text. */
+      readonly buttonTextTemporary?: number;
+      /** Holds the evaluated `alwaysButton:`; absent for `false`. */
+      readonly alwaysButtonTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
