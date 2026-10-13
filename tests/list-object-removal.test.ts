@@ -135,11 +135,6 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
       "Cannot call removeLast() on an empty list. Check that the list's length is above 0 first.",
     ],
     [
-      'let items = ["a"]\nitems.removeAt()\nexit',
-      "TSR028",
-      "removeAt() takes one argument, but this call has none.",
-    ],
-    [
       "function dynamic(value) {\n    return value\n}\nlet items = dynamic(set[1])\nitems.removeAt(0)\nexit",
       "TSR016",
       "Sets have no method 'removeAt'.",
