@@ -2282,6 +2282,14 @@ class TypeChecker {
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
+      const own =
+        variable === undefined ? undefined : this.#ownFallback(statement.value, variable, scope);
+      if (own !== undefined) {
+        yield* compileChild(this.#storeTask(place, own.expression, own.type));
+        // Where it was not null, the variable keeps its own value, of the type the store may just have decided.
+        this.#assigned(variable!, union([nonNullType(this.#currentType(variable!)), own.type]));
+        return;
+      }
       const checked = this.#checkedValue(statement.value);
       yield* compileChild(
         this.#storeTask(
@@ -7108,6 +7116,46 @@ class TypeChecker {
   #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
     if (resolved(loaded).kind === "unknown") settle(place, loaded, expression.span);
     else flowInto(place, loaded);
+  }
+
+  /**
+   * For `x = x otherwise d`, which keeps `x` where it is not null and stores `d` where it is, as
+   * `if x == null { x = d }` does (#859), what it stores: `d` and its type, or for a chain, the chain after `x` and the
+   * type it gives. `undefined` for any other value, and where `x` is never null, so its fallback never runs.
+   */
+  #ownFallback(
+    expression: Expression,
+    variable: Variable,
+    scope: Scope,
+  ): { readonly expression: Expression; readonly type: StaticType } | undefined {
+    const chain: Extract<Expression, { kind: "binaryExpression" }>[] = [];
+    let value = unwrap(expression);
+    while (value.kind === "binaryExpression" && value.operator === "otherwise") {
+      chain.push(value);
+      value = value.left;
+    }
+    const read = unwrap(value);
+    const entry = read.kind === "identifier" ? scope.resolve(read.name) : undefined;
+    if (
+      chain.length === 0 ||
+      entry?.kind !== "variable" ||
+      entry.variable !== variable ||
+      neverNull(this.#typeOf(value))
+    )
+      return undefined;
+    chain.reverse();
+    let type = plainType(this.#typeOf(chain[0]!.right));
+    for (const node of chain.slice(1)) {
+      const replaced: OpenType[] = [];
+      type = fallbackType(
+        type,
+        plainType(this.#typeOf(node.right)),
+        this.#kept.has(node),
+        replaced,
+      );
+      if (replaced.length > 0) this.#replaced.push({ node, slots: replaced });
+    }
+    return { expression: chain.length === 1 ? chain[0]!.right : expression, type };
   }
 
   /**

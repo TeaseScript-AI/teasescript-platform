@@ -101,50 +101,88 @@ exit`,
   );
 });
 
-test("after a value of unknown type, a fallback types the result as the if form does (#859)", () => {
-  /** What the script says, and the code and message of its failure. */
-  const outcome = (source: string, storage: { key: string; value: SerializableRuntimeValue }[]) => {
-    const compiled = compileValidPlan(source);
-    const result = run(
-      compiled,
-      createImmediatePacingRuntimeSnapshot(compiled, { scriptStorage: storage }),
-    );
-    const failure = result.snapshot.failure;
-    return [said(result.events), failure === null ? null : [failure.code, failure.message]];
-  };
-  // `x` holds null until a load of a computed key gives it a value whose type the compiler cannot know.
+/** What a script says, and the code and message of its failure, with values saved under keys before it runs. */
+function outcome(
+  source: string,
+  storage: { key: string; value: SerializableRuntimeValue }[] = [],
+): [string[], [string, string] | null] {
+  const compiled = compileValidPlan(source);
+  const result = run(
+    compiled,
+    createImmediatePacingRuntimeSnapshot(compiled, { scriptStorage: storage }),
+  );
+  const failure = result.snapshot.failure;
+  return [said(result.events), failure === null ? null : [failure.code, failure.message]];
+}
+
+test("after a value of unknown type, otherwise and every null check compile as the if form does (#859)", () => {
+  // Three ways a variable gets a value of unknown type while no value decided its type: a load of a computed key and a
+  // function result without a type, each after 'let x = null', and a copy of an element of an empty list.
+  const sources: ((
+    value: number | string | null,
+  ) => [string, { key: string; value: SerializableRuntimeValue }[]])[] = [
+    (value) => [
+      'let n = "a"\nlet x = null\nx = load "k.${n}", default: null',
+      value === null ? [] : [{ key: "k.a", value }],
+    ],
+    (value) => [`${HIDE}let x = null\nx = hide(${JSON.stringify(value)})`, []],
+    (value) => [
+      `${HIDE}let items = []\nitems.add(hide(${JSON.stringify(value)}))\nlet x = items[0]`,
+      [],
+    ],
+  ];
+  const use = (value: string) => `say "\${${value} - 1}"`;
+  // Each form with what it says for 5 and for null. Text fails when the script runs, in every form.
+  const forms: [string, string[], string[]][] = [
+    [`if x == null { x = 0 }\n${use("x")}`, ["4"], ["-1"]],
+    [use("(x otherwise 0)"), ["4"], ["-1"]],
+    [`let y = x otherwise 0\n${use("y")}`, ["4"], ["-1"]],
+    [`x = x otherwise 0\n${use("x")}`, ["4"], ["-1"]],
+    [`let y = x otherwise null otherwise 0\n${use("y")}`, ["4"], ["-1"]],
+    [`if x != null {\n    ${use("x")}\n}`, ["4"], []],
+    [`if x == null {\n    say "none"\n} else {\n    ${use("x")}\n}`, ["4"], ["none"]],
+    ['if x == null or x - 1 > 0 {\n    say "yes"\n}', ["yes"], ["yes"]],
+    ['if x != null and x - 1 > 0 {\n    say "yes"\n}', ["yes"], []],
+    [`if x == null {\n    exit\n}\n${use("x")}`, ["4"], []],
+  ];
+  for (const source of sources)
+    for (const [form, five, none] of forms) {
+      const script = (
+        value: number | string | null,
+        check = form,
+      ): [string, { key: string; value: SerializableRuntimeValue }[]] => {
+        const [start, storage] = source(value);
+        return [`${start}\n${check}\nexit`, storage];
+      };
+      const label = script(5)[0];
+      assert.deepEqual(outcome(...script(5)), [five, null], label);
+      assert.deepEqual(outcome(...script(null)), [none, null], label);
+      assert.match(outcome(...script("t"))[1]?.[0] ?? "", /^TSR0(27|58)$/, label);
+      // A typed place gets no value that nothing checked: text fails before it is kept there.
+      const typed = form.replace(
+        /say "\$\{(\w+|\(x otherwise 0\)) - 1\}"/,
+        "let count: integer = $1\nsay count",
+      );
+      if (typed !== form) assert.equal(outcome(...script("t", typed))[1]?.[0], "TSR058", typed);
+    }
+  // The issue's script: the fallback decides 'x' as the if form's store does, so text fails at the load, as there.
   const loaded = (check: string) =>
     `let n = "a"\nlet x = null\nx = load "k.\${n}", default: null\n${check}\nsay "\${x - 1}"\nexit`;
-  const copied = (check: string) =>
-    `let n = "a"\nlet x = null\nx = load "k.\${n}", default: null\n${check}\nsay "\${y - 1}"\nexit`;
-  const stored = (value: SerializableRuntimeValue) => [{ key: "k.a", value }];
-  for (const [fallback, check, failure] of [
-    [loaded("x = x otherwise 0"), loaded("if x == null { x = 0 }"), "TSR058"],
-    [copied("let y = x otherwise 0"), copied("let y = x\nif y == null { y = 0 }"), "TSR027"],
-  ] as const) {
-    assert.deepEqual(outcome(fallback, []), [["-1"], null]);
-    assert.deepEqual(outcome(fallback, stored(5)), [["4"], null]);
-    // Text under the key fails when the script runs, where and as the if form fails.
-    assert.equal(outcome(fallback, stored("t"))[1]?.[0], failure);
-    for (const storage of [[], stored(5), stored("t")])
-      assert.deepEqual(outcome(fallback, storage), outcome(check, storage));
-  }
-  // A parameter or a function result without a type gives a value of unknown type, which a typed place still checks.
+  const text = [{ key: "k.a", value: "t" }];
+  assert.deepEqual(outcome(loaded("x = x otherwise 0"), text), [
+    [],
+    ["TSR058", `'x' holds a whole number (integer) or null, so it cannot take text (string) "t".`],
+  ]);
+  assert.deepEqual(
+    outcome(loaded("x = x otherwise 0"), text),
+    outcome(loaded("if x == null { x = 0 }"), text),
+  );
+  // A parameter without a type, and a get with a null default on a list whose element type no value decided yet.
   assert.deepEqual(
     sayTexts(
-      `${HIDE}function less(value) {\n    let known = value otherwise 0\n    return known - 1\n}\nlet x = null\nx = hide(5)\nx = x otherwise 0\nsay less(null)\nsay less(5)\nsay x - 1\nexit`,
+      `${HIDE}function less(value) {\n    let known = value otherwise 0\n    return known - 1\n}\nlet items = []\nitems.add(hide(5))\nlet first = items.get(0, default: null) otherwise 0\nsay less(null)\nsay less(5)\nsay first - 1\nexit`,
     ),
     ["-1", "4", "4"],
-  );
-  assert.deepEqual(
-    outcome(
-      `${HIDE}let x = null\nx = hide("t")\nlet count: integer = x otherwise 0\nsay count\nexit`,
-      [],
-    ),
-    [
-      [],
-      ["TSR058", `'count' holds a whole number (integer), so it cannot take text (string) "t".`],
-    ],
   );
 });
 
@@ -157,10 +195,10 @@ test("a fallback keeps a value that held only null where a later value decides i
     [["TSV043", "y"]],
   );
   assert.deepEqual(
-    sayTexts(
+    outcome(
       loop('    if y is integer {\n        say "integer"\n    } else {\n        say "list"\n    }'),
     ),
-    ["integer", "list"],
+    [["integer", "list"], null],
   );
 });
 
