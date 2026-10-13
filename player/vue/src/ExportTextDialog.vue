@@ -79,10 +79,13 @@ async function copyText() {
 }
 function download() {
   fileUrl ??= URL.createObjectURL(new Blob([props.text], { type: "text/plain;charset=utf-8" }));
+  // In the document while it is clicked, as some browsers download only from a link there.
   const link = document.createElement("a");
   link.href = fileUrl;
   link.download = props.fileName;
+  document.body.append(link);
   link.click();
+  link.remove();
 }
 
 function focusCopy(event: Event) {
