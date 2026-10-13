@@ -47,7 +47,11 @@ subdirectories, Vue typechecking emits nothing, and the clean-build regression u
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
-distinct task-relevant evidence.
+distinct task-relevant evidence. To see what the checkout's compiler and
+runtime do with one source, run `npm run probe -- [--run] [--json] <file.tease | ->`
+after `npm run build:typescript`: it prints the diagnostics and, with `--run`, the
+messages, runtime failure, or first player interaction (see `tools/probe.mjs`).
+It is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 
 CI and tests verify executable code, scripts, configuration, generated artifacts,
