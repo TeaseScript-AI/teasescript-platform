@@ -1374,9 +1374,7 @@ function routedRead(value: IrExpression): Extract<IrExpression, { kind: "load" }
   const only = value.kind === "template" && value.parts.length === 1 ? value.parts[0]! : null;
   let inner = only !== null && "value" in only ? only.value : null;
   if (inner?.kind === "call" && inner.name === helperName("castText")) inner = inner.positional[0]!;
-  return inner?.kind === "load" && inner.read === "string" && literalKey(inner.key) !== null
-    ? inner
-    : null;
+  return inner?.kind === "load" && inner.read === "string" ? inner : null;
 }
 
 /** How many calls of script functions the values that a statement evaluates itself make. */
