@@ -2952,9 +2952,11 @@ async function debugStorageEditScenario(cdp, origin) {
   );
   await closed();
 
-  // A text too long to write as JSON, which V8 refuses as for any text longer than its limit, is no Player error: the
-  // list shows its preview, and a draft of it changed to Advanced stays as typed, which Save refuses in the editor.
+  // A text too long to write as JSON, which V8 refuses as for any text longer than its limit, is no Player error. Its
+  // draft keeps its type when Advanced is chosen and the editor says so; the draft here is shaped like JSON, which
+  // Advanced would read as another value. Saved as text, the list shows its preview.
   const tooLong = `too long ${"x".repeat(100)}`;
+  const draft = JSON.stringify(tooLong);
   await evaluate(
     cdp,
     `{ const stringify = JSON.stringify; globalThis.smokeStringify = stringify; JSON.stringify = function (...args) { const json = stringify.apply(this, args); if (typeof json === "string" && json.includes(${JSON.stringify(tooLong)})) throw new RangeError("Invalid string length"); return json; }; }`,
@@ -2965,38 +2967,40 @@ async function debugStorageEditScenario(cdp, origin) {
       true,
       failure,
     );
+  const keepsText = async (when) => {
+    await choose("advanced");
+    // A Player error would show at once.
+    await delay(300);
+    await noPlayerError(`Choosing Advanced for such a draft ${when} was a Player error`);
+    assertEqual(
+      await value(
+        cdp,
+        `[document.querySelector('[data-storage-editor-type]').value, document.querySelector('[data-storage-editor-value]').value, /too large to show as text/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')].join("|")`,
+      ),
+      `text|${draft}|true`,
+      `Such a draft ${when} did not keep its type and text, saying so in the editor`,
+    );
+  };
   await physicalClick(cdp, "[data-debug-storage-add]");
   await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
   await setField("[data-storage-editor-key]", "long");
-  await setField("[data-storage-editor-value]", tooLong);
+  await setField("[data-storage-editor-value]", draft);
+  await keepsText("being added");
   await save(
     `!document.querySelector('[data-storage-editor]')`,
     "A text too long to write as JSON was not saved",
   );
-  // A Player error would show at once.
   await delay(300);
   await noPlayerError("Listing a text too long to write as JSON was a Player error");
   await waitFor(
     cdp,
-    `JSON.stringify(${rows}) === JSON.stringify([['"long"', ${JSON.stringify(`"${tooLong.slice(0, 78)}…`)}]])`,
+    `JSON.stringify(${rows}) === JSON.stringify([['"long"', ${JSON.stringify(`${JSON.stringify(draft).slice(0, 79)}…`)}]])`,
     8_000,
-    "A text too long to write as JSON was not listed with its preview",
+    "A text too long to write as JSON was not listed as text with its preview",
   );
   await physicalClick(cdp, "[data-debug-storage-edit]");
   await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await choose("advanced");
-  await delay(300);
-  await noPlayerError("Changing such a text to Advanced was a Player error");
-  await save(
-    `/This is not JSON/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')`,
-    "Such a text in Advanced was not refused in the editor",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-storage-editor-value]').value`),
-    tooLong,
-    "The draft did not stay as typed",
-  );
-  await noPlayerError("Saving such a text as Advanced was a Player error");
+  await keepsText("being edited");
   await physicalClick(cdp, "[data-storage-editor] form button[type='button']");
   await closed();
   await evaluate(

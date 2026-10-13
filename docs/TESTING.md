@@ -643,10 +643,10 @@ visible and says when it names no saved photo, shows the saved photo once with b
 to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
 off, and fits the narrow drawer. Its editor on the `debug-storage-edit` package refuses a malformed number inline and
 stores nothing, stores an added value that the running session's next load returns while the earlier load stays,
-marks the session edited, changes the value to text and deletes it, lists a text too long to write as JSON with its
-preview and keeps it as typed when its type becomes Advanced, where Save refuses it inline, neither as a Player error,
-fits a narrow screen, and after the session ended stores a deletion for the next Start. The spill store of Debug's
-rewind history, loaded into the page, keeps and deletes
+marks the session edited, changes the value to text and deletes it, keeps a JSON-shaped draft too long to write as JSON
+as Text when Advanced is chosen and says so inline, also when editing it, and lists it saved as text with its preview,
+neither as a Player error, fits a narrow screen, and after the session ended stores a deletion for the next Start. The
+spill store of Debug's rewind history, loaded into the page, keeps and deletes
 rows in IndexedDB; its sweep deletes the history databases of pages that ended, a live one only once its page closes it,
 and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
 shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
