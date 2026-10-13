@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -372,6 +373,7 @@ test("file stores replay from their recorded answers and store answers alone, wi
         `let picture = fileFromBase64("${png}", default: "")`,
         `let page = fileFromBase64("${svg}", default: "")`,
         "let data = fileToBase64(page)",
+        "let hash = hashFile(page)",
         "say toJson([picture]), instant",
         "exit",
       ].join("\n"),
@@ -383,10 +385,14 @@ test("file stores replay from their recorded answers and store answers alone, wi
   recording.storeFiles({ kind: "stored", references: [reference] }, true);
   recording.storeFiles({ kind: "stored", references: [page] }, true);
   recording.storeFiles({ kind: "read", files: [svg] });
+  recording.storeFiles({
+    kind: "hashed",
+    hashes: [createHash("sha256").update(Buffer.from(svg, "base64")).digest("hex")],
+  });
   recording.storeFiles({ kind: "read", files: [png] });
   assert.equal(recording.snapshot.status, "halted");
   const exported = recording.export();
-  // Each kept file was vouched for with the kind of its type; a read needs no store answer.
+  // Each kept file was vouched for with the kind of its type; a read or a hash needs no store answer.
   assert.deepEqual(
     exported.replay!.operations.flatMap((operation) =>
       operation.admissionQueries.map((query) => [query.reference, query.kind]),

@@ -90,6 +90,7 @@ import {
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
+import { textSha256 } from "./sha256.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -3377,9 +3378,9 @@ export class Evaluator {
   }
 
   /**
-   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13), `toJson` and `fromJson` with `files: false`. Text that
-   * does not read as JSON or Base64, or a value that is not text, gives the `default:` of a reading function, never a
-   * runtime error.
+   * `toJson`, `fromJson`, `toBase64`, `fromBase64`, or `hashText` (V30 §13), `toJson` and `fromJson` with
+   * `files: false`. Text that does not read as JSON or Base64, or a value that is not text, gives the `default:` of a
+   * reading function, never a runtime error.
    */
   #dataTextFunction(
     name: string,
@@ -3415,14 +3416,14 @@ export class Evaluator {
         (speaker) => this.speakerById(speaker.speakerId, span).properties,
         span,
       );
-    if (name === "toBase64") {
+    if (name === "toBase64" || name === "hashText") {
       if (typeof value !== "string")
         throw fault(
           "TSR059",
-          `toBase64(...) encodes text (string), not ${describeRuntimeValue(value)}.`,
+          `${name}(...) ${name === "toBase64" ? "encodes" : "hashes"} text (string), not ${describeRuntimeValue(value)}.`,
           span,
         );
-      return base64Text(value, span);
+      return name === "toBase64" ? base64Text(value, span) : textSha256(value);
     }
     const read =
       typeof value !== "string"

@@ -40,7 +40,11 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
-import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
+import {
+  CAPTURE_UNAVAILABLE_REASONS,
+  fileStoreOperation,
+  requiredActionCompletionEvents,
+} from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
 import {
   formAnswerMismatch,
@@ -65,6 +69,7 @@ import {
   isStandardBase64,
 } from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
+import { isSha256Hex } from "./sha256.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {
@@ -278,7 +283,8 @@ function validForegroundActionKind(
 
 /**
  * A pending file store: the files its instruction's call stores, each once with the type its bytes give, or the stored
- * files of this session it reads, each once. `fileFromBase64` and `fileToBase64` have exactly one.
+ * files of this session it reads or hashes, each once. `fileFromBase64`, `fileToBase64`, and `hashFile` have exactly
+ * one.
  */
 function validFileStoreAction(
   action: Record<string, unknown>,
@@ -327,7 +333,7 @@ function validFileStoreAction(
     ) &&
     new Set(files.map((file: Record<string, unknown>) => file.base64)).size === files.length;
   const reads =
-    action.operation === "read" &&
+    (action.operation === "read" || action.operation === "hash") &&
     files.length === 0 &&
     references.length > 0 &&
     references.every(
@@ -340,8 +346,8 @@ function validFileStoreAction(
   if (owner?.kind !== "fileStore") return false;
   const count = Math.max(files.length, references.length);
   return (
-    (owner.call === "fileFromBase64" || owner.call === "fromJson") === stores &&
-    (owner.call === "fileFromBase64" || owner.call === "fileToBase64" ? count === 1 : true) &&
+    fileStoreOperation(owner.call) === action.operation &&
+    (owner.call === "toJson" || owner.call === "fromJson" ? true : count === 1) &&
     // `fromJson` keeps only files of a recognized type.
     (owner.call !== "fromJson" ||
       files.every((file: Record<string, unknown>) => isRecognizedFileType(String(file.type))))
@@ -1024,6 +1030,9 @@ function validateFileStoreHandoff(
     (settlement.outcome === "failed") !== (result === null) ||
     // The stored files' references are the answer.
     (settlement.outcome === "stored" && !sameItems(result, settlement.references)) ||
+    // A hash is 64 lowercase hexadecimal digits.
+    (settlement.outcome === "hashed" &&
+      !(isPlainRecord(result) && Array.isArray(result.items) && result.items.every(isSha256Hex))) ||
     !validInteractionResultHandoffOwner(handoff, snapshot, plan) ||
     !Array.isArray(snapshot.temporaries) ||
     snapshot.temporaries.some(
@@ -1940,7 +1949,7 @@ function validFileStoreSettlement(
       "completedAtMs",
       "references",
     ]) ||
-    !isOneOf(settlement.outcome, ["stored", "read", "failed"]) ||
+    !isOneOf(settlement.outcome, ["stored", "read", "hashed", "failed"]) ||
     (settlement.ownerCallFrameId !== null && !positiveSafeInteger(settlement.ownerCallFrameId)) ||
     !positiveSafeInteger(settlement.destinationTemporary) ||
     !Array.isArray(settlement.references) ||
@@ -1959,8 +1968,8 @@ function validFileStoreSettlement(
     owner?.kind === "fileStore" &&
     owner.destinationTemporary === settlement.destinationTemporary &&
     (settlement.outcome === "failed" ||
-      (settlement.outcome === "stored") ===
-        (owner.call === "fileFromBase64" || owner.call === "fromJson"))
+      settlement.outcome ===
+        { store: "stored", read: "read", hash: "hashed" }[fileStoreOperation(owner.call)])
   );
 }
 

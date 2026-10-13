@@ -126,12 +126,16 @@ export function isConversionResult(result: ConversionResult, value: unknown): bo
 /** `min` and `max` of two or more numbers or durations (V30 §13). */
 export const MIN_MAX_BUILTINS: ReadonlySet<string> = new Set(["min", "max"]);
 
-/** The functions that turn values into JSON or Base64 text and back, to exchange data with other programs (V30 §13). */
+/**
+ * The functions that turn values into JSON or Base64 text and back, or text into its SHA-256, to exchange data with
+ * other programs (V30 §13).
+ */
 export const DATA_TEXT_FUNCTIONS: ReadonlySet<string> = new Set([
   "toJson",
   "fromJson",
   "toBase64",
   "fromBase64",
+  "hashText",
 ]);
 
 /**

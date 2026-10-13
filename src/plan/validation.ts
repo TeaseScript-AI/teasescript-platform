@@ -1212,6 +1212,7 @@ function validateFileStoreInstruction(
   if (
     call !== "fileFromBase64" &&
     call !== "fileToBase64" &&
+    call !== "hashFile" &&
     call !== "toJson" &&
     call !== "fromJson"
   ) {
@@ -2393,6 +2394,7 @@ function validateExpressionNode(
         value.callee.kind === "identifier" &&
         (value.callee.name === "fileFromBase64" ||
           value.callee.name === "fileToBase64" ||
+          value.callee.name === "hashFile" ||
           ((value.callee.name === "toJson" || value.callee.name === "fromJson") &&
             !keepsFilesOut(value.arguments)))
       ) {

@@ -1,5 +1,6 @@
 import type {
   DelayDisplay,
+  FileStoreCall,
   InteractionChoiceValue,
   InteractionKind,
   InteractionResultDomain,
@@ -229,10 +230,10 @@ export interface RuntimeFileToStore {
 }
 
 /**
- * A `fileStore` instruction waits while the Player stores files or reads stored ones (V30 §13 and §33). The Player
- * completes it with the references of the stored files, the Base64 of the read ones, or a failure; the instruction then
- * runs again with that answer, so its continuation is itself. Expiry blocks wait until it settles, so it is never
- * suspended.
+ * A `fileStore` instruction waits while the Player stores files, reads stored ones, or hashes one (V30 §13 and §33).
+ * The Player completes it with the references of the stored files, the Base64 of the read ones, the SHA-256 of the
+ * hashed one, or a failure; the instruction then runs again with that answer, so its continuation is itself. Expiry
+ * blocks wait until it settles, so it is never suspended.
  */
 export interface RuntimeFileStoreActionSnapshot {
   readonly kind: "fileStore";
@@ -246,12 +247,20 @@ export interface RuntimeFileStoreActionSnapshot {
   readonly destinationTemporary: number;
   readonly createdAtMs: number;
   readonly requestEventSequence: number;
-  /** Whether the Player stores `files` or reads `references`; the other list is empty. */
-  readonly operation: "store" | "read";
+  /** Whether the Player stores `files`, or reads or hashes `references`; the other list is empty. */
+  readonly operation: "store" | "read" | "hash";
   /** The files to store, each kept once. */
   readonly files: readonly RuntimeFileToStore[];
-  /** The stored files to read, each named once. */
+  /** The stored files to read or hash, each named once. */
   readonly references: readonly string[];
+}
+
+/** What the Player does for a call of a `fileStore` instruction (V30 §13 and §33). */
+export function fileStoreOperation(
+  call: FileStoreCall,
+): RuntimeFileStoreActionSnapshot["operation"] {
+  if (call === "fileFromBase64" || call === "fromJson") return "store";
+  return call === "hashFile" ? "hash" : "read";
 }
 
 /** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */
@@ -469,8 +478,8 @@ export interface RuntimeFileStoreActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "fileStore";
   readonly settlementKind: "completed";
-  /** `stored` or `read` as asked, or `failed` when the Player could not. */
-  readonly outcome: "stored" | "read" | "failed";
+  /** `stored`, `read`, or `hashed` as asked, or `failed` when the Player could not. */
+  readonly outcome: "stored" | "read" | "hashed" | "failed";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;

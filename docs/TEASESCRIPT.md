@@ -202,6 +202,16 @@ text or of a `data:…;base64,` URL as a file and gives its reference, or the de
 can be kept, passed along, and turned back into Base64 ([§33](specifications/accepted-syntaxes-v30.md#stored-files),
 [stored files](RUNTIME.md#stored-files)).
 
+```tease
+let correct = hashText(answer) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e"
+let same = hashFile(image) == load("imageHash", default: "")
+```
+
+`hashText(text)` gives the SHA-256 of a text's UTF-8 bytes at once, and `hashFile(file)` that of a stored file's bytes
+after a short wait, both as the 64 lowercase hexadecimal digits that other programs, such as `sha256sum`, give. Any
+other value goes through `toJson` first. A hash hides only a secret with many possible values
+([§13](specifications/accepted-syntaxes-v30.md#hashes)).
+
 ### Compact choices
 
 `askChoice` returns the value of the selected button. A value may be written before an option's `:`; an option without
@@ -378,8 +388,9 @@ Implemented value operations include the V30 §8 text operations and regexes, jo
 (§4), list `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and
 `get` with `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
-`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §33 file functions
-`fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the numeric functions `round` (also with
+`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
+`hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
+numeric functions `round` (also with
 `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials,
 logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, and `atan2`, `min`
 and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`, `linearRegression`, and
