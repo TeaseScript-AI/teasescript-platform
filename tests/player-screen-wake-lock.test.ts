@@ -4,6 +4,7 @@ import { effectScope, type Ref } from "vue";
 
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import type { RandomDrawResolutionOutcome } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // The Player keeps the screen on while a session plays (PLAYER-UI "Session start and user activation"): from the Start
@@ -12,10 +13,15 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface WakeLockHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
-  prepare(create: () => PlayerRuntimeSession): void;
+  readonly randomDraw: Readonly<Ref<{ readonly drawId: number } | null>>;
+  prepare(
+    create: (options: RuntimeAdapter.PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
+  ): void;
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
   reportHostError(error: unknown): void;
+  setRandomControl(control: RuntimeAdapter.PlayerRuntimeSessionOptions["randomControl"]): void;
+  resolveRandomDraw(drawId: number, outcome: "natural"): RandomDrawResolutionOutcome | null;
 }
 let usePlayerSession: (options: { capabilities: { camera: boolean } }) => WakeLockHost;
 let useDevelopmentTime: (
@@ -225,6 +231,26 @@ test("a script error and a Player error release the lock", async (context) => {
   browser.show();
   await settle();
   assert.equal(browser.requests(), 2, "a stopped session asks for no lock");
+});
+
+test("a random draw Debug pauses at keeps the lock, also in the first statement", async (context) => {
+  const browser = stubBrowser(context, "granting");
+  const { host } = mountPlayer(context);
+  // Debug's Choose outcomes: the session pauses at every draw until it is decided. Paused in its first statement, the
+  // session has not completed one yet.
+  host.setRandomControl({});
+  host.prepare((options) =>
+    runtime.createPlayerRuntimeSession("let roll = randomInteger(1..=6)\nexit", options),
+  );
+  await host.activate();
+  await settle();
+  const draw = host.randomDraw.value;
+  assert.ok(draw);
+  assert.deepEqual([browser.requests(), browser.held()], [1, 1]);
+  assert.ok(host.resolveRandomDraw(draw.drawId, "natural"));
+  await settle();
+  assert.equal(status(host), "halted");
+  assert.equal(browser.held(), 0);
 });
 
 test("the lock is asked for at the Start click, before the camera opens", async (context) => {
