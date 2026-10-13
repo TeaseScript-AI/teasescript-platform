@@ -524,9 +524,12 @@ export function debugPhotoUses(
       for (const reference of capturedMediaReferences(entry.value)) saved.add(reference);
   for (const reference of saved)
     add(reference, { relation: "savedValue", operation: null, actionId: null });
+  // A state's `storedFiles` names every stored file the session knew, which the export does not use by naming it.
+  const unnamed = (state: RuntimeSnapshot | null | undefined) =>
+    state === null || state === undefined ? null : { ...state, storedFiles: [] };
   const carried = [
-    replaySnapshot,
-    recording?.anchorSnapshot ?? null,
+    unnamed(replaySnapshot),
+    unnamed(recording?.anchorSnapshot),
     recording?.operations ?? [],
     session?.events.slice(-EVENT_TAIL) ?? [],
     session === null ? [] : transcriptTail(session.transcriptEntries),
