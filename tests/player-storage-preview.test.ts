@@ -96,6 +96,36 @@ test("each saved value is previewed by its type", () => {
   assert.equal(storagePreview("x".repeat(200)).text.length, 80);
 });
 
+test("a long text shows the start of its JSON, also one too long to write whole", (context) => {
+  const texts = [
+    "x".repeat(78),
+    "x".repeat(79),
+    "x".repeat(81),
+    '"'.repeat(100),
+    `${"a".repeat(76)}\n${"b".repeat(10)}`,
+    // A surrogate pair just inside and just across the end of the shown start, and a lone surrogate across it.
+    `${"a".repeat(77)}😀z`,
+    `${"a".repeat(79)}😀z`,
+    `${"a".repeat(77)}\ud800${"a".repeat(10)}`,
+  ];
+  // The preview is the text's JSON, cut to 80 characters with an ellipsis.
+  const expected = texts.map((text) => {
+    const json = JSON.stringify(text);
+    return json.length <= 80 ? json : `${json.slice(0, 79)}…`;
+  });
+  // V8 cannot write a text longer than its limit as JSON; here no text longer than the preview can be written whole.
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
+    if (typeof value === "string" && value.length > 80)
+      throw new RangeError("Invalid string length");
+    return stringify(value, ...rest);
+  });
+  assert.deepEqual(
+    texts.map((text) => storagePreview(text).text),
+    expected,
+  );
+});
+
 test("members are listed in order with their index, property name, or dict key", () => {
   const saved = savedValues('save { level: 2, tags: ["a", null] } as "object"');
   const members = storageMembers(saved.get("object")!);
