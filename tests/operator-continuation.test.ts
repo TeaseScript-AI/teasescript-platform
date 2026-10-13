@@ -72,16 +72,21 @@ test("a sign that starts a continued line after a value subtracts, as on one lin
 });
 
 test("an operator that starts a continued line gets the errors it gets on one line", () => {
-  for (const source of [
-    `let r = (a < b${BREAK}< c)`,
-    `let r = (a .. b${BREAK}.. c)`,
-    `let r = (p${BREAK}&& q)`,
-    `let r = (n${BREAK}?? 0)`,
-  ]) {
-    const codes = diagnosticCodes(source);
-    assert.notDeepEqual(codes, [], source);
-    assert.deepEqual(codes, diagnosticCodes(source.replaceAll(BREAK, " ")), source);
+  // Comparisons and ranges do not chain (V30 §5); each symbol names the word to write and parses as it (V30 §39).
+  for (const [source, codes] of [
+    [`let r = (a < b${BREAK}< c)`, ["TSP020"]],
+    [`let r = (a .. b${BREAK}.. c)`, ["TSP022"]],
+    [`let r = (p${BREAK}&& q)`, ["TSP037"]],
+    [`let r = (p${BREAK}|| q)`, ["TSP037"]],
+    [`let r = (n${BREAK}?? 0)`, ["TSP037"]],
+  ] as const) {
+    assert.deepEqual(diagnosticCodes(source), codes, source);
+    assert.deepEqual(diagnosticCodes(source.replaceAll(BREAK, " ")), codes, source);
   }
+});
+
+test("parentheses inside an interpolation continue an expression before an operator", () => {
+  assertParsesAsOneLine(`say """\${(a${BREAK}+ b)}"""`);
 });
 
 test("an operator may not start a statement line, also in a block inside brackets", () => {
