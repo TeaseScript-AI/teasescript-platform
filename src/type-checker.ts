@@ -7656,7 +7656,8 @@ type EffectWork =
 
 /**
  * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later.
+ * include those of the loops inside it, but not those of timer or media blocks it starts, which run later, nor those of
+ * code that a literal rules out, which never runs.
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Map<string, Sharing>();
@@ -7667,6 +7668,8 @@ function programEffects(program: Program): ProgramEffects {
   };
   let callsFiles = false;
   let entersMain = false;
+  // The value that literals give each condition the walk asks about.
+  const conditions = new Map<Expression, boolean | undefined>();
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -7713,6 +7716,26 @@ function programEffects(program: Program): ProgramEffects {
         if (root !== null) write(root, "changes", loop, inside);
       }
       handlers(expression);
+      if (
+        expression.kind === "binaryExpression" &&
+        (expression.operator === "and" ||
+          expression.operator === "or" ||
+          expression.operator === "otherwise")
+      ) {
+        // The operands of an `and`, `or`, or `otherwise` chain after a literal that decides its result never run, so
+        // they are part of no loop.
+        let runs = true;
+        for (const operand of chainOperands(expression)) {
+          work.push({ expression: operand, loop: runs ? loop : null, inside });
+          // A condition that literals decide is never null either.
+          const decides =
+            expression.operator === "otherwise"
+              ? isNonNullLiteral(operand) || literalCondition(operand, conditions) !== undefined
+              : literalCondition(operand, conditions) === (expression.operator === "or");
+          runs &&= !decides;
+        }
+        continue;
+      }
       for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
       continue;
     }
@@ -7747,16 +7770,34 @@ function programEffects(program: Program): ProgramEffects {
           if (parameter.defaultValue !== null)
             work.push({ expression: parameter.defaultValue, loop: null, inside: true });
         continue;
+      case "ifStatement": {
+        // A branch that a literal condition rules out never runs, so it is part of no loop.
+        const condition = literalCondition(statement.condition, conditions);
+        enter(statement.thenBlock.statements, condition === false ? null : loop, inside);
+        if (statement.elseBlock !== null)
+          enter(
+            statement.elseBlock.kind === "ifStatement"
+              ? [statement.elseBlock]
+              : statement.elseBlock.statements,
+            condition === true ? null : loop,
+            inside,
+          );
+        break;
+      }
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, node, inside);
+        // A body that a literal rules out never runs, so it is part of no loop, and its own loop changes nothing.
+        const runs = literalCondition(statement.condition, conditions) !== false;
+        enter(statement.body.statements, runs ? node : null, inside);
         work.push({ expression: statement.condition, loop: node, inside });
         continue;
       }
       case "repeatStatement":
-      case "forStatement":
-        enter(statement.body.statements, loopNode(statement.body, loop), inside);
+      case "forStatement": {
+        const node = loopNode(statement.body, loop);
+        enter(statement.body.statements, runsNoTime(statement) ? null : node, inside);
         break;
+      }
       default:
         enter(nestedStatements(statement), loop, inside);
     }
@@ -7779,6 +7820,96 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
+}
+
+/** The operands of a chain of one operator, from the left; a part in parentheses is an operand of its own. */
+function chainOperands(root: Extract<Expression, { kind: "binaryExpression" }>): Expression[] {
+  const operands: Expression[] = [];
+  let left: Expression = root;
+  while (left.kind === "binaryExpression" && left.operator === root.operator) {
+    operands.push(left.right);
+    left = left.left;
+  }
+  operands.push(left);
+  return operands.reverse();
+}
+
+/**
+ * The value that literals give a condition, as the type check decides it: `true` or `false`, also in parentheses or
+ * after `not`, and an `and` chain with an operand that is `false` this way, or whose operands are all `true`, and an
+ * `or` chain the other way round. `known` keeps the value of each part, so each part is evaluated once, without native
+ * recursion.
+ */
+function literalCondition(
+  condition: Expression,
+  known: Map<Expression, boolean | undefined>,
+): boolean | undefined {
+  const pending = [condition];
+  while (pending.length > 0) {
+    const node = pending.at(-1)!;
+    if (known.has(node)) {
+      pending.pop();
+      continue;
+    }
+    const parts = conditionParts(node);
+    const unknown = parts.filter((part) => !known.has(part));
+    if (unknown.length > 0) {
+      for (const part of unknown) pending.push(part);
+      continue;
+    }
+    pending.pop();
+    const values = parts.map((part) => known.get(part));
+    known.set(node, conditionValue(node, values));
+  }
+  return known.get(condition);
+}
+
+/** The parts whose values decide a condition: what stands in parentheses or after `not`, or a chain's operands. */
+function conditionParts(node: Expression): readonly Expression[] {
+  if (node.kind === "parenthesizedExpression") return [node.expression];
+  if (node.kind === "unaryExpression" && node.operator === "not") return [node.operand];
+  if (node.kind === "binaryExpression" && (node.operator === "and" || node.operator === "or"))
+    return chainOperands(node);
+  return [];
+}
+
+/** A condition's value from the values of its {@link conditionParts}, or `undefined` when literals do not decide it. */
+function conditionValue(
+  node: Expression,
+  values: readonly (boolean | undefined)[],
+): boolean | undefined {
+  if (node.kind === "booleanLiteral") return node.value;
+  if (node.kind === "parenthesizedExpression") return values[0];
+  if (node.kind === "unaryExpression" && node.operator === "not")
+    return values[0] === undefined ? undefined : !values[0];
+  if (node.kind !== "binaryExpression" || (node.operator !== "and" && node.operator !== "or"))
+    return undefined;
+  const decides = node.operator === "or";
+  if (values.includes(decides)) return decides;
+  return values.every((value) => value === !decides) ? !decides : undefined;
+}
+
+/** A literal other than `null`, also in parentheses, so a fallback after it never runs. */
+function isNonNullLiteral(expression: Expression): boolean {
+  return [
+    "numberLiteral",
+    "durationLiteral",
+    "stringLiteral",
+    "booleanLiteral",
+    "listLiteral",
+    "setLiteral",
+    "dictLiteral",
+    "objectLiteral",
+  ].includes(unwrap(expression).kind);
+}
+
+/** Whether the body of a `repeat` or `for` loop certainly runs no time, as the type check decides it. */
+function runsNoTime(
+  statement: Extract<Statement, { kind: "repeatStatement" | "forStatement" }>,
+): boolean {
+  if (statement.kind === "forStatement") return isEmptyLiteral(statement.iterable);
+  const times = staticNumber(statement.count);
+  return times !== undefined && times < 1;
 }
 
 /** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
