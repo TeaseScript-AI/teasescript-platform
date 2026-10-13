@@ -1,6 +1,7 @@
 import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { leaveScopes, resolveCaptures } from "./captures.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
+import { sayStagesSelectively } from "./say-staging.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../temporal.js";
 import {
@@ -2746,8 +2747,9 @@ function advance(snapshot: RuntimeSnapshot): void {
 /**
  * A `say` instruction evaluates visible text, pacing, and speaker output before
  * it can know whether its complete transition is representable. Evaluate that
- * work against a private canonical-state clone so a rejected pacing value cannot
- * retain RNG, warning, event, or action changes.
+ * work against a private stage so a rejected pacing value cannot retain RNG,
+ * warning, event, or action changes: copies of the parts the say changes in
+ * place, or a canonical-state clone when an expression may change any other.
  */
 function executeSayAtomically(
   instruction: Extract<Instruction, { kind: "say" }>,
@@ -2755,8 +2757,8 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = sayEvaluatesNoExpression(instruction)
-    ? expressionFreeSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
+  const stagedSnapshot = sayStagesSelectively(instruction)
+    ? selectiveSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
     : stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
@@ -2785,24 +2787,12 @@ function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
 }
 
 /**
- * Whether `executeSay` evaluates no expression of this say: its text is literal or prepared, without explicit
- * presentation, at smart or instant pacing. Any expression, even a read, can change nested state before a later step
- * rejects the say, so every other say keeps the deep staging clone.
+ * Staging for a say whose expressions change no state but the generator (`sayStagesSelectively`). Such a say replaces
+ * root fields and changes in place only the generator, the speaker warning list, and for a result-bearing say its
+ * temporaries and live messages, so it copies those and shares everything else read-only. Every field is listed so
+ * that a new snapshot field must be classified here.
  */
-function sayEvaluatesNoExpression(instruction: Extract<Instruction, { kind: "say" }>): boolean {
-  return (
-    (instruction.textTemporary !== undefined || instruction.value.kind === "literal") &&
-    instruction.presentation === null &&
-    (instruction.pacing === "smart" || instruction.pacing === "instant")
-  );
-}
-
-/**
- * Staging for a say that evaluates no expression. Such a say replaces root fields and changes only the speaker
- * warning list in place, and a result-bearing say also its temporaries and live messages, so it copies those and shares
- * everything else read-only. Every field is listed so that a new snapshot field must be classified here.
- */
-function expressionFreeSayStagingClone(
+function selectiveSayStagingClone(
   snapshot: RuntimeSnapshot,
   givesHandle: boolean,
 ): RuntimeSnapshot {
@@ -2815,7 +2805,7 @@ function expressionFreeSayStagingClone(
     speakers: snapshot.speakers,
     defaultSpeaker: snapshot.defaultSpeaker,
     contextualSpeaker: snapshot.contextualSpeaker,
-    // No random draw is reachable; the copy is constant-size.
+    // A draw advances the generator in place; the copy is constant-size.
     rng: { ...snapshot.rng },
     warnedSpeakerIds: [...snapshot.warnedSpeakerIds],
     loopFrames: snapshot.loopFrames,

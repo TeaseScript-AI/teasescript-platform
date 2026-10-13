@@ -39,6 +39,7 @@ import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { withDeepSayStaging } from "./helpers/deep-say-staging.js";
 
 /*
  * Controlled randomness (docs/RUNTIME.md#controlled-randomness). The central invariant: a pause undoes its unit and
@@ -159,13 +160,27 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       ["counter"],
     ),
   }),
-  /** Draws inside a staged say. */
+  /** Draws inside staged says, one of which gives a message handle and one waits. */
   stagedSay: () => ({
     stepMs: 2000,
     plan: project(
       [
         'let colors = ["red", "green", "blue"]',
         'say "${colors} then ${randomInteger(1..=3)} then ${colors}"',
+        'let line = say "${colors.random} ${chance(50)}"',
+        'say "${line.text} ${random()}", 1 s',
+        "exit",
+      ].join("\n"),
+    ),
+  }),
+  /** Draws inside a staged say that then fails at its pacing. */
+  rejectedSay: () => ({
+    stepMs: 2000,
+    plan: project(
+      [
+        'let colors = ["red", "green", "blue"]',
+        "let pacing = -1 s",
+        'say "${colors.random} ${randomInteger(1..=6)}", pacing',
         "exit",
       ].join("\n"),
     ),
@@ -437,6 +452,27 @@ for (const [name, make] of Object.entries(SCENARIOS)) {
     );
   });
 }
+
+test("draws inside says pause, resume, and roll back alike on a selective and a deep stage", () => {
+  for (const name of ["stagedSay", "rejectedSay"]) {
+    const selective = SCENARIOS[name]!();
+    const deep = { ...selective, plan: withDeepSayStaging(selective.plan) };
+    for (const resolve of [natural, forced])
+      for (const mode of ["plain", "callback", "pauseCheckpoint"] as const) {
+        const context = `${name}, ${mode}, ${resolve === natural ? "natural" : "chosen"}`;
+        const expected = drive(selective, mode, resolve);
+        const actual = drive(deep, mode, resolve);
+        assert.deepEqual(actual.events, expected.events, `${context}: events`);
+        assert.equal(actual.snapshot, expected.snapshot, `${context}: final state`);
+        assert.deepEqual(actual.receipts, expected.receipts, `${context}: receipts`);
+        assert.deepEqual(actual.pauses, expected.pauses, `${context}: pauses`);
+      }
+  }
+  assert.equal(
+    JSON.parse(drive(SCENARIOS.rejectedSay!(), "plain", natural).snapshot).status,
+    "failed",
+  );
+});
 
 test("every paused draw names a site that listRandomSites lists, counted from 1", () => {
   for (const make of Object.values(SCENARIOS)) {
