@@ -14629,6 +14629,15 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
   }
   const java = javaProperty(node, property, javaHost(context));
   if (java !== undefined) return java;
+  const mixedKey = targetNode.kind === "variable" ? bindingKey(targetNode, context.bindings) : null;
+  if (mixedKey !== null && context.mapUses.jsonMixed.has(mixedKey))
+    addDiagnostic(
+      context,
+      "SX_JSON_MIXED",
+      "warning",
+      `${variableName(targetNode)} holds parsed JSON and also values the conversion does not follow (a parameter, a tuple, or a compound assignment sets it), so this read stays a property read, which stops the script where the value is parsed JSON (a dict).`,
+      node.span,
+    );
   // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
   // such a property, apart from a map key, so a receiver not proven to be a map is a list.
   if (
@@ -14639,15 +14648,6 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
-  const mixedKey = targetNode.kind === "variable" ? bindingKey(targetNode, context.bindings) : null;
-  if (mixedKey !== null && context.mapUses.jsonMixed.has(mixedKey))
-    addDiagnostic(
-      context,
-      "SX_JSON_MIXED",
-      "warning",
-      `${variableName(targetNode)} holds parsed JSON and also values the conversion does not follow (a parameter, a tuple, or a compound assignment sets it), so this read stays a property read, which stops the script where the value is parsed JSON (a dict).`,
-      node.span,
-    );
   // Groovy read `value.size` of what a JsonSlurper's parseText() gave as a map's key, or a list's length.
   if (property === "size" && !context.writeTargets.has(node) && isJsonValue(targetNode, context)) {
     const target = lowerExpression(targetNode, context);
