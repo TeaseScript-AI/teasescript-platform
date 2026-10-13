@@ -660,7 +660,8 @@ reload shows the waiting popup again, and no popup text reaches the transcript. 
 catalog that names pages of the smoke's server, checks that right after a click `openUrl` opens its address at once in
 a tab without an opener and the script goes on, that with `alwaysButton: true` its button, with its `buttonText:`,
 shows also right after a click and opens it, that without a recent click its button "Open link" opens it, and that
-after a reload the address does not open by itself, also not from the click on Continue, but from its button. A choice and a form toggle held
+after a reload the address does not open by itself, also not from the click on Continue, but from its button, as after
+Debug's Return and after turning Debug off while the rewind inspects an earlier state. A choice and a form toggle held
 down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
 `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image

@@ -2614,17 +2614,21 @@ class SemanticValidator {
     const addresses = statement.arguments.filter(
       (argument) => argument.kind === "positionalArgument",
     );
-    if (addresses.length !== 1 || statement.arguments[0]?.kind !== "positionalArgument")
+    const addressed =
+      addresses.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
+    if (!addressed)
       this.#report(
         semanticCode.argumentCount,
         "openUrl takes one web address without a name, first, as in 'openUrl(\"https://example.com\")'.",
         statement.span,
       );
-    // A named address is reported above, as an address that needs no name.
     for (const argument of statement.arguments)
       if (
         argument.kind === "namedArgument" &&
-        !["url", "buttonText", "alwaysButton"].includes(argument.name.name)
+        argument.name.name !== "buttonText" &&
+        argument.name.name !== "alwaysButton" &&
+        // A named address without a positional one is the error above.
+        (addressed || argument.name.name !== "url")
       )
         this.#report(
           semanticCode.unknownNamedArgument,

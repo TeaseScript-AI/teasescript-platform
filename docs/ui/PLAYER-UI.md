@@ -921,12 +921,13 @@ the tools drawer of a narrow layout, and Escape closes it only while focus is in
 button waits, the composer shows no hint.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
-form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script
-goes on, with nothing in the chat. Otherwise, when the browser does not open the tab, and always for an `openUrl`
-written with `alwaysButton: true`, it shows a button where `showButton` shows its button: its `buttonText`, **Open
-link** by default, never the address, which may be meant as a surprise; the composer takes no answer; default focus goes to the button instead of the composer, and the player's click opens the
-tab and lets the script go on. A request that a reload, a restore, or Debug's rewind brought back always shows the
-button: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
+form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes
+on, with nothing in the chat. Otherwise, when the browser does not open the tab, and always for an `openUrl` written
+with `alwaysButton: true`, it shows a button where `showButton` shows its button: its `buttonText`, **Open link** by
+default, never the address, which may be meant as a surprise; the composer takes no answer; default focus goes to the
+button instead of the composer, and the player's click opens the tab and lets the script go on. A request that a reload,
+a restore, Debug's rewind, or its Return brought back always shows the button, also when turning Debug off reinstates
+its session: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
 address, so the page there cannot reach the Player; the browser sends it at most the Player's origin as referrer.
 Neither the address nor the button enters the transcript.
 

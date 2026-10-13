@@ -5573,6 +5573,67 @@ async function openUrlScenario(cdp, origin, debugPort) {
   );
   for (const target of await tabs())
     await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
+
+  // Debug's Return, and turning Debug off, reinstate the session with its waiting request: it keeps its button and
+  // opens only from the click, though Back, Return, and the switch were clicks.
+  CATALOGS.set("/dev-package/open-url-rewind/catalog.json", {
+    images: [],
+    media: [],
+    sources: [
+      {
+        path: "main.tease",
+        source: [
+          'showButton "Go"',
+          `openUrl("${address(4)}")`,
+          `openUrl("${address(5)}")`,
+          'say "Opened after Return", instant',
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    problems: [],
+  });
+  await navigate(cdp, `${origin}/player/?dev&package=open-url-rewind`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `(${answer}) === 'Go'`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitForTabs(1, "The fourth address did not open at once");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The fifth address shows no button");
+  const backToGo = async () => {
+    await evaluate(
+      cdp,
+      `document.querySelectorAll('.transcript-entry [data-back-to-here]')[0].setAttribute('data-smoke-back', '')`,
+    );
+    await settledClick(cdp, "[data-smoke-back]");
+    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
+  };
+  await backToGo();
+  await settledClick(cdp, "[data-rewind-return]");
+  await waitFor(cdp, `!document.querySelector('[data-rewind-inspection]')`, 5_000, "No Return");
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Return lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "Return opened the waiting address by itself");
+  await backToGo();
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('[data-debug-active]')`);
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]')`,
+    5_000,
+    "Debug stayed on",
+  );
+  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Turning Debug off lost the button");
+  await delay(500);
+  assertEqual((await tabs()).length, 1, "Turning Debug off opened the waiting address by itself");
+  await physicalClick(cdp, "[data-open-url]");
+  await waitForTabs(2, "The button did not open the fifth address");
+  await cdp.call("Page.bringToFront");
+  await waitFor(cdp, said("Opened after Return"), 8_000, "The script did not go on");
+  for (const target of await tabs())
+    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
 }
 
 async function preselectScenario(cdp, origin) {

@@ -281,6 +281,9 @@ test("openUrl is a reserved statement whose web address the compiler checks", ()
   assert.deepEqual(diagnostics('let urls = ["https://example.com"]\nopenUrl(urls[0])'), []);
   assert.deepEqual(diagnostics("openUrl(3)"), ["TSV043"]);
   assert.deepEqual(diagnostics('openUrl(url: "https://example.com")'), ["TSV020"]);
+  assert.deepEqual(diagnostics('openUrl("https://example.com", url: "https://other.example")'), [
+    "TSV022",
+  ]);
   // Its button's text is shown text, and alwaysButton: is true or false.
   assert.deepEqual(diagnostics('openUrl("https://example.com", buttonText: ["Go"])'), ["TSV040"]);
   assert.deepEqual(diagnostics('openUrl("https://example.com", alwaysButton: "yes")'), ["TSV043"]);
