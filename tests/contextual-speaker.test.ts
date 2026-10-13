@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProject, compileSource, type ProjectSourceFile } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { Story } from "./helpers/story-session.js";
@@ -8,6 +9,18 @@ import { Story } from "./helpers/story-session.js";
 const VERA = 'speaker vera {\n    title: "Mistress"\n    font: "Georgia"\n}';
 const NO_SPEAKER_AT_RUNTIME =
   "This message has no speaker, so 'speaker' has no value: it names none with 'as', and no default speaker is set. Give it one with 'as name', or set a default speaker with 'speaker name' before it.";
+
+const NO_SPEAKER_AT_COMPILE =
+  "This message has no speaker, so 'speaker' has no value: it names none with 'as', and the script never sets a default speaker. Give it one with 'as name', or set a default speaker with 'speaker name'.";
+
+/** Each diagnostic as its code, message, and the source it marks. */
+function diagnostics(source: string): [string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
 
 /** A default speaker that only one path sets, so the compiler cannot tell whether the message has a speaker. */
 function onePath(on: boolean): string {
@@ -86,4 +99,50 @@ test("a timer or button block reads the default speaker when it runs", () => {
   assert.equal(story.press(1), "pressed");
   assert.equal(story.snapshot.failure, null);
   assert.deepEqual(story.said(), ["Mistress", "mistress"]);
+});
+
+test("'speaker' in a message without 'as' is a compile error when the script never sets a default speaker", () => {
+  const reads = [
+    ...READS.map(([read]) => read),
+    'timer async 1 s {\n    say "${speaker.title}"\n}',
+    'showPermanentButton "Kneel" {\n    say "${speaker.title}"\n}',
+    // An ask without 'as' inside a 'say as' text is a message of its own, with the default speaker.
+    'say as vera "${askText "Q ${speaker.title}"}"',
+  ];
+  for (const read of reads) {
+    const source = `${VERA}\n${read}\nexit`;
+    assert.deepEqual(diagnostics(source), [["TSV063", NO_SPEAKER_AT_COMPILE, "speaker"]], source);
+  }
+  // Without any speaker declared, too.
+  assert.deepEqual(diagnostics('say "${speaker.title}"\nexit'), [
+    ["TSV063", NO_SPEAKER_AT_COMPILE, "speaker"],
+  ]);
+});
+
+test("a message with 'as', and a speaker's own property, read 'speaker' without a default speaker", () => {
+  const result = runValidSource(
+    [
+      'speaker vera {\n    title: "Mistress"\n    alias: speaker.title + "!"\n}',
+      'say as vera "${speaker.title} ${speaker.alias}"',
+      'let answer = askText as vera "${speaker.title.uppercase()}?"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["Mistress Mistress!", "MISTRESS?"]);
+});
+
+test("a default speaker set anywhere in the package leaves 'speaker' to the runtime", () => {
+  const main = (setter: string): ProjectSourceFile => ({
+    path: "main.tease",
+    source: [VERA, setter, 'say "${speaker.title}"', "exit"].join("\n"),
+  });
+  const elsewhere: readonly (readonly ProjectSourceFile[])[] = [
+    // In another file, in a function, or in a block that may not run.
+    [main(""), { path: "cast.tease", source: "speaker vera\nend" }],
+    [main("function cast {\n    speaker vera\n}")],
+    [main("timer async 1 s {\n    speaker vera\n}")],
+  ];
+  for (const files of elsewhere)
+    assert.deepEqual(compileProject(files).diagnostics, [], JSON.stringify(files));
 });
