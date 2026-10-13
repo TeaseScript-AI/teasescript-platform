@@ -135,6 +135,8 @@ test("a regex shows as its literal and compares by pattern and flags", () => {
       "say [r, /x/]",
       'say "${r == /\\d+[a*]/i} ${r != /\\d+[a*]/} ${[/a/, r].contains(/\\d+[a*]/i)} ${[/a/, r].indexOf(r)}"',
       'say "${set[/a/, /a/, /a/i].length} ${dict { "k": /a/ } == dict { "k": /a/ }}"',
+      // Data with the same fields is a dict, never a regex.
+      'say fromJson("{\\"kind\\": \\"regex\\", \\"source\\": \\"a\\", \\"flags\\": \\"\\"}", default: null) is regex',
       'let values: (regex | string)?[] = [r, null, "/a/"]',
       'say "${values[0] is regex} ${values[1] is regex} ${values[2] is regex} ${values[1] is regex?}"',
     ),
@@ -145,6 +147,7 @@ test("a regex shows as its literal and compares by pattern and flags", () => {
       "[/\\d+[a*]/i, /x/]",
       "true true true 1",
       "2 true",
+      "false",
       "true false false true",
     ],
   );

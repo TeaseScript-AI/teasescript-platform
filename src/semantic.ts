@@ -36,7 +36,7 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
-import { compileRegex, regexFlagProblem } from "./regex.js";
+import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -2305,7 +2305,7 @@ class SemanticValidator {
       this.#report(semanticCode.invalidRegex, flagProblem, createSourceSpan(start, end));
       return;
     }
-    const compiled = compileRegex(literal.source, literal.flags);
+    const compiled = compileRegex(literal.source, canonicalRegexFlags(literal.flags));
     if (!compiled.ok) this.#report(semanticCode.invalidRegex, compiled.problem, literal.span);
   }
 
