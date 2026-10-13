@@ -186,6 +186,23 @@ test("after a value of unknown type, otherwise and every null check compile as t
   );
 });
 
+test("x = x otherwise d keeps what x held where it was not null, also in parentheses (#859)", () => {
+  // The call in the fallback may run 'reset', which ends what is known about 'x', but 'x' was read before it.
+  assert.deepEqual(
+    sayTexts(
+      `${HIDE}let x: integer | string | null = hide(null)\nfunction reset {\n    x = "a"\n}\nfunction chooseZero {\n    return 0\n}\nif x is integer? {\n    x = x otherwise chooseZero()\n    let z: integer = x\n    say z\n}\nexit`,
+    ),
+    ["0"],
+  );
+  assert.deepEqual(
+    outcome(
+      'let n = "a"\nlet x = null\nx = load "k.${n}", default: null\nx = (x otherwise null) otherwise 0\nlet z: integer = x\nsay z\nexit',
+      [{ key: "k.a", value: 4 }],
+    ),
+    [["4"], null],
+  );
+});
+
 test("a fallback keeps a value that held only null where a later value decides it after all (#859)", () => {
   // The list stored in 'x' has an element of unknown type, so no later check can start with 'x' decided.
   const loop = (body: string) =>

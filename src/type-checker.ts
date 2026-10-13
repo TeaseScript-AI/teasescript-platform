@@ -2265,6 +2265,8 @@ class TypeChecker {
       loaded.kind === "loadExpression"
     )
       this.#loadReceivers.set(loaded, variable.type);
+    // What the variable holds where it is read, before a call in the value may end what is known about it.
+    const before = variable === undefined ? undefined : this.#currentType(variable);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
     // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
@@ -2286,8 +2288,8 @@ class TypeChecker {
         variable === undefined ? undefined : this.#ownFallback(statement.value, variable, scope);
       if (own !== undefined) {
         yield* compileChild(this.#storeTask(place, own.expression, own.type));
-        // Where it was not null, the variable keeps its own value, of the type the store may just have decided.
-        this.#assigned(variable!, union([nonNullType(this.#currentType(variable!)), own.type]));
+        // Where it was not null, the variable keeps the value it held, of the type the store may just have decided.
+        this.#assigned(variable!, union([nonNullType(before!), own.type]));
         return;
       }
       const checked = this.#checkedValue(statement.value);
@@ -7132,7 +7134,7 @@ class TypeChecker {
     let value = unwrap(expression);
     while (value.kind === "binaryExpression" && value.operator === "otherwise") {
       chain.push(value);
-      value = value.left;
+      value = unwrap(value.left);
     }
     const read = unwrap(value);
     const entry = read.kind === "identifier" ? scope.resolve(read.name) : undefined;
