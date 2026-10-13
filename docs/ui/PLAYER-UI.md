@@ -111,8 +111,9 @@ surrounding Player geometry to change.
 - **Component surface:** tool panels, composer, and ordinary Standard controls.
 - **Media-control surface:** translucent title/global controls and timer material over the stage.
 - **Stage surface:** the structural primary-content region; media may use its available rectangle.
-- **Content identity:** speaker, authored control, theme, and media-derived colours remain distinct from unrelated
-  application chrome roles.
+- **Content identity:** speaker, authored control, and theme colours remain distinct from unrelated application chrome
+  roles; the Stage photo's colours colour the whole Player
+  ([Stage and media presentation](#stage-and-media-presentation)).
 
 The tools framework sits beside the primary stage/conversation composition on comfortable layouts and becomes an
 overlay drawer when constrained. Title/global controls and the timer/background rail overlay the stage. Foreground
@@ -1207,10 +1208,10 @@ there is no Radix runtime or CSS dependency.
 
 ## Theme and customization boundary
 
-The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills,
-media ambience, or technical masks. The Player/theme accent remains theme-owned; local control colour never changes it,
-and only the Stage photo does, under the Photo accent A/B test's A
-([Stage and media presentation](#stage-and-media-presentation)).
+The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills, or
+technical masks; the Stage photo's colours feed it ([Stage and media presentation](#stage-and-media-presentation)). The
+Player/theme accent remains theme-owned; local control colour never changes it, and only the Stage photo does, under
+the Photo accent A/B test's A.
 
 Standard Player theme precedence is: explicit user-selected theme, package/developer-selected default, then platform
 default. A package may select a default but cannot force it against a user override.
