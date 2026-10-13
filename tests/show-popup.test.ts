@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { rebuildRecordedSession } from "../player/debug-export.js";
+import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
+  observePlayerRuntimeTime,
   playerRuntimeDebugNow,
   playerRuntimeForeground,
+  playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
@@ -64,6 +68,22 @@ function transcript(session: PlayerRuntimeSession): string[] {
   );
 }
 
+function observe(session: PlayerRuntimeSession, atMs: number): PlayerRuntimeSession {
+  const observed = observePlayerRuntimeTime(session, atMs);
+  assert.equal(observed.outcome.kind, "observed");
+  return observed.session;
+}
+
+function close(session: PlayerRuntimeSession): PlayerRuntimeSession {
+  const result = closePlayerRuntimePopup(session);
+  assert.equal(result?.outcome.kind, "completed");
+  return result.session;
+}
+
+function seconds(value: number) {
+  return { kind: "duration", milliseconds: value * 1000 };
+}
+
 test("showPopup waits until the player closes it with its one button, and nothing enters the transcript", () => {
   for (const [form, buttonText] of [
     ['showPopup "Task completed"', "OK"],
@@ -91,6 +111,108 @@ test("showPopup waits until the player closes it with its one button, and nothin
     // Neither the message nor the button's text is a chat message.
     assert.deepEqual(transcript(session), ["narrator: Before", "narrator: After"], form);
   }
+});
+
+test("showPopup used as a value returns how long the popup was open as a duration, in both forms", () => {
+  for (const form of [
+    'let t = showPopup "Stand in the corner. Click when you\'re done."',
+    'let t = showPopup "Stand in corner ${n}."',
+    'let t = showPopup(message: "Stand in the corner.", buttonText: "Done")',
+    'let t = showPopup("Stand in corner ${n}.", buttonText: "Done ${n}")',
+  ]) {
+    // The popup appears at 1 s and closes at 4 s.
+    let session = createPlayerRuntimeSession(
+      `let n = 2\nwait 1 s\n${form}\nif t < 5 min {\n  say "Back already? Again.", instant\n}\nsay "\${t}", instant\nexit`,
+    );
+    session = observe(session, 4_000);
+    assert.equal(playerRuntimeForeground(session)?.kind, "popup", form);
+    session = close(session);
+    assert.equal(session.state.status, "halted", form);
+    assert.deepEqual(binding(playerRuntimeSnapshot(session), "t"), seconds(3), form);
+    assert.deepEqual(
+      transcript(session),
+      ["narrator: Back already? Again.", "narrator: 3 seconds"],
+      form,
+    );
+  }
+});
+
+test("a popup whose value is ignored gives none, and the script goes on as before", () => {
+  let session = createPlayerRuntimeSession(
+    'wait 1 s\nshowPopup "First"\nlet t = showPopup "Second"\nsay "${t}", instant\nexit',
+  );
+  session = close(observe(session, 2_000));
+  const ignored = playerRuntimeSnapshot(session).lastSettlement;
+  assert.ok(ignored?.actionKind === "interaction");
+  assert.equal(ignored.destinationTemporary, null);
+  assert.equal(ignored.result, null);
+  // The second popup counts from when it appeared, at 2 s.
+  session = close(observe(session, 5_000));
+  assert.deepEqual(transcript(session), ["narrator: 3 seconds"]);
+});
+
+test("a popup's value leaves out the time a block interrupted it, also across a restore while the block runs", () => {
+  // The block runs from 1 s to 3 s while the popup, shown at 0 s, waits; it closes at 4 s.
+  let session = createPlayerRuntimeSession(
+    'timer async 1 s {\n  wait 2 s\n}\nlet t = showPopup "Wait for me"\nsay "${t}", instant\nexit',
+  );
+  session = observe(session, 2_000);
+  assert.equal(closePlayerRuntimePopup(session), null, "the block's wait is in front");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  for (const current of [session, restored]) {
+    const back = observe(current, 3_000);
+    assert.equal(playerRuntimeForeground(back)?.kind, "popup");
+    assert.deepEqual(transcript(close(observe(back, 4_000))), ["narrator: 2 seconds"]);
+  }
+});
+
+test("a popup restored while it waits returns the time since it appeared once closed", () => {
+  const source = 'wait 1 s\nlet t = showPopup "Wait"\nsay "${t}", instant\nexit';
+  const restorePoint = createPlayerRuntimeRestorePoint(
+    observe(createPlayerRuntimeSession(source), 2_200),
+  );
+  const restored = restorePlayerRuntimeSession(restorePoint);
+  assert.equal(validateRuntimeSnapshot(playerRuntimeSnapshot(restored), restored.plan).valid, true);
+  assert.deepEqual(transcript(close(observe(restored, 3_500))), ["narrator: 2.5 seconds"]);
+
+  // A checkpoint between the close and the script reading the value keeps it.
+  const { plan, snapshot } = started('let t = showPopup "Wait"\nexit');
+  const settled = closed(plan, observeTime(plan, snapshot, 1_500).snapshot).snapshot;
+  assert.equal(validateRuntimeSnapshot(settled, plan).valid, true);
+  const checkpoint = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, settled)));
+  assert.deepEqual(checkpoint.snapshot, settled);
+  assert.deepEqual(
+    binding(runUntilExit(checkpoint.plan, checkpoint.snapshot).snapshot, "t"),
+    seconds(1.5),
+  );
+});
+
+test("a recorded popup value replays the same, and a repeated close replays its settlement", () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'wait 1 s\nlet t = showPopup "Wait"\nsay "${t}", instant\nexit',
+    { recorder },
+  );
+  session = observe(session, 2_000);
+  const popup = pendingPopup(playerRuntimeSnapshot(session));
+  session = close(observe(session, 3_500));
+  const recording = recorder.recording()!;
+  const rebuilt = rebuildRecordedSession(
+    recording.plan,
+    recording.anchorSnapshot,
+    recording.operations,
+  ).exportSnapshot();
+  assert.deepEqual(rebuilt, playerRuntimeSnapshot(session));
+  assert.deepEqual(binding(rebuilt, "t"), seconds(2.5));
+
+  const settled = playerRuntimeSnapshot(session);
+  const repeated = closed(session.plan, settled, popup.actionId);
+  assert.ok(
+    repeated.outcome.kind === "alreadySettled" &&
+      repeated.outcome.settlement.actionKind === "interaction",
+  );
+  assert.deepEqual(repeated.outcome.settlement.result, seconds(2.5));
+  assert.deepEqual(repeated.snapshot, settled);
 });
 
 test("closing a popup publishes its completion without a player transcript event", () => {
@@ -221,7 +343,7 @@ test("snapshot validation refuses a popup settlement with a transcript and a pop
   assert.equal(validateRuntimeSnapshot(renamed, plan).valid, false);
 });
 
-test("showPopup is a reserved statement whose arguments the compiler checks", () => {
+test("the compiler checks showPopup's arguments and its value, and its name is reserved", () => {
   const diagnostics = (source: string) =>
     compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.code);
   assert.deepEqual(diagnostics('showPopup("a", "b")'), ["TSV020"]);
@@ -235,8 +357,10 @@ test("showPopup is a reserved statement whose arguments the compiler checks", ()
   // The message and the button's text are shown text.
   assert.deepEqual(diagnostics('showPopup ["a"]'), ["TSV040"]);
   assert.deepEqual(diagnostics('showPopup("a", buttonText: ["b"])'), ["TSV040"]);
-  // It gives no value, and its name is reserved.
-  assert.deepEqual(diagnostics('let shown = showPopup("a")'), ["TSV028"]);
-  assert.deepEqual(diagnostics("let shown = showPopup"), ["TSV028"]);
+  // Its value is a duration in both forms, which needs a message, and its name is reserved.
+  assert.deepEqual(diagnostics('let shown: duration = showPopup("a")'), []);
+  assert.deepEqual(diagnostics('let shown: string = showPopup "a"'), ["TSV041"]);
+  assert.deepEqual(diagnostics('let shown = showPopup "a", buttonText: "b"'), ["TSP032"]);
+  assert.deepEqual(diagnostics("let shown = showPopup"), ["TSP012"]);
   assert.deepEqual(diagnostics("let showPopup = 1"), ["TSV001"]);
 });

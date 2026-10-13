@@ -13,7 +13,7 @@ import type {
   InteractionExpression,
   LetStatement,
   OpenUrlStatement,
-  ShowPopupStatement,
+  ShowPopupParts,
   LoadExpression,
   MediaParts,
   Program,
@@ -3714,6 +3714,10 @@ class TypeChecker {
         yield* compileChild(this.#showButtonTask(expression, scope));
         this.#suspend();
         return DURATION_TYPE;
+      case "showPopupExpression":
+        yield* compileChild(this.#showPopupTask(expression, scope));
+        this.#suspend();
+        return DURATION_TYPE;
       case "timerExpression":
         yield* compileChild(this.#timerTask(expression, scope));
         this.#suspend();
@@ -4359,8 +4363,8 @@ class TypeChecker {
   }
 
   /** The message and `buttonText:` of `showPopup` are shown text. */
-  *#showPopupTask(statement: ShowPopupStatement, scope: Scope): CompileTask<void> {
-    for (const argument of statement.arguments) {
+  *#showPopupTask(parts: ShowPopupParts, scope: Scope): CompileTask<void> {
+    for (const argument of parts.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
       const name = argument.kind === "namedArgument" ? argument.name.name : "message";
       if (name === "message") this.#checkShownText(argument.value, type, "a popup message");
@@ -7692,6 +7696,7 @@ function programEffects(program: Program): ProgramEffects {
         (expression.kind === "interactionExpression" ||
           expression.kind === "sayExpression" ||
           expression.kind === "showButtonExpression" ||
+          expression.kind === "showPopupExpression" ||
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
           expression.kind === "showCameraExpression" ||

@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 88;
+export const INSTRUCTION_PLAN_VERSION = 89;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -551,8 +551,9 @@ export const DEFAULT_OPEN_URL_BUTTON_TEXT = "Open link";
 export type InteractionKind =
   "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup" | "url";
 /**
- * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
- * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
+ * `choice` is the value of the selected choice option; a button or popup used as a value yields a `duration`;
+ * `temporal` is the date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's
+ * answers.
  */
 export type InteractionResultDomain =
   "none" | "string" | "number" | "choice" | "duration" | "temporal" | "form";

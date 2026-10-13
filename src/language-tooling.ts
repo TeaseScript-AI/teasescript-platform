@@ -1007,6 +1007,10 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       for (const argument of expression.arguments)
         children.push({ kind: "expression", node: argument.value });
       return;
+    case "showPopupExpression":
+      for (const argument of expression.arguments)
+        children.push({ kind: "expression", node: argument.value });
+      return;
     case "unaryExpression":
     case "unitExpression":
       children.push({ kind: "expression", node: expression.operand });

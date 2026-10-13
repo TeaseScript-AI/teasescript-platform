@@ -51,13 +51,13 @@ export interface RuntimeInteractionActionSnapshot {
   readonly speakerId: number | null;
   readonly ui: InteractionUiPayload;
   /**
-   * Scene time when the interaction appeared; a button's elapsed time counts from here, and its buttons show the date
-   * and time presentation in force then.
+   * Scene time when the interaction appeared; a button's or popup's elapsed time counts from here, and its buttons show
+   * the date and time presentation in force then.
    */
   readonly createdAtMs: number;
   /**
    * The scene time the interaction stood still while blocks interrupted it, present once positive. Its timeout and a
-   * button's elapsed time leave it out (owner decision on #829, 2026-10-11).
+   * button's or popup's elapsed time leave it out (owner decision on #829, 2026-10-11).
    */
   readonly pausedMs?: number;
   /**
@@ -379,8 +379,8 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly transcriptEventSequence: number | null;
   readonly completionEventSequence: number;
   /**
-   * `null` for a button used as a statement; a choice may also return `null` as an option's value, and a button used
-   * as a value records its elapsed waiting time.
+   * `null` for a button or popup used as a statement; a choice may also return `null` as an option's value, and a
+   * button or popup used as a value records its elapsed waiting time.
    */
   readonly result: InteractionResultValue;
   readonly transcriptText: string | null;

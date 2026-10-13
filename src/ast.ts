@@ -199,14 +199,23 @@ export interface HideCameraStatement {
 }
 
 /**
- * `showPopup <message>`, or the call `showPopup(message: ..., buttonText: ...)` (V30 §31), whose message may also be
- * written without its name, first. The command form is one positional argument. It waits until the player closes the
- * popup and gives no value.
+ * Shared data of `showPopup <message>`, or the call `showPopup(message: ..., buttonText: ...)` (V30 §31), whose message
+ * may also be written without its name, first. The command form is one positional argument. It waits until the player
+ * closes the popup.
  */
-export interface ShowPopupStatement {
-  readonly kind: "showPopupStatement";
+export interface ShowPopupParts {
   readonly arguments: readonly CallArgument[];
   readonly span: SourceSpan;
+}
+
+/** A popup whose elapsed-time result is ignored. */
+export interface ShowPopupStatement extends ShowPopupParts {
+  readonly kind: "showPopupStatement";
+}
+
+/** A popup used as a value; like `showButton`, it evaluates to the elapsed waiting time as a `duration`. */
+export interface ShowPopupExpression extends ShowPopupParts {
+  readonly kind: "showPopupExpression";
 }
 
 /** `openUrl(<url>)` (V30 §33): offers the player the URL to open; it gives no value. */
@@ -644,6 +653,7 @@ export type Expression =
   | InteractionExpression
   | SayExpression
   | ShowButtonExpression
+  | ShowPopupExpression
   | TimerExpression
   | PlayMediaExpression
   | ShowCameraExpression
