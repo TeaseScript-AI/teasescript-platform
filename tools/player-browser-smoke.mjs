@@ -206,9 +206,10 @@ async function main() {
       await preselectScenario(cdp, origin);
       await popupScenario(cdp, origin);
       await openUrlScenario(cdp, origin, debugPort);
+      await exportTextScenario(cdp, origin, profile);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, and openUrl scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();
@@ -5515,6 +5516,119 @@ async function popupScenario(cdp, origin) {
     "Closed with Space",
     "Closed after the reload",
   ].entries())
+    assertEqual(
+      texts[index].endsWith(text),
+      true,
+      `Entry ${index} is ${texts[index]}, not ${text}`,
+    );
+}
+
+/**
+ * The `export-text` package's `exportText` dialogs (PLAYER-UI "Foreground interaction presentation"): the title and the
+ * text in a read-only field while the composer takes no answer, Copy, a refused copy that leaves the text selected and
+ * points to Download, Download as a UTF-8 text file with the script's file name, a click beside the dialog that does not
+ * close it, Close, and a reload that shows the waiting dialog again. Nothing of them reaches the transcript.
+ */
+async function exportTextScenario(cdp, origin, profile) {
+  const downloads = join(profile, "export-text-downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=export-text`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const title = `(document.querySelector('[data-export-text-title]')?.textContent.trim() ?? null)`;
+  const field = `document.querySelector('[data-export-text-field]')`;
+  const status = `document.querySelector('[data-export-text-status]')?.textContent.trim()`;
+  const json = JSON.stringify({
+    name: "Corner time ü",
+    minutes: 15,
+    lines: ["Face the wall", "Hands behind your back 😀"],
+  });
+  const preset = `-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${Buffer.from(json, "utf8").toString("base64")}\n-----END CORNERTIME CUSTOM PUNISHMENT-----`;
+  await waitFor(cdp, `${title} === 'Your preset'`, 8_000, "The exportText dialog did not open");
+  assertEqual(await value(cdp, `${field}.value`), preset, "The dialog's text");
+  assertEqual(await value(cdp, `${field}.readOnly`), true, "The text field is not read-only");
+  await waitFor(
+    cdp,
+    `document.activeElement?.matches('[data-export-text-copy]') === true`,
+    2_000,
+    "Copy did not take focus",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-composer-input]').disabled`),
+    true,
+    "The composer takes an answer while the dialog waits",
+  );
+  // Copy writes the whole text.
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.__copied = text; } } });`,
+  );
+  await physicalClick(cdp, "[data-export-text-copy]");
+  await waitFor(cdp, `${status} === 'Copied.'`);
+  assertEqual(await value(cdp, `window.__copied`), preset, "Copy did not write the text");
+  // A clipboard that refuses, as Android's does above about 1 MB, where the browser does not copy the selection
+  // either, leaves the text selected and points to Download.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('too large', 'NotAllowedError')) } }); document.execCommand = () => false;`,
+  );
+  await physicalClick(cdp, "[data-export-text-copy]");
+  await waitFor(cdp, `${status}?.includes('use Download') === true`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const area = ${field}; return document.activeElement === area && area.selectionStart === 0 && area.selectionEnd === area.value.length; })()`,
+    ),
+    true,
+    "The refused copy did not select the text",
+  );
+  await evaluate(cdp, `delete document.execCommand;`);
+  // Download saves the text in UTF-8 under the script's file name.
+  await evaluate(
+    cdp,
+    `window.__fileType = null; const create = URL.createObjectURL; URL.createObjectURL = (file) => { window.__fileType = file.type; return create.call(URL, file); };`,
+  );
+  await physicalClick(cdp, "[data-export-text-download]");
+  let downloaded = null;
+  const deadline = Date.now() + 8_000;
+  while (downloaded === null && Date.now() < deadline) {
+    if ((await readdir(downloads)).includes("preset.txt"))
+      downloaded = await readFile(join(downloads, "preset.txt"), "utf8");
+    else await delay(50);
+  }
+  assertEqual(downloaded, preset, "The downloaded file");
+  assertEqual(await value(cdp, `window.__fileType`), "text/plain;charset=utf-8", "The file's type");
+  // A click beside the dialog does not close it; Close does, and the script goes on.
+  await backdropClick(cdp);
+  await delay(300);
+  assertEqual(await value(cdp, title), "Your preset", "A click beside the dialog closed it");
+  await physicalClick(cdp, "[data-export-text-close]");
+  await waitFor(cdp, `${title} === 'Copy or download'`, 8_000, "Close did not continue the script");
+  assertEqual(
+    await value(cdp, `${field}.value`),
+    "A reload shows this one again",
+    "The second dialog's text",
+  );
+  await reloadKept(cdp, "A reload shows this one again");
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `${field}?.value === 'A reload shows this one again'`,
+    8_000,
+    "The reload lost the dialog",
+  );
+  await physicalClick(cdp, "[data-export-text-close]");
+  await waitFor(cdp, `${title} === null && !!document.querySelector('[data-session-end-dialog]')`);
+  // Each entry shows its speaker before its text; the dialogs add none of their own.
+  const texts = await value(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`,
+  );
+  assertEqual(texts.length, 2, `The transcript has other entries: ${JSON.stringify(texts)}`);
+  for (const [index, text] of ["Closed the preset", "Closed after the reload"].entries())
     assertEqual(
       texts[index].endsWith(text),
       true,
