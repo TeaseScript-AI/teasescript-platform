@@ -8164,6 +8164,29 @@ function lowerCollectionAssignment(
       },
     ];
   }
+  if (
+    call.name === "reverse" &&
+    call.arguments.length === 0 &&
+    variableName(receiver) !== null &&
+    isKnownListExpression(receiver, context)
+  ) {
+    // Groovy reverse() gives a new list in reverse order and leaves the list as it was; TeaseScript reverse() reverses
+    // a list in place (#860), so `list = list.reverse()` reverses it, and another variable takes a copy, which
+    // assignment makes (ADR 0014), and reverses that.
+    const copy: IrExpression = { kind: "variable", name: target };
+    const reversed: IrStatement = {
+      kind: "expression",
+      expression: { kind: "methodCall", target: copy, name: "reverse", arguments: [] },
+      span,
+    };
+    if (variableName(receiver) === target && !declaration) return [reversed];
+    const source = lowerExpression(receiver, context);
+    if (source === null) return null;
+    const assigned: IrStatement = declaration
+      ? { kind: "let", name: target, value: source, span }
+      : { kind: "assign", target: copy, operator: "=", value: source, span };
+    return [assigned, reversed];
+  }
   if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return null;
   if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return null;
   // `collect()` without a closure collects each element as it is, as `collect { item -> item }`.
@@ -9263,7 +9286,7 @@ function lowerCollectionStatement(
     ];
   }
   const shuffledList =
-    variableName(receiver) === "Collections" && call.name === "shuffle"
+    variableName(receiver) === "Collections" && ["shuffle", "reverse"].includes(call.name)
       ? call.arguments[0]
       : undefined;
   const listTarget = shuffledList ?? receiver;
@@ -9279,14 +9302,14 @@ function lowerCollectionStatement(
   };
   const reassign = (value: IrExpression): IrStatement[] =>
     parameterWrite() ?? [{ kind: "assign", target: list, operator: "=", value, span }];
-  // Collections.shuffle() shuffles the list in place, as TeaseScript shuffle() does.
+  // Collections.shuffle() and Collections.reverse() change the list in place, as TeaseScript shuffle() and reverse() do.
   if (shuffledList !== undefined && call.arguments.length === 1) {
     const blocked = parameterWrite();
     if (blocked !== null) return blocked;
     return [
       {
         kind: "expression",
-        expression: { kind: "methodCall", target: list, name: "shuffle", arguments: [] },
+        expression: { kind: "methodCall", target: list, name: call.name, arguments: [] },
         span,
       },
     ];
@@ -22303,6 +22326,22 @@ function javaHost(context: LowerContext): JavaRuleHost {
     },
     actionCall: (action, args) => actionCall(action, args, context),
     isPhoto: (node) => context.photoVariables.has(variableName(node) ?? ""),
+    reversedCopy: (list, node) => {
+      const root = context.statementRoot;
+      if (root === null || !isHoistable(root, node, context)) return null;
+      // Assignment copies a list (ADR 0014), which TeaseScript reverse() then reverses in place (#860).
+      const name = freshName("reversed", context);
+      const copy: IrExpression = { kind: "variable", name };
+      context.prelude.push(
+        { kind: "let", name, value: list, span: node.span },
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target: copy, name: "reverse", arguments: [] },
+          span: node.span,
+        },
+      );
+      return copy;
+    },
     state: context.java,
   };
 }

@@ -33,6 +33,8 @@ export interface TextAnalysis {
   readonly bufferValues: ReadonlySet<AstNode>;
   /** Map keys whose every value in the body's map literals is a closure, as `[label: "a slap", action: { ... }]`. */
   readonly closureFields: ReadonlySet<string>;
+  /** `reverse()` calls of a value whose type the conversion does not know that its use shows to be text (textReverses). */
+  readonly textReverses: ReadonlySet<AstNode>;
 }
 
 const RANDOM_TYPES = new Set(["Random", "java.util.Random"]);
@@ -178,7 +180,84 @@ export function analyzeText(root: AstNode): TextAnalysis {
     textBuffers,
     bufferValues,
     closureFields: closureFields(tree),
+    textReverses: textReverses(tree),
   };
+}
+
+/** Groovy methods that only text has, of which a value's use shows that the value is text. */
+const TEXT_ONLY_METHODS = new Set([
+  "substring",
+  "toLowerCase",
+  "toUpperCase",
+  "trim",
+  "startsWith",
+  "endsWith",
+  "charAt",
+  "toCharArray",
+  "capitalize",
+  "tokenize",
+  "matches",
+  "replaceAll",
+  "replaceFirst",
+  "split",
+  "isNumber",
+  "isInteger",
+  "toInteger",
+]);
+
+/**
+ * `reverse()` calls that reverse text: of the result of a text-only method, `name.substring(1).reverse()`, or whose
+ * result is the receiver of one, `path.reverse().substring(0, 4)` (a list has no such method, so Groovy failed there);
+ * also another `reverse()` of the same receiver in the same statement (BuzzQuiz's
+ * `QFiles[r0].reverse().substring(0, QFiles[r0].reverse().indexOf("/"))`), which nothing between changes.
+ */
+function textReverses(tree: Tree): Set<AstNode> {
+  const isReverse = (node: AstNode | null | undefined): node is AstNode =>
+    node?.kind === "methodCall" &&
+    constantString(node.method) === "reverse" &&
+    argumentsOf(node).length === 0;
+  const textOnly = (node: AstNode | null | undefined): boolean =>
+    node?.kind === "methodCall" && TEXT_ONLY_METHODS.has(constantString(node.method) ?? "");
+  const key = (node: AstNode | null): string =>
+    JSON.stringify(node, (name: string, value: unknown) => (name === "span" ? undefined : value));
+  const reverses = [...tree.parents.keys()].filter(isReverse);
+  const found = new Set<AstNode>();
+  const proven = new Set<string>();
+  for (const node of reverses) {
+    const parent = tree.parents.get(node) ?? null;
+    const receiver = asNode(node.object);
+    if ((textOnly(parent) && asNode(parent!.object) === node) || textOnly(receiver)) {
+      found.add(node);
+      if (node.span !== null && repeatable(receiver))
+        proven.add(`${node.span.line} ${key(receiver)}`);
+    }
+  }
+  for (const node of reverses) {
+    const receiver = asNode(node.object);
+    if (
+      node.span !== null &&
+      repeatable(receiver) &&
+      proven.has(`${node.span.line} ${key(receiver)}`)
+    )
+      found.add(node);
+  }
+  return found;
+}
+
+/** A variable, or an element or a field of one at a constant or variable position, which reading does not change. */
+function repeatable(node: AstNode | null): boolean {
+  if (node === null) return false;
+  if (node.kind === "variable") return true;
+  if (node.kind === "property") return repeatable(asNode(node.object));
+  if (node.kind === "binary" && node.operator === "[") {
+    const index = asNode(node.right);
+    return (
+      repeatable(asNode(node.left)) &&
+      index !== null &&
+      (index.kind === "constant" || index.kind === "variable")
+    );
+  }
+  return false;
 }
 
 /** Map keys whose every literal value is a closure or a variable that only ever holds closures. */
@@ -406,11 +485,16 @@ export function textCall(
       return list === null || index === null ? null : { kind: "index", target: list, index };
     }
     case "reverse": {
-      // Groovy reverse() of a list or text is a new reversed value; the receiver stays as it was.
+      // Groovy reverse() of a list or text is a new reversed value; the receiver stays as it was. TeaseScript reverse()
+      // gives text a new text, by code points as Java kept surrogate pairs, and reverses a list in place (#860), so a
+      // list's copy is reversed where the statement may take it first, and the helper builds one elsewhere.
       const list = onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
-      if (args.length !== 0 || (!list && !text)) return undefined;
+      if (args.length !== 0 || (!list && !text && !analysis.textReverses.has(node)))
+        return undefined;
       const value = host.lower(receiver);
-      return value === null ? null : host.helper(list ? "reversed" : "reversedText", [value]);
+      if (value === null) return null;
+      if (!list) return { kind: "methodCall", target: value, name: "reverse", arguments: [] };
+      return host.reversedCopy(value, node) ?? host.helper("reversed", [value]);
     }
     case "toCharArray": {
       // Only text has toCharArray(), charAt(), and indexOf(part, start): on any other value Groovy failed, as the

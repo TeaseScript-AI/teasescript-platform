@@ -80,6 +80,11 @@ export interface JavaRuleHost {
   actionCall(action: IrExpression, args: IrExpression[]): IrExpression;
   /** Whether a node names a photo the script took, whose reference is no package path. */
   isPhoto(node: AstNode): boolean;
+  /**
+   * A list in reverse order, as Groovy reverse() gave a new one: a copy, reversed in place, before the statement where
+   * `node` may be evaluated first, else null.
+   */
+  reversedCopy(list: IrExpression, node: AstNode): IrExpression | null;
   readonly state: JavaFileState;
 }
 
@@ -333,6 +338,7 @@ export function javaFileState(
             textBuffers: new Set(),
             bufferValues: new Set(),
             closureFields: new Set(),
+            textReverses: new Set(),
           }
         : analyzeText(body),
     data: shared?.data ?? {

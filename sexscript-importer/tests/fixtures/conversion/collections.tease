@@ -102,15 +102,6 @@ function sexscriptLegacySplit(text, separator) {
   }
   return partsValue2
 }
-function sexscriptLegacyReversed(itemsValue4) {
-  let result = []
-  let index = itemsValue4.length - 1
-  while index >= 0 {
-    result.add(itemsValue4[index])
-    index -= 1
-  }
-  return result
-}
 let items = ["kneel", "wait", "count"]
 let upper = []
 for it in items {
@@ -363,7 +354,7 @@ for toy in ["paddle", "cane"] {
     ownedCount += 1
   }
 }
-owned = sexscriptLegacyReversed(owned)
+owned.reverse()
 say prose "Owned ${owned.length}", instant
 // A collect() whose closure returns early adds each returned element in a loop, as SissyPlaytimeExposure's exposure
 // check.
