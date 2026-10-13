@@ -16,6 +16,7 @@ import type {
   SerializableRuntimeValue,
   SerializableSpeakerReference,
 } from "./serializable-values.js";
+import { binaryFromBase64 } from "./stored-files.js";
 import { checkTextLength, textTooLong } from "./text-length.js";
 import { describeRuntimeValue } from "./value-predicates.js";
 
@@ -36,7 +37,8 @@ type JsonWork =
  * The compact JSON text of `value`: text, numbers, `true`, `false`, and `null` as they are; a list or set as an array, a
  * set in its order; a dict, an object, and a speaker's properties as an object in key order; a date or time as its ISO
  * text, an absolute one in UTC; and a duration as its milliseconds. Any other value fails with `TSR059`, and a text
- * longer than a text can be with `TSR084`.
+ * longer than a text can be with `TSR084`. `storedFile` may give the JSON to write in place of a text, in the order the
+ * texts are written; keys are never given to it.
  */
 export function jsonText(
   value: SerializableRuntimeValue,
@@ -44,6 +46,7 @@ export function jsonText(
     speaker: SerializableSpeakerReference,
   ) => readonly SerializableRuntimeProperty[],
   span: SourceSpan,
+  storedFile?: (text: string) => string | undefined,
 ): string {
   const out: string[] = [];
   let length = 0;
@@ -82,7 +85,7 @@ export function jsonText(
       continue;
     }
     if (typeof current === "string") {
-      write(jsonString(current, span));
+      write(storedFile?.(current) ?? jsonString(current, span));
       continue;
     }
     switch (current.kind) {
@@ -350,12 +353,8 @@ export function base64Text(text: string, span: SourceSpan): string {
  * line breaks are ignored, the URL alphabet (`-` and `_`) is read like the standard one, and padding may be missing.
  */
 export function textFromBase64(text: string): string | undefined {
-  let binary: string;
-  try {
-    binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
-  } catch {
-    return undefined;
-  }
+  const binary = binaryFromBase64(text);
+  if (binary === undefined) return undefined;
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   try {

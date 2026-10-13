@@ -36,7 +36,9 @@ export function startTimerHandler(
   const suspendedAction = snapshot.foregroundAction;
   if (
     suspendedAction !== null &&
-    (suspendedAction.kind === "storageWrite" || suspendedAction.kind === "capture")
+    (suspendedAction.kind === "storageWrite" ||
+      suspendedAction.kind === "capture" ||
+      suspendedAction.kind === "fileStore")
   ) {
     throw new Error(
       "Only a foreground delay, interaction, reading time, or media wait can be interrupted.",

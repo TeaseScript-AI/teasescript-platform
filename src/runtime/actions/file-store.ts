@@ -1,0 +1,471 @@
+import type { FileStoreInstruction } from "../../plan/model.js";
+import { internalFault, RuntimeFault } from "../errors.js";
+import type { Evaluator } from "../evaluator.js";
+import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
+import { jsonText, valueFromJson } from "../json-base64.js";
+import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
+import {
+  assertEventSequenceCapacity,
+  copySpan,
+  isPlainRecord,
+  requiredFutureActionCompletionEvents,
+  setCapturedTemporary,
+  takeSequence,
+} from "../operations/support.js";
+import type {
+  SerializableRuntimeDict,
+  SerializableRuntimeList,
+  SerializableRuntimeValue,
+} from "../serializable-values.js";
+import type { RuntimeSnapshot } from "../state.js";
+import {
+  base64FileType,
+  base64FromBinary,
+  base64Length,
+  binaryFromBase64,
+  binaryFromDataUrl,
+  fileType,
+  holdsStoredFile,
+  isDataUrl,
+  isRecognizedFileType,
+  isStandardBase64,
+  storedFileKind,
+} from "../stored-files.js";
+import { interactionStringFits } from "../../interaction-limits.js";
+import { checkTextLength, messageText } from "../text-length.js";
+import { describeRuntimeValue } from "../value-predicates.js";
+import type { CapturedMediaAdmission } from "./capture.js";
+import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model.js";
+
+// The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files
+// to store or read. Without any it gives the result at once; otherwise it asks the Player and waits, and runs again with
+// the Player's answer, which the completion hands off, to give the result. Both runs read the same operands, so they
+// find the same files in the same order.
+
+/**
+ * The Player's answer as the instruction reads it: the stored files' references or the read files' Base64, in request
+ * order, or `null` when the Player could not store or read them.
+ */
+type FileStoreAnswer = readonly string[] | null;
+
+/** What the first run found: the result, or the files to store or read. */
+type FileStoreRequest =
+  | { readonly result: SerializableRuntimeValue }
+  | { readonly store: readonly RuntimeFileToStore[] }
+  | { readonly read: readonly string[] };
+
+interface FileStoreOperands {
+  readonly value: SerializableRuntimeValue;
+  readonly fallback: SerializableRuntimeValue;
+  readonly files: boolean;
+}
+
+/** Runs a `fileStore` instruction, the first time or again with the Player's answer. */
+export function executeFileStore(
+  instruction: FileStoreInstruction,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const span = instruction.span;
+  if (snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary))
+    throw new RuntimeFault(
+      "TSR050",
+      internalFault(`The slot for the result of ${instruction.call}(...) is already in use.`),
+      copySpan(span),
+    );
+  const operands: FileStoreOperands = {
+    value: evaluator.evaluate(instruction.value),
+    fallback: instruction.default === null ? null : evaluator.evaluate(instruction.default),
+    files:
+      instruction.files === null
+        ? true
+        : filesOperand(instruction.call, evaluator.evaluate(instruction.files), span),
+  };
+  const handoff = snapshot.interactionResultHandoff;
+  let result: SerializableRuntimeValue;
+  if (
+    handoff?.actionKind === "fileStore" &&
+    handoff.owningInstruction === snapshot.nextInstruction
+  ) {
+    result = finishFileStore(
+      instruction,
+      operands,
+      fileStoreAnswer(handoff.result, span),
+      snapshot,
+      evaluator,
+      events,
+    );
+  } else {
+    const request = startFileStore(instruction, operands, snapshot, evaluator);
+    if (!("result" in request)) {
+      requestFileStore(instruction, request, snapshot, events);
+      return;
+    }
+    result = request.result;
+  }
+  setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, result);
+  evaluator.trace?.writeTemporary(
+    evaluator.callFrameId(),
+    instruction.destinationTemporary,
+    result,
+  );
+  snapshot.nextInstruction += 1;
+}
+
+/** The texts of the answer a completion handed off, or `null` for a failure. */
+function fileStoreAnswer(
+  result: SerializableRuntimeValue,
+  span: FileStoreInstruction["span"],
+): FileStoreAnswer {
+  if (result === null) return null;
+  const texts: string[] = [];
+  if (typeof result === "object" && result.kind === "list")
+    for (const item of result.items) if (typeof item === "string") texts.push(item);
+  if (typeof result !== "object" || result.kind !== "list" || texts.length !== result.items.length)
+    throw new RuntimeFault(
+      "TSR050",
+      internalFault("The answer of the file store is malformed."),
+      copySpan(span),
+    );
+  return texts;
+}
+
+/** The files a call needs stored or read, or its result when it needs none. */
+function startFileStore(
+  instruction: FileStoreInstruction,
+  { value, fallback, files }: FileStoreOperands,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+): FileStoreRequest {
+  const span = instruction.span;
+  switch (instruction.call) {
+    case "fileFromBase64": {
+      if (typeof value !== "string") return { result: fallback };
+      const binary = binaryFromDataUrl(value) ?? binaryFromBase64(value);
+      if (binary === undefined) return { result: fallback };
+      checkTextLength(base64Length(binary.length), "fileFromBase64(...)", span);
+      return { store: [{ type: fileType(binary), base64: base64FromBinary(binary) }] };
+    }
+    case "fileToBase64":
+      return { read: [storedFileOperand(value, snapshot, span)] };
+    case "toJson": {
+      const references: string[] = [];
+      const found = new Set<string>();
+      const text = jsonText(
+        value,
+        (speaker) => evaluator.speakerById(speaker.speakerId, span).properties,
+        span,
+        files
+          ? (written) => {
+              if (!found.has(written) && holdsStoredFile(snapshot.storedFiles, written)) {
+                found.add(written);
+                references.push(written);
+              }
+              return undefined;
+            }
+          : undefined,
+      );
+      return references.length === 0 ? { result: text } : { read: references };
+    }
+    case "fromJson": {
+      const read = typeof value === "string" ? valueFromJson(value) : undefined;
+      if (read === undefined) return { result: fallback };
+      if (!files) return { result: read };
+      const store: RuntimeFileToStore[] = [];
+      const found = new Set<string>();
+      replaceFileDataUrls(read, (file) => {
+        if (!found.has(file.base64)) {
+          found.add(file.base64);
+          store.push(file);
+        }
+        return undefined;
+      });
+      return store.length === 0 ? { result: read } : { store };
+    }
+  }
+}
+
+/** The result of a call once the Player stored or read its files, or could not. */
+function finishFileStore(
+  instruction: FileStoreInstruction,
+  { value, fallback }: FileStoreOperands,
+  answer: FileStoreAnswer,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): SerializableRuntimeValue {
+  const span = instruction.span;
+  const call = instruction.call;
+  if (answer === null) {
+    if (call === "fileToBase64" || call === "toJson")
+      throw new RuntimeFault(
+        "TSR085",
+        `${call}(...) could not read a stored file it needs, because this browser no longer has it or could not read it. Take, choose, or store the file again.`,
+        copySpan(span),
+      );
+    emitDeveloperWarning(
+      snapshot,
+      events,
+      "TSW019",
+      `The Player could not keep the ${call === "fromJson" ? "files of this JSON" : "file"}, so ${call}(...) gave its default.`,
+      span,
+    );
+    return fallback;
+  }
+  const malformed = () =>
+    new RuntimeFault(
+      "TSR050",
+      internalFault(`The answer of the file store does not fit ${call}(...).`),
+      copySpan(span),
+    );
+  switch (call) {
+    case "fileFromBase64":
+    case "fileToBase64":
+      if (answer.length !== 1) throw malformed();
+      return answer[0]!;
+    case "toJson": {
+      const written = new Map<string, string>();
+      const text = jsonText(
+        value,
+        (speaker) => evaluator.speakerById(speaker.speakerId, span).properties,
+        span,
+        (reference) => {
+          if (!holdsStoredFile(snapshot.storedFiles, reference)) return undefined;
+          let dataUrl = written.get(reference);
+          if (dataUrl === undefined) {
+            const base64 = answer[written.size];
+            if (base64 === undefined) throw malformed();
+            // Standard Base64 and a type of the fixed list need no escapes in JSON.
+            dataUrl = `"data:${base64FileType(base64)};base64,${base64}"`;
+            written.set(reference, dataUrl);
+          }
+          return dataUrl;
+        },
+      );
+      if (written.size !== answer.length) throw malformed();
+      return text;
+    }
+    case "fromJson": {
+      const read = typeof value === "string" ? valueFromJson(value) : undefined;
+      if (read === undefined) throw malformed();
+      const references = new Map<string, string>();
+      const result = replaceFileDataUrls(read, (file) => {
+        let reference = references.get(file.base64);
+        if (reference === undefined) {
+          reference = answer[references.size];
+          if (reference === undefined) throw malformed();
+          references.set(file.base64, reference);
+        }
+        return reference;
+      });
+      if (references.size !== answer.length) throw malformed();
+      return result;
+    }
+  }
+}
+
+/** Asks the Player to store or read files and waits for its answer, with this instruction as the continuation. */
+function requestFileStore(
+  instruction: FileStoreInstruction,
+  request: Exclude<FileStoreRequest, { readonly result: SerializableRuntimeValue }>,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): void {
+  const span = instruction.span;
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  )
+    throw new RuntimeFault(
+      "TSR051",
+      internalFault("The session has used up its action numbers."),
+      copySpan(span),
+    );
+  // The request and the completion, besides what active actions reserve.
+  assertEventSequenceCapacity(snapshot, 2 + requiredFutureActionCompletionEvents(snapshot), span);
+  const sequence = takeSequence(snapshot);
+  const action: RuntimeFileStoreActionSnapshot = Object.freeze({
+    kind: "fileStore",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    continuationInstruction: snapshot.nextInstruction,
+    ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+    destinationTemporary: instruction.destinationTemporary,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    requestEventSequence: sequence,
+    operation: "store" in request ? "store" : "read",
+    files: "store" in request ? request.store : [],
+    references: "read" in request ? request.read : [],
+  });
+  snapshot.nextActionId += 1;
+  snapshot.foregroundAction = action;
+  snapshot.status = "waiting";
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence,
+      action: { ...action },
+      span: copySpan(span),
+    } satisfies ActionRequestedEvent),
+  );
+}
+
+/** The text of `fileToBase64`, which must be a stored file this session knows. */
+function storedFileOperand(
+  value: SerializableRuntimeValue,
+  snapshot: RuntimeSnapshot,
+  span: FileStoreInstruction["span"],
+): string {
+  if (typeof value === "string" && holdsStoredFile(snapshot.storedFiles, value)) return value;
+  throw new RuntimeFault(
+    "TSR059",
+    `fileToBase64(...) reads a stored file, ${
+      typeof value === "string"
+        ? `but ${JSON.stringify(messageText(value))} is not one`
+        : `not ${describeRuntimeValue(value)}`
+    }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.`,
+    copySpan(span),
+  );
+}
+
+function filesOperand(
+  call: FileStoreInstruction["call"],
+  value: SerializableRuntimeValue,
+  span: FileStoreInstruction["span"],
+): boolean {
+  if (typeof value === "boolean") return value;
+  throw new RuntimeFault(
+    "TSR059",
+    `${call}(...) takes true or false (boolean) for 'files:', not ${describeRuntimeValue(value)}.`,
+    copySpan(span),
+  );
+}
+
+/**
+ * Visits each text of `value`, which `fromJson` read, that is a data URL of a recognized file type: the value itself, or
+ * a list element or dict value at any depth, in reading order. What `replace` gives takes its place, and the value with
+ * those changes is returned. A dict's keys stay text.
+ */
+function replaceFileDataUrls(
+  value: SerializableRuntimeValue,
+  replace: (file: RuntimeFileToStore) => string | undefined,
+): SerializableRuntimeValue {
+  if (typeof value === "string") {
+    const file = fileInDataUrl(value);
+    return (file === undefined ? undefined : replace(file)) ?? value;
+  }
+  const pending: {
+    readonly holder: SerializableRuntimeList | SerializableRuntimeDict;
+    readonly index: number;
+  }[] = [];
+  const enter = (item: SerializableRuntimeValue) => {
+    if (item === null || typeof item !== "object" || (item.kind !== "list" && item.kind !== "dict"))
+      return;
+    // Last first, so that the stack gives them in reading order.
+    const length = item.kind === "list" ? item.items.length : item.entries.length;
+    for (let index = length - 1; index >= 0; index -= 1) pending.push({ holder: item, index });
+  };
+  enter(value);
+  for (let slot = pending.pop(); slot !== undefined; slot = pending.pop()) {
+    const { holder, index } = slot;
+    const item = holder.kind === "list" ? holder.items[index]! : holder.entries[index]!.value;
+    if (typeof item !== "string") {
+      enter(item);
+      continue;
+    }
+    const file = fileInDataUrl(item);
+    const replacement = file === undefined ? undefined : replace(file);
+    if (replacement === undefined) continue;
+    if (holder.kind === "list") holder.items[index] = replacement;
+    else holder.entries[index]!.value = replacement;
+  }
+  return value;
+}
+
+/** The file a data URL holds when its bytes are of a recognized type; any other text holds none. */
+function fileInDataUrl(text: string): RuntimeFileToStore | undefined {
+  if (!isDataUrl(text)) return undefined;
+  const binary = binaryFromDataUrl(text);
+  if (binary === undefined) return undefined;
+  const type = fileType(binary);
+  return isRecognizedFileType(type) ? { type, base64: base64FromBinary(binary) } : undefined;
+}
+
+/** A file store completion the engine accepts: the outcome, and the answer the instruction runs again with. */
+export type FileStoreCompletion =
+  | {
+      readonly ok: true;
+      readonly outcome: "stored" | "read" | "failed";
+      readonly answer: FileStoreAnswer;
+    }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Resolves a file store completion payload: `{ kind: "stored", references }` with one reference per file to store, each
+ * of stored media of the file's kind that the trusted host vouches for and none twice; `{ kind: "read", files }` with
+ * the standard Base64 of each file to read; or `{ kind: "failed" }` when the Player could not store or read them.
+ */
+export function resolveFileStoreCompletion(
+  payload: unknown,
+  action: RuntimeFileStoreActionSnapshot,
+  admission: CapturedMediaAdmission | undefined,
+): FileStoreCompletion {
+  if (!isPlainRecord(payload)) return invalidFileStorePayload();
+  if (payload.kind === "failed")
+    return Object.keys(payload).length === 1
+      ? { ok: true, outcome: "failed", answer: null }
+      : invalidFileStorePayload();
+  if (payload.kind === "stored" && action.operation === "store") {
+    const stored = texts(payload.references);
+    if (
+      Object.keys(payload).length !== 2 ||
+      stored === null ||
+      stored.length !== action.files.length ||
+      !stored.every((reference) => reference.length > 0 && interactionStringFits(reference)) ||
+      new Set(stored).size !== stored.length
+    )
+      return invalidFileStorePayload();
+    if (
+      !stored.every(
+        (reference, index) =>
+          admission?.holds(reference, storedFileKind(action.files[index]!.type)) === true,
+      )
+    )
+      return { ok: false, message: "A stored file is not stored media of this host." };
+    return { ok: true, outcome: "stored", answer: stored };
+  }
+  if (payload.kind === "read" && action.operation === "read") {
+    const files = texts(payload.files);
+    if (
+      Object.keys(payload).length !== 2 ||
+      files === null ||
+      files.length !== action.references.length ||
+      !files.every(isStandardBase64)
+    )
+      return invalidFileStorePayload();
+    return { ok: true, outcome: "read", answer: files };
+  }
+  return invalidFileStorePayload();
+}
+
+/** `value` when it is a list of texts, else `null`. */
+function texts(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const found: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") return null;
+    found.push(item);
+  }
+  return found;
+}
+
+function invalidFileStorePayload(): FileStoreCompletion {
+  return {
+    ok: false,
+    message:
+      "File store completion payload must be { kind: 'stored', references } for files to store, { kind: 'read', files } for files to read, or { kind: 'failed' }.",
+  };
+}

@@ -6,11 +6,13 @@ import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
   isCapturedMediaReference,
+  isWellFormedCapturedMediaReference,
   type CapturedMediaRecord,
   type CapturedMediaRepository,
 } from "../../captured-media.js";
 import {
   browserCapturedMediaLocks,
+  capturedMediaReferences,
   capturedMediaStorage,
   withCapturedMedia,
   type CapturedMediaStorage,
@@ -22,6 +24,7 @@ import {
   type ImageFileFilters,
 } from "../../image-file.js";
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
+import { FileStoreService } from "../../stored-files.js";
 import {
   activePlayerRuntimeInteraction,
   beginPlayerRuntimeRecording,
@@ -345,7 +348,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolveAsset = (path: string): string | null => {
     if (!isCapturedMediaReference(path)) return resolvePackageAsset(path);
     void mediaRevision.value;
-    const resolved = capturedMedia.resolve(path);
+    // Only an image is shown, never a stored file of another type (V30 §33).
+    const resolved = capturedMedia.resolve(path, "image");
     return resolved.state === "ready" ? resolved.url : null;
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
@@ -534,6 +538,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   });
   const serviceCapture = () => captures.request();
   watch(servicedSession, () => void serviceCapture());
+  // Stores and reads the files of `fileFromBase64`, `fileToBase64`, `toJson`, and `fromJson` as session media.
+  const fileStores = new FileStoreService({
+    session: () => servicedSession.value,
+    generation: () => generation.value,
+    observe: observeForInput,
+    publish: (next) => (session.value = next),
+    media: capturedMedia,
+    diagnostic: reportDiagnostic,
+    later: (task) => setTimeout(task, 0),
+  });
+  watch(servicedSession, () => fileStores.request());
   // A session that ended releases its camera.
   watch(
     () => session.value?.state.status,
@@ -598,6 +613,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (stop) => {
       if (!stop) return;
       captures.reset();
+      fileStores.reset();
       camera.release();
       captureCamera.release();
       loads.clear();
@@ -655,6 +671,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       element.load();
     }
     captures.stop();
+    fileStores.stop();
     camera.release();
     captureCamera.release();
     // Issued saves still finish and store their photos before the live lock and the session media are released.
@@ -666,6 +683,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
   // could not load, such as a browser that denies storage. A session-local run plays normally and keeps nothing.
   const storedEntries = shallowRef<readonly RuntimeScriptStorageEntrySnapshot[] | null>(null);
+  // The references in the stored values that the media store had stored when they were read: the stored files a Start
+  // names, with those it holds since.
+  let readStoredFiles: ReadonlySet<string> = new Set();
   // Counts changes this Player made to the saved values: a stored save, a clear, an import, or a fresh read.
   const savedDataRevision = ref(0);
   /**
@@ -675,7 +695,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function loadScriptStorage(): Promise<void> {
     if (!scriptStorage) return;
     try {
-      storedEntries.value = await scriptStorage.load();
+      const entries = await scriptStorage.load();
+      readStoredFiles = await capturedMedia
+        .storedReferences(storedValueReferences(entries))
+        .catch(() => new Set<string>());
+      storedEntries.value = entries;
       savedDataRevision.value++;
       notices.dismiss(playerNoticeKeys.storageUnavailable);
     } catch {
@@ -683,11 +707,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       notices.publish(playerNotices.storageUnavailable());
     }
   }
-  /** Session options for the script's storage; call it from the Start factory. */
+  /**
+   * Session options for the script's storage; call it from the Start factory. The references in the stored values that
+   * the media store holds, or had stored when they were read, are stored files the session knows, so `toJson` writes
+   * them and `fileToBase64` reads them; other text, also text of the same shape, stays text.
+   */
   function scriptStorageOptions(): PlayerRuntimeSessionOptions {
-    return storedEntries.value === null
-      ? {}
-      : { scriptStorage: storedEntries.value, persistentScriptStorage: true };
+    if (storedEntries.value === null) return {};
+    const storedFiles = [...storedValueReferences(storedEntries.value)].filter(
+      (reference) => readStoredFiles.has(reference) || capturedMedia.knows(reference),
+    );
+    return { scriptStorage: storedEntries.value, persistentScriptStorage: true, storedFiles };
   }
   // Each pending write is persisted once through the provider and then reported to the runtime, which keeps the
   // previous value when it failed (warning TSW014). Every published session is observed, whichever operation made it.
@@ -1072,6 +1102,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     openingCamera.value = false;
     activation.value = null;
     captures.reset();
+    fileStores.reset();
     camera.release();
     captureCamera.release();
     device.reset();
@@ -1843,7 +1874,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** A saved photo, loaded on first use: its URL once ready, or whether it still loads or is missing. */
     savedPhoto(reference: string) {
       void mediaRevision.value;
-      return capturedMedia.resolve(reference);
+      return capturedMedia.resolve(reference, "image");
     },
     /** Whether the Player offers saved data: of every script this browser keeps, or at least of the shown one. */
     hasSavedData: options.savedData !== undefined || scriptStorage !== undefined,
@@ -2119,4 +2150,13 @@ function sameSavedValue(
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   return serializableEquals(left, right);
+}
+
+/** The captured-media references of the stored values, by their shape: candidates that only the media store can confirm. */
+function storedValueReferences(entries: readonly RuntimeScriptStorageEntrySnapshot[]): Set<string> {
+  const references = new Set<string>();
+  for (const entry of entries)
+    for (const reference of capturedMediaReferences(entry.value))
+      if (isWellFormedCapturedMediaReference(reference)) references.add(reference);
+  return references;
 }

@@ -254,7 +254,8 @@ export function useImageCapture(host: ImageCaptureHost) {
     const target = capture.value;
     if (target === null) return null;
     void host.cameraRevision.value;
-    const preview = target.reference === null ? null : host.media.resolve(target.reference);
+    const preview =
+      target.reference === null ? null : host.media.resolve(target.reference, "image");
     return {
       phase: target.phase,
       camera: target.camera,

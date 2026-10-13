@@ -104,6 +104,11 @@ export function requiredInstructionTemporaries(
     case "capture":
       if (instruction.tags !== null) collect(instruction.tags);
       break;
+    case "fileStore":
+      collect(instruction.value);
+      if (instruction.default !== null) collect(instruction.default);
+      if (instruction.files !== null) collect(instruction.files);
+      break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);
       collect(instruction.key);
@@ -183,6 +188,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
     case "capture":
+    case "fileStore":
       return new Set([instruction.destinationTemporary]);
     case "say":
       return instruction.destinationTemporary === undefined

@@ -1,11 +1,15 @@
 import { interactionStringFits } from "../../interaction-limits.js";
 import { isPlainRecord } from "../operations/support.js";
+import type { StoredFileKind } from "../stored-files.js";
 import { CAPTURE_UNAVAILABLE_REASONS, type CaptureUnavailableReason } from "./model.js";
 
-/** Trusted host knowledge about captured media; the engine admits a captured reference only when it vouches for it. */
+/**
+ * Trusted host knowledge about captured media and stored files; the engine admits a reference only when it vouches for
+ * it.
+ */
 export interface CapturedMediaAdmission {
   /** Whether `reference` names stored media of `kind` that this host created or loaded. */
-  holds(reference: string, kind: "image"): boolean;
+  holds(reference: string, kind: StoredFileKind): boolean;
 }
 
 export type CaptureCompletion =

@@ -12,6 +12,7 @@ import type {
   RuntimeActionSettlementSnapshot,
   RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
+  RuntimeFileStoreActionSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
@@ -29,7 +30,10 @@ import {
   resolveCaptureCompletion,
   type CapturedMediaAdmission,
 } from "../actions/capture.js";
+import { resolveFileStoreCompletion } from "../actions/file-store.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
+import { addStoredFile, addStoredFiles } from "../stored-files.js";
+import { createCapturedSerializableList } from "../serializable-values.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
@@ -187,6 +191,9 @@ function completeCapturedAction(
   if (active.kind === "capture") {
     return completeCapture(captured.plan, current, active, value, options.capturedMedia, trace);
   }
+  if (active.kind === "fileStore") {
+    return completeFileStore(captured.plan, current, active, value, options.capturedMedia);
+  }
   return completePacingGate(captured.plan, current, active, value);
 }
 
@@ -238,12 +245,13 @@ function completePacingGate(
 
 function validRequestedActionKind(
   value: unknown,
-): value is "interaction" | "chatPacingGate" | "storageWrite" | "capture" {
+): value is "interaction" | "chatPacingGate" | "storageWrite" | "capture" | "fileStore" {
   return (
     value === "interaction" ||
     value === "chatPacingGate" ||
     value === "storageWrite" ||
-    value === "capture"
+    value === "capture" ||
+    value === "fileStore"
   );
 }
 
@@ -357,6 +365,8 @@ function completeCapture(
       outcome: "completed",
     }),
   );
+  // A photo is a stored file, which `toJson` writes as a data URL.
+  if (reference !== null) addStoredFile(current.storedFiles, reference);
   // A photo taken with tags joins the image catalog, keyed by its reference, so tag queries find it too.
   if (reference !== null && action.tags !== null) {
     current.capturedImages.push({ reference, tags: action.tags.map((tag) => ({ ...tag })) });
@@ -427,6 +437,65 @@ function completeCapture(
       span: copySpan(span),
     } satisfies ActionCompletedEvent),
   );
+  return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+/**
+ * Settles a file store with the Player's answer, which is handed off to its instruction; that runs again and gives the
+ * result. Stored files become files this session knows.
+ */
+function completeFileStore(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeFileStoreActionSnapshot,
+  request: Record<string, unknown>,
+  admission: CapturedMediaAdmission | undefined,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  const resolved = resolveFileStoreCompletion(request.payload, action, admission);
+  if (!resolved.ok) {
+    return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  }
+  assertEventSequenceCapacity(current, 1);
+  const stored = resolved.outcome === "stored" ? (resolved.answer ?? []) : [];
+  addStoredFiles(current.storedFiles, stored);
+  const completionSequence = takeSequence(current, 1);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "fileStore",
+    settlementKind: "completed",
+    outcome: resolved.outcome,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence: completionSequence,
+    completedAtMs: current.currentSessionTimeMs,
+    references: [...stored],
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  // The instruction runs again with the answer before anything else, as a result is consumed.
+  current.interactionResultHandoff = Object.freeze({
+    actionKind: "fileStore",
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    result: resolved.answer === null ? null : createCapturedSerializableList([...resolved.answer]),
+  });
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
+  const events: InterpreterEvent[] = [
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionSequence,
+      settlement,
+      span: copySpan(span),
+    } satisfies ActionCompletedEvent),
+  ];
   return pendingResult(current, events, { kind: "completed", settlement });
 }
 
@@ -628,6 +697,9 @@ function commitInteractionSettlement(
     // A form records the options its cycles showed, which its result cannot always tell.
     ...(action.ui.kind === "form" ? { shownOptions: outcome.shownOptions ?? null } : {}),
   });
+  // An image answer is a stored file, which `toJson` writes as a data URL.
+  if (action.ui.kind === "image" && typeof result === "string")
+    addStoredFile(current.storedFiles, result);
   const handoff: RuntimeInteractionResultHandoffSnapshot | null =
     action.destinationTemporary === null
       ? null

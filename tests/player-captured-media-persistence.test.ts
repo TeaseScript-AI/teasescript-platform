@@ -154,7 +154,7 @@ test("a save whose photo cannot be stored is not persisted and keeps the previou
   await assert.rejects(storage.write("photo", photo), CapturedMediaNotStoredError);
   assert.equal(provider.entries.get("photo"), "previous");
   // The photo stays usable this session, and a later save can try again.
-  assert.equal(media.resolve(photo).state, "ready");
+  assert.equal(media.resolve(photo, "image").state, "ready");
   repository.failWrites = false;
   await storage.write("photo", photo);
   assert.equal(provider.entries.get("photo"), photo);
@@ -296,9 +296,9 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
   );
   const shown = second.stageImage;
   assert.ok(shown !== null);
-  assert.equal(secondRun.resolve(shown).state, "loading");
+  assert.equal(secondRun.resolve(shown, "image").state, "loading");
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(secondRun.resolve(shown).state, "ready");
+  assert.equal(secondRun.resolve(shown, "image").state, "ready");
   assert.equal(await (await secondRun.read(shown))?.data.text(), "the photo");
 
   // A string of the right shape that the store never created grants nothing, also after `save` and `load`.
@@ -309,9 +309,9 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
     withCapturedMedia(provider, secondRun),
   );
   assert.equal(third.stageImage, forged);
-  secondRun.resolve(forged);
+  secondRun.resolve(forged, "image");
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(secondRun.resolve(forged), { state: "missing" });
+  assert.deepEqual(secondRun.resolve(forged, "image"), { state: "missing" });
   assert.equal(repository.size, 1);
 });
 
@@ -381,7 +381,7 @@ test("without durable storage a stored reference is missing at once, so presenta
   let changes = 0;
   const media = new CapturedMediaStore(null, urls, "package", () => changes++);
   const reference = "captured-media:00000000-0000-4000-8000-000000000000:1";
-  assert.deepEqual(media.resolve(reference), { state: "missing" });
+  assert.deepEqual(media.resolve(reference, "image"), { state: "missing" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(changes, 0);
 });

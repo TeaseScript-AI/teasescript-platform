@@ -59,6 +59,7 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   media: "Media",
   save: "Save",
   photo: "Photo",
+  file: "Stored file",
 };
 const callLabels = {
   function: (name: string) => `${name}()`,

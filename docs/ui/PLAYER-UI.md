@@ -586,7 +586,9 @@ load ("Video playback is not supported by this Player yet."), so the script cont
 such package file is a warning [player notice](#player-notices), once per session and authored path, for example
 "Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
 video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
-video playback itself is missing; captured photos and chosen images are no package files and are never reported. An
+video playback itself is missing; captured photos, chosen images, and stored files are no package files and are never
+reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
+and video are not played ([stored files](../RUNTIME.md#stored-files)). An
 authored Stage image has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage
 rendering are not yet implemented in the Player; the development preview's Stage media picker can override the Stage
 for layout comparison.

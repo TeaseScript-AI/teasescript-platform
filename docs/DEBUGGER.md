@@ -282,7 +282,8 @@ saved values, answers, or storage keys, only when saved values and answers are c
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
 as the last good state when that state cannot be checkpointed; photos add the chosen originals of the photos the export
 refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,
-such as in a variable of the replay's state); Player and browser details add the presentation settings, screen
+such as in a variable of the replay's state), where a state's `storedFiles`, which names every stored file the session
+knew, does not count as referring to one; Player and browser details add the presentation settings, screen
 geometry, pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path
 or a file URL outside another URL, is replaced in every readable section, and replay data containing it is left out
 entirely, since changing it would change the replay; such detection in free text is best effort and cannot prove text

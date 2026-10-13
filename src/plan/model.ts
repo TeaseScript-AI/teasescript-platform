@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 90;
+export const INSTRUCTION_PLAN_VERSION = 91;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -163,6 +163,7 @@ export type Instruction =
   | StopAudioInstruction
   | InteractionInstruction
   | CaptureInstruction
+  | FileStoreInstruction
   | GotoInstruction
   | TransferInstruction
   | SetFallbackInstruction
@@ -927,6 +928,28 @@ export interface CaptureInstruction extends InstructionBase {
    * the image catalog with them (ADR 0023). `null` without `tags:`.
    */
   readonly tags: ExpressionPlan | null;
+  readonly destinationTemporary: number;
+}
+
+/** The calls that may use the Player's file store, which `fileStore` instructions run. */
+export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "toJson" | "fromJson";
+
+/**
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, or a `toJson` or `fromJson` without a written
+ * `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store or read
+ * them and waits, with the instruction itself as the continuation, and once the answer is handed off it runs again and
+ * gives the result. Without files it gives the result at once. Its operands are temporaries or literals, so both runs
+ * read the same values.
+ */
+export interface FileStoreInstruction extends InstructionBase {
+  readonly kind: "fileStore";
+  readonly call: FileStoreCall;
+  /** The text, file, or value. */
+  readonly value: ExpressionPlan;
+  /** The `default:` of `fileFromBase64` and `fromJson`; `null` for the others. */
+  readonly default: ExpressionPlan | null;
+  /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
+  readonly files: ExpressionPlan | null;
   readonly destinationTemporary: number;
 }
 
