@@ -566,7 +566,10 @@ function locateCompactCommand(
 /** The last document parsed, which help, signature help, and formatting of the same text read again. */
 let lastParse: { readonly text: string; readonly result: ParseResult } | null = null;
 
-/** The syntax of a document, or none when parsing it exhausted the call stack, which the compiler reports. */
+/**
+ * The syntax of a document, or none when parsing it exhausted the call stack, which the compiler reports. Only a parse
+ * that succeeded is kept, so that the same text is parsed again after a failure.
+ */
 function parseDocument(text: string): ParseResult {
   if (lastParse?.text === text) return lastParse.result;
   let result: ParseResult;
@@ -574,7 +577,7 @@ function parseDocument(text: string): ParseResult {
     result = parse(text);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
-    result = parse("");
+    return parse("");
   }
   lastParse = { text, result };
   return result;
