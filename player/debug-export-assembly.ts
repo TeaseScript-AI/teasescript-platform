@@ -531,12 +531,30 @@ export function debugPhotoUses(
     session?.events.slice(-EVENT_TAIL) ?? [],
     session === null ? [] : transcriptTail(session.transcriptEntries),
   ];
-  // One text per part, written as the export writes deep data; all parts in one could be too long for a text.
-  for (const reference of capturedMediaReferencesIn(
-    ...carried.map((part) => serializeValidatedRuntimeJson(part)),
-  ))
+  for (const reference of mediaReferencesIn(carried))
     if (!uses.has(reference)) uses.set(reference, []);
   return uses;
+}
+
+/**
+ * The captured-media references in plain data, also within a text or a property name. It reads the data in place, so
+ * neither deep data nor a state too long to write as one text is a problem; an object reached twice is read once.
+ */
+function mediaReferencesIn(data: readonly unknown[]): Set<string> {
+  const texts: string[] = [];
+  const seen = new Set<object>();
+  const pending = [...data];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === "string") texts.push(current);
+    else if (typeof current === "object" && current !== null && !seen.has(current)) {
+      seen.add(current);
+      if (Array.isArray(current)) for (const item of current) pending.push(item);
+      else for (const [key, item] of Object.entries(current)) pending.push(key, item);
+    }
+  }
+  // Searched one text at a time, never joined.
+  return capturedMediaReferencesIn(texts);
 }
 
 // Text that looks like a credential or an absolute file path. Detection cannot prove text free of secrets; the dialog
