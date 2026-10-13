@@ -1658,6 +1658,8 @@ test("released records leave the trace, while later records and the version inde
       () => {
         for (const entry of records(released)) read.set(entry.id, recordData(entry));
         released.release(released.status().lastRecord ?? 0);
+        // Between operations, and between instructions in an observer, nothing stays retained.
+        assert.equal(released.status().records, 0);
       },
       everyInstruction,
     );
@@ -1689,6 +1691,48 @@ test("released records leave the trace, while later records and the version inde
     ),
     { id: base, retained: false },
   );
+});
+
+test("release does nothing while an instruction runs, as a builtin it calls sees", () => {
+  const compiled = compileSource(
+    [
+      "let original = 1",
+      "let ignored = releaseNow()",
+      'say "${releaseNow()} said", instant',
+      "let later = original + 1",
+      "exit",
+    ].join("\n"),
+    { builtins: ["releaseNow"] },
+  );
+  assert.deepEqual(compiled.diagnostics, []);
+  const plan = compiled.plan!;
+  const play = (release: boolean) => {
+    const trace = new RuntimeDebugContext();
+    const session = createFreshRuntimeSession(
+      plan,
+      { seed: SEED, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+      {
+        capabilities: {
+          builtins: {
+            releaseNow: () => {
+              if (release) trace.release(Infinity);
+              return 0;
+            },
+          },
+        },
+      },
+    );
+    session.run({ debugTrace: trace });
+    assert.equal(session.view().status, "halted");
+    return { trace, records: records(trace) };
+  };
+  const released = play(true);
+  // The second call runs inside a staged message, the first in an ordinary statement: neither releases anything.
+  assert.deepEqual(released.records, play(false).records);
+  assert.equal(released.records[0]!.target, "original");
+  // Between operations, it releases.
+  released.trace.release(Infinity);
+  assert.equal(released.trace.status().records, 0);
 });
 
 test("paused and resumed draws name the released versions that a trace releasing nothing names", () => {
@@ -1738,7 +1782,7 @@ test("a released record keeps its place in the bounds, which drop it like any ot
   assert.deepEqual(released, kept);
   assert.ok(
     [...kept.read.values()].some(
-      (entry) => entry.kind === "unrecorded" && entry.detail?.kind === "unrecorded",
+      (entry) => entry.detail?.kind === "unrecorded" && entry.detail.reason === "unavailable",
     ),
     "the bounds dropped versions that were read again",
   );

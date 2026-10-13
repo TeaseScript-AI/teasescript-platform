@@ -477,6 +477,10 @@ export class TraceStore {
   } | null = null;
   #lastRandom: TraceRecord | null = null;
   #stage: Stage | null = null;
+  /** Whether an operation records now, from `open` to `close`. */
+  #operating = false;
+  /** Whether that operation stands between two instructions, calling an instruction observer. */
+  betweenInstructions = false;
 
   #epoch = 0;
   #origin: RuntimeDebugTraceOrigin = "attach";
@@ -507,6 +511,7 @@ export class TraceStore {
   ) {}
 
   reset(origin: "start" | "restore"): void {
+    this.#operating = false;
     this.#clear();
     this.#epoch += 1;
     this.#pendingOrigin = origin;
@@ -538,6 +543,7 @@ export class TraceStore {
       this.#sceneTimeMs = snapshot.currentSessionTimeMs;
       this.#instruction = null;
       this.acc = emptyDependencies();
+      this.#operating = true;
       return true;
     } catch (error) {
       this.#fail(error);
@@ -546,6 +552,7 @@ export class TraceStore {
   }
 
   close(snapshot: RuntimeSnapshot): void {
+    this.#operating = false;
     if (this.#failure !== null) return;
     this.#last = new WeakRef(snapshot);
     while (this.#stage !== null) this.#endStage(this.#stage);
@@ -1381,8 +1388,13 @@ export class TraceStore {
 
   /** See `RuntimeDebugContext.release`. */
   release(upTo: number): void {
-    // A stage still open may roll a key back to a version it keeps, which must stay findable.
-    if (this.#failure !== null || this.#stage !== null) return;
+    // A running instruction or an open stage may still alias, read again, or roll back to what they recorded.
+    if (
+      this.#failure !== null ||
+      this.#stage !== null ||
+      (this.#operating && !this.betweenInstructions)
+    )
+      return;
     try {
       while (this.#retained < this.#records.length && this.#retainedAt(this.#retained).id <= upTo) {
         const record = this.#retainedAt(this.#retained);

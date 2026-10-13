@@ -377,7 +377,11 @@ function executeInstructionBoundary(
   const instructionIndex = snapshot.nextInstruction;
   const call = currentCallFrameId(snapshot) ?? 0;
   const observer = context.observer;
-  if (observeStart && observer?.before?.(instructionIndex, call) === true) {
+  if (
+    observeStart &&
+    observer !== null &&
+    observeBefore(context.trace, observer, instructionIndex, call)
+  ) {
     context.stopped = true;
     return 0;
   }
@@ -435,9 +439,42 @@ function executeInstructionBoundary(
   }
   if (unit) control.endUnit(context.trace);
   // A failed instruction did not complete; the operation ends with its failure.
-  if (observer?.after !== undefined && !failed)
-    observer.after(instructionIndex, snapshot.nextInstruction, call);
+  if (observer !== null && !failed)
+    observeAfter(context.trace, observer, instructionIndex, snapshot.nextInstruction, call);
   return 1;
+}
+
+/** Calls an observer's `before` between two instructions, where its host may release records of the trace. */
+function observeBefore(
+  trace: TraceStore | null,
+  observer: RuntimeInstructionObserver,
+  instruction: number,
+  call: number,
+): boolean {
+  if (observer.before === undefined) return false;
+  if (trace !== null) trace.betweenInstructions = true;
+  try {
+    return observer.before(instruction, call) === true;
+  } finally {
+    if (trace !== null) trace.betweenInstructions = false;
+  }
+}
+
+/** Calls an observer's `after` between two instructions, where its host may release records of the trace. */
+function observeAfter(
+  trace: TraceStore | null,
+  observer: RuntimeInstructionObserver,
+  instruction: number,
+  next: number,
+  call: number,
+): void {
+  if (observer.after === undefined) return;
+  if (trace !== null) trace.betweenInstructions = true;
+  try {
+    observer.after(instruction, next, call);
+  } finally {
+    if (trace !== null) trace.betweenInstructions = false;
+  }
 }
 
 export function stepToEvent(
