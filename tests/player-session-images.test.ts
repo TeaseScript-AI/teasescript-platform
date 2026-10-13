@@ -3,6 +3,7 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
 import {
+  compilePlayerProject,
   createPlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   observePlayerRuntimeTime,
@@ -12,9 +13,17 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
-import type { DebugExportCandidate } from "../player/debug-export-assembly.js";
+import {
+  assembleDebugExport,
+  chooseDebugCategory,
+  chooseDebugPhoto,
+  NO_PERSONAL_CONTENT,
+  type DebugExportCandidate,
+} from "../player/debug-export-assembly.js";
+import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
+import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { SerializableRuntimeValue } from "../src/index.js";
+import type { InstructionPlan, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -39,6 +48,11 @@ interface ImageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepareScript(
+    plan: InstructionPlan,
+    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
+  ): Promise<void>;
+  readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   debugExportCandidate(
     shown: Pick<DebugExportCandidate, "player" | "host">,
   ): Promise<DebugExportCandidate>;
@@ -49,6 +63,7 @@ let usePlayerSession: (options: {
   resolveAsset?: (path: string) => string | null;
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
+  keptSessions?: KeptSessionStore;
   decodeImage?: (data: Blob) => Promise<{ width: number; height: number }>;
 }) => ImageHost;
 
@@ -212,6 +227,84 @@ test("a debug export candidate is the state when it was asked for, while play co
   assert.deepEqual(candidate.session?.transcriptEntries, transcriptEntries);
   assert.deepEqual(candidate.recording?.endSnapshot, askedSnapshot);
   assert.equal(candidate.photos.length, 1);
+});
+
+test("after a reload, Continue's debug export offers the photo its state holds, which no recorded call used", async (context) => {
+  stubBrowser(context);
+  const entries = new Map<string, SerializableRuntimeValue>();
+  const provider: ScriptStorageProvider = {
+    scope: "images",
+    load: async () => [...entries].map(([key, value]) => ({ key, value })),
+    write: async (key, value) =>
+      void (value === null ? entries.delete(key) : entries.set(key, value)),
+    replace: async (next) => {
+      entries.clear();
+      for (const { key, value } of next) entries.set(key, value);
+    },
+    clear: async () => entries.clear(),
+  };
+  const repository = new FakeMediaRepository();
+  const keptSessions = memoryKeptSessionStore();
+  const { plan } = compilePlayerProject(
+    'let picture = askImage("Picture")\nshowImage picture\nshowButton "First"\nexit',
+  );
+  assert.ok(plan);
+  // One page of the Player; a reload is a new one with the same browser storage.
+  const page = async () => {
+    const scope = effectScope();
+    const host = scope.run(() =>
+      usePlayerSession({
+        scriptStorage: provider,
+        capturedMedia: { repository },
+        keptSessions,
+        decodeImage: async () => ({ width: 2, height: 2 }),
+      }),
+    );
+    assert.ok(host);
+    context.after(() => scope.stop());
+    await host.loadScriptStorage();
+    await host.prepareScript(plan, (options) =>
+      createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
+    );
+    return { host, scope };
+  };
+  const before = await page();
+  await before.host.activate();
+  const photo = await chosen(before.host, "kept.png");
+  answer(before.host, photo);
+  await until(
+    () => playerRuntimeForeground(before.host.session.value!)?.kind === "show-button",
+    "the session did not reach First",
+  );
+  const kept = async () => JSON.stringify(await keptSessions.session("images")).includes(photo);
+  for (let tries = 0; !(await kept()); tries += 1) {
+    assert.ok(tries < 400, "the session was not kept");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  before.scope.stop();
+
+  const after = await page();
+  assert.equal(after.host.activation.value, "continue");
+  await after.host.activate();
+  const candidate = await after.host.debugExportCandidate({
+    player: {},
+    host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
+  });
+  assert.deepEqual(
+    candidate.photos.map((each) => [each.reference, each.usedBy, each.byteLength]),
+    [[photo, [], PNG.length]],
+  );
+  let choices = NO_PERSONAL_CONTENT;
+  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
+    choices = chooseDebugCategory(choices, candidate, category, true);
+  const { exported } = await assembleDebugExport(candidate, chooseDebugPhoto(choices, photo, true));
+  const read = parseDebugExport(await (await debugExportFile(exported, false)).text());
+  assert.equal(replayDebugExport(read).kind, "reproduced");
+  assert.equal(read.checkpoint?.snapshot.stageImage, photo);
+  assert.deepEqual(
+    read.photos.map((each) => [each.reference, each.data]),
+    [[photo, PNG]],
+  );
 });
 
 test("an image that never became the preview can be dropped, and Use image answers only with a stored image", async (context) => {

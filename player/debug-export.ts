@@ -188,7 +188,10 @@ export interface DebugAdmissionQuery {
   readonly result: boolean;
 }
 
-/** A photo the session used; `data` is its original bytes when the player chose to include them. */
+/**
+ * A photo the export refers to; `data` is its original bytes when the player chose to include them. `usedBy` is empty
+ * for a photo no recorded call or saved value used, which the export holds otherwise, such as in a variable.
+ */
 export interface DebugPhoto {
   readonly reference: string;
   readonly mimeType: string;

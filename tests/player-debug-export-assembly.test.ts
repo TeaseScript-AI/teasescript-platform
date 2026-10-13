@@ -14,14 +14,18 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
+  activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
   answeredByPlayerInput,
   answerPlayerRuntimeImage,
   applyPlayerRuntimeStorageEdit,
+  beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
   createPlayerRuntimeSession,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeForeground,
+  playerRuntimeSnapshotJson,
+  restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
@@ -68,9 +72,7 @@ function candidate(
   recorder: DebugRecorder,
   read: () => Promise<Uint8Array<ArrayBuffer> | null> = async () => photoBytes,
 ): DebugExportCandidate {
-  const recording = recorder.recording();
-  const uses = debugPhotoUses(recording, playerRuntimeSnapshot(session).scriptStorage);
-  return {
+  const frozen: Omit<DebugExportCandidate, "photos"> = {
     build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
     package: { id: "development-package:test", version: null },
     session: {
@@ -79,19 +81,10 @@ function candidate(
       events: session.events,
       transcriptEntries: session.transcriptEntries,
     },
-    recording,
+    recording: recorder.recording(),
     hostError: null,
     editedWhileDebugging: null,
     rewoundWhileDebugging: null,
-    photos: [...uses].map(([photo, usedBy]) => ({
-      reference: photo,
-      mimeType: "image/png",
-      byteLength: photoBytes.length,
-      width: 2,
-      height: 1,
-      usedBy,
-      read,
-    })),
     player: { viewportWidth: 390, userAgent: "Test Browser" },
     host: {
       stage: { status: "unresolved", path: "images/missing-room.png" },
@@ -109,6 +102,44 @@ function candidate(
       debugLog: ["Skipped the wait at main.tease:3"],
     },
   };
+  return {
+    ...frozen,
+    photos: [...debugPhotoUses(frozen)].map(([photo, usedBy]) => ({
+      reference: photo,
+      mimeType: "image/png",
+      byteLength: photoBytes.length,
+      width: 2,
+      height: 1,
+      usedBy,
+      read,
+    })),
+  };
+}
+
+/** The photos a candidate offers, with their uses. */
+function offered(frozen: DebugExportCandidate) {
+  return frozen.photos.map((photo) => [photo.reference, photo.usedBy] as const);
+}
+
+/** A media store that holds `stored` only. */
+function admits(stored: string) {
+  return { holds: (asked: string) => asked === stored };
+}
+
+/** `session` as Continue goes on with it after a reload: restored from its state and events, recording from there. */
+function continued(session: PlayerRuntimeSession): {
+  session: PlayerRuntimeSession;
+  recorder: DebugRecorder;
+} {
+  const recorder = new DebugRecorder();
+  const restored = restorePlayerRuntimeSessionAt(
+    session.plan,
+    playerRuntimeSnapshotJson(session),
+    session.events,
+    recorder,
+  );
+  beginPlayerRuntimeRecording(restored, recorder);
+  return { session: restored, recorder };
 }
 
 async function fileText(exported: Parameters<typeof debugExportFile>[0]): Promise<string> {
@@ -215,12 +246,70 @@ test("a saved photo only the replay's state holds is offered too, and a saved ph
       ],
     },
   );
-  const shown = playerRuntimeSnapshot(session).scriptStorage;
-  assert.deepEqual(shown, []);
-  assert.deepEqual(
-    [...debugPhotoUses(recorder.recording(), shown)],
-    [[reference, [{ relation: "savedValue", operation: null, actionId: null }]]],
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, []);
+  assert.deepEqual(offered(candidate(session, recorder)), [
+    [reference, [{ relation: "savedValue", operation: null, actionId: null }]],
+  ]);
+});
+
+test("a photo the replay's state holds without a recorded use is offered without one, and the file restores it", async () => {
+  // Answered before a reload, the photo is in a variable and on the Stage of the state the replay starts from.
+  let session = createPlayerRuntimeSession(
+    'let picture = askImage("Picture")\nshowImage picture\nshowButton "First"\nexit',
   );
+  session = answerPlayerRuntimeImage(session, reference, admits(reference))!.session;
+  const reloaded = continued(session);
+  const frozen = candidate(reloaded.session, reloaded.recorder);
+  assert.deepEqual(offered(frozen), [[reference, []]]);
+  // Photos on starts with the photos a recorded call used; the player can add this one.
+  assert.deepEqual([...all(frozen).photoReferences], []);
+  const { exported } = await assembleDebugExport(
+    frozen,
+    chooseDebugPhoto(all(frozen), reference, true),
+  );
+  const read = parseDebugExport(await fileText(exported));
+  assert.equal(replayDebugExport(read).kind, "reproduced");
+  assert.equal(read.checkpoint?.snapshot.stageImage, reference);
+  assert.deepEqual(
+    read.photos.map((photo) => [photo.reference, photo.data, photo.usedBy]),
+    [[reference, photoBytes, []]],
+  );
+});
+
+test("a photo only an event or a call the export carries holds is offered, and one only older events hold is not", () => {
+  const edited = "captured-media:22222222-2222-4222-8222-222222222222:1";
+  const old = "captured-media:33333333-3333-4333-8333-333333333333:1";
+  // The answer's variable is gone, and a later button settled, before a reload.
+  let session = createPlayerRuntimeSession(
+    'if true {\n    let picture = askImage("Picture")\n}\nshowButton "First"\nshowButton "Second"\ndelete "edited"\nshowButton "Third"\nexit',
+  );
+  session = answerPlayerRuntimeImage(session, reference, admits(reference))!.session;
+  session = activatePlayerRuntimeButton(session)!.session;
+  const reloaded = continued(session);
+  // After it, Debug's storage editor saves a photo, which the script deletes again.
+  session = applyPlayerRuntimeStorageEdit(reloaded.session, {
+    key: "edited",
+    value: edited,
+  }).session;
+  session = activatePlayerRuntimeButton(session)!.session;
+  assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, []);
+  assert.deepEqual(
+    new Map(offered(candidate(session, reloaded.recorder))),
+    new Map([
+      [reference, []],
+      [edited, []],
+    ]),
+  );
+
+  // An answer more events ago than the export keeps, with a button settled since, is in none of its parts.
+  let long = createPlayerRuntimeSession(
+    'if true {\n    let picture = askImage("Picture")\n}\nfor turn in 1..=300 {\n    say "Turn ${turn}", instant\n}\nshowButton "Next"\nshowButton "Done"\nexit',
+  );
+  long = answerPlayerRuntimeImage(long, old, admits(old))!.session;
+  long = activatePlayerRuntimeButton(long)!.session;
+  const later = continued(long);
+  assert.ok(JSON.stringify(later.session.events).includes(old));
+  assert.deepEqual(offered(candidate(later.session, later.recorder)), []);
 });
 
 test("with everything chosen, the export replays the failure and carries the photo and its use", async () => {

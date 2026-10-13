@@ -22,6 +22,7 @@ import {
   type DebugSelection,
 } from "./debug-export.js";
 import type { DebugRecording } from "./debug-recorder.js";
+import { capturedMediaReferencesIn } from "./kept-sessions.js";
 import type { PlayerTranscriptEntryPresentation } from "./model.js";
 
 /**
@@ -177,11 +178,7 @@ export async function assembleDebugExport(
   const { session, recording } = candidate;
   const parts: DebugExportPart[] = [];
   const omissions: string[] = [];
-  // The session's actual state describes what happened; a recording that stopped early ends at an earlier state.
-  const snapshot = session?.snapshot ?? recording?.endSnapshot ?? null;
-  // The state replay data checkpoints: where a complete recording's calls lead, which a failed session reached before
-  // any later observation of time. An incomplete recording does not replay, so the actual state is the most useful.
-  const replaySnapshot = recording?.complete === true ? recording.endSnapshot : snapshot;
+  const { snapshot, replaySnapshot } = exportedStates(candidate);
   const plan = recording?.plan ?? session?.plan ?? null;
   const incident = describeIncident(
     snapshot,
@@ -198,20 +195,7 @@ export async function assembleDebugExport(
     ? removeSecrets(events.map((event) => sessionTextEvent(event, choices)))
     : events.map((event) => ({ sequence: event.sequence, kind: event.kind }));
   if (choices.sessionText && session !== null) {
-    // The last messages as the conversation shows them: a removed one has left it, and its say and removal stay in the
-    // events.
-    const shown: PlayerTranscriptEntryPresentation[] = [];
-    const entries = session.transcriptEntries;
-    for (let index = entries.length - 1; index >= 0 && shown.length < TRANSCRIPT_TAIL; index -= 1) {
-      const entry = entries[index]!;
-      if (entry.kind !== "message" || entry.removed !== true) shown.push(entry);
-    }
-    const transcript = shown
-      .reverse()
-      .map((entry) => ({
-        ...(entry.kind === "message" ? { speaker: entry.speakerId } : {}),
-        text: entry.text,
-      }));
+    const transcript = transcriptTail(session.transcriptEntries);
     sections["transcriptTail"] = removeSecrets(transcript);
     parts.push({
       name: "Session text",
@@ -332,6 +316,37 @@ export async function assembleDebugExport(
     sections,
   };
   return { exported, parts };
+}
+
+/** The states an export carries: the state shown, and the state its replay data checkpoints. */
+function exportedStates({
+  session,
+  recording,
+}: Pick<DebugExportCandidate, "session" | "recording">) {
+  // The session's actual state describes what happened; a recording that stopped early ends at an earlier state.
+  const snapshot = session?.snapshot ?? recording?.endSnapshot ?? null;
+  // The state replay data checkpoints: where a complete recording's calls lead, which a failed session reached before
+  // any later observation of time. An incomplete recording does not replay, so the actual state is the most useful.
+  const replaySnapshot = recording?.complete === true ? recording.endSnapshot : snapshot;
+  return { snapshot, replaySnapshot };
+}
+
+/**
+ * The last messages as the conversation shows them: a removed one has left it, and its say and removal stay in the
+ * events.
+ */
+function transcriptTail(entries: readonly PlayerTranscriptEntryPresentation[]) {
+  const shown: PlayerTranscriptEntryPresentation[] = [];
+  for (let index = entries.length - 1; index >= 0 && shown.length < TRANSCRIPT_TAIL; index -= 1) {
+    const entry = entries[index]!;
+    if (entry.kind !== "message" || entry.removed !== true) shown.push(entry);
+  }
+  return shown
+    .reverse()
+    .map((entry) => ({
+      ...(entry.kind === "message" ? { speaker: entry.speakerId } : {}),
+      text: entry.text,
+    }));
 }
 
 function describeIncident(
@@ -475,13 +490,16 @@ function recordedAnswers(recording: DebugRecording | null): unknown[] {
 }
 
 /**
- * The photos a session used, with where: recorded image answers and captures, and saved values: those given, which the
- * state shown has, and those of the recording's anchor and end, which its replay holds. A saved photo counts once.
+ * The photos an export can refer to, each once, with where they were used: recorded image answers and captures, and
+ * saved values of the state shown and of the replay's states. A photo the export holds only otherwise has no use, such
+ * as one in a variable of a replay that begins after a reload or a rewind, in an event, or in another recorded call.
+ * What the export leaves out does not count: the state shown beyond its saved values, and older events and messages.
  */
 export function debugPhotoUses(
-  recording: DebugRecording | null,
-  savedValues: readonly { readonly value: Parameters<typeof capturedMediaReferences>[0] }[],
+  candidate: Pick<DebugExportCandidate, "session" | "recording">,
 ): ReadonlyMap<string, readonly DebugPhotoUse[]> {
+  const { session, recording } = candidate;
+  const { snapshot, replaySnapshot } = exportedStates(candidate);
   const uses = new Map<string, DebugPhotoUse[]>();
   const add = (reference: string, use: DebugPhotoUse) => {
     const list = uses.get(reference) ?? [];
@@ -501,15 +519,23 @@ export function debugPhotoUses(
       add(media["reference"], { relation: "capture", operation: operation.seq, actionId });
   }
   const saved = new Set<string>();
-  for (const values of [
-    savedValues,
-    recording?.anchorSnapshot.scriptStorage ?? [],
-    recording?.endSnapshot.scriptStorage ?? [],
-  ])
-    for (const entry of values)
+  for (const state of [snapshot, recording?.anchorSnapshot, replaySnapshot])
+    for (const entry of state?.scriptStorage ?? [])
       for (const reference of capturedMediaReferences(entry.value)) saved.add(reference);
   for (const reference of saved)
     add(reference, { relation: "savedValue", operation: null, actionId: null });
+  const carried = [
+    replaySnapshot,
+    recording?.anchorSnapshot ?? null,
+    recording?.operations ?? [],
+    session?.events.slice(-EVENT_TAIL) ?? [],
+    session === null ? [] : transcriptTail(session.transcriptEntries),
+  ];
+  // One text per part, written as the export writes deep data; all parts in one could be too long for a text.
+  for (const reference of capturedMediaReferencesIn(
+    ...carried.map((part) => serializeValidatedRuntimeJson(part)),
+  ))
+    if (!uses.has(reference)) uses.set(reference, []);
   return uses;
 }
 

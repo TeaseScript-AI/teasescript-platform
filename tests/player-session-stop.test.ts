@@ -2,11 +2,20 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 
+import {
+  assembleDebugExport,
+  chooseDebugCategory,
+  chooseDebugPhoto,
+  NO_PERSONAL_CONTENT,
+  type DebugExportCandidate,
+} from "../player/debug-export-assembly.js";
+import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
+import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
@@ -34,15 +43,17 @@ interface StopHost {
   setDebugTracing(on: boolean): void;
   debugRecording(): DebugRecording | null;
   debugExportCandidate(
-    shown: Record<string, never>,
-  ): Promise<{ readonly recording: DebugRecording | null }>;
+    shown: Partial<Pick<DebugExportCandidate, "player" | "host">>,
+  ): Promise<DebugExportCandidate>;
   loadScriptStorage(): Promise<void>;
+  scriptStorageOptions(): RuntimeAdapter.PlayerRuntimeSessionOptions;
   prepare(create: (options: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
+  capturedMedia?: { repository: FakeMediaRepository };
   capabilities: { camera: boolean };
 }) => StopHost;
 let useDebugRewind: (player: StopHost) => {
@@ -467,5 +478,95 @@ test("after a Player error, a debug export keeps the recording up to the error t
   assert.deepEqual(
     host.debugRecording()?.operations.map((operation) => operation.kind),
     ["run"],
+  );
+});
+
+test("a debug export offers a photo only the replay saves, also after a Player error and Back, and replays with it", async (context) => {
+  stubBrowser(context);
+  // What only the Player's interface adds to the candidate, here nothing of note.
+  const shown: Pick<DebugExportCandidate, "player" | "host"> = {
+    player: {},
+    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+  };
+  const photo = "captured-media:44444444-4444-4444-8444-444444444444:1";
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const values = new Map<string, SerializableRuntimeValue>([["picture", photo]]);
+  const provider: ScriptStorageProvider = {
+    scope: "test",
+    load: async () => [...values].map(([key, value]) => ({ key, value })),
+    write: async (key, value) =>
+      void (value === null ? values.delete(key) : values.set(key, value)),
+    replace: async (entries) => {
+      values.clear();
+      for (const { key, value } of entries) values.set(key, value);
+    },
+    clear: async () => values.clear(),
+  };
+  const repository = new FakeMediaRepository();
+  const data = new Blob([bytes], { type: "image/png" });
+  await repository.add({
+    namespace: "test",
+    reference: photo,
+    kind: "image",
+    mimeType: "image/png",
+    size: data.size,
+    width: 1,
+    height: 1,
+    data,
+  });
+  const host = mount(context, () =>
+    usePlayerSession({
+      scriptStorage: provider,
+      capturedMedia: { repository },
+      capabilities: { camera: false },
+    }),
+  );
+  const rewind = mount(context, () => useDebugRewind(host));
+  await host.loadScriptStorage();
+  host.prepare(({ recorder }) =>
+    runtime.createPlayerRuntimeSession(
+      'let picture = load "picture", default: ""\ndelete "picture"\nshowButton "First"\nsave picture as "picture"\nshowButton "Second"\nexit',
+      { recorder, ...host.scriptStorageOptions() },
+    ),
+  );
+  const offered = async () =>
+    (await host.debugExportCandidate(shown)).photos.map((each) => [
+      each.reference,
+      each.usedBy.map((use) => use.relation),
+    ]);
+  const label = () => {
+    const foreground = runtime.playerRuntimeForeground(host.session.value!);
+    return foreground?.kind === "show-button" ? foreground.label : null;
+  };
+  await host.activate();
+  await settle();
+  // At First, the photo is saved only in the state the recording begins with.
+  assert.equal(label(), "First");
+  assert.equal(values.has("picture"), false);
+  assert.deepEqual(await offered(), [[photo, ["savedValue"]]]);
+
+  const first = runtime.activatePlayerRuntimeButton(host.session.value!);
+  assert.ok(first);
+  host.update(first.session);
+  await settle();
+  assert.equal(values.get("picture"), photo);
+  host.reportHostError(new TypeError("A component failed."));
+  // Back shows First again, without the photo saved; the export replays the calls up to the error.
+  assert.equal(await rewind.back(0), true);
+  assert.equal(label(), "First");
+  const candidate = await host.debugExportCandidate(shown);
+  assert.deepEqual(
+    candidate.photos.map((each) => [each.reference, each.usedBy.map((use) => use.relation)]),
+    [[photo, ["savedValue"]]],
+  );
+  let choices = NO_PERSONAL_CONTENT;
+  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
+    choices = chooseDebugCategory(choices, candidate, category, true);
+  const { exported } = await assembleDebugExport(candidate, chooseDebugPhoto(choices, photo, true));
+  const read = parseDebugExport(await (await debugExportFile(exported, false)).text());
+  assert.equal(replayDebugExport(read).kind, "reproduced");
+  assert.deepEqual(
+    read.photos.map((each) => [each.reference, each.data]),
+    [[photo, bytes]],
   );
 });

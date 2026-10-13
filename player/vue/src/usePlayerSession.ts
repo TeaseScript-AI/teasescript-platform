@@ -1901,9 +1901,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         rewoundWhileDebugging: rewound.value,
         ...shown,
       };
-      const storage = (snapshot ?? recording?.endSnapshot)?.scriptStorage ?? [];
       const photos: DebugPhotoCandidate[] = [];
-      for (const [reference, usedBy] of debugPhotoUses(frozen.recording, storage)) {
+      for (const [reference, usedBy] of debugPhotoUses(frozen)) {
         const record = await capturedMedia.read(reference);
         if (record === null || record.kind !== "image") continue;
         photos.push({
