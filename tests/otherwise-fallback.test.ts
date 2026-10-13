@@ -219,6 +219,83 @@ test("a fallback keeps a value that held only null where a later value decides i
   );
 });
 
+test("a copy of a value of unknown type from a list or dict makes nothing null where it goes (#859)", () => {
+  // The importer's reduction of a helper that fills a list from a parameter without a type and stores elements back.
+  assert.deepEqual(
+    diagnostics(`function sexscriptLegacyRandom(limit) {
+  return 0
+}
+function shuffle(deck, ndeck) {
+  let newdeckValue = []
+  let i = 0
+  while i < ndeck {
+    if i < newdeckValue.length {
+      newdeckValue.add(deck[i])
+    }
+    let j = sexscriptLegacyRandom(ndeck)
+    let temp = newdeckValue[i]
+    if j < newdeckValue.length {
+      newdeckValue[j] = temp
+      newdeckValue.add(temp)
+    }
+  }
+  return newdeckValue
+}
+let imp: string[] = ["a", "b"]
+imp = shuffle(imp, 2)
+exit`),
+    [],
+  );
+  /** What a script that compiles without errors says, and the code of its failure. */
+  const ran = (source: string): [string[], string | null] => {
+    const compiled = compileSource(source);
+    const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+    assert.deepEqual(errors, [], source);
+    const result = run(compiled.plan!, createImmediatePacingRuntimeSnapshot(compiled.plan!));
+    return [said(result.events), result.snapshot.failure?.code ?? null];
+  };
+  // The elements are values of unknown type, which a typed place checks when the script runs. A copy of one goes back
+  // twice, through a list literal, through a branch that may replace it, through a list that text decides, and after a
+  // null check.
+  const holders = [
+    {
+      start: "let out = []\n    out.add(deck[0])\n    out.add(deck[1])",
+      at: (index: number) => `out[${index}]`,
+      result: "out",
+    },
+    {
+      start: 'let out = dict{}\n    out["a"] = deck[0]\n    out["b"] = deck[1]',
+      at: (index: number) => `out["${"ab"[index]}"]`,
+      result: '[out["a"], out["b"]]',
+    },
+  ];
+  const forms: ((at: (index: number) => string) => string)[] = [
+    (at) => `let temp = ${at(0)}\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+    (at) =>
+      `let temp = ${at(0)}\n    let pair = [temp, temp]\n    ${at(1)} = pair[0]\n    ${at(0)} = pair[1]`,
+    (at) =>
+      `let temp = ${at(0)}\n    if deck.length > 5 {\n        temp = ${at(1)}\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+    (at) =>
+      `let temp = ${at(0)}\n    let other = []\n    other.add(temp)\n    other.add("x")\n    ${at(1)} = other[0]\n    ${at(0)} = other[0]`,
+    (at) =>
+      `let temp = ${at(0)}\n    if temp == null {\n        temp = "z"\n    }\n    ${at(1)} = temp\n    ${at(0)} = temp`,
+  ];
+  for (const holder of holders)
+    for (const form of forms) {
+      const script = (deck: string) =>
+        `function helper(deck) {\n    ${holder.start}\n    ${form(holder.at)}\n    return ${holder.result}\n}\nlet imp: string[] = ["p", "q"]\nimp = helper(${deck})\nsay imp[0] + imp[1]\nexit`;
+      const label = script('["a", "b"]');
+      assert.deepEqual(ran(label), [["aa"], null], label);
+      assert.deepEqual(ran(script("[1, 2]")), [[], "TSR058"], label);
+      assert.deepEqual(ran(script("[null, null]")), [[], "TSR058"], label);
+    }
+  // A copy that the function returns.
+  const first = (deck: string) =>
+    `function first(deck) {\n    let out = []\n    out.add(deck[0])\n    let temp = out[0]\n    return temp\n}\nlet name: string = first(${deck})\nsay name\nexit`;
+  assert.deepEqual(ran(first('["a"]')), [["a"], null]);
+  assert.deepEqual(ran(first("[null]")), [[], "TSR058"]);
+});
+
 test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
   const source = (value: string) =>
     `${HIDE}let count: integer? = hide(1)

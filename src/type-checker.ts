@@ -1118,7 +1118,7 @@ class TypeChecker {
       // Without a decision, a value the compiler cannot know that reached the slot is replayed instead: it decides
       // nothing, but earlier reads then know that the slot may hold such a value.
       const held = unknown.get(slot);
-      const type =
+      const decided =
         decider === null || decider === undefined
           ? undefined
           : !undecided(decider)
@@ -1126,6 +1126,9 @@ class TypeChecker {
             : replayable(decider)
               ? detachedType(decider.resolved!)
               : undefined;
+      // A variable's copy of a value the compiler cannot know may hold null (see `nullFromUnknown`).
+      const type =
+        decided !== undefined && decider!.nullFromUnknown === true ? optional(decided) : decided;
       const decision: Decision | undefined =
         type !== undefined
           ? { type, at: slot.resolvedAt ?? decider!.resolvedAt! }
@@ -2005,15 +2008,15 @@ class TypeChecker {
     if (statement.typeAnnotation === null) {
       // A copy of a place that no value decided yet but that held a value the compiler cannot know, such as an element
       // of `[]` after `add(load(key, default: null))`, holds that value too, which may be null: the value that later
-      // decides the variable's own copy decides it as optional, and the copied value is checked against the type it
-      // decides when the script runs, as a store of it would be (#859).
+      // decides the variable's own copy decides it as optional (see `nullFromUnknown`), and the copied value is checked
+      // against the type it decides when the script runs, as a store of it would be (#859).
       const held = members(value).some(
         (part) => part.kind === "open" && part.heldUnknown !== undefined,
       );
       type = held ? placeType(value) : this.#newPlaceType(written, value);
       if (held)
         for (const part of members(type))
-          if (part.kind === "open" && part.heldUnknown !== undefined) part.sawNull = true;
+          if (part.kind === "open" && part.heldUnknown !== undefined) part.nullFromUnknown = true;
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);

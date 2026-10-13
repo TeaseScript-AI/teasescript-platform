@@ -79,6 +79,14 @@ export interface OpenType {
    * (ADR 0021 rule 1.7), but what the slot holds is then checked at runtime where a known type is required.
    */
   heldUnknown?: SourceSpan;
+  /**
+   * For a variable's own copy of a slot that held a value the compiler cannot know, which may be null (#859): where a
+   * read saw the copy undecided, the type that a later value decides is taken over as optional, as after a first null,
+   * by the next check and by the places that share the decision. Unlike {@link sawNull}, it does not make the decision
+   * optional at once, which a null test before the deciding value could not narrow, and a copy of the slot does not
+   * keep it: where the variable's value goes while undecided, it is a value the compiler cannot know like any other.
+   */
+  nullFromUnknown?: boolean;
 }
 
 let decisions = 0;
@@ -726,9 +734,13 @@ function* settleTask(
       // The slot may still hold the value the compiler cannot know when the script runs, with any properties.
       openTables(value);
       // Another place that is still undecided decides nothing yet, so the slot may still hold the value the compiler
-      // cannot know that it held: the copy of that place keeps it, since reading the slot now reads the copy.
-      if (decidedValue(value).kind === "never")
+      // cannot know that it held: the copy of that place keeps it, and that it may be null, since reading the slot now
+      // reads the copy.
+      if (decidedValue(value).kind === "never") {
         yield* compileChild(heldUnknownTask(value, target.heldUnknown));
+        if (target.nullFromUnknown === true)
+          for (const part of members(value)) if (part.kind === "open") part.nullFromUnknown = true;
+      }
     }
     return;
   }
