@@ -194,6 +194,11 @@ export interface RuntimeDebugTraceStatus {
   /** The oldest and newest retained record IDs, or `null` without records; IDs in between are consecutive. */
   readonly firstRecord: number | null;
   readonly lastRecord: number | null;
+  /**
+   * The ID the next record gets, also once records were released or dropped: the records that an instruction or an
+   * operation makes have the IDs from this value before it up to, but not including, this value after it.
+   */
+  readonly nextRecord: number;
   readonly accountedBytes: number;
   /** Whether older records of this epoch have been dropped. */
   readonly truncated: boolean;
@@ -1601,6 +1606,7 @@ export class TraceStore {
       records: this.#records.length - this.#retained,
       firstRecord: this.#records[this.#retained]?.id ?? null,
       lastRecord: this.#records.length > this.#retained ? this.#records.at(-1)!.id : null,
+      nextRecord: this.#nextId,
       accountedBytes: this.#bytes,
       truncated: this.#truncated,
       draws: this.#draws,

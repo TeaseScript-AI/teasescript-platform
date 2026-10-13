@@ -1801,7 +1801,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   nothing. A released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge
   toward the accounted bytes while the index names it, until the bounds drop it with its index entries. `release` works
   between operations, also after one threw, and in an instruction observer's callbacks; while an operation otherwise
-  runs, as in a builtin, `randomControl.decide`, or `capturedMedia.holds`, it does nothing.
+  runs, as in a builtin, `randomControl.decide`, or `capturedMedia.holds`, it does nothing. `status()` counts and names
+  retained records only; its `nextRecord`, the ID the next record gets, stays meaningful after a release: the records an
+  instruction or an operation made have the IDs from `nextRecord` before it up to `nextRecord` after it.
 - **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),

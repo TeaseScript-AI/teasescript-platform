@@ -1833,6 +1833,70 @@ test("release works once an operation that threw has unwound, and does nothing i
   }
 });
 
+test("status names the retained records and the next record ID, before any record and after a release", () => {
+  const plan = compile("let total = 0\nrepeat 3 {\n    total += 1\n}\nexit");
+  const trace = new RuntimeDebugContext();
+  const range = () => {
+    const { records, firstRecord, lastRecord, nextRecord } = trace.status();
+    return { records, firstRecord, lastRecord, nextRecord };
+  };
+  assert.deepEqual(range(), { records: 0, firstRecord: null, lastRecord: null, nextRecord: 1 });
+  const session = createFreshRuntimeSession(plan, {
+    seed: SEED,
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+  });
+  // What each instruction made, as the next record ID before and after it; the records must be exactly those.
+  const made: number[][] = [];
+  let next = 0;
+  session.run({
+    debugTrace: trace,
+    instructionObserver: {
+      before: () => {
+        next = trace.status().nextRecord;
+      },
+      after: () => {
+        const status = range();
+        made.push(Array.from({ length: status.nextRecord - next }, (_, index) => next + index));
+        if (status.records === 0) return;
+        // Release the oldest record, then all of them: the next ID stays.
+        trace.release(status.firstRecord!);
+        assert.deepEqual(range(), {
+          records: status.records - 1,
+          firstRecord: status.records === 1 ? null : status.firstRecord! + 1,
+          lastRecord: status.records === 1 ? null : status.lastRecord,
+          nextRecord: status.nextRecord,
+        });
+        trace.release(status.lastRecord!);
+        assert.deepEqual(range(), {
+          records: 0,
+          firstRecord: null,
+          lastRecord: null,
+          nextRecord: status.nextRecord,
+        });
+      },
+    },
+  });
+  const kept = new RuntimeDebugContext();
+  createFreshRuntimeSession(plan, {
+    seed: SEED,
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+  }).run({ debugTrace: kept });
+  assert.deepEqual(
+    made.flat(),
+    records(kept).map((entry) => entry.id),
+  );
+  assert.deepEqual(range(), {
+    records: 0,
+    firstRecord: null,
+    lastRecord: null,
+    nextRecord: kept.status().nextRecord,
+  });
+});
+
 test("paused and resumed draws name the released versions that a trace releasing nothing names", () => {
   const plan = compile(
     [
