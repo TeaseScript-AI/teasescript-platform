@@ -13,6 +13,7 @@ import type {
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import {
   askOperands,
+  expressionChildren,
   sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
@@ -1143,7 +1144,10 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
 }
 
 function formatSay(source: string, node: SayParts, edits: OffsetEdit[]): void {
-  const tokens = lex(source.slice(node.span.start.offset, node.span.end.offset)).tokens.filter(
+  const tokens = lex(
+    source.slice(node.span.start.offset, node.span.end.offset),
+    sayRegexStarts(node),
+  ).tokens.filter(
     (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
   );
   const absolute = (token: Token) => ({
@@ -1167,6 +1171,22 @@ function formatSay(source: string, node: SayParts, edits: OffsetEdit[]): void {
     )
       whitespaceEdit(source, l.end, r.start, " ", edits);
   }
+}
+
+/**
+ * Where the regex literals of a `say` start, from its start: the parse may have found them where the token before does
+ * not tell, so that lexing its text alone takes them for division (V30 §8).
+ */
+function sayRegexStarts(node: SayParts): Set<number> {
+  const starts = new Set<number>();
+  const pending: Expression[] = [...sayOperands(node)];
+  for (let expression = pending.pop(); expression !== undefined; expression = pending.pop()) {
+    if (expression.kind === "regexLiteral")
+      starts.add(expression.span.start.offset - node.span.start.offset);
+    // One by one: a wide list must not depend on the host's argument-spread limit.
+    else for (const child of expressionChildren(expression)) pending.push(child);
+  }
+  return starts;
 }
 
 function tokenIsSayModifier(token: Token): boolean {

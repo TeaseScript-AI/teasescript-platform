@@ -12,10 +12,15 @@ const REGEX_FLAGS = "ims";
 /**
  * The most instructions a regex may compile to, and the most groups it may capture. Both bound the work and memory of
  * one search on top of its linear time, and the size is checked before compiling, since repeats such as `a{1000}`
- * expand when a regex compiles. See `docs/RESOURCE-LIMITS.md`.
+ * expand when a regex compiles. The longest pattern, in UTF-16 code units, bounds what RE2 reads to parse it, which a
+ * long character class does not add to the size. See `docs/RESOURCE-LIMITS.md`.
  */
 export const MAX_REGEX_SIZE = 10_000;
 export const MAX_REGEX_GROUPS = 100;
+export const MAX_REGEX_LENGTH = 10_000;
+
+/** RE2 adds two instructions to every program, beyond its estimate of the pattern. */
+const PROGRAM_FRAME = 2;
 
 /** The flags in their canonical order, for flags that are valid. */
 export function canonicalRegexFlags(flags: string): string {
@@ -64,7 +69,18 @@ export function compileRegex(source: string, flags: string): RegexCompileResult 
     programs.set(key, cached);
     return { ok: true, program: cached };
   }
-  const estimate = regexSizeEstimate(source);
+  if (source.length > MAX_REGEX_LENGTH)
+    return {
+      ok: false,
+      problem: `This regex is too long: a regex may have at most ${groupedDigits(MAX_REGEX_LENGTH)} characters. Use a shorter pattern.`,
+    };
+  const surrogate = surrogateInPattern(source);
+  if (surrogate !== null)
+    return {
+      ok: false,
+      problem: `A regex cannot hold half of a character: '\\x{${surrogate.toString(16).toUpperCase()}}' is a surrogate, which stands for half of a character such as an emoji. Write the whole character, as in '\\x{1F600}'.`,
+    };
+  const estimate = regexSizeEstimate(source) + PROGRAM_FRAME;
   if (estimate > MAX_REGEX_SIZE) return { ok: false, problem: tooLargeMessage(estimate) };
   const compiled = compileRegexProgram(source, flags);
   if (!compiled.ok)
@@ -93,7 +109,58 @@ export function compileRegex(source: string, flags: string): RegexCompileResult 
 }
 
 function tooLargeMessage(size: number): string {
-  return `This regex is too large: with its repeats written out it has about ${groupedDigits(size)} steps, and a regex may have at most ${groupedDigits(MAX_REGEX_SIZE)}. Use smaller or fewer repeat counts such as '{100}'.`;
+  return `This regex is too large: with its repeats written out it has ${size >= ESTIMATE_CEILING ? "more than a million" : `about ${groupedDigits(size)}`} steps, and a regex may have at most ${groupedDigits(MAX_REGEX_SIZE)}. Use smaller or fewer repeat counts such as '{100}'.`;
+}
+
+/**
+ * The first surrogate, U+D800 to U+DFFF, that the pattern holds as a character of its own: alone in its text, also in
+ * `\Q...\E`, or written as `\x{D800}` to `\x{DFFF}`; `null` when there is none. Text holds a surrogate as half of a
+ * character, or alone, and RE2's search for a pattern's leading text can start inside a pair, so such a pattern would
+ * match half of a character in some searches and not in others.
+ */
+function surrogateInPattern(source: string): number | null {
+  const width = (at: number): number => (pairedAt(source, at) ? 2 : 1);
+  const lone = (at: number): number | null => {
+    const unit = source.charCodeAt(at);
+    return isSurrogate(unit) && !pairedAt(source, at) ? unit : null;
+  };
+  let index = 0;
+  while (index < source.length) {
+    if (source.startsWith("\\Q", index)) {
+      // Quoted text holds no escapes, up to `\E` or the end.
+      const close = source.indexOf("\\E", index + 2);
+      const end = close < 0 ? source.length : close;
+      for (let at = index + 2; at < end; at += width(at)) if (lone(at) !== null) return lone(at);
+      index = close < 0 ? source.length : close + 2;
+      continue;
+    }
+    if (source.startsWith("\\x{", index)) {
+      const close = source.indexOf("}", index + 3);
+      if (close < 0) return null;
+      const digits = source.slice(index + 3, close);
+      const value = /^[0-9A-Fa-f]{1,8}$/u.test(digits) ? Number.parseInt(digits, 16) : -1;
+      if (value >= 0xd800 && value <= 0xdfff) return value;
+      index = close + 1;
+      continue;
+    }
+    // An escaped character is checked as itself.
+    if (source[index] === "\\") index += 1;
+    if (index >= source.length) break;
+    if (lone(index) !== null) return lone(index);
+    index += width(index);
+  }
+  return null;
+}
+
+function isSurrogate(unit: number): boolean {
+  return unit >= 0xd800 && unit <= 0xdfff;
+}
+
+/** Whether the high surrogate at `index` starts a pair; a low surrogate there never does. */
+function pairedAt(text: string, index: number): boolean {
+  const unit = text.charCodeAt(index);
+  const next = text.charCodeAt(index + 1);
+  return unit >= 0xd800 && unit <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
 }
 
 /** A message for RE2's description of a pattern it rejects, explaining the features that RE2 leaves out on purpose. */
@@ -122,33 +189,29 @@ function syntaxMessage(error: string, fragment: string): string {
  */
 export function regexSizeEstimate(source: string): number {
   interface Group {
-    /** The sizes of the finished alternatives, and how many there are. */
+    /** The size of the finished alternatives, with 1 for each `|`. */
     alternatives: number;
-    bars: number;
-    /** The size of the current alternative and of its last item, which a repeat applies to. */
-    sequence: number;
+    /** The size of the current alternative before its last item, and of that item, which a repeat applies to. */
+    before: number;
     last: number;
     readonly capturing: boolean;
   }
-  const open = (capturing: boolean): Group => ({
-    alternatives: 0,
-    bars: 0,
-    sequence: 0,
-    last: 0,
-    capturing,
-  });
+  const open = (capturing: boolean): Group => ({ alternatives: 0, before: 0, last: 0, capturing });
   const groups: Group[] = [open(false)];
   let group = groups[0]!;
+  // Sizes stop growing at a ceiling far above any limit, so that nested repeats never overflow a number, and every
+  // step only adds and multiplies, so a size over a limit stays over it.
+  const sum = (left: number, right: number): number => Math.min(left + right, ESTIMATE_CEILING);
+  const times = (count: number, size: number): number => Math.min(count * size, ESTIMATE_CEILING);
+  const sequence = (current: Group): number => Math.max(1, sum(current.before, current.last));
   const item = (size: number): void => {
-    group.sequence += size;
+    group.before = sum(group.before, group.last);
     group.last = size;
   };
   const repeat = (size: number): void => {
-    group.sequence += size - group.last;
     group.last = size;
   };
-  const total = (finished: Group): number =>
-    finished.alternatives + Math.max(1, finished.sequence) + finished.bars;
+  const total = (finished: Group): number => sum(finished.alternatives, sequence(finished));
   let index = 0;
   while (index < source.length) {
     const character = source[index]!;
@@ -181,21 +244,20 @@ export function regexSizeEstimate(source: string): number {
       if (groups.length > 1) {
         const closed = groups.pop()!;
         group = groups.at(-1)!;
-        item(total(closed) + (closed.capturing ? 2 : 0));
+        item(sum(total(closed), closed.capturing ? 2 : 0));
       }
       index += 1;
       continue;
     }
     if (character === "|") {
-      group.alternatives += Math.max(1, group.sequence);
-      group.bars += 1;
-      group.sequence = 0;
+      group.alternatives = sum(group.alternatives, sum(sequence(group), 1));
+      group.before = 0;
       group.last = 0;
       index += 1;
       continue;
     }
     if (character === "*" || character === "+" || character === "?") {
-      repeat(group.last + (character === "*" ? 2 : 1));
+      repeat(sum(group.last, character === "*" ? 2 : 1));
       index += source[index + 1] === "?" ? 2 : 1;
       continue;
     }
@@ -215,9 +277,9 @@ export function regexSizeEstimate(source: string): number {
         repeat(
           max === -1
             ? min === 0
-              ? group.last + 2
-              : min * group.last + 1
-            : max * group.last + (max - min),
+              ? sum(group.last, 2)
+              : sum(times(min, group.last), 1)
+            : sum(times(max, group.last), max - min),
         );
       index += counts[0].length;
       index += source[index] === "?" ? 1 : 0;
@@ -240,12 +302,17 @@ export function regexSizeEstimate(source: string): number {
     item(1);
     index = character === "\\" ? escapeEnd(source, index) : index + codePointWidth(source, index);
   }
+  // An unclosed group counts as a capturing one; RE2 rejects it anyway.
   while (groups.length > 1) {
     const closed = groups.pop()!;
-    groups.at(-1)!.sequence += total(closed) + 2;
+    group = groups.at(-1)!;
+    item(sum(total(closed), 2));
   }
   return total(groups[0]!);
 }
+
+/** Where size estimates stop growing: far above any limit, and small enough to multiply exactly. */
+const ESTIMATE_CEILING = 1_000_000;
 
 /** The end of the class that starts with `[` at `start`, as RE2 reads it, or -1 when it does not end. */
 function classEnd(source: string, start: number): number {
@@ -253,11 +320,13 @@ function classEnd(source: string, start: number): number {
   if (source[index] === "^") index += 1;
   // A `]` right after the opening `[` or `[^` is a character of the class.
   let first = true;
+  // The next `:]`, searched for again only once a named class has been passed, so the search stays linear.
+  let named = -2;
   while (index < source.length) {
     if (source[index] === "]" && !first) return index + 1;
     first = false;
     if (source.startsWith("[:", index)) {
-      const named = source.indexOf(":]", index);
+      if (named !== -1 && named < index) named = source.indexOf(":]", index);
       if (named >= 0) {
         index = named + 2;
         continue;

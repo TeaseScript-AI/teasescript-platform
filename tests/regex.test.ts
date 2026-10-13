@@ -5,7 +5,12 @@ import { compileSource } from "../src/compiler.js";
 import { lex } from "../src/lexer.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileRegexProgram } from "../src/regex-engine.js";
-import { MAX_REGEX_GROUPS, MAX_REGEX_SIZE, regexSizeEstimate } from "../src/regex.js";
+import {
+  MAX_REGEX_GROUPS,
+  MAX_REGEX_LENGTH,
+  MAX_REGEX_SIZE,
+  regexSizeEstimate,
+} from "../src/regex.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
@@ -167,6 +172,20 @@ test("toRegex makes a regex of pattern text, or gives its default for text that 
     ),
     ["/\\d+/ true", "/(?i)ab/", "null /x/ null", "/too large/", "/too many groups/", "/none/ true"],
   );
+  // A pattern whose repeats nest far beyond the limits gives the default as well.
+  const deep = "(?:".repeat(103) + "a" + "){1000}".repeat(103);
+  assert.deepEqual(said(`say toRegex("${deep}", default: null)`), ["null"]);
+  // The pattern is evaluated before the default, and the default also when it is not needed.
+  assert.deepEqual(
+    said(
+      "let order: string[] = []",
+      'function pattern {\n  order.add("pattern")\n  return "a"\n}',
+      'function backup {\n  order.add("default")\n  return /b/\n}',
+      "let r = toRegex(pattern(), default: backup())",
+      'say "${r} ${order.join()}"',
+    ),
+    ["/a/ pattern, default"],
+  );
   // Text that is not text, which only the runtime can know, gives the default too.
   const unknown = runWithGlobals("say toRegex(value, default: /d/)\nexit", { value: 4 });
   assert.equal(unknown.snapshot.failure, null);
@@ -214,8 +233,25 @@ test("lexing tells a regex from division and comments by whether an operand is e
       'say "x".contains(',
       "  /x/",
       ")",
+      // A `/` where RE2 reads a named class or quoted text does not end the literal.
+      'say "${"/".matches(/[[:alpha:]/]/)} ${"/".matches(/[^[:space:]/]/)} ${"[".matches(/\\Q[\\E/)} ${"a/b".matches(/\\Qa/b\\E/)}"',
     ),
-    ["4 4 6 3 4 1", "4", "true", "true", "true", "true true false", "true"],
+    ["4 4 6 3 4 1", "4", "true", "true", "true", "true true false", "true", "true false true true"],
+  );
+  // Where the grammar expects a value after a word, as after a speaker or a message mode, the parse finds the regex.
+  assert.deepEqual(
+    said(
+      "speaker vera {}",
+      "say as vera /a/",
+      "say prose() /b/",
+      'say prose(align: "center") /c/',
+      "say skippable /d/",
+      "let w = say as vera /e/",
+      // A word that can be a value keeps dividing: a say reads a value before a mode or skip word.
+      "let prose = 8",
+      "say prose / 2",
+    ),
+    ["/a/", "/b/", "/c/", "/d/", "/e/", "4"],
   );
   const kinds = (source: string) =>
     lex(source)
@@ -313,7 +349,7 @@ test("a regex literal is checked when the script compiles, with an explanation",
     ["/a{1001}/", "This regex is not valid: invalid repeat count in '{1001}'.", "/a{1001}/"],
     [
       `/${"a{1000}".repeat(11)}/`,
-      `This regex is too large: with its repeats written out it has about 11,000 steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.`,
+      `This regex is too large: with its repeats written out it has about 11,002 steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.`,
       `/${"a{1000}".repeat(11)}/`,
     ],
     [
@@ -511,7 +547,7 @@ test("stored and restored regex values are validated, with RE2 and the regex lim
     ],
     [
       { kind: "list", items: [{ kind: "regex", source: "a{1000}".repeat(11), flags: "" }] },
-      "$.items[0] contains a regex that cannot be used: This regex is too large: with its repeats written out it has about 11,000 steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.",
+      "$.items[0] contains a regex that cannot be used: This regex is too large: with its repeats written out it has about 11,002 steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.",
     ],
   ] as const)
     assert.equal(validateSerializableValue(value), failure, JSON.stringify(value));
@@ -565,4 +601,106 @@ test("the size estimate is at least what RE2 compiles, so the limit is checked b
     assert.ok(regexSizeEstimate(pattern) + 2 >= compiled.program.size, pattern);
   }
   assert.equal(regexSizeEstimate("a{1000}".repeat(10)), MAX_REGEX_SIZE);
+});
+
+test("a pattern cannot hold half of a character, and text with lone surrogates is searched by code point", () => {
+  const half =
+    "A regex cannot hold half of a character: '\\x{D83D}' is a surrogate, which stands for half of a character such as an emoji. Write the whole character, as in '\\x{1F600}'.";
+  assert.deepEqual(diagnostics("let r = /(\\x{D83D})/\nexit"), [["TSV063", half, "/(\\x{D83D})/"]]);
+  assert.equal(firstDiagnostic("let r = /[\\x{DE00}]/\nexit")?.[0], "TSV063");
+  // Quoted or escaped, the same characters are text.
+  assert.deepEqual(diagnostics("let r = /\\Q\\x{D83D}\\E|\\\\x{D83D}/\nexit"), []);
+  // From text, and with a lone surrogate written in the text, the pattern gives the default.
+  assert.deepEqual(
+    said(
+      'say "${toRegex("\\\\x{D83D}", default: null)} ${toRegex("\\\\x{1F600}", default: null)}"',
+    ),
+    ["null /\\x{1F600}/"],
+  );
+  const plan = compileValidPlan("let r = toRegex(pattern, default: /none/)\nsay r\nexit", {
+    globals: ["pattern"],
+  });
+  const lone = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { globals: { pattern: "\uD83D" } }),
+  );
+  assert.deepEqual(sayTexts(lone), ["/none/"]);
+  // Every search agrees: a lone surrogate in text is one character, and half of a pair is none.
+  const searches = (text: string) =>
+    runWithGlobals(
+      [
+        "let r = /[\\x{D7FF}-\\x{E000}]/",
+        'say "${text.contains(r)} ${text.find(r) != null} ${text.capture(r) != null} ${text.indexOf(r)} ${text.matches(r)}"',
+        'say "${text.matches(/./)} ${text.indexOf(/x/)}"',
+        "exit",
+      ].join("\n"),
+      { text },
+    );
+  assert.deepEqual(sayTexts(searches("😀x")), ["false false false null false", "false 1"]);
+  assert.deepEqual(sayTexts(searches("\uD83Dx")), ["true true true 0 false", "false 1"]);
+  assert.deepEqual(sayTexts(searches("\uDE00")), ["true true true 0 true", "true null"]);
+});
+
+test("\\d, \\w, and \\s match ASCII characters, and Unicode properties match every script", () => {
+  assert.deepEqual(
+    said(
+      'say "${"٣".matches(/\\d/)} ${"é".matches(/\\w/)} ${"\u00a0".matches(/\\s/)} ${"٣".matches(/\\p{Nd}/)} ${"é".matches(/\\p{L}/)}"',
+    ),
+    ["false false false true true"],
+  );
+});
+
+test("the program-size limit holds at exactly 10,000 instructions, and long patterns are refused before compiling", () => {
+  // `a{1000}` nine times and `a{998}` compile to 10,000 instructions; one character more is over the limit.
+  const largest = "a{1000}".repeat(9) + "a{998}";
+  const compiled = compileRegexProgram(largest, "");
+  assert.ok(compiled.ok && compiled.program.size === MAX_REGEX_SIZE);
+  assert.deepEqual(diagnostics(`let r = /${largest}/\nexit`), []);
+  assert.equal(
+    firstDiagnostic(`let r = /${largest}a/\nexit`)?.[1],
+    "This regex is too large: with its repeats written out it has about 10,001 steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.",
+  );
+  assert.equal(
+    firstDiagnostic(`let r = /(?:${"(?:".repeat(103)}a${"){1000}".repeat(103)})/\nexit`)?.[1],
+    "This regex is too large: with its repeats written out it has more than a million steps, and a regex may have at most 10,000. Use smaller or fewer repeat counts such as '{100}'.",
+  );
+  // A long class compiles to one instruction, but RE2 reads all of it: the pattern's length is limited too.
+  assert.deepEqual(diagnostics(`let r = /[${"a".repeat(MAX_REGEX_LENGTH - 2)}]/\nexit`), []);
+  assert.deepEqual(
+    firstDiagnostic(`let r = /[${"a".repeat(MAX_REGEX_LENGTH - 1)}]/\nexit`)?.slice(0, 2),
+    [
+      "TSV063",
+      "This regex is too long: a regex may have at most 10,000 characters. Use a shorter pattern.",
+    ],
+  );
+});
+
+test("searching and compiling leave the case methods the host had, and never ask the host for a character's case", () => {
+  const lower = String.prototype.toLowerCase;
+  const upper = String.prototype.toUpperCase;
+  let hostCalls = 0;
+  // Methods a page may have installed before: each counts the single characters from U+0080 on it is asked about.
+  const counting = (native: () => string) =>
+    function (this: string): string {
+      const text = `${this}`;
+      if (text.codePointAt(0)! >= 0x80 && [...text].length === 1) hostCalls += 1;
+      return native.call(text);
+    };
+  const installedLower = counting(lower);
+  const installedUpper = counting(upper);
+  String.prototype.toLowerCase = installedLower;
+  String.prototype.toUpperCase = installedUpper;
+  try {
+    // Fresh patterns, which compile now: ignoring case, a class of two characters, and one RE2 rejects.
+    const result = runValidSource(
+      'say "${"Ꞩ".matches(/ꞩ/i)} ${"☃".matches(/[☁☃]/)} ${toRegex("(?i)(ɥ", default: null)}"\nexit',
+    );
+    assert.deepEqual(sayTexts(result), ["true true null"]);
+    assert.equal(String.prototype.toLowerCase, installedLower);
+    assert.equal(String.prototype.toUpperCase, installedUpper);
+    assert.equal(hostCalls, 0);
+  } finally {
+    String.prototype.toLowerCase = lower;
+    String.prototype.toUpperCase = upper;
+  }
 });

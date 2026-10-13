@@ -1574,13 +1574,15 @@ playground answers each file store as `failed`.
 ## Regexes
 
 The regex searches and `toRegex` ([V30 §8](specifications/accepted-syntaxes-v30.md#regexes)) are pure core built-ins
-that run in one instruction with RE2 through `re2js`, never native `RegExp`. A regex value is plain data,
-`{ kind: "regex", source, flags }` with valid flags in the order `i`, `m`, `s`; plan, snapshot, checkpoint, storage,
-and host-data validation compile it within the [regex limits](RESOURCE-LIMITS.md#retained-poc-policies-and-defaults),
-so a pattern RE2 rejects is malformed data there. Compiled programs are a cache outside any state. RE2 reports UTF-16
-offsets, and `indexOf` counts the code points before the match once. Ignoring case reads the pinned Unicode 17.0 case
-pairs of `src/regex-case-pairs.ts` instead of the host's `toLowerCase` and `toUpperCase`, so every host folds alike.
-A search within the limits takes time proportional to its text and counts as one instruction.
+that run in one instruction with RE2 through `re2js`, never native `RegExp`. A regex value is plain data, `{ kind:
+"regex", source, flags }` with valid flags in the order `i`, `m`, `s`; plan, snapshot, checkpoint, storage, and
+host-data validation compile it within the [regex limits](RESOURCE-LIMITS.md#retained-poc-policies-and-defaults), so a
+pattern RE2 rejects is malformed data there. Compiled programs are a cache outside any state. RE2 reports UTF-16
+offsets, and `indexOf` counts the code points before the match once. RE2's case folding, when a regex ignores case and
+when it simplifies a class of two characters, reads the pinned Unicode 17.0 case pairs of `src/regex-case-pairs.ts`
+instead of the host's `toLowerCase` and `toUpperCase`, so every host folds alike. A pattern cannot hold a surrogate as a
+character of its own, since RE2's search for a pattern's leading text can start inside a pair; text with lone surrogates
+is searched by code point. A search within the limits takes time proportional to its text and counts as one instruction.
 
 ## Runtime defaults and limits
 

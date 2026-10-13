@@ -224,6 +224,8 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
+  /** The offsets of the `/` where its parse expected a value (see `Parser.regexStarts`). */
+  readonly regexStarts: readonly number[];
   /** The statement ranges its parse recorded. */
   readonly ranges: RangeSegment;
   readonly recovered: boolean;
@@ -310,16 +312,26 @@ const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
-  const header = readScriptHeader(lex(source));
-  const parser = new Parser(header.programTokens);
-  const program = parser.parseProgram();
-
-  return Object.freeze({
-    program,
-    header: header.header,
-    diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
-    statementRanges: Object.freeze(parser.statementRanges()),
-  });
+  // A `/` where the grammar expects a value starts a regex literal (V30 §8). The lexer tells most such places from the
+  // token before; where a parse with errors expected a value at a `/` that the lexer took for division, the source is
+  // lexed and parsed again with a regex there, until no new one appears. A parse without errors is never changed.
+  const regexStarts = new Set<number>();
+  for (;;) {
+    const header = readScriptHeader(lex(source, regexStarts));
+    const parser = new Parser(header.programTokens);
+    const program = parser.parseProgram();
+    const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
+    if (added.length > 0 && parser.diagnostics.length > 0) {
+      for (const offset of added) regexStarts.add(offset);
+      continue;
+    }
+    return Object.freeze({
+      program,
+      header: header.header,
+      diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
+      statementRanges: Object.freeze(parser.statementRanges()),
+    });
+  }
 }
 
 class Parser {
@@ -329,6 +341,11 @@ class Parser {
    * `say` value it reuses.
    */
   readonly #statementRanges: (StatementRange | RangeSegment)[] = [];
+  /**
+   * The offsets of each `/` where this parse expected a value, which a regex literal starts there; like its diagnostics,
+   * a speculative parser keeps its own.
+   */
+  readonly #regexStarts: number[] = [];
   #current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -367,6 +384,10 @@ class Parser {
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
+  }
+
+  public get regexStarts(): readonly number[] {
+    return this.#regexStarts;
   }
 
   /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
@@ -977,6 +998,7 @@ class Parser {
     );
     if (known !== undefined) {
       this.#diagnostics.push(...known.diagnostics);
+      this.#regexStarts.push(...known.regexStarts);
       this.#statementRanges.push(known.ranges);
       this.#current = known.end;
       this.#recoveredAtStatementBoundary = known.recovered;
@@ -989,6 +1011,7 @@ class Parser {
       recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
     };
     const diagnosticCount = this.#diagnostics.length;
+    const regexStartCount = this.#regexStarts.length;
     const rangeCount = this.#statementRanges.length;
     const parts = yield* parseChild(this.#parseSayParts(false));
     parsed.push({
@@ -996,6 +1019,7 @@ class Parser {
       parts,
       end: this.#current,
       diagnostics: this.#diagnostics.slice(diagnosticCount),
+      regexStarts: this.#regexStarts.slice(regexStartCount),
       ranges: { list: this.#statementRanges, from: rangeCount, to: this.#statementRanges.length },
       recovered: this.#recoveredAtStatementBoundary,
     });
@@ -4099,6 +4123,8 @@ class Parser {
         this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
       );
     }
+    // The lexer took this `/` for division, but a value starts here (see `parse`).
+    if (token.kind === TokenKind.Slash) this.#regexStarts.push(token.span.start.offset);
     return null;
   }
 

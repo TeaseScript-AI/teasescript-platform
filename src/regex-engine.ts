@@ -53,30 +53,22 @@ export function compileRegexProgram(source: string, flags: string): RegexCompila
   if (flags.includes("i")) options |= RE2JS.CASE_INSENSITIVE;
   if (flags.includes("m")) options |= RE2JS.MULTILINE;
   if (flags.includes("s")) options |= RE2JS.DOTALL;
-  // A pattern can switch ignoring case on inside itself, as in `(?i)` or `(?si:`.
-  const folds = flags.includes("i") || /\(\?[A-Za-z-]*i/u.test(source);
   let compiled: RE2JS;
   try {
-    compiled = folds
-      ? withPinnedCase(MAX_CASE_LOOKUPS, () => RE2JS.compile(source, options))
-      : RE2JS.compile(source, options);
+    compiled = withPinnedCase(MAX_CASE_LOOKUPS, () => RE2JS.compile(source, options));
   } catch (error) {
     if (error === CASE_LOOKUPS_EXCEEDED) return { ok: false, reason: "caseRanges" };
     if (!(error instanceof RE2JSSyntaxException)) throw error;
     return { ok: false, reason: "syntax", error: error.error, fragment: error.input ?? source };
   }
-  return { ok: true, program: new Re2Program(compiled, folds) };
+  return { ok: true, program: new Re2Program(compiled) };
 }
 
 class Re2Program implements RegexProgram {
   readonly size: number;
   readonly groups: number;
 
-  constructor(
-    private readonly compiled: RE2JS,
-    /** Whether matching may fold case, which then reads the pinned case pairs. */
-    private readonly folds: boolean,
-  ) {
+  constructor(private readonly compiled: RE2JS) {
     this.size = compiled.programSize();
     this.groups = compiled.groupCount();
   }
@@ -103,15 +95,12 @@ class Re2Program implements RegexProgram {
   }
 
   #run<T>(search: () => T): T {
-    return this.folds ? withPinnedCase(Infinity, search) : search();
+    return withPinnedCase(Infinity, search);
   }
 }
 
 /** Thrown out of re2js when compiling a regex makes more case lookups than it may. */
 const CASE_LOOKUPS_EXCEEDED = new Error("A regex made more case lookups than it may.");
-
-const nativeToLowerCase = String.prototype.toLowerCase;
-const nativeToUpperCase = String.prototype.toUpperCase;
 
 /** The lower case of each upper-case character of a pair, and the upper case of each lower-case one. */
 let casePairs: { readonly lower: Map<number, number>; readonly upper: Map<number, number> } | null =
@@ -136,14 +125,18 @@ function pinnedCasePairs(): NonNullable<typeof casePairs> {
 }
 
 /**
- * Runs `work` while the case of one character from U+0080 on comes from the pinned pairs instead of the host. re2js
- * folds a character outside its own table with the host's `toLowerCase` and `toUpperCase`, whose Unicode version
- * differs between browsers and their versions; it calls them on one character at a time, and only then. Every other
- * text keeps the host's methods, which are back in place when `work` returns or throws. At most `lookups` pinned
- * lookups are made: the count depends only on the pattern, so stopping there gives the same result everywhere.
+ * Runs `work`, re2js compiling or searching, while the case of one character from U+0080 on comes from the pinned pairs
+ * instead of the host. re2js folds a character outside its own table with the host's `toLowerCase` and `toUpperCase`,
+ * whose Unicode version differs between browsers and their versions, when it ignores case and when it simplifies a
+ * class of two characters; it calls them on one character at a time. Every other text keeps the methods the host had,
+ * which are back in place when `work` returns or throws. At most `lookups` pinned lookups are made: the count depends
+ * only on the pattern, so stopping there gives the same result everywhere.
  */
 function withPinnedCase<T>(lookups: number, work: () => T): T {
   const { lower, upper } = pinnedCasePairs();
+  const prototype = String.prototype;
+  const hostToLowerCase = prototype.toLowerCase;
+  const hostToUpperCase = prototype.toUpperCase;
   let remaining = lookups;
   const pinned = (pairs: Map<number, number>, native: () => string) =>
     function (this: string): string {
@@ -156,13 +149,12 @@ function withPinnedCase<T>(lookups: number, work: () => T): T {
       const partner = pairs.get(character);
       return partner === undefined ? text : String.fromCodePoint(partner);
     };
-  const prototype = String.prototype;
-  prototype.toLowerCase = pinned(lower, nativeToLowerCase);
-  prototype.toUpperCase = pinned(upper, nativeToUpperCase);
+  prototype.toLowerCase = pinned(lower, hostToLowerCase);
+  prototype.toUpperCase = pinned(upper, hostToUpperCase);
   try {
     return work();
   } finally {
-    prototype.toLowerCase = nativeToLowerCase;
-    prototype.toUpperCase = nativeToUpperCase;
+    prototype.toLowerCase = hostToLowerCase;
+    prototype.toUpperCase = hostToUpperCase;
   }
 }
