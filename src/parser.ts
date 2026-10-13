@@ -3670,9 +3670,8 @@ class Parser {
         token.lexeme === "calendar" && after.kind === TokenKind.Identifier
           ? calendarDurationUnit(after.lexeme)
           : undefined;
-      // A month or a year written out needs `calendar` here too. A short `mo` or `y` stays a name, as in `${x y}`.
-      const withoutCalendar =
-        token.lexeme.length > 2 ? calendarDurationUnit(token.lexeme) : undefined;
+      // A month or a year needs `calendar` here too, also as `mo` or `y`.
+      const withoutCalendar = calendarDurationUnit(token.lexeme);
       if (exact !== undefined) {
         this.#advance();
         result = withUnit({ calendar: false, unit: exact }, token);

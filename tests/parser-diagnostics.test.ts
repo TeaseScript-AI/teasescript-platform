@@ -221,7 +221,7 @@ test("where only text written out in quotes is allowed, a failed interpolation r
     ['goto "rooms/${}.tease"\nexit', "TSP008"],
     ['call tagged "punishment ${1 < 2 < 3}"\nexit', "TSP020"],
     ['call tagged "a ${}"\nexit', "TSP008"],
-    ['call tagged "punishment", from: "modules/${x y}"\nexit', "TSP009"],
+    ['call tagged "punishment", from: "modules/${x z}"\nexit', "TSP009"],
     ['let pool = findScripts(from: "modules/${}")\nexit', "TSP008"],
   ] as const) {
     assert.deepEqual(
