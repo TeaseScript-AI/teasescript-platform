@@ -336,7 +336,8 @@ the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
 `linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
 `randomBeta`, and `randomPert`, and the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
-`TSV020`/`TSV022` for argument counts and names; other values are checked when the operation runs.
+`TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
+with that method takes them; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, parameters, and function results keep one type, including types
