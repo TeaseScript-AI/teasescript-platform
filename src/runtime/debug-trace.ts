@@ -731,9 +731,23 @@ export class TraceStore {
     return inner;
   }
 
-  /** Makes `deps` the collector of the frame being evaluated after `child` finished, which it adds. */
+  /**
+   * Makes `deps` the collector of the frame being evaluated after `child` finished, which it adds. Into an empty
+   * collector, the finished child's causes move instead of being copied, so a chain of nested expressions collects
+   * in work proportional to its causes.
+   */
   focus(deps: DebugDependencies, child: DebugDependencies | null, merge: boolean): void {
-    if (child !== null && merge && this.#failure === null) addAll(deps, child, this.#limit());
+    if (child !== null && merge && this.#failure === null) {
+      if (deps.ids.length > 0 || deps.omitted > 0) addAll(deps, child, this.#limit());
+      else if (child !== deps) {
+        deps.ids = child.ids;
+        deps.omitted = child.omitted;
+        deps.seen = child.seen;
+        child.ids = [];
+        child.omitted = 0;
+        child.seen = undefined;
+      }
+    }
     this.acc = deps;
   }
 
