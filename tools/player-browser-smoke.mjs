@@ -75,6 +75,9 @@ const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
 // The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
 const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
 const lateImage = { hold: false, release: null };
+// The photo-colour scenario counts the requests for its photo.
+const PHOTO_COLOUR_URL = "/dev-package/photo-colour/files/images/green.svg";
+const photoColourRequests = { count: 0 };
 
 await main();
 
@@ -94,6 +97,7 @@ async function main() {
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
+    if (request.url === PHOTO_COLOUR_URL) photoColourRequests.count += 1;
     if (request.url === LATE_IMAGE_URL && lateImage.hold) {
       lateImage.hold = false;
       lateImage.release = () => handleRequest(request, response);
@@ -2509,8 +2513,8 @@ async function lateImageScenario(cdp, origin) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the green Stage photo colours the background and the theme's surfaces in
- * both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the theme's; and the
+ * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
+ * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the theme's; and the
  * empty Stage after `hideImage` gives every theme colour back.
  */
 async function photoColourScenario(cdp, origin) {
@@ -2538,8 +2542,12 @@ async function photoColourScenario(cdp, origin) {
   await navigate(cdp, `${origin}/player/?package=photo-colour`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   const theme = await value(cdp, roles);
+  photoColourRequests.count = 0;
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
+  // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
+  // caching it.
+  assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
   // Let the fade to the photo's colour end.
   await delay(900);
   const withPhoto = await value(cdp, roles);

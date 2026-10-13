@@ -1,29 +1,23 @@
-import { computed, onBeforeUnmount, ref, shallowRef, watch, watchEffect, type Ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch, watchEffect, type Ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
 import { photoColours } from "../../theme/photo-theme.js";
+import { usePhotoSwatches } from "./usePhotoSwatches";
 
 // Photo colours (PLAYER-UI.md "Stage and media presentation"): the Stage photo colours the Player.
 
 /** The photo is measured at this longest side: enough pixels for six swatches, few enough to stay cheap. */
 const MEASURE_SIDE = 128;
-/** A photo must stay this long before the Player follows it, so fast image changes do not flicker. */
-const SETTLE_MS = 200;
 /** How long the background and the message bubbles take to fade to a new photo's colour, as in `style.css`. */
 const FADE_MS = 600;
-/** The swatches of this many recent photos are kept, so a photo shown again is not measured again. */
-const CACHE_SIZE = 32;
-const cache = new Map<string, PhotoSwatches | null>();
 
-/** The photo's swatches, or `null` when the browser cannot read its pixels. */
-async function measure(source: string): Promise<PhotoSwatches | null> {
-  const image = new Image();
-  // Before the source: an image from another origin then loads readable when its server allows it, and fails to load
-  // otherwise, instead of tainting the canvas.
-  image.crossOrigin = "anonymous";
-  image.decoding = "async";
-  image.src = source;
-  await image.decode();
+/**
+ * The swatches of the photo the Stage shows, read from its own image element: the browser downloads and decodes it
+ * once, for the Stage. An image from another origin that its server does not share leaves the canvas unreadable, and
+ * this throws.
+ */
+function measure(image: HTMLImageElement): PhotoSwatches | null {
+  if (image.naturalWidth === 0 || image.naturalHeight === 0) return null;
   const scale = Math.min(1, MEASURE_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -33,43 +27,6 @@ async function measure(source: string): Promise<PhotoSwatches | null> {
   context.imageSmoothingQuality = "high";
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   return photoSwatches(context.getImageData(0, 0, canvas.width, canvas.height).data);
-}
-
-/**
- * The swatches of the Stage photo, measured once per source after it settled; `null` while the Stage shows no photo. A
- * photo whose pixels cannot be read keeps the previous photo's swatches.
- */
-function usePhotoSwatches(source: Readonly<Ref<string | null>>) {
-  const swatches = shallowRef<PhotoSwatches | null>(null);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let generation = 0;
-  watch(
-    source,
-    (src) => {
-      clearTimeout(timer);
-      const current = ++generation;
-      timer = setTimeout(async () => {
-        if (src === null) {
-          swatches.value = null;
-          return;
-        }
-        let result = cache.get(src);
-        if (result === undefined) {
-          try {
-            result = await measure(src);
-          } catch {
-            result = null;
-          }
-          cache.set(src, result);
-          if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
-        }
-        if (current === generation && result) swatches.value = result;
-      }, SETTLE_MS);
-    },
-    { immediate: true },
-  );
-  onBeforeUnmount(() => clearTimeout(timer));
-  return swatches;
 }
 
 /**
@@ -127,7 +84,13 @@ export function usePhotoColour(
     readonly stage: Readonly<Ref<HTMLElement | undefined>>;
   },
 ) {
-  const swatches = usePhotoSwatches(source);
+  // The Stage's own image of that source, while it still shows it.
+  const swatches = usePhotoSwatches(source, (src) => {
+    const image = elements.stage.value?.querySelector<HTMLImageElement>(
+      "img.stage-media:not([data-stage-preview])",
+    );
+    return image?.getAttribute("src") === src && image.complete ? measure(image) : undefined;
+  });
   const colours = computed(() =>
     swatches.value ? photoColours(swatches.value, mode.value) : null,
   );
