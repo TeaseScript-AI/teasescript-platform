@@ -43,7 +43,7 @@ interface StopHost {
   setDebugTracing(on: boolean): void;
   debugRecording(): DebugRecording | null;
   debugExportCandidate(
-    shown: Partial<Pick<DebugExportCandidate, "player" | "host">>,
+    shown: Pick<DebugExportCandidate, "player" | "host">,
   ): Promise<DebugExportCandidate>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): RuntimeAdapter.PlayerRuntimeSessionOptions;
@@ -179,6 +179,11 @@ function mount<T>(context: TestContext, create: () => T): T {
 }
 
 const settle = (milliseconds = 50) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+// What only the Player's interface adds to a debug export candidate, here nothing of note.
+const shown: Pick<DebugExportCandidate, "player" | "host"> = {
+  player: {},
+  host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+};
 const said = (host: StopHost) => host.session.value?.transcriptEntries.map((entry) => entry.text);
 
 test("a Player error stops the session where it stands, and late writes do not continue it", async (context) => {
@@ -470,7 +475,7 @@ test("after a Player error, a debug export keeps the recording up to the error t
   // Back shows an earlier state, from which the recorder begins anew; the export still shows the error's recording.
   assert.equal(await rewind.back(0), true);
   assert.deepEqual(host.debugRecording(), atError);
-  assert.deepEqual((await host.debugExportCandidate({})).recording, atError);
+  assert.deepEqual((await host.debugExportCandidate(shown)).recording, atError);
   // A new Start records its own session.
   host.prepare(create);
   await host.activate();
@@ -483,11 +488,6 @@ test("after a Player error, a debug export keeps the recording up to the error t
 
 test("a debug export offers a photo only the replay saves, also after a Player error and Back, and replays with it", async (context) => {
   stubBrowser(context);
-  // What only the Player's interface adds to the candidate, here nothing of note.
-  const shown: Pick<DebugExportCandidate, "player" | "host"> = {
-    player: {},
-    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
-  };
   const photo = "captured-media:44444444-4444-4444-8444-444444444444:1";
   const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const values = new Map<string, SerializableRuntimeValue>([["picture", photo]]);
@@ -529,11 +529,21 @@ test("a debug export offers a photo only the replay saves, also after a Player e
       { recorder, ...host.scriptStorageOptions() },
     ),
   );
-  const offered = async () =>
-    (await host.debugExportCandidate(shown)).photos.map((each) => [
-      each.reference,
-      each.usedBy.map((use) => use.relation),
-    ]);
+  // The candidate's photos with their uses, and the file with every category and the photo chosen, read back.
+  const exported = async () => {
+    const candidate = await host.debugExportCandidate(shown);
+    let choices = NO_PERSONAL_CONTENT;
+    for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
+      choices = chooseDebugCategory(choices, candidate, category, true);
+    const assembled = await assembleDebugExport(candidate, chooseDebugPhoto(choices, photo, true));
+    return {
+      offered: candidate.photos.map((each) => [
+        each.reference,
+        each.usedBy.map((use) => use.relation),
+      ]),
+      read: parseDebugExport(await (await debugExportFile(assembled.exported, false)).text()),
+    };
+  };
   const label = () => {
     const foreground = runtime.playerRuntimeForeground(host.session.value!);
     return foreground?.kind === "show-button" ? foreground.label : null;
@@ -543,7 +553,13 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   // At First, the photo is saved only in the state the recording begins with.
   assert.equal(label(), "First");
   assert.equal(values.has("picture"), false);
-  assert.deepEqual(await offered(), [[photo, ["savedValue"]]]);
+  const atFirst = await exported();
+  assert.deepEqual(atFirst.offered, [[photo, ["savedValue"]]]);
+  assert.equal(replayDebugExport(atFirst.read).kind, "reproduced");
+  assert.deepEqual(
+    atFirst.read.photos.map((each) => [each.reference, each.data]),
+    [[photo, bytes]],
+  );
 
   const first = runtime.activatePlayerRuntimeButton(host.session.value!);
   assert.ok(first);
@@ -554,19 +570,12 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   // Back shows First again, without the photo saved; the export replays the calls up to the error.
   assert.equal(await rewind.back(0), true);
   assert.equal(label(), "First");
-  const candidate = await host.debugExportCandidate(shown);
+  const afterBack = await exported();
+  assert.deepEqual(afterBack.offered, [[photo, ["savedValue"]]]);
+  assert.equal(replayDebugExport(afterBack.read).kind, "reproduced");
+  assert.ok(afterBack.read.replay!.operations.length > atFirst.read.replay!.operations.length);
   assert.deepEqual(
-    candidate.photos.map((each) => [each.reference, each.usedBy.map((use) => use.relation)]),
-    [[photo, ["savedValue"]]],
-  );
-  let choices = NO_PERSONAL_CONTENT;
-  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
-    choices = chooseDebugCategory(choices, candidate, category, true);
-  const { exported } = await assembleDebugExport(candidate, chooseDebugPhoto(choices, photo, true));
-  const read = parseDebugExport(await (await debugExportFile(exported, false)).text());
-  assert.equal(replayDebugExport(read).kind, "reproduced");
-  assert.deepEqual(
-    read.photos.map((each) => [each.reference, each.data]),
+    afterBack.read.photos.map((each) => [each.reference, each.data]),
     [[photo, bytes]],
   );
 });

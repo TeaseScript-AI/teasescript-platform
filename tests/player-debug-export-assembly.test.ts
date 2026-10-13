@@ -142,6 +142,17 @@ function continued(session: PlayerRuntimeSession): {
   return { session: restored, recorder };
 }
 
+/** The file with every category and `photos` chosen, read back; it replays. */
+async function exportedWith(frozen: DebugExportCandidate, photos: readonly string[]) {
+  let choices = all(frozen);
+  for (const photo of photos) choices = chooseDebugPhoto(choices, photo, true);
+  const read = parseDebugExport(
+    await fileText((await assembleDebugExport(frozen, choices)).exported),
+  );
+  assert.equal(replayDebugExport(read).kind, "reproduced");
+  return read;
+}
+
 async function fileText(exported: Parameters<typeof debugExportFile>[0]): Promise<string> {
   return (await debugExportFile(exported, false)).text();
 }
@@ -263,12 +274,7 @@ test("a photo the replay's state holds without a recorded use is offered without
   assert.deepEqual(offered(frozen), [[reference, []]]);
   // Photos on starts with the photos a recorded call used; the player can add this one.
   assert.deepEqual([...all(frozen).photoReferences], []);
-  const { exported } = await assembleDebugExport(
-    frozen,
-    chooseDebugPhoto(all(frozen), reference, true),
-  );
-  const read = parseDebugExport(await fileText(exported));
-  assert.equal(replayDebugExport(read).kind, "reproduced");
+  const read = await exportedWith(frozen, [reference]);
   assert.equal(read.checkpoint?.snapshot.stageImage, reference);
   assert.deepEqual(
     read.photos.map((photo) => [photo.reference, photo.data, photo.usedBy]),
@@ -276,9 +282,22 @@ test("a photo the replay's state holds without a recorded use is offered without
   );
 });
 
-test("a photo only an event or a call the export carries holds is offered, and one only older events hold is not", () => {
+test("the photos are found in the export's states as they are, so a state too long to write as one text still opens", (context) => {
+  let session = createPlayerRuntimeSession(
+    'let picture = askImage("Picture")\nshowButton "First"\nexit',
+  );
+  session = answerPlayerRuntimeImage(session, reference, admits(reference))!.session;
+  const reloaded = continued(session);
+  const frozen = candidate(reloaded.session, reloaded.recorder);
+  // As V8 refuses a text longer than it can hold, which a valid state of large texts can need.
+  context.mock.method(JSON, "stringify", () => {
+    throw new RangeError("Invalid string length");
+  });
+  assert.deepEqual(new Map(debugPhotoUses(frozen)), new Map([[reference, []]]));
+});
+
+test("a photo only an event or a call the export carries holds is offered, and the file carries it", async () => {
   const edited = "captured-media:22222222-2222-4222-8222-222222222222:1";
-  const old = "captured-media:33333333-3333-4333-8333-333333333333:1";
   // The answer's variable is gone, and a later button settled, before a reload.
   let session = createPlayerRuntimeSession(
     'if true {\n    let picture = askImage("Picture")\n}\nshowButton "First"\nshowButton "Second"\ndelete "edited"\nshowButton "Third"\nexit',
@@ -293,15 +312,43 @@ test("a photo only an event or a call the export carries holds is offered, and o
   }).session;
   session = activatePlayerRuntimeButton(session)!.session;
   assert.deepEqual(playerRuntimeSnapshot(session).scriptStorage, []);
+  const frozen = candidate(session, reloaded.recorder);
   assert.deepEqual(
-    new Map(offered(candidate(session, reloaded.recorder))),
+    new Map(offered(frozen)),
     new Map([
       [reference, []],
       [edited, []],
     ]),
   );
+  const read = await exportedWith(frozen, [reference, edited]);
+  assert.deepEqual(
+    new Map(read.photos.map((photo) => [photo.reference, photo.data])),
+    new Map([
+      [reference, photoBytes],
+      [edited, photoBytes],
+    ]),
+  );
+});
+
+test("a photo only a message of the export holds is offered, and one only older events hold is not", async () => {
+  // Said as text, then updated messages push the say out of the events the export keeps; the message stays.
+  let session = createPlayerRuntimeSession(
+    'if true {\n    let picture = askImage("Picture")\n    say "Kept ${picture}", instant\n}\nlet counter = say "Turn 0", instant\nfor turn in 1..=300 {\n    counter.text = "Turn ${turn}"\n}\nshowButton "Next"\nshowButton "Done"\nexit',
+  );
+  session = answerPlayerRuntimeImage(session, reference, admits(reference))!.session;
+  session = activatePlayerRuntimeButton(session)!.session;
+  const reloaded = continued(session);
+  const frozen = candidate(reloaded.session, reloaded.recorder);
+  assert.deepEqual(offered(frozen), [[reference, []]]);
+  const read = await exportedWith(frozen, [reference]);
+  assert.ok(JSON.stringify(read.sections["transcriptTail"]).includes(reference));
+  assert.deepEqual(
+    read.photos.map((photo) => [photo.reference, photo.data]),
+    [[reference, photoBytes]],
+  );
 
   // An answer more events ago than the export keeps, with a button settled since, is in none of its parts.
+  const old = "captured-media:33333333-3333-4333-8333-333333333333:1";
   let long = createPlayerRuntimeSession(
     'if true {\n    let picture = askImage("Picture")\n}\nfor turn in 1..=300 {\n    say "Turn ${turn}", instant\n}\nshowButton "Next"\nshowButton "Done"\nexit',
   );
