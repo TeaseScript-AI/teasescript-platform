@@ -2692,8 +2692,8 @@ These are Player controls, not transcript messages.
   file** when it allows files, **Skip** when it is written with `allowSkip: true`, and **Use image**. Until the player
   has taken a photo or chosen a file, Use image is greyed out: pointing at it or tapping it shows "Take or choose an
   image first", and a screen reader announces it as unavailable with that reason. A photo taken or a file chosen then
-  stands still on the Stage as the preview, and Use image is enabled; only Use image gives the script the image. A new
-  photo or file replaces the preview.
+  stands still on the Stage as the preview, and Use image is enabled in the accent colour; only Use image gives the
+  script the image. A new photo or file replaces the preview.
 - **Camera step.** Open camera shows the viewfinder on the Stage, or in the camera window a script shows, with neither
   the question nor a shutter on the picture. The chat then offers **Take photo**, which takes the photo at once,
   **Self-timer (5 s)**, which counts down five seconds as a large animated number from 5 to 1 over the viewfinder and
