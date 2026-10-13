@@ -46,7 +46,11 @@ import {
   validFormState,
   validFormUi,
 } from "./actions/form.js";
-import { IMAGE_ANSWER_TRANSCRIPT_TEXT, validImageRequestFields } from "../image-input.js";
+import {
+  IMAGE_ANSWER_TRANSCRIPT_TEXT,
+  IMAGE_SKIP_TEXT,
+  validImageRequestFields,
+} from "../image-input.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
@@ -952,8 +956,13 @@ function validInteractionResultForInstruction(
       isTemporalAnswer(result, ui.temporalKind)
     );
   }
+  // A skipped image request returns `null`; only a request that allowed skipping is skipped.
   if (instruction.interactionKind === "image")
-    return instruction.expectedResult === "string" && isImageReference(result);
+    return (
+      instruction.expectedResult === "string" &&
+      (isImageReference(result) ||
+        (result === null && imageRequestAllowsSkip(instruction, snapshot.temporaries)))
+    );
   // The form's fields were cleared with its request; its settlement checks the answers against them.
   if (instruction.interactionKind === "form")
     return (
@@ -1384,6 +1393,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
               "accessibleName",
               "allowCamera",
               "allowFile",
+              "allowSkip",
               "types",
               "mime",
             ]
@@ -1530,6 +1540,7 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       actual.hint === expected.hint &&
       actual.allowCamera === expected.allowCamera &&
       actual.allowFile === expected.allowFile &&
+      actual.allowSkip === expected.allowSkip &&
       textsEqual(expected.types, actual.types) &&
       textsEqual(expected.mime, actual.mime)
     );
@@ -1545,7 +1556,7 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
 function imageRequestFields(
   ui: Record<string, unknown>,
 ): Parameters<typeof imageRequestValue>[0] | null {
-  const { question, hint, allowCamera, allowFile } = ui;
+  const { question, hint, allowCamera, allowFile, allowSkip } = ui;
   const types = textList(ui.types);
   const mime = textList(ui.mime);
   if (
@@ -1553,11 +1564,35 @@ function imageRequestFields(
     (hint !== null && typeof hint !== "string") ||
     typeof allowCamera !== "boolean" ||
     typeof allowFile !== "boolean" ||
+    typeof allowSkip !== "boolean" ||
     types === undefined ||
     mime === undefined
   )
     return null;
-  return { question, hint, allowCamera, allowFile, types, mime };
+  return { question, hint, allowCamera, allowFile, allowSkip, types, mime };
+}
+
+/**
+ * Whether the image request of `instruction` may be skipped: its UI says so, or for a prepared request, the request its
+ * temporary keeps while it is open and until its result is taken.
+ */
+function imageRequestAllowsSkip(
+  instruction: Extract<Instruction, { kind: "interaction" }>,
+  temporaries: unknown,
+): boolean {
+  if (!("preparedUi" in instruction))
+    return instruction.ui.kind === "image" && instruction.ui.allowSkip;
+  if (instruction.preparedUi.kind !== "image" || !Array.isArray(temporaries)) return false;
+  const request = runtimeTemporaryValue(temporaries, instruction.preparedUi.requestTemporary);
+  return (
+    isPlainRecord(request) &&
+    request.kind === "object" &&
+    Array.isArray(request.properties) &&
+    request.properties.some(
+      (property: unknown) =>
+        isPlainRecord(property) && property.name === "allowSkip" && property.value === true,
+    )
+  );
 }
 
 function textList(value: unknown): readonly string[] | null | undefined {
@@ -1781,9 +1816,14 @@ function validSettlementKindData(
     // `settlementMatchesPresentedUi` checked the answers against the recorded form above.
     resultValid = true;
   } else if (settlement.interactionKind === "image") {
+    // A skip of a request that allowed it returns `null`, with the skip control's text as the transcript.
     resultValid =
-      isImageReference(settlement.result) &&
-      settlement.transcriptText === IMAGE_ANSWER_TRANSCRIPT_TEXT;
+      (isImageReference(settlement.result) &&
+        settlement.transcriptText === IMAGE_ANSWER_TRANSCRIPT_TEXT) ||
+      (settlement.result === null &&
+        isPlainRecord(settlement.ui) &&
+        settlement.ui.allowSkip === true &&
+        settlement.transcriptText === IMAGE_SKIP_TEXT);
   } else if (settlement.interactionKind === "temporal") {
     // The transcript shows the answer in the presentation in force then, which is not derived again here.
     resultValid =

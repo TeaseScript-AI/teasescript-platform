@@ -2694,9 +2694,11 @@ answer, also when a file answers. The viewfinder opens on the Stage, or in the c
 request's question (or "Take a photo" without one) and the shutter on the picture; the shutter counts down five seconds,
 as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with "Use this" and "Retake",
 and only "Use this" gives the script the photo. These are Player controls, not transcript messages. A camera that is
-denied or broken offers "Try again", and the paperclip keeps working. After a reload while the request waits, the camera
-is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not
-implemented yet.
+denied or broken offers "Try again", and the paperclip keeps working. A request written with `allowSkip: true` also
+shows **Skip** under its question in the chat, where `showButton` shows its button, for as long as the request waits,
+also while the camera cannot be used; Skip answers `null`, and the player's transcript shows `Skip`. After a reload
+while the request waits, the camera is asked for again, but a photo is never taken by itself. `invalidMessage` and
+`invalidLlmInstruction` are not implemented yet.
 
 ### Video input
 
@@ -2737,6 +2739,30 @@ let audio = askAudio(
 ```
 
 `askAudio(...)` returns one engine-managed audio reference as `string`.
+
+### Skipping a file input
+
+**Status:** Accepted (Owner decisions on #857, 2026-10-12). Implemented for `askImage`; `askFile`, `askVideo`,
+`askAudio`, and `askFolder` are not implemented yet.
+
+`askFile`, `askImage`, `askVideo`, `askAudio`, and `askFolder` take `allowSkip:`, which is `false` by default. Without
+it, or with `allowSkip: false`, the request waits until the player gives a file, and the result is a `string`. With
+`allowSkip: true` the Player also offers a skip control, and the request returns `null` when the player skips it, so
+its result is `string?` and needs a check or a fallback before it is used as text:
+
+```text
+let pic = askImage("Show me your setup", allowSkip: true) otherwise "images/no-photo.png"
+
+let doc = askFile("Upload your contract", allowSkip: true)
+if doc == null {
+    say "No contract, then."
+}
+```
+
+Only `allowSkip: false` written as a literal keeps the result `string`; any other value, such as a variable, may be
+`true`, so the result is `string?`. A value that is not `true` or `false` is a compile error where the compiler sees
+it, and otherwise a runtime error when the request opens. An answer stays an engine-managed reference (`string`), not
+a handle.
 
 ### Invalid input handling
 
@@ -2815,10 +2841,10 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`. A [form](#forms), `askForm(...)` or
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`, except a file input the player skips ([Skipping a file input](#skipping-a-file-input)). A [form](#forms), `askForm(...)` or
   `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or by its
   timeout with `onTimeout: "cancel"`.
-- Input functions complete only after valid input has been supplied.
+- Input functions complete only after valid input has been supplied, or a skip or cancellation the request allows.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
 - `types` accepts file extensions such as `".png"` and `".mp4"`.
@@ -2831,6 +2857,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askImage(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askVideo(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askAudio(...)` defaults to `allowMicrophone: true` and `allowFile: true`.
+- `askFile(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` default to `allowSkip: false`.
 
 ## 21. Blocking button
 **Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)

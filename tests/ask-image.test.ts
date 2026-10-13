@@ -59,6 +59,15 @@ function answered(plan: InstructionPlan, snapshot: RuntimeSnapshot, reference = 
   );
 }
 
+function skipped(plan: InstructionPlan, snapshot: RuntimeSnapshot) {
+  return completeAction(plan, snapshot, {
+    actionId: pendingImage(snapshot).actionId,
+    actionKind: "interaction",
+    interactionKind: "image",
+    payload: { kind: "skip" },
+  });
+}
+
 function binding(snapshot: RuntimeSnapshot, name: string) {
   return snapshot.frames[0]?.bindings.find((candidate) => candidate.name === name)?.value;
 }
@@ -87,6 +96,7 @@ test("askImage waits for the player's image, and its reference reaches the Stage
     hint: "Add an image",
     allowCamera: true,
     allowFile: true,
+    allowSkip: false,
     types: null,
     mime: null,
     accessibleName: { kind: "localizedDefault", key: "answer" },
@@ -113,6 +123,7 @@ test("askImage takes its message by name and its source and file options in any 
     hint: null,
     allowCamera: false,
     allowFile: true,
+    allowSkip: false,
     types: [".jpg", ".PNG"],
     mime: ["image/jpeg", "image/png"],
     accessibleName: { kind: "localizedDefault", key: "answer" },
@@ -125,6 +136,42 @@ test("askImage takes its message by name and its source and file options in any 
     bare.events.some((event) => event.kind === "say"),
     false,
   );
+});
+
+test("allowSkip: true lets the player skip, which answers null, and a skippable request still takes an image", () => {
+  const { plan, snapshot } = started(
+    'let doc = askImage("Upload your contract", allowSkip: true)\nif doc == null {\n  say "No contract, then.", instant\n}\nlet pic = askImage("Show me your setup", allowSkip: true) otherwise "none"\nlet shown = pic\nexit',
+  );
+  assert.equal(pendingImage(snapshot).ui.allowSkip, true);
+  const skip = skipped(plan, snapshot);
+  assert.equal(skip.outcome.kind, "completed");
+  // The transcript shows the skip control's text, as for a button.
+  const transcript = skip.events.find((event) => event.kind === "playerTranscript");
+  assert.ok(transcript?.kind === "playerTranscript");
+  assert.equal(transcript.text, "Skip");
+  const next = run(plan, skip.snapshot);
+  assert.equal(binding(next.snapshot, "doc"), null);
+  assert.ok(
+    next.events.some((event) => event.kind === "say" && event.text === "No contract, then."),
+  );
+  // The second request takes an image, also when it may be skipped.
+  const finished = runUntilExit(plan, answered(plan, next.snapshot).snapshot).snapshot;
+  assert.equal(binding(finished, "pic"), IMAGE);
+  assert.equal(binding(finished, "shown"), IMAGE);
+  // `otherwise` gives its fallback for a skip.
+  const fallback = runUntilExit(plan, skipped(plan, next.snapshot).snapshot).snapshot;
+  assert.equal(binding(fallback, "shown"), "none");
+  // `allowSkip: false` is the same as no option: a skip is not an answer.
+  for (const source of [
+    'let pick = askImage("Add")\nexit',
+    'let pick = askImage("Add", allowSkip: false)\nexit',
+  ]) {
+    const waiting = started(source);
+    assert.equal(pendingImage(waiting.snapshot).ui.allowSkip, false);
+    const refused = skipped(waiting.plan, waiting.snapshot);
+    assert.equal(refused.outcome.kind, "invalidPayload");
+    assert.deepEqual(refused.snapshot, waiting.snapshot);
+  }
 });
 
 test("askImage evaluates computed arguments once, in source order, before it asks", () => {
@@ -242,6 +289,37 @@ function answeredAgain(plan: InstructionPlan, snapshot: RuntimeSnapshot, actionI
   ).outcome.kind;
 }
 
+test("a skippable request keeps its skip across a JSON checkpoint, and a skip after restore returns null", () => {
+  const { plan, snapshot } = started(
+    'let pick = askImage("Show me", allowSkip: true)\nif pick == null {\n  say "Skipped.", instant\n}\nexit',
+  );
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot)));
+  assert.deepEqual(restored.snapshot, snapshot);
+  assert.equal(pendingImage(restored.snapshot).ui.allowSkip, true);
+  const original = skipped(plan, snapshot);
+  const resumed = skipped(restored.plan, restored.snapshot);
+  assert.equal(resumed.outcome.kind, "completed");
+  assert.deepEqual(resumed.events, original.events);
+  // The skip's result waits for the script in a checkpoint too.
+  assert.deepEqual(
+    restoreCheckpoint(createCheckpoint(plan, original.snapshot)).snapshot,
+    original.snapshot,
+  );
+  const originalRun = runUntilExit(plan, original.snapshot);
+  const resumedRun = runUntilExit(restored.plan, resumed.snapshot);
+  assert.deepEqual(resumedRun.snapshot, originalRun.snapshot);
+  assert.equal(binding(resumedRun.snapshot, "pick"), null);
+  assert.ok(resumedRun.events.some((event) => event.kind === "say" && event.text === "Skipped."));
+  // A repeated skip replays its settlement.
+  const again = completeAction(plan, original.snapshot, {
+    actionId: pendingImage(snapshot).actionId,
+    actionKind: "interaction",
+    interactionKind: "image",
+    payload: { kind: "skip" },
+  });
+  assert.equal(again.outcome.kind, "alreadySettled");
+});
+
 test("a timer expiry block may interrupt askImage, also across a checkpoint, and the same request is answered after it", () => {
   const { plan, snapshot } = started(
     'let ticks = 0\ntimer async 1 s {\n  wait 1 s\n  ticks = ticks + 1\n}\nlet pick = askImage("Add an image")\nexit',
@@ -295,6 +373,30 @@ test("askImage is a reserved call whose arguments the compiler checks", () => {
     "TSV043",
   ]);
   assert.deepEqual(diagnostics("let pick: string = askImage()"), []);
+  // A request that may be skipped answers `string?`, so its answer needs a check or a fallback.
+  assert.deepEqual(diagnostics("let pick: string = askImage(allowSkip: false)"), []);
+  assert.deepEqual(diagnostics("let pick: string = askImage(allowSkip: true)"), ["TSV041"]);
+  assert.deepEqual(diagnostics("let pick = askImage(allowSkip: true)\nlet size = pick.length"), [
+    "TSV043",
+  ]);
+  assert.deepEqual(
+    diagnostics('let pick: string = askImage(allowSkip: (true)) otherwise "none"'),
+    [],
+  );
+  assert.deepEqual(
+    diagnostics("let pick = askImage(allowSkip: true)\nif pick != null {\n  showImage pick\n}"),
+    [],
+  );
+  // A computed `allowSkip:` may be true, so the answer may be `null`.
+  assert.deepEqual(
+    diagnostics("let skip = chance(50)\nlet pick: string = askImage(allowSkip: skip)"),
+    ["TSV041"],
+  );
+  assert.deepEqual(
+    diagnostics("let skip = chance(50)\nlet pick: string? = askImage(allowSkip: skip)"),
+    [],
+  );
+  assert.deepEqual(diagnostics('let pick = askImage(allowSkip: "yes")'), ["TSV043"]);
   assert.deepEqual(diagnostics("let pick: integer = askImage()"), ["TSV041"]);
   assert.deepEqual(diagnostics("let ask = askImage"), ["TSV028"]);
   assert.deepEqual(diagnostics("function frame(pick = askImage()) {\n}"), ["TSV032"]);
@@ -327,6 +429,18 @@ test("a computed source or filter that the request cannot use fails before it as
   );
   assert.equal(snapshot.status, "failed");
   assert.match(snapshot.failure?.message ?? "", /needs allowCamera: or allowFile: to be true/u);
+  const skip = (value: SerializableRuntimeValue) =>
+    started(
+      'let skip = load "" + "skip", default: null\nlet pick = askImage(allowSkip: skip)\nexit',
+      { scriptStorage: [{ key: "skip", value }] },
+    ).snapshot;
+  assert.equal(pendingImage(skip(true)).ui.allowSkip, true);
+  const notBoolean = skip("yes");
+  assert.equal(notBoolean.failure?.code, "TSR052");
+  assert.match(
+    notBoolean.failure?.message ?? "",
+    /askImage\(allowSkip:\) takes true or false, not/u,
+  );
   // A filter too long for an interaction fails at the interaction text limit, however long it is.
   const long = started(
     'let kinds = load "" + "kinds", default: null\nlet pick = askImage(types: kinds)\nexit',
@@ -365,6 +479,7 @@ test("restored state rejects a pending image request that differs from what was 
       ui.allowCamera = false;
     },
     (ui: Record<string, unknown>) => (ui.mime = ["text/plain"]),
+    (ui: Record<string, unknown>) => (ui.allowSkip = true),
   ]) {
     const checkpoint = JSON.parse(json);
     tamper(checkpoint.snapshot.foregroundAction.ui);
@@ -376,4 +491,20 @@ test("restored state rejects a pending image request that differs from what was 
   );
   settled.snapshot.lastSettlement.transcriptText = IMAGE;
   assert.throws(() => restoreCheckpoint(settled));
+  // Only a request that allowed skipping settles with `null`, and its transcript is the skip's text.
+  const unskippable = JSON.parse(
+    serializeCheckpoint(createCheckpoint(plan, answered(plan, snapshot).snapshot)),
+  );
+  unskippable.snapshot.lastSettlement.result = null;
+  unskippable.snapshot.lastSettlement.transcriptText = "Skip";
+  assert.throws(() => restoreCheckpoint(unskippable));
+  const skippable = started("let pick = askImage(allowSkip: true)\nexit");
+  const skip = JSON.parse(
+    serializeCheckpoint(
+      createCheckpoint(skippable.plan, skipped(skippable.plan, skippable.snapshot).snapshot),
+    ),
+  );
+  assert.doesNotThrow(() => restoreCheckpoint(structuredClone(skip)));
+  skip.snapshot.lastSettlement.transcriptText = "Image";
+  assert.throws(() => restoreCheckpoint(skip));
 });

@@ -93,10 +93,14 @@ export const playerNotices = {
     message:
       "The saved data of this earlier state could not be restored in this browser, so the session did not go on from it.",
   }),
-  imageNeedsCamera: (): PlayerNotice => ({
+  /** `skip` is the label of the request's skip control, which still answers it, or `null` without one. */
+  imageNeedsCamera: (skip: string | null): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,
     level: "warning",
-    message: "This image request needs a camera, which cannot be used here.",
+    message:
+      skip === null
+        ? "This image request needs a camera, which cannot be used here."
+        : `The camera cannot be used here. Choose ${skip} to answer without an image.`,
   }),
   /** The session stopped because of a script error, or the Player itself failed; the action shows the error's details. */
   sessionError: (cause: "script" | "player", showDetails: () => void): PlayerNotice => ({

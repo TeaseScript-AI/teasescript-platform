@@ -120,6 +120,11 @@ export type PlayerForegroundPresentation =
       readonly allowFile: boolean;
       /** Whether a photo from the camera may answer. */
       readonly allowCamera: boolean;
+      /**
+       * The label of the control that skips the request, which answers `null` and is then the player's transcript
+       * entry; `null` when the request cannot be skipped.
+       */
+      readonly skip: string | null;
       /** The file extensions and image MIME types a file needs; `null` accepts any image. */
       readonly types: readonly string[] | null;
       readonly mime: readonly string[] | null;

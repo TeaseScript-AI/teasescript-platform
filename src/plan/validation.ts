@@ -1414,6 +1414,7 @@ function validateStaticInteractionUi(
               "accessibleName",
               "allowCamera",
               "allowFile",
+              "allowSkip",
               "types",
               "mime",
             ]

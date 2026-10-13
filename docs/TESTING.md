@@ -604,7 +604,8 @@ its `picture-race` package checks that a file chosen for a request a timer's req
 its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
 script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
-paperclip stays. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
+paperclip stays; its `picture-skip` package checks that a request written with `allowSkip: true` offers Skip under its
+question beside the camera, which answers `null`, and that one without offers none. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
 the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
 region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
 shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
