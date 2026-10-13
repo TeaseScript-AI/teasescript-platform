@@ -183,6 +183,7 @@ import {
   TIME_TYPE,
   ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
+  REGEX_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -3575,6 +3576,8 @@ class TypeChecker {
           if (part.kind === "stringInterpolation")
             yield* compileChild(this.#interpolationTask(part.expression, scope));
         return STRING_TYPE;
+      case "regexLiteral":
+        return REGEX_TYPE;
       case "parenthesizedExpression": {
         const type = yield* compileChild(this.#expressionTask(expression.expression, scope));
         return this.#placeReads.has(expression.expression) ? placeRead(type) : type;
@@ -6238,6 +6241,19 @@ class TypeChecker {
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
       }
+      case "toRegex": {
+        // A regex from pattern text, or the default, a regex or null (V30 §8).
+        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        const fallbackType = fallback === -1 ? undefined : values[fallback]!;
+        return fallbackType !== undefined &&
+          isKnown(fallbackType) &&
+          isAssignable(optional(REGEX_TYPE), fallbackType)
+          ? union([REGEX_TYPE, fallbackType])
+          : optional(REGEX_TYPE);
+      }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
           this.#reportUnless(
@@ -6698,9 +6714,8 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : isScalar(member, "script")
-            ? SCRIPT_CHOICE_MESSAGE
-            : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
+          : (unreturnableChoiceMessage(member) ??
+              "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set."),
         entry.span,
       ),
     );
@@ -6725,11 +6740,11 @@ class TypeChecker {
             this.#checkMembers(
               property.value,
               propertyType,
-              (member) => !isScalar(member, "script"),
-              () =>
+              (member) => unreturnableChoiceMessage(member) === undefined,
+              (member) =>
                 this.#report(
                   typeCode.invalidInteractionChoice,
-                  SCRIPT_CHOICE_MESSAGE,
+                  unreturnableChoiceMessage(member)!,
                   property.value.span,
                 ),
             );
@@ -6777,7 +6792,7 @@ class TypeChecker {
             typeCode.unshowableValue,
             member.kind === "dict"
               ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, and script references, and selects one element of a list.`,
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, script references, and regexes, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -6785,7 +6800,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -6801,7 +6816,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
           element.span,
         ),
       );
@@ -9115,12 +9130,20 @@ function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
 
-const SCRIPT_CHOICE_MESSAGE =
-  "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
+/** Why a button cannot return a value of this member type, which it may show: a script reference or a regex. */
+function unreturnableChoiceMessage(member: StaticType): string | undefined {
+  for (const [name, description] of [
+    ["script", "a script reference"],
+    ["regex", "a regex"],
+  ] as const)
+    if (isScalar(member, name))
+      return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`;
+  return undefined;
+}
 
-/** Whether a button may return a value of this member type: one that is shown, other than a script reference. */
+/** Whether a button may return a value of this member type: one that is shown, other than a script reference or regex. */
 function isChoiceValue(member: StaticType): boolean {
-  return isShowable(member) && !isScalar(member, "script");
+  return isShowable(member) && unreturnableChoiceMessage(member) === undefined;
 }
 
 const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
@@ -9862,10 +9885,19 @@ const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 
 /** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
 function textResultType(member: TextMember): StaticType {
-  if (member.result === "integer?") return optional(INTEGER_TYPE);
-  return member.result === "string[]"
-    ? { kind: "list", element: STRING_TYPE }
-    : scalarType(member.result);
+  switch (member.result) {
+    case "integer?":
+      return optional(INTEGER_TYPE);
+    case "string?":
+      return optional(STRING_TYPE);
+    case "string[]":
+      return { kind: "list", element: STRING_TYPE };
+    // The groups of a match, or null without one; a group that did not take part is null.
+    case "string?[]?":
+      return optional({ kind: "list", element: optional(STRING_TYPE) });
+    default:
+      return scalarType(member.result);
+  }
 }
 
 /** The answer of an `askForm` field whose kind only the runtime knows. */

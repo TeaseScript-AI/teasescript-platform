@@ -60,6 +60,7 @@ import type {
 } from "../../plan/model.js";
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
+import { canonicalRegexFlags } from "../../regex.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -1387,6 +1388,7 @@ export class InstructionCompiler {
       case "nullLiteral":
       case "numberLiteral":
       case "durationLiteral":
+      case "regexLiteral":
         return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
       case "stringLiteral": {
         const interpolations = expression.parts
@@ -3342,6 +3344,13 @@ function assembleExpression(
     case "nullLiteral":
     case "numberLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+    case "regexLiteral":
+      return {
+        kind: "regex",
+        source: expression.source,
+        flags: canonicalRegexFlags(expression.flags),
+        span: copySpan(expression.span),
+      };
     case "durationLiteral": {
       const value = durationLiteralValue(expression);
       // The type checker rejects a calendar amount that is not whole before lowering.

@@ -22,6 +22,7 @@ import type {
   SerializableCameraViewHandle,
   SerializableRuntimeTemporal,
   SerializableRuntimeValue,
+  SerializableRegex,
   SerializableScriptReference,
   SerializableTimerHandle,
 } from "./serializable-values.js";
@@ -36,6 +37,7 @@ import {
   isCameraView,
   isObject,
   isRange,
+  isRegex,
   isScriptReference,
   isSet,
   isSpeakerReference,
@@ -46,8 +48,8 @@ import {
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
- * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, and script
- * references. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
+ * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, script references,
+ * and regexes. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
  * as the local date and time it is.
  */
 export function visibleText(
@@ -104,6 +106,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (value === null) return "null";
   if (isAnyDuration(value)) return formatDuration(value);
   if (isScriptReference(value)) return scriptNotation(value, span);
+  if (isRegex(value)) return regexNotation(value, span);
   throw fault(
     "TSR021",
     `${describeRuntimeValue(value).replace(/^a/u, "A")} cannot be shown as text here.${isObject(value) ? " Show one of its properties instead." : isSet(value) ? " Show its elements with toList().join() instead." : ""}`,
@@ -134,6 +137,16 @@ function scriptNotation(
   return `script(${quotedText(path)}${label === null ? "" : `, label: ${quotedText(label)}`})`;
 }
 
+/**
+ * A regex as its literal: `/\d+/i`. A `limit` cuts its pattern. Notation longer than any text can be fails with
+ * `TSR084` for `/…/`.
+ */
+function regexNotation(value: SerializableRegex, span: SourceSpan, limit = Infinity): string {
+  const source = prefix(value.source, limit);
+  checkTextLength(source.length + value.flags.length + 2, "/…/", span);
+  return `/${source}/${value.flags}`;
+}
+
 /** At most the first `limit` characters of `text`. */
 function prefix(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
@@ -148,7 +161,8 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
     value === null ||
     isAnyDuration(value) ||
     isTemporal(value) ||
-    isScriptReference(value)
+    isScriptReference(value) ||
+    isRegex(value)
   );
 }
 
@@ -309,6 +323,7 @@ function writeNotation(
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
     else if (isScriptReference(current)) output.push(scriptNotation(current, span, limit));
+    else if (isRegex(current)) output.push(regexNotation(current, span, limit));
     else output.push(plainScalarText(current, span));
     for (let index = before; index < output.length; index += 1) {
       tooLong(output[index]!.length);

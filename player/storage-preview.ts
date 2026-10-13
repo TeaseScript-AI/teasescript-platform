@@ -90,6 +90,8 @@ export function storagePreview(value: SerializableRuntimeValue): StoragePreview 
         "Script",
         value.label === null ? value.path : `${value.path}, label ${value.label}`,
       );
+    case "regex":
+      return preview("Regex", shortText(`/${value.source}/${value.flags}`));
     default:
       // Handles to runtime objects never reach storage; a forged one is shown as what it claims to be.
       return preview(value.kind, "");

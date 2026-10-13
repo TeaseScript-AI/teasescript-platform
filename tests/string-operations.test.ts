@@ -280,7 +280,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.contains(1)\nexit',
       "TSV043",
-      "contains() needs text (string) for 'part', not a whole number (integer). Convert it with toString(...).",
+      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
       "1",
     ],
     [
@@ -394,7 +394,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       "say [[1], [2]].join()\nexit",
       "TSV043",
-      "join() can only join text, numbers, true or false, null, durations, date and time values, and script references, not a list (integer[]). Select an element or a property first.",
+      "join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes, not a list (integer[]). Select an element or a property first.",
       "[1]",
     ],
     ["say null.trim()\nexit", "TSV043", "Null has no method 'trim'.", "trim"],
@@ -456,7 +456,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.contains(part)\nexit",
       { text: "abc", part: 1 },
       "TSR057",
-      "contains() needs text (string) for 'part', not a number. Convert it with toString(...).",
+      "contains() needs text (string) or a regex for 'part', not a number. Convert it with toString(...).",
     ],
     [
       "say text.repeat(times)\nexit",
@@ -529,7 +529,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
     [nested.snapshot.failure?.code, nested.snapshot.failure?.message],
     [
       "TSR021",
-      "join() can only join text, numbers, true or false, null, durations, date and time values, and script references. Select an element or a property first.",
+      "join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes. Select an element or a property first.",
     ],
   );
 });

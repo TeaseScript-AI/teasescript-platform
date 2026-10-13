@@ -8,6 +8,7 @@ export const TokenKind = {
   InterpolationStart: "interpolationStart",
   InterpolationEnd: "interpolationEnd",
   StringEnd: "stringEnd",
+  RegexLiteral: "regexLiteral",
 
   KeywordSpeaker: "keywordSpeaker",
   KeywordSay: "keywordSay",
@@ -70,8 +71,15 @@ export const TokenKind = {
 
 export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
 
+/**
+ * A regex literal's value is its pattern, the text between its slashes, and its flags follow the closing slash. A
+ * literal without a closing slash, which the lexer reports, has a lexeme of only `/` and its pattern.
+ */
 type TokenWithValueKind =
-  typeof TokenKind.Identifier | typeof TokenKind.NumberLiteral | typeof TokenKind.StringText;
+  | typeof TokenKind.Identifier
+  | typeof TokenKind.NumberLiteral
+  | typeof TokenKind.StringText
+  | typeof TokenKind.RegexLiteral;
 
 type TokenWithoutValueKind = Exclude<TokenKind, TokenWithValueKind>;
 

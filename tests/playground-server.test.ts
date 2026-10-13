@@ -43,13 +43,18 @@ test("serves the root playground page", async () => {
   assert.equal(response.body, await projectFile("playground/index.html"));
 });
 
-test("serves only the explicit colour module needed by unbundled playground imports", async () => {
+test("serves only the explicit colour and regex modules needed by unbundled playground imports", async () => {
   const response = await get("/vendor/color.js");
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/javascript/u);
   assert.equal(response.body, await projectFile("node_modules/colorjs.io/dist/color.js"));
+  const regex = await get("/vendor/re2js.js");
+  assert.equal(regex.status, 200);
+  assert.match(regex.contentType, /^text\/javascript/u);
+  assert.equal(regex.body, await projectFile("node_modules/re2js/build/index.js"));
   assert.equal((await get("/vendor/package.json")).status, 404);
   assert.equal((await get("/node_modules/colorjs.io/package.json")).status, 404);
+  assert.equal((await get("/node_modules/re2js/package.json")).status, 404);
 });
 
 test("serves the Player build at its maintained route", async () => {

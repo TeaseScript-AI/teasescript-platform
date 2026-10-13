@@ -33,6 +33,7 @@ import {
   nonNullType,
   NULL_TYPE,
   NUMBER_TYPE,
+  REGEX_TYPE,
   resolved,
   STRING_TYPE,
   TIME_TYPE,
@@ -50,6 +51,7 @@ import {
   endBeforeStartMessage,
   LIST_JOIN,
   negativeMessage,
+  regexMemberMessage,
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
@@ -110,7 +112,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -125,7 +127,9 @@ export function memberProblems(
       return problem(
         name === "length"
           ? LENGTH_PROPERTY
-          : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
+          : name === "findAll"
+            ? unknownTextMemberMessage(name, "method")
+            : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
       );
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
@@ -145,6 +149,8 @@ export function memberProblems(
     return positionalMethodProblems(name, call, true);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
+  if (isScalar(type, "regex"))
+    return problem(regexMemberMessage(name, call === null ? "property" : "method"));
   const fix =
     type.kind === "scalar" && TEXT_MEMBERS.has(name)
       ? " Convert it to text first with toString(...)."
@@ -201,19 +207,28 @@ function argumentProblems(
       problems.push({ kind: "invalidOperand", message, span: value.span });
     };
     const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
-    const needed = text ? STRING_TYPE : INTEGER_TYPE;
+    const searches = parameter.kind === "regex" || parameter.kind === "textOrRegex";
+    const needed =
+      parameter.kind === "regex"
+        ? REGEX_TYPE
+        : parameter.kind === "textOrRegex"
+          ? union([STRING_TYPE, REGEX_TYPE])
+          : text
+            ? STRING_TYPE
+            : INTEGER_TYPE;
     if (!isAssignable(needed, type)) {
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
           message: argumentTypeMessage(member, parameter, describeValue(type)),
           span: value.span,
-          ...(text ? {} : { widened: value }),
+          ...(text || searches ? {} : { widened: value }),
           fix: argumentFix(parameter, argumentKind(type)),
         },
       );
       continue;
     }
+    if (searches) continue;
     if (text) {
       if (parameter.kind === "nonEmptyText" && staticVisibleText(value) === "")
         fail(emptyTextMessage(member, parameter));
@@ -322,6 +337,7 @@ export function builtinCallProblems(
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
   if (DATA_TEXT_FUNCTIONS.has(name) || name === "fileFromBase64" || name === "fileToBase64")
     return dataTextProblems(name, call, typeOf);
+  if (name === "toRegex") return regexConversionProblems(call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -444,7 +460,7 @@ function dataTextProblems(
     if (
       !SESSION_HANDLE_KINDS.has(part.kind) &&
       part.kind !== "range" &&
-      !isScalar(part, "calendarDuration", "script")
+      !isScalar(part, "calendarDuration", "script", "regex")
     )
       return false;
     unwritable = part;
@@ -462,6 +478,62 @@ function dataTextProblems(
       span: value.span,
     });
   }
+  return problems;
+}
+
+/**
+ * Problems with `toRegex(text, default:)` (V30 §8): its arguments, a required `default:` that is missing, text that can
+ * never be text, and a `default:` that can be neither a regex nor `null`.
+ */
+function regexConversionProblems(
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const problems: OperationProblem[] = [];
+  const positional: Expression[] = [];
+  let fallback: Expression | undefined;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    else if (argument.name.name === "default") fallback = argument.value;
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: `toRegex(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional.length !== 1)
+    problems.push({
+      kind: "argumentCount",
+      message: `toRegex(...) takes 1 argument (text) and a 'default:', received ${positional.length}.`,
+      span: call.span,
+    });
+  else if (fallback === undefined)
+    problems.push({
+      kind: "argumentCount",
+      message:
+        "'toRegex(text, default: value)' needs a 'default:' for text that is not a valid regex. Add one, such as 'default: null'.",
+      span: call.span,
+    });
+  if (problems.length > 0) return problems;
+  const text = positional[0]!;
+  const candidates = members(forUse(typeOf(text))).map(resolved);
+  if (
+    candidates.length > 0 &&
+    candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+  )
+    problems.push({
+      kind: "invalidOperand",
+      message: `toRegex(...) reads pattern text (string), not ${describeValue(typeOf(text))}.`,
+      span: text.span,
+    });
+  const fallbackType = typeOf(fallback!);
+  if (!isAssignable(union([REGEX_TYPE, NULL_TYPE]), fallbackType))
+    problems.push({
+      kind: "invalidOperand",
+      message: `toRegex(...) needs a regex or null as its default:, not ${describeValue(fallbackType)}.`,
+      span: fallback!.span,
+    });
   return problems;
 }
 
@@ -616,7 +688,7 @@ function candidateConversionProblem(
       ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
         ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
-        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(type)}.`;
+        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
     const conversion = TEMPORAL_CONVERSIONS[result];

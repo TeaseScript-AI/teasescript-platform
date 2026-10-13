@@ -79,6 +79,12 @@ test("each saved value is previewed by its type", () => {
     storagePreview({ kind: "script", path: "rooms/hall.tease", label: "door" }).text,
     "rooms/hall.tease, label door",
   );
+  assert.deepEqual(storagePreview({ kind: "regex", source: "\\d+", flags: "i" }), {
+    type: "Regex",
+    text: "/\\d+/i",
+    photo: null,
+    size: null,
+  });
   // Text shaped like a photo reference stays text; the store decides whether it names a saved photo.
   assert.deepEqual(preview("photo"), {
     type: "Text",

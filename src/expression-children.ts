@@ -72,6 +72,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "nullLiteral":
     case "numberLiteral":
     case "durationLiteral":
+    case "regexLiteral":
       return [];
     case "stringLiteral":
       return expression.parts.flatMap((part) =>
