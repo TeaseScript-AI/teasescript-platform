@@ -18,6 +18,8 @@ const TEST_CARD = [
 
 // A decoded captured photo, not merely an image element with a captured URL.
 const decodedPhoto = `[...document.querySelectorAll('img')].find((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0)`;
+// An image request's preview on the Stage, once it shows.
+const decodedPreview = `(() => { const image = document.querySelector('[data-stage-preview]'); return !!image && image.complete && image.naturalWidth > 0; })()`;
 const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
 // A package the smoke serves only as a catalog: paths that model URIs built from the path alone would merge.
 const MODEL_PATHS_CATALOG = {
@@ -203,7 +205,7 @@ async function main() {
       await preselectScenario(cdp, origin);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, and preselected-button scenarios",
       );
     } finally {
       cdp.close();
@@ -1383,15 +1385,12 @@ async function packageScenario(cdp, origin) {
 // The start page shows the script's header, and the session it starts is kept: a reload continues it where it was, also
 // with a photo only the session holds, and after `exit` the session stays behind the end dialog until it is closed,
 // which returns to the start page.
-async function keptSessionScenario(cdp, origin, profile) {
-  await setViewport(cdp, 1440, 900);
-  const start = "[data-session-start]";
-  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
-  const choice = (label) =>
-    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
-  // Keeping is asynchronous browser storage; a reload waits until the kept snapshot includes `text`, such as the label
-  // of the interaction it should come back to.
-  const kept = (text) =>
+/**
+ * Reloads the page once the session the Player keeps includes `text`, such as the label of the interaction it should
+ * come back to: keeping is asynchronous browser storage.
+ */
+async function reloadKept(cdp, text) {
+  const kept = () =>
     evaluate(
       cdp,
       `return new Promise((resolve) => {
@@ -1407,14 +1406,21 @@ async function keptSessionScenario(cdp, origin, profile) {
         request.onerror = () => resolve(false);
       })`,
     );
-  const reloadOnceKept = async (text) => {
-    const deadline = Date.now() + 8_000;
-    while (!(await kept(text))) {
-      if (Date.now() > deadline) throw new Error("The session was not kept");
-      await delay(50);
-    }
-    await cdp.call("Page.reload");
-  };
+  const deadline = Date.now() + 8_000;
+  while (!(await kept())) {
+    if (Date.now() > deadline) throw new Error("The session was not kept");
+    await delay(50);
+  }
+  await cdp.call("Page.reload");
+}
+
+async function keptSessionScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-start]";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const choice = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
+  const reloadOnceKept = (text) => reloadKept(cdp, text);
   await navigate(cdp, `${origin}/player/?package=kept-session`);
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
   assertEqual(
@@ -1507,6 +1513,7 @@ async function keptSessionScenario(cdp, origin, profile) {
   );
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `${stageImage} && !!${choice("Done")}`,
@@ -3018,6 +3025,7 @@ async function debugStorageScenario(cdp, origin, profile) {
   );
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Saved.'))`,
@@ -3682,14 +3690,20 @@ async function viewfinderScenario(cdp, origin) {
 
 /**
  * `askImage` in a package: only while it waits does the composer offer a paperclip, which opens the native file picker,
- * and a drop target. A chosen or dropped file answers once the Player has checked it, and the Stage shows it; a file
- * that is not an image, a second file, or one the request's filters exclude is refused and the request keeps waiting.
+ * and a drop target. Under its question the request offers Upload file, which opens the picker too, and Use image,
+ * greyed with its reason until a file is given. A chosen or dropped file, once the Player has checked it, stands on the
+ * Stage as the preview, which another file replaces, and Use image answers with it; a file that is not an image, a
+ * second file, or one the request's filters exclude is refused, and a cancelled picker changes nothing.
  */
 async function askImageScenario(cdp, origin, profile) {
   const chosen = join(profile, "chosen.png");
+  const replaced = join(profile, "replaced.png");
   const notes = join(profile, "notes.png");
   await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
+  await writeFile(replaced, solidPng(30, 30, [40, 120, 200]));
   await writeFile(notes, "not an image");
+  const use = `document.querySelector('[data-image-control="use"]')`;
+  const previewWidth = `document.querySelector('[data-stage-preview]')?.naturalWidth`;
   const stageImage = `(() => {
     const image = document.querySelector('.stage-media');
     return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:');
@@ -3717,14 +3731,58 @@ async function askImageScenario(cdp, origin, profile) {
     "Attach an image",
     "The paperclip has no accessible name",
   );
-  // The paperclip opens the native picker: a click on the hidden file input, which CDP then answers.
+  // Without an image yet, Use image is greyed and says why when pressed, and a screen reader hears the reason.
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-image-controls] button')].map((button) => button.textContent.trim()).join(' / ')`,
+    ),
+    "Open camera / Upload file / Use image",
+    "The image request's first step",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `${use}.getAttribute('aria-disabled') === 'true' && document.getElementById(${use}.getAttribute('aria-describedby'))?.textContent === 'Take or choose an image first'`,
+    ),
+    true,
+    "Use image is not unavailable with its reason before an image is given",
+  );
+  await physicalClick(cdp, '[data-image-control="use"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-image-use-hint]')?.textContent.includes('Take or choose an image first') === true`,
+    3_000,
+    "Pressing the greyed Use image did not say why",
+  );
+  assertEqual(await value(cdp, `${imageAnswers}`), 0, "The greyed Use image answered");
+  // The paperclip and Upload file open the native picker: a click on the hidden file input, which CDP then answers. A
+  // picker cancelled, which no click answers, changes nothing.
+  const countPicker = () =>
+    evaluate(
+      cdp,
+      `const input = document.querySelector('[data-composer-file]');
+      window.__pickerOpened = 0;
+      input.addEventListener('click', () => window.__pickerOpened++, { once: true });
+      input.addEventListener('click', (event) => event.preventDefault(), { once: true });`,
+    );
+  await countPicker();
+  await physicalClick(cdp, '[data-image-control="file"]');
+  assertEqual(await value(cdp, "window.__pickerOpened"), 1, "Upload file did not open the picker");
   await evaluate(
     cdp,
-    `const input = document.querySelector('[data-composer-file]');
-    window.__pickerOpened = 0;
-    input.addEventListener('click', () => window.__pickerOpened++, { once: true });
-    input.addEventListener('click', (event) => event.preventDefault(), { once: true });`,
+    `document.querySelector('[data-composer-file]').dispatchEvent(new Event('cancel'))`,
   );
+  await delay(300);
+  assertEqual(
+    await value(
+      cdp,
+      `${imageAnswers} === 0 && !document.querySelector('[data-stage-preview]') && ${use}.getAttribute('aria-disabled') === 'true'`,
+    ),
+    true,
+    "A cancelled picker changed the request",
+  );
+  await countPicker();
   await physicalClick(cdp, "[data-composer-attach]");
   assertEqual(
     await value(cdp, "window.__pickerOpened"),
@@ -3742,9 +3800,26 @@ async function askImageScenario(cdp, origin, profile) {
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
   await waitFor(
     cdp,
-    `${stageImage} && ${imageAnswers} === 1`,
+    `${decodedPreview} && ${previewWidth} === 48 && ${use}.hasAttribute('data-accent') && ${use}.getAttribute('aria-disabled') === null`,
     8_000,
-    "The chosen image is not on the Stage",
+    "The chosen image is not the preview, with Use image enabled",
+  );
+  // Another file replaces the preview; only Use image answers, with the last one.
+  await openPicker(cdp, '[data-image-control="file"]');
+  await setInputFiles(cdp, "[data-composer-file]", [replaced]);
+  await waitFor(
+    cdp,
+    `${decodedPreview} && ${previewWidth} === 30`,
+    8_000,
+    "The preview was not replaced",
+  );
+  assertEqual(await value(cdp, `${imageAnswers}`), 0, "A chosen file answered before Use image");
+  await useImage(cdp);
+  await waitFor(
+    cdp,
+    `${stageImage} && document.querySelector('.stage-media').naturalWidth === 30 && ${imageAnswers} === 1`,
+    8_000,
+    "Use image did not answer with the preview",
   );
 
   // The second request accepts PNG files only and is answered by a drop.
@@ -3792,6 +3867,7 @@ async function askImageScenario(cdp, origin, profile) {
   );
   assertEqual(await value(cdp, `${imageAnswers}`), 1, "A refused drop answered the request");
   await drop([["dropped.png", pngBase64]]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `${stageImage} && ${imageAnswers} === 2 && document.body.innerText.includes('Thank you.')`,
@@ -3811,7 +3887,7 @@ async function askImageScenario(cdp, origin, profile) {
     "The composer took a file outside an image request",
   );
 
-  // A file chosen in a picker opened for one request does not answer the timer's request that replaced it meanwhile.
+  // A file chosen in a picker opened for one request is no preview for the timer's request that replaced it meanwhile.
   const placeholder = (text) =>
     `document.querySelector('[data-composer-input]')?.getAttribute('placeholder') === ${JSON.stringify(text)}`;
   await navigate(cdp, `${origin}/player/?package=picture-race`);
@@ -3828,11 +3904,12 @@ async function askImageScenario(cdp, origin, profile) {
     "A file chosen for the main request was not refused",
   );
   assertEqual(
-    await value(cdp, `${imageAnswers}`),
-    0,
-    "A stale choice answered the timer's request",
+    await value(cdp, `${imageAnswers} === 0 && !document.querySelector('[data-stage-preview]')`),
+    true,
+    "A stale choice became the timer's request's preview",
   );
   await drop([["timer.png", pngBase64]]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `document.body.innerText.includes('Timer image received.') && ${placeholder("Main image")}`,
@@ -3840,13 +3917,14 @@ async function askImageScenario(cdp, origin, profile) {
     "The timer's request was not answered, or the main request did not resume",
   );
   await drop([["main.png", pngBase64]]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `document.body.innerText.includes('Main image received.') && ${imageAnswers} === 2`,
     8_000,
     "The resumed main request was not answered",
   );
-  // A file chosen for a request that a timer's wait suspended answers it once it resumes.
+  // A file chosen for a request that a timer's wait suspended becomes its preview once it resumes.
   await waitFor(cdp, placeholder("Second image"), 8_000, "The second image request did not open");
   await openPicker(cdp);
   await waitFor(
@@ -3857,6 +3935,7 @@ async function askImageScenario(cdp, origin, profile) {
   );
   await waitFor(cdp, placeholder("Second image"), 8_000, "The second request did not resume");
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `document.body.innerText.includes('Second image received.') && ${imageAnswers} === 3`,
@@ -3865,13 +3944,6 @@ async function askImageScenario(cdp, origin, profile) {
   );
 }
 
-/**
- * The camera route of `askImage`: the camera opens by itself with the request, on the Stage, or in the camera window a
- * script shows. The shutter on the viewfinder takes a photo the player may take again, and "Use this" alone answers the
- * request with the camera's own, unmirrored picture. A camera the request opened turns off after the answer, also one
- * given as a file, or a skip. A camera that fails offers "Try again" while the paperclip stays. A request written with
- * `allowSkip: true` offers Skip under its question, which answers `null`; one without offers none.
- */
 // Exports a package's saved data from Player Settings in the default build, without Debug: one downloaded file with the
 // saved photo's exact bytes, the same data as text with copying and its manual fallback, no unsaved photo, released
 // resources once the dialog closes, and a dialog that fits a narrow screen with touch-sized controls.
@@ -3900,6 +3972,7 @@ async function savedDataExportScenario(cdp, origin, profile) {
   );
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await useImage(cdp);
   await waitFor(cdp, text("Saved."), 8_000, "The script did not save its photo");
   // The second image request gets another photo, which is never saved; the session then waits for text.
   const unsaved = join(profile, "unsaved.png");
@@ -3907,6 +3980,7 @@ async function savedDataExportScenario(cdp, origin, profile) {
   await waitFor(cdp, visible("[data-composer-attach]"));
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [unsaved]);
+  await useImage(cdp);
   await waitFor(
     cdp,
     `!!document.querySelector('[placeholder="Anything else?"]')`,
@@ -4496,6 +4570,7 @@ async function debugExportScenario(cdp, origin, profile) {
   );
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [picture]);
+  await useImage(cdp);
   await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`, 8_000, "No error line");
   assertEqual(
     await value(
@@ -4684,10 +4759,10 @@ async function debugExportScenario(cdp, origin, profile) {
     true,
     "The photo's original bytes",
   );
-  // The name was sent with a click on Send; the picture answers through the picker, whose input is not recorded.
+  // The name was sent with a click on Send, and the picture chosen in the picker with a click on Use image.
   assertEqual(
     JSON.stringify(document.sections.answers.map((answer) => answer.input)),
-    JSON.stringify(["send", null]),
+    JSON.stringify(["send", "button"]),
     "How each answer was given",
   );
 
@@ -4830,20 +4905,33 @@ async function debugExportScenario(cdp, origin, profile) {
   await setViewport(cdp, 1440, 900);
 }
 
+/**
+ * The camera route of `askImage`, in two steps under the question in the chat. The first offers Open camera, Upload
+ * file, and Use image, and no camera turns on by itself. Open camera shows the viewfinder on the Stage, or in the
+ * camera window a script shows, without the question or controls on the picture; Take photo takes the camera's own,
+ * unmirrored picture at once and Self-timer after counting down, and either returns to the first step with the photo
+ * as the preview, while Back returns without one. Only Use image answers. A camera the request opened turns off when
+ * the camera step ends, and a reload at either step comes back at the first step without taking a photo.
+ */
 async function askImageCameraScenario(cdp, origin, profile) {
   const file = join(profile, "camera-alternative.png");
   await writeFile(file, solidPng(32, 24, [10, 120, 200]));
   const liveVideo = (frame) =>
     `(() => { const video = document.querySelector('${frame} [data-image-capture]')?.parentElement.querySelector('video'); return !!video && video.readyState >= 2 && video.videoWidth > 0; })()`;
-  const photo = `document.querySelector('[data-image-capture-photo]')`;
-  const photoReady = `(${photo}?.complete && ${photo}.naturalWidth > 0) === true`;
+  const preview = `document.querySelector('[data-stage-preview]')`;
   const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
+  const controls = `[...document.querySelectorAll('[data-image-controls] button')].map((button) => button.textContent.trim()).join(' / ')`;
+  const useReady = `(document.querySelector('[data-image-control="use"]')?.getAttribute('aria-disabled') === null)`;
   // Every camera track the page opens, so the smoke can see the camera turn off.
   const cameraOff = `window.__cameraTracks.length > 0 && window.__cameraTracks.every((track) => track.readyState === 'ended')`;
   const start = async (pkg) => {
     await navigate(cdp, `${origin}/player/?package=${pkg}`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const openCamera = async () => {
+    await waitFor(cdp, visible('[data-image-control="camera"]'), 8_000, "No Open camera");
+    await physicalClick(cdp, '[data-image-control="camera"]');
   };
   const tracking = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
     source: `{
@@ -4872,67 +4960,94 @@ async function askImageCameraScenario(cdp, origin, profile) {
     await start("picture-camera");
     await waitFor(
       cdp,
-      liveVideo("[data-stage-camera]"),
+      `${controls} === 'Open camera / Upload file / Use image'`,
       8_000,
-      "The camera did not open by itself on the Stage",
+      "The request did not offer its first step",
+    );
+    await delay(500);
+    assertEqual(
+      await value(
+        cdp,
+        `window.__cameraTracks.length === 0 && !document.querySelector('[data-stage-camera]')`,
+      ),
+      true,
+      "The camera turned on by itself",
+    );
+    await openCamera();
+    await waitFor(
+      cdp,
+      `${liveVideo("[data-stage-camera]")} && ${controls} === 'Take photo / Self-timer (5 s) / Back'`,
+      8_000,
+      "Open camera did not show the camera step on the Stage",
     );
     assertEqual(
       await value(
         cdp,
-        `document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me')`,
+        `!document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me') && document.querySelector('[data-image-capture]').querySelectorAll('button').length === 0 && !!document.querySelector('[data-stage-camera] [data-viewfinder-mirror]')`,
       ),
       true,
-      "The viewfinder does not ask the request's question",
+      "The viewfinder shows the question or controls, or lost its mirror button",
     );
     assertEqual(
       await value(cdp, visible("[data-composer-attach]")),
       true,
       "The paperclip is not offered beside the camera",
     );
-    await physicalClick(cdp, "[data-image-capture-shutter]");
-    // The shutter counts down from five over the live viewfinder before it takes the photo.
+    await physicalClick(cdp, '[data-image-control="back"]');
+    await waitFor(
+      cdp,
+      `${cameraOff} && !document.querySelector('[data-stage-camera]') && !${preview} && !${useReady}`,
+      8_000,
+      "Back did not return to the first step without a photo, turning the camera off",
+    );
+    // Take photo takes the photo at once and shows it as the preview; only Use image answers.
+    await openCamera();
+    await waitFor(
+      cdp,
+      liveVideo("[data-stage-camera]"),
+      8_000,
+      "Open camera did not open it again",
+    );
+    await physicalClick(cdp, '[data-image-control="photo"]');
+    await waitFor(
+      cdp,
+      `${decodedPreview} && ${useReady} && ${controls} === 'Open camera / Upload file / Use image' && ${cameraOff}`,
+      8_000,
+      "Take photo did not return to the first step with the photo as the preview",
+    );
+    assertTestCard(
+      await value(cdp, quadrantColors(preview)),
+      "The preview does not show the camera's frame",
+    );
+    assertEqual(await value(cdp, `${imageAnswers}`), 0, "Taking a photo answered the request");
+    // The self-timer counts down from five over the live viewfinder, then replaces the preview.
+    const firstPhoto = await value(cdp, `${preview}.src`);
+    await openCamera();
+    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
+    await physicalClick(cdp, '[data-image-control="timer"]');
     await waitFor(
       cdp,
       `document.querySelector('[data-image-capture-countdown]')?.textContent.trim() === '5' && ${liveVideo("[data-stage-camera]")}`,
       2_000,
-      "The shutter did not start the countdown",
+      "Self-timer did not start the countdown",
     );
     assertEqual(
-      await value(cdp, `!!${photo}`),
+      await value(cdp, `!!${preview}`),
       false,
       "The photo was taken before the countdown ended",
     );
-    await waitFor(cdp, photoReady, 10_000, "The photo taken is not shown for review");
-    assertTestCard(
-      await value(cdp, quadrantColors(photo)),
-      "The photo taken does not show the camera's frame",
-    );
-    assertEqual(
-      await value(cdp, `${imageAnswers}`),
-      0,
-      "Taking a photo answered the request before Use this",
-    );
-    await physicalClick(cdp, "[data-image-capture-retake]");
     await waitFor(
       cdp,
-      `!${photo} && ${liveVideo("[data-stage-camera]")}`,
-      8_000,
-      "Retake did not return to the live camera",
+      `${decodedPreview} && ${preview}.src !== ${JSON.stringify(firstPhoto)}`,
+      10_000,
+      "The self-timer's photo did not replace the preview",
     );
-    await physicalClick(cdp, "[data-image-capture-shutter]");
-    await waitFor(cdp, photoReady, 10_000);
-    await physicalClick(cdp, "[data-image-capture-use]");
+    await useImage(cdp);
     await waitFor(
       cdp,
-      `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
+      `!${preview} && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
       8_000,
-      "Use this did not answer the request",
-    );
-    await waitFor(
-      cdp,
-      cameraOff,
-      8_000,
-      "The camera the request opened stayed on after the answer",
+      "Use image did not answer the request",
     );
     await waitFor(
       cdp,
@@ -4943,13 +5058,52 @@ async function askImageCameraScenario(cdp, origin, profile) {
       "The Stage does not show the photo used",
     );
 
-    // With a camera window the script shows, the photo is taken there; a file answer turns the camera off too.
+    // A reload at either step comes back at the first step, without a preview, and takes no photo.
+    await start("picture-camera");
+    await openCamera();
+    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
+    await reloadKept(cdp, "Take a selfie for me");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-session-start]')?.textContent.trim() === 'Continue'`,
+    );
+    await physicalClick(cdp, "[data-session-start]");
+    await waitFor(
+      cdp,
+      `${controls} === 'Open camera / Upload file / Use image' && !${useReady}`,
+      8_000,
+      "A reload during the camera step did not come back at the first step",
+    );
+    await openCamera();
+    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
+    await physicalClick(cdp, '[data-image-control="photo"]');
+    await waitFor(cdp, decodedPreview, 8_000);
+    await cdp.call("Page.reload");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-session-start]')?.textContent.trim() === 'Continue'`,
+    );
+    await physicalClick(cdp, "[data-session-start]");
+    await waitFor(cdp, `${controls} === 'Open camera / Upload file / Use image'`, 8_000);
+    await delay(500);
+    assertEqual(
+      await value(
+        cdp,
+        `!${preview} && !${useReady} && ${imageAnswers} === 0 && window.__cameraTracks.length === 0`,
+      ),
+      true,
+      "A reload with a preview kept it, answered, or opened the camera",
+    );
+
+    // With a camera window the script shows, the camera step is there; a file given meanwhile becomes the preview on
+    // the Stage and turns the camera off.
     await start("picture-camera-view");
+    await openCamera();
     await waitFor(
       cdp,
       liveVideo("[data-floating-viewfinder]"),
       8_000,
-      "The camera did not open in the script's camera window",
+      "Open camera did not show the camera step in the script's camera window",
     );
     assertEqual(
       await value(cdp, `!!document.querySelector('[data-stage-camera]')`),
@@ -4960,23 +5114,26 @@ async function askImageCameraScenario(cdp, origin, profile) {
     await setInputFiles(cdp, "[data-composer-file]", [file]);
     await waitFor(
       cdp,
-      `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1`,
+      `${decodedPreview} && ${useReady} && !document.querySelector('[data-image-capture]')`,
       8_000,
-      "A file did not answer the camera request",
+      "A file given during the camera step did not become the preview",
     );
     await waitFor(
       cdp,
       cameraOff,
       8_000,
-      "The camera the request opened stayed on after a file answered",
+      "The camera the request opened stayed on after a file was given",
     );
+    await useImage(cdp);
+    await waitFor(cdp, `${imageAnswers} === 1`, 8_000, "Use image did not answer with the file");
 
-    // The camera is busy the first time: the viewfinder offers Try again, and the paperclip stays.
+    // The camera is busy the first time: the camera step offers Try again and Back, and the paperclip stays.
     await evaluate(cdp, "sessionStorage.setItem('busyOnce', '1')");
     await start("picture-camera");
+    await openCamera();
     await waitFor(
       cdp,
-      visible("[data-image-capture-retry]"),
+      `${controls} === 'Try again / Back'`,
       8_000,
       "A busy camera offered no Try again",
     );
@@ -4985,7 +5142,7 @@ async function askImageCameraScenario(cdp, origin, profile) {
       true,
       "The paperclip went with the camera",
     );
-    await physicalClick(cdp, "[data-image-capture-retry]");
+    await physicalClick(cdp, '[data-image-control="retry"]');
     await waitFor(
       cdp,
       liveVideo("[data-stage-camera]"),
@@ -4993,31 +5150,16 @@ async function askImageCameraScenario(cdp, origin, profile) {
       "Try again did not open the camera",
     );
 
-    // Skip answers a skippable request with `null`: the viewfinder closes, the camera turns off, and the transcript
-    // shows the player's Skip.
-    const skip = `[...document.querySelectorAll('[data-image-skip]')]`;
+    // Skip, among the first step's controls, answers a skippable request with `null`, and the transcript shows the
+    // player's Skip.
     await start("picture-skip");
     await waitFor(
       cdp,
-      `${liveVideo("[data-stage-camera]")} && ${skip}.length === 1 && ${skip}[0].textContent.trim() === 'Skip'`,
+      `${controls} === 'Open camera / Upload file / Skip / Use image'`,
       8_000,
-      "The skippable request offered no Skip beside the camera",
-    );
-    assertEqual(
-      await value(
-        cdp,
-        `${skip}[0].closest('[data-foreground-controls]') !== null && !${skip}[0].closest('[data-image-capture]')`,
-      ),
-      true,
-      "Skip is not among the chat's controls",
+      "The skippable request offered no Skip",
     );
     await physicalClick(cdp, "[data-image-skip]");
-    await waitFor(
-      cdp,
-      `!document.querySelector('[data-image-capture]') || document.querySelector('[data-image-capture]').textContent.includes('Now a photo you cannot skip')`,
-      8_000,
-      "Skip did not close the skipped request's viewfinder",
-    );
     await waitFor(
       cdp,
       `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim() === 'Skip') && document.body.innerText.includes('No photo, then.')`,
@@ -5026,11 +5168,10 @@ async function askImageCameraScenario(cdp, origin, profile) {
     );
     await waitFor(
       cdp,
-      `${liveVideo("[data-stage-camera]")} && ${visible("[data-composer-attach]")}`,
+      `${controls} === 'Open camera / Upload file / Use image'`,
       8_000,
-      "The next request did not open",
+      "The next request, without allowSkip, did not open without Skip",
     );
-    assertEqual(await value(cdp, `${skip}.length`), 0, "A request without allowSkip offered Skip");
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
       identifier: tracking.result.identifier,
@@ -5039,13 +5180,27 @@ async function askImageCameraScenario(cdp, origin, profile) {
   }
 }
 
-/** Opens the file picker with the paperclip; the native dialog itself is suppressed, and `setInputFiles` answers it. */
-async function openPicker(cdp) {
+/**
+ * Opens the file picker with the paperclip, or another `control` that opens it; the native dialog itself is suppressed,
+ * and `setInputFiles` answers it.
+ */
+async function openPicker(cdp, control = "[data-composer-attach]") {
   await evaluate(
     cdp,
     `document.querySelector('[data-composer-file]').addEventListener('click', (event) => event.preventDefault(), { once: true });`,
   );
-  await physicalClick(cdp, "[data-composer-attach]");
+  await physicalClick(cdp, control);
+}
+
+/** "Use image" answers an image request once the file or photo given for it stands on the Stage as its preview. */
+async function useImage(cdp) {
+  await waitFor(
+    cdp,
+    `(${decodedPreview}) && document.querySelector('[data-image-control="use"]')?.getAttribute('aria-disabled') !== 'true'`,
+    8_000,
+    "The image given shows no preview to use",
+  );
+  await settledClick(cdp, '[data-image-control="use"]');
 }
 
 /** Sets the files of a file input, as the native picker does, through the DevTools protocol. */

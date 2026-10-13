@@ -18,9 +18,10 @@ interface StopHost {
   readonly stopped: Readonly<Ref<boolean>>;
   readonly permanentButtons: Readonly<Ref<readonly { readonly buttonId: number }[]>>;
   readonly imageCapture: {
-    readonly view: Readonly<Ref<{ readonly phase: string } | null>>;
-    shutter(): Promise<void>;
-    use(): void;
+    readonly view: Readonly<Ref<{ readonly phase: string; readonly ready: boolean } | null>>;
+    openCamera(): void;
+    takePhoto(): Promise<void>;
+    use(session: PlayerRuntimeSession): RuntimeAdapter.PlayerRuntimeControlResult | null;
   };
   reportHostError(error: unknown): void;
   observe(): PlayerRuntimeSession | null;
@@ -288,11 +289,6 @@ test("an observation whose publish causes a Player error admits neither the inpu
 
 test("a photo used in the same task as a Player error does not answer", async (context) => {
   stubBrowser(context);
-  // The capture's countdown waits a second per step; here it does not wait.
-  const setTimer = globalThis.setTimeout;
-  context.mock.method(globalThis, "setTimeout", (work: () => void, milliseconds?: number) =>
-    setTimer(work, milliseconds === 1000 ? 0 : milliseconds),
-  );
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
   host.prepare(({ recorder }) =>
     runtime.createPlayerRuntimeSession(
@@ -301,15 +297,17 @@ test("a photo used in the same task as a Player error does not answer", async (c
     ),
   );
   await host.activate();
+  host.imageCapture.openCamera();
   await settle();
   assert.equal(host.imageCapture.view.value?.phase, "live");
-  await host.imageCapture.shutter();
-  assert.equal(host.imageCapture.view.value?.phase, "review");
+  await host.imageCapture.takePhoto();
+  assert.equal(host.imageCapture.view.value?.ready, true);
   host.reportHostError(new TypeError("A component failed."));
   const stopped = host.session.value;
-  host.imageCapture.use();
+  assert.equal(host.imageCapture.use(stopped!), null);
   await nextTick();
   assert.equal(host.session.value, stopped);
+  assert.equal(host.imageCapture.view.value, null, "the stopped request's steps close");
   assert.deepEqual(said(host), ["Photo"]);
 });
 

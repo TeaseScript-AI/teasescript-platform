@@ -2684,21 +2684,31 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
-`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route: while
-the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped onto
-the composer answers the request; outside such a request there is neither. A chosen image stays in the browser and is
-session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage references it.
-When the request allows the camera and the browser can capture, the camera turns on by itself as the request asks (owner
-round 5): the session camera when it is already open, otherwise one the request opens, which turns off again after the
-answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a script shows, with the
-request's question (or "Take a photo" without one) and the shutter on the picture; the shutter counts down five seconds,
-as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with "Use this" and "Retake",
-and only "Use this" gives the script the photo. These are Player controls, not transcript messages. A camera that is
-denied or broken offers "Try again", and the paperclip keeps working. A request written with `allowSkip: true` also
-shows **Skip** under its question in the chat, where `showButton` shows its button, for as long as the request waits,
-also while the camera cannot be used; Skip answers `null`, and the player's transcript shows `Skip`. After a reload
-while the request waits, the camera is asked for again, but a photo is never taken by itself. `invalidMessage` and
-`invalidLlmInstruction` are not implemented yet.
+`askImage(...)` **status (Owner decisions, 2026-10-05 and 2026-10-13):** images only, for now. While the request
+waits, the Player shows its controls under the question in the chat, where `showButton` shows its button, in two steps.
+These are Player controls, not transcript messages.
+
+- **First step.** It offers **Open camera** when the request allows the camera and the browser can capture, **Upload
+  file** when it allows files, **Skip** when it is written with `allowSkip: true`, and **Use image**. Until the player
+  has taken a photo or chosen a file, Use image is greyed out: pointing at it or tapping it shows "Take or choose an
+  image first", and a screen reader announces it as unavailable with that reason. A photo taken or a file chosen then
+  stands still on the Stage as the preview, and Use image is enabled in the accent colour; only Use image gives the
+  script the image. A new photo or file replaces the preview.
+- **Camera step.** Open camera shows the viewfinder on the Stage, or in the camera window a script shows, with neither
+  the question nor a shutter on the picture. The chat then offers **Take photo**, which takes the photo at once,
+  **Self-timer (5 s)**, which counts down five seconds as a large animated number from 5 to 1 over the viewfinder and
+  then takes it, and **Back**. A photo taken returns to the first step with that photo as the preview; Back returns
+  without a new photo. A camera that is denied or broken offers **Try again** and **Back**.
+
+Upload file opens the browser's native file picker, as does a paperclip in the request's composer while the request
+allows files, and an image file dropped onto the composer is taken too; outside such a request there is neither. A
+chosen or dropped file becomes the preview, also during the camera step, and a cancelled picker changes nothing. A
+chosen image stays in the browser and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only
+while saved script storage references it. The camera step uses the session camera when it is already open, as in a
+script that uses `takePhoto()`; otherwise the request opens a camera of its own at Open camera, which turns off again
+on the return to the first step and after the answer. Skip answers `null`, and the player's transcript shows `Skip`. After
+a reload while the request waits, the Player starts again at the first step without a preview, and a photo is never
+taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
 
 ### Video input
 
@@ -2742,13 +2752,14 @@ let audio = askAudio(
 
 ### Skipping a file input
 
-**Status:** Accepted (Owner decisions on #857, 2026-10-12). Implemented for `askImage`; `askFile`, `askVideo`,
-`askAudio`, and `askFolder` are not implemented yet.
+**Status:** Accepted (Owner decisions on #857, 2026-10-12, and 2026-10-13). Implemented for `askImage`; `askFile`,
+`askFiles`, `askVideo`, `askAudio`, and `askFolder` are not implemented yet.
 
 `askFile`, `askImage`, `askVideo`, `askAudio`, and `askFolder` take `allowSkip:`, which is `false` by default. Without
 it, or with `allowSkip: false`, the request waits until the player gives a file, and the result is a `string`. With
-`allowSkip: true` the Player also offers a skip control, and the request returns `null` when the player skips it, so
-its result is `string?` and needs a check or a fallback before it is used as text:
+`allowSkip: true` the Player also offers a skip control, **Skip** in the first step of `askImage`
+([Image input](#image-input)), and the request returns `null` when the player skips it, so its result is `string?` and
+needs a check or a fallback before it is used as text:
 
 ```text
 let pic = askImage("Show me your setup", allowSkip: true) otherwise "images/no-photo.png"
@@ -2763,6 +2774,9 @@ Only `allowSkip: false` written as a literal keeps the result `string`; any othe
 `true`, so the result is `string?`. A value that is not `true` or `false` is a compile error where the compiler sees
 it, and otherwise a runtime error when the request opens. An answer stays an engine-managed reference (`string`), not
 a handle.
+
+`askFiles` takes `allowSkip:` as well. A skip returns `null`, so its result is `string[]?`, as for `askFile` and
+`askFolder`.
 
 ### Invalid input handling
 
@@ -2857,7 +2871,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askImage(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askVideo(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askAudio(...)` defaults to `allowMicrophone: true` and `allowFile: true`.
-- `askFile(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` default to `allowSkip: false`.
+- `askFile(...)`, `askFiles(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` default to `allowSkip: false`.
 
 ## 21. Blocking button
 **Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)

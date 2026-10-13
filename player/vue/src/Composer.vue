@@ -30,9 +30,9 @@ const props = withDefaults(
      */
     freshAfter?: number;
     /**
-     * While an image request accepts a file: a paperclip opens the browser's file picker with this `accept` hint, and a
-     * file dropped onto the composer answers too. Without it there is neither. `request` identifies the request the
-     * files are for.
+     * While an image request accepts a file: a paperclip opens the browser's file picker with this `accept` hint, as
+     * `openPicker` does, and a file can be dropped onto the composer. Without it there is neither. `request` identifies
+     * the request the files are for.
      */
     attach?: { readonly accept: string; readonly label: string; readonly request: Request } | null;
   }>(),
@@ -224,7 +224,7 @@ function selectInput(): void {
   });
 }
 
-defineExpose({ focusInput, selectInput });
+defineExpose({ focusInput, selectInput, openPicker });
 </script>
 
 <template>

@@ -92,7 +92,6 @@ import {
 } from "../../notices.js";
 import {
   validateScriptStorageEntries,
-  type CapturedMediaAdmission,
   type InstructionPlan,
   type InterpreterEvent,
   type RandomControlOptions,
@@ -542,9 +541,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   );
 
-  // The camera route of `askImage` opens as the request asks and uses the session camera while it is open. Otherwise the
-  // request opens a camera of its own, which only captures use and which is released when the capture ends, so it never
-  // serves `takePhoto()` or a script's camera view. Its problems show in the viewfinder itself.
+  // The camera step of `askImage` uses the session camera while it is open. Otherwise it opens a camera of its own, which
+  // only that step uses and which is released when the step ends, so it never serves `takePhoto()` or a script's camera
+  // view. Its problems show in the viewfinder itself.
   const cameraOffered =
     options.capabilities?.camera === true ||
     (typeof navigator !== "undefined" &&
@@ -561,15 +560,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () => {},
   );
   const imageCapture = useImageCapture({
-    session: servicedSession,
+    // A session a Player error stopped takes no input, so its request's steps close.
+    session: computed(() => (stopped.value ? null : servicedSession.value)),
     generation,
     sessionCamera: camera,
     captureCamera,
     cameraRevision,
     media: capturedMedia,
     offered: cameraOffered,
-    observe: observeForInput,
-    publish: (next) => (session.value = next),
   });
   // An image request that allows only the camera cannot be answered with an image where no camera can be used; one the
   // player may skip says that Skip still answers it. Each such request, of a session and an action, is reported once, so
@@ -607,8 +605,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     { flush: "sync" },
   );
   const decodeImage = options.decodeImage ?? browserImageDecoder;
-  // The runtime accepts an image answer only when the store vouches for it.
-  const imageAdmission: CapturedMediaAdmission = capturedMedia;
   /**
    * Checks an image file the player chose for the pending `askImage` and stores it as session media, like a photo.
    * Resolves to its reference, or to why the file is not accepted.
@@ -1957,28 +1953,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */
     viewfinderPlacement,
     /**
-     * The image input of `askImage`: `store` checks and stores a chosen file, `admission` vouches for stored images when
-     * the runtime is answered, and `discard` drops a stored image that never answered, for example after the request
-     * ended while the file was read.
+     * The image input of `askImage`: `store` checks and stores a chosen file, and `discard` drops a stored image that
+     * never became the request's preview, for example after the request ended while the file was read.
      */
     images: {
       /** Whether a camera can be used here for a request that allows it: the session camera, or one the browser opens. */
       camera: cameraOffered,
       store: storeImageFile,
-      admission: imageAdmission,
       discard: (reference: string) => capturedMedia.discard(reference),
     },
     /**
-     * Taking a photo for an `askImage` request that allows the camera: open while the request is presented, on the
-     * Stage or in the script's camera window; `null` otherwise.
+     * The steps of a presented `askImage` request: its controls in the chat, the preview on the Stage, and the camera
+     * step's viewfinder on the Stage or in the script's camera window; its `view` is `null` without such a request.
      */
-    imageCapture: {
-      view: imageCapture.view,
-      retry: imageCapture.retry,
-      shutter: imageCapture.shutter,
-      retake: imageCapture.retake,
-      use: imageCapture.use,
-    },
+    imageCapture,
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */

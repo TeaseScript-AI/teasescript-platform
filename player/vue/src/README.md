@@ -121,11 +121,12 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
-- `useImageCapture.ts` holds the Player-only state of taking a photo for `askImage` and answers the request on "Use
-  this". It uses the session camera while that is open, without opening or releasing it; otherwise it opens a camera of
-  its own, which only it uses, and turns it off when the request ends; `ImageCapture.vue` draws it on the viewfinder, through `Stage.vue`'s
-  `camera` slot or `FloatingViewfinder.vue`'s default slot, with shadcn Button, Tooltip, and Alert and the Player action
-  button.
+- `useImageCapture.ts` holds the Player-only state of an `askImage` request's two steps and its preview, which
+  `RuntimeInteraction.vue` answers with on "Use image". Its camera step uses the session camera while that is open,
+  without opening or releasing it; otherwise it opens a camera of its own, which only it uses, and turns it off when the
+  step ends. `ForegroundControls.vue` draws the steps' controls, `Stage.vue` the preview, and `ImageCapture.vue` the
+  camera step's status and countdown on the viewfinder, through `Stage.vue`'s `camera` slot or
+  `FloatingViewfinder.vue`'s default slot, with the shadcn Alert.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its

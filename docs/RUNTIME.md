@@ -1232,8 +1232,9 @@ with `prepareSayText` and `field: true`, after the arguments and before the requ
 unlowered call.
 
 It is a mandatory `image` interaction with result domain `string`. Its UI carries `question`, `hint`, `allowCamera`,
-`allowFile`, `allowSkip`, `types`, and `mime` (`null` without a filter); the Player shows the question on the camera viewfinder and
-the hint as the composer's help; while it waits, its request temporary keeps that request, so restore
+`allowFile`, `allowSkip`, `types`, and `mime` (`null` without a filter); the Player shows the hint as the composer's help
+and its own controls under the question ([PLAYER-UI](ui/PLAYER-UI.md)); while it waits, its request temporary keeps that
+request, so restore
 checks the pending action against it. The host answers through `completeAction`:
 
 ```text
