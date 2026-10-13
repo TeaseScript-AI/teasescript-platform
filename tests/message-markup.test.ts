@@ -39,6 +39,36 @@ test("parses exact line-start block forms and preserves line endings", () => {
   assert.equal(messageMarkupVisibleText(markup), markup.visibleText);
 });
 
+test("only a line feed ends a line, and a carriage return before it belongs to the ending", () => {
+  const lines = (text: string) =>
+    parseMessageMarkup(text).blocks.flatMap((block) =>
+      (block.kind === "heading"
+        ? [block.line]
+        : block.kind === "list"
+          ? block.items.map((item) => item.line)
+          : block.lines
+      ).map((line) => [line.text, line.ending]),
+    );
+  assert.deepEqual(lines(""), [["", ""]]);
+  assert.deepEqual(lines("\n"), [
+    ["", "\n"],
+    ["", ""],
+  ]);
+  assert.deepEqual(lines("a\rb\r"), [["a\rb\r", ""]]);
+  assert.deepEqual(lines("\r\r\n\r\n"), [
+    ["\r", "\r\n"],
+    ["", "\r\n"],
+    ["", ""],
+  ]);
+  assert.deepEqual(lines("a\n\nb\r\nc\n"), [
+    ["a", "\n"],
+    ["", "\n"],
+    ["b", "\r\n"],
+    ["c", "\n"],
+    ["", ""],
+  ]);
+});
+
 test("requires exact block marker spelling and separates adjacent block kinds", () => {
   const markup = parseMessageMarkup(
     [

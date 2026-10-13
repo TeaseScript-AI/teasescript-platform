@@ -475,8 +475,7 @@ function isDenseArray(value: unknown): value is unknown[] {
 function splitLines(text: string): SourceLine[] {
   const lines: SourceLine[] = [];
   let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    if (text.charCodeAt(index) !== 10) continue;
+  for (let index = text.indexOf("\n"); index >= 0; index = text.indexOf("\n", start)) {
     const hasCarriageReturn = index > start && text.charCodeAt(index - 1) === 13;
     lines.push({
       text: text.slice(start, hasCarriageReturn ? index - 1 : index),
