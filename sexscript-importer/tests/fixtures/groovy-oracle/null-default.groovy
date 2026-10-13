@@ -32,7 +32,7 @@ def callbacks = [read: { -> "was " + g }]
 g = null
 if (g == null) g = callbacks.read()
 show("G " + g)
-// A test right after a storage read stays a test.
+// A storage read keeps its own assignment, and the default follows it.
 def h = 0
 def who = "x"
 h = load("count." + who)
