@@ -148,6 +148,22 @@ test("after a value of unknown type, a fallback types the result as the if form 
   );
 });
 
+test("a fallback keeps a value that held only null where a later value decides it after all (#859)", () => {
+  // The list stored in 'x' has an element of unknown type, so no later check can start with 'x' decided.
+  const loop = (body: string) =>
+    `${HIDE}let items = []\nitems.add(hide(1))\nlet x = null\nrepeat 2 {\n    let y = x otherwise 0\n${body}\n    x = items\n}\nexit`;
+  assert.deepEqual(
+    diagnostics(loop("    say y + 1")).map(([, code, , text]) => [code, text]),
+    [["TSV043", "y"]],
+  );
+  assert.deepEqual(
+    sayTexts(
+      loop('    if y is integer {\n        say "integer"\n    } else {\n        say "list"\n    }'),
+    ),
+    ["integer", "list"],
+  );
+});
+
 test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
   const source = (value: string) =>
     `${HIDE}let count: integer? = hide(1)

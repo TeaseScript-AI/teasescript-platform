@@ -320,10 +320,11 @@ export function checkTypes(
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
   // that starts as null and that a read saw before its first other value, also one in another file, starts again with
-  // the type that value gives it.
+  // the type that value gives it, and a fallback for such a place keeps it where that value cannot be carried over.
   const widened: Widened = new Map();
   const decided: Decided = new Map();
   const copies: Copies = new Map();
+  const kept: KeptFallbacks = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
   // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
@@ -337,6 +338,7 @@ export function checkTypes(
       widened,
       decided,
       copies,
+      kept,
       storage,
       programs.length,
       onFile,
@@ -366,6 +368,7 @@ export function checkTypes(
     let last =
       !checker.widenedMore &&
       !checker.decidedMore &&
+      !checker.keptMore &&
       (!storageChanged || (!storageRead && !checker.copiedMore));
     let followed = false;
     if (last && storageChanged) {
@@ -425,6 +428,12 @@ type Decided = Map<Declaration, Map<string, Decision>>;
  * name: by the declaration of the variable that holds them, then by their path.
  */
 type Copies = Map<Declaration, Map<string, string>>;
+
+/**
+ * The `otherwise` expressions whose value counted as null so far where they were checked, but which a later value
+ * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
+ */
+type KeptFallbacks = Set<Expression>;
 
 /** The type that decided a slot, and the store that decided it. */
 interface Decision {
@@ -1070,6 +1079,14 @@ class TypeChecker {
   /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
   copiedMore = false;
 
+  /** Whether this check found a fallback to keep that earlier checks did not (see {@link KeptFallbacks}). */
+  keptMore = false;
+
+  readonly #kept: KeptFallbacks;
+
+  /** The fallbacks of this check that replaced places that so far held only null, with those places. */
+  readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
+
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
    * variable it was copied from, which a mismatch in the copy names.
@@ -1139,6 +1156,14 @@ class TypeChecker {
       this.#copies.set(place.root, copies);
       this.copiedMore = true;
     }
+    // A fallback replaced a place that held only null where it was checked. When something decided that place after
+    // all, also in a way the next check cannot start with, the fallback keeps it from then on (see `fallbackType`).
+    const known = new Map<OpenType, boolean>();
+    for (const { node, slots } of this.#replaced)
+      if (!this.#kept.has(node) && !slots.every((slot) => heldOnlyNull(slot, known))) {
+        this.#kept.add(node);
+        this.keptMore = true;
+      }
   }
 
   readonly #decided: Decided;
@@ -1203,6 +1228,7 @@ class TypeChecker {
     widened: Widened,
     decided: Decided,
     copies: Copies,
+    kept: KeptFallbacks,
     storage: ReadonlyMap<string, StorageKeyType>,
     files: number,
     private readonly onFile: (file: number) => void,
@@ -1213,6 +1239,7 @@ class TypeChecker {
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
+    this.#kept = kept;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
@@ -4714,7 +4741,14 @@ class TypeChecker {
       yield* compileChild(this.#expressionTask(node.right, scope));
       const changes = this.#flow.undo(start);
       if (unused === null) this.#flow.apply(this.#flow.join([new Map(), changes]));
-      type = fallbackType(left, plainType(this.#capture(node.right)));
+      const replaced: OpenType[] = [];
+      type = fallbackType(
+        left,
+        plainType(this.#capture(node.right)),
+        this.#kept.has(node),
+        replaced,
+      );
+      if (replaced.length > 0) this.#replaced.push({ node, slots: replaced });
       // The root's own type is recorded by its caller.
       if (node !== root) this.#types.set(node, type);
     }
@@ -8765,14 +8799,24 @@ function neverNull(type: StaticType): boolean {
  * in it, counts as what a read of it gives elsewhere (#859): a value the compiler cannot know where one reached it, and
  * otherwise only null so far, which a fallback of known type other than null replaces, as `if x == null { x = 0 }`
  * would. Where a later value decides it, the next check starts with that type, as for any read that saw it undecided.
+ * Where the next check cannot start with it, `keep` keeps the place in the result, as a union. The places replaced are
+ * added to `replaced`.
  */
-function fallbackType(value: StaticType, fallback: StaticType): StaticType {
+function fallbackType(
+  value: StaticType,
+  fallback: StaticType,
+  keep = false,
+  replaced: OpenType[] = [],
+): StaticType {
   if (neverNull(value)) return value;
   let kept = nonNullType(value);
-  if (decidedValue(fallback).kind !== "never") {
-    if (members(kept).some((member) => member.kind === "open" && member.heldUnknown !== undefined))
-      return UNKNOWN_TYPE;
-    kept = decidedValue(kept);
+  const slots = members(kept).filter((member): member is OpenType => member.kind === "open");
+  if (slots.length > 0 && decidedValue(fallback).kind !== "never") {
+    if (slots.some((slot) => slot.heldUnknown !== undefined)) return UNKNOWN_TYPE;
+    if (!keep) {
+      replaced.push(...slots);
+      kept = decidedValue(kept);
+    }
   }
   if (resolved(kept).kind === "never") return fallback;
   const undecided = (type: StaticType): boolean =>
