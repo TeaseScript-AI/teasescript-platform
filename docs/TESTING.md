@@ -656,7 +656,9 @@ Debug shows the failure on the Now tab. Its `session-end` package opens the end 
 focus to the end line, and a five-star radio group chosen by click and arrow key beside an unavailable Send review;
 Escape closes it too, the line's Play again starts anew, and an end that rewind's Forward and Return restore opens no
 dialog; its `call-failure` package's error dialog shows the failing line and the call path from a function of another
-file. Its `popup` package shows `showPopup` dialogs whose button takes focus: the Enter held since the answer before a
+file. On `session-end`, Start takes a screen wake lock, the browser releases it while the minimized window hides the
+page, the page shown again takes a new one, and none is held once the script exits. Its `popup` package shows
+`showPopup` dialogs whose button takes focus: the Enter held since the answer before a
 popup does not close it, a fresh Enter, Escape, Space, or a click on the button does and a click beside it does not, a
 reload shows the waiting popup again, and no popup text reaches the transcript. Its `open-url` package, served as a
 catalog that names pages of the smoke's server, checks that right after a click `openUrl` opens its address at once in

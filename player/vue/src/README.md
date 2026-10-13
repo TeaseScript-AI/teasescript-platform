@@ -55,7 +55,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   starts within the click. Because some browsers (Safari) allow playback per element only from a user activation, which
   the session may outlive while a camera permission prompt is open, the host reuses released elements and, within a
   Start or Continue click that waits for the camera, plays silence on every spare one, ensuring at least two; elements
-  allocated beyond the pool fall back to the refused-playback retry. In a Player that can capture or read stored
+  allocated beyond the pool fall back to the refused-playback retry. For the same reason, as Safari grants a page's
+  first screen wake lock only right after a click, `useScreenWakeLock.ts` asks for it within that click, before the
+  camera opens, and holds it while the session plays. In a Player that can capture or read stored
   photos, a save first stores the captured photos its value references (`player/captured-media-persistence.ts`);
   captured references resolve only through that trusted store, and authored
   media references only through the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from

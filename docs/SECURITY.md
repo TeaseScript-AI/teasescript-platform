@@ -129,4 +129,6 @@ manifest field, remains open, as do capability declaration metadata, device swit
 recovery, simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
-Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media privacy policy, and time-integrity policy remain to be specified.
+Exact iframe sandbox flags and frame permissions (the Player's screen wake lock needs `allow="screen-wake-lock"` in a
+frame of another origin), CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media
+privacy policy, and time-integrity policy remain to be specified.

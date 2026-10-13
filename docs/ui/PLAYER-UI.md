@@ -463,6 +463,14 @@ session is created only when Start is activated; Continue resumes a kept session
 devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
 are tracked in #469.
 
+While a session plays, the Player keeps the screen on with the browser's screen wake lock, so a long wait without input
+does not let the screen dim, turn off, or lock. It asks for the lock at the Start or Continue click, also when a camera
+opens first, and holds it while the session runs or waits, also while Debug holds the session at an inspected state or a
+random draw. The browser releases the lock while the page is hidden; the Player asks again when the page is shown while
+the session still plays. The Player releases it once the session ends with `exit`, so the end dialog has none, once an
+error stops the session, and once the start page shows or the page is left. Where the browser has no wake lock, such as
+on plain HTTP, or refuses one, such as on low battery, the session plays as before and the Player says nothing.
+
 ## Session end and failure
 
 An ordinary end opens the end dialog by itself: **The end**, a review placeholder, and **Close**, which takes focus. The

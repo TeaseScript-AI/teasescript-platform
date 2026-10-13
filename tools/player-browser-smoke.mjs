@@ -190,6 +190,7 @@ async function main() {
       await debugHistoryStorageScenario(cdp, origin);
       await debugRewindScenario(cdp, origin);
       await sessionEndScenario(cdp, origin);
+      await wakeLockScenario(cdp, origin);
       await errorCallPathScenario(cdp, origin);
       await heldPressScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
@@ -207,7 +208,7 @@ async function main() {
       await openUrlScenario(cdp, origin, debugPort);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, and openUrl scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, and openUrl scenarios",
       );
     } finally {
       cdp.close();
@@ -6429,6 +6430,66 @@ async function sessionEndScenario(cdp, origin) {
       windowsVirtualKeyCode: 27,
     });
   await waitFor(cdp, onStartPage, 5_000, "Escape did not close the end dialog for the start page");
+}
+
+/**
+ * The screen wake lock (PLAYER-UI "Session start and user activation"): held from Start, released by the browser while
+ * the minimized window hides the page and asked for again once it shows, and none from `exit` on.
+ */
+async function wakeLockScenario(cdp, origin) {
+  // The Player's requests, and the sentinels the browser granted, which tell whether it still holds each.
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__wakeLocks = [];
+      window.__wakeLockRequests = 0;
+      const request = WakeLock.prototype.request;
+      WakeLock.prototype.request = function (...args) {
+        window.__wakeLockRequests++;
+        return request.apply(this, args).then((sentinel) => {
+          window.__wakeLocks.push(sentinel);
+          return sentinel;
+        });
+      };`,
+  });
+  const { windowId } = (await cdp.call("Browser.getWindowForTarget")).result;
+  const locks = (requests, held) =>
+    `window.__wakeLockRequests === ${requests} && window.__wakeLocks.filter((sentinel) => !sentinel.released).length === ${held}`;
+  try {
+    await navigate(cdp, `${origin}/player/?package=session-end`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    assertEqual(await value(cdp, locks(0, 0)), true, "The start page asked for a wake lock");
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(cdp, locks(1, 1), 5_000, "Start did not take a wake lock");
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } });
+    await waitFor(
+      cdp,
+      `document.visibilityState === 'hidden' && ${locks(1, 0)}`,
+      5_000,
+      "The hidden page kept its wake lock or asked for one",
+    );
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+    await waitFor(
+      cdp,
+      `document.visibilityState === 'visible' && ${locks(2, 1)}`,
+      5_000,
+      "The page shown again did not take a new wake lock",
+    );
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Finish'`,
+    );
+    await settledClick(cdp, "[data-foreground-controls] button");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-session-end-dialog]') && ${locks(2, 0)}`,
+      8_000,
+      "The wake lock was still held once the script exited",
+    );
+  } finally {
+    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
 }
 
 /**

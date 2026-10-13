@@ -106,6 +106,7 @@ import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
 import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
+import { useScreenWakeLock } from "./useScreenWakeLock";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
@@ -1379,6 +1380,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () =>
       session.value !== null &&
       (session.value.state.status === "running" || session.value.state.status === "waiting"),
+  );
+  // The screen stays on from the Start or Continue click, while the camera opens, until the session ends or stops; also
+  // while Debug holds it at an inspected state or a random draw, where a draw in its first statement leaves it `ready`.
+  useScreenWakeLock(
+    () =>
+      openingCamera.value ||
+      (session.value !== null &&
+        !stopped.value &&
+        session.value.state.status !== "halted" &&
+        session.value.state.status !== "failed"),
   );
   // A room change runs to its end before another starts; like an import, it replaces the saved data in use.
   let roomChange: Promise<void> = Promise.resolve();
