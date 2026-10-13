@@ -65,6 +65,7 @@ export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
   member("uppercase", [], "string"),
   member("lowercase", [], "string"),
   member("uppercaseFirst", [], "string"),
+  member("reverse", [], "string"),
   member("repeat", [count("count")], "string"),
   member("padStart", [count("length"), fill], "string"),
   member("padEnd", [count("length"), fill], "string"),
@@ -94,7 +95,13 @@ const TEXT_MEMBER_SUGGESTIONS: ReadonlyMap<string, string> = new Map([
 /** The scalar kind of an argument, for choosing the conversion a message suggests; `null` for other values. */
 export type ArgumentKind = "string" | "integer" | "number" | "boolean" | "duration" | null;
 
-export function argumentCountMessage(member: TextMember, received: number): string {
+/** A method's name and parameters, as a message about its arguments names them: a text operation or another method. */
+export interface MethodParameters {
+  readonly name: string;
+  readonly parameters: readonly Pick<TextParameter, "name" | "optional">[] | null;
+}
+
+export function argumentCountMessage(member: MethodParameters, received: number): string {
   const parameters = member.parameters ?? [];
   const names = parameters.map((parameter) => parameter.name);
   const required = parameters.filter((parameter) => parameter.optional !== true).length;

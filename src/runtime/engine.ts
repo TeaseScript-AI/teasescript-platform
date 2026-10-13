@@ -1707,7 +1707,7 @@ function isEmptyPrefill(value: SerializableRuntimeValue): boolean {
 
 /**
  * The request of `askImage`, from its written arguments in source order: the message as text, sources that default to
- * true and are not both off, and `types:` and `mime:` lists of valid texts.
+ * true and are not both off, `allowSkip:`, which defaults to false, and `types:` and `mime:` lists of valid texts.
  */
 function imageInteractionUi(
   value: SerializableRuntimeValue,
@@ -1721,12 +1721,13 @@ function imageInteractionUi(
   let hint: string | null = null;
   let allowCamera = true;
   let allowFile = true;
+  let allowSkip = false;
   let types: readonly string[] | null = null;
   let mime: readonly string[] | null = null;
   for (const { name, value: argument } of value.properties) {
     if (name === "message") question = fieldText(argument, span, temporalContext);
     else if (name === "hint") hint = fieldText(argument, span, temporalContext);
-    else if (name === "allowCamera" || name === "allowFile") {
+    else if (name === "allowCamera" || name === "allowFile" || name === "allowSkip") {
       if (typeof argument !== "boolean")
         throw fault(
           "TSR052",
@@ -1734,7 +1735,8 @@ function imageInteractionUi(
           span,
         );
       if (name === "allowCamera") allowCamera = argument;
-      else allowFile = argument;
+      else if (name === "allowFile") allowFile = argument;
+      else allowSkip = argument;
     } else if (name === "types" || name === "mime") {
       const texts = imageFilterTexts(name, argument, span);
       if (name === "types") types = texts;
@@ -1743,7 +1745,17 @@ function imageInteractionUi(
       throw fault("TSR052", internalFault("The prepared askImage request is malformed."), span);
   }
   if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
-  return { kind: "image", question, hint, allowCamera, allowFile, types, mime, accessibleName };
+  return {
+    kind: "image",
+    question,
+    hint,
+    allowCamera,
+    allowFile,
+    allowSkip,
+    types,
+    mime,
+    accessibleName,
+  };
 }
 
 function imageFilterTexts(

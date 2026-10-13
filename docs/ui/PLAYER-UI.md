@@ -854,30 +854,48 @@ composer shows the prefill again, and unsent edits are not kept.
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
 picker for one image, with the request's `types` and `mime` as its `accept` hint. A file dragged over the composer
-marks it as a drop target ("Drop the image here") and answers when dropped; dragged text or links are not taken.
+marks it as a drop target ("Drop the image here") and is taken when dropped; dragged text or links are not taken.
 Outside such a request there is no paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
-because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
-stored as session media and recorded in the transcript as the player message `Image`.
+because a timer's request replaced it meanwhile, is taken by neither request and shows the composer notice. An accepted
+image is stored as session media and becomes the request's preview.
 
-An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
-viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
-request's question, also said in the chat, or else "Take a photo", and a **Take photo** shutter in the material of the
-viewfinder's mirror button, both at the bottom so the top stays clear. The
-shutter starts a five-second countdown: a number from 5 to 1 as large as the viewfinder allows, each appearing large and
-settling over the live picture, without the motion when the player prefers reduced motion; a request that ends during
-the countdown takes no photo. The photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
-answers the request, and **Retake** drops the photo and returns to the live camera. The paperclip stays available
-throughout. Once the player works in the viewfinder, each step moves keyboard focus to its main control; opening by
-itself, it takes no focus. None of these controls enter the transcript. The session camera is used when it is open;
-otherwise the request opens a camera of its own, only for itself, and turns it off after the answer, whether a photo or
-a file answered. A camera that is denied, missing, broken, or ended shows why in an alert, with **Try again**, which asks
-for it again. The viewfinder belongs to its request: it closes when the request ends or is interrupted, or its session is
-replaced, and a restored session asks for the camera again but never takes a photo by itself. Where no camera can be
-used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered, and a
-[player notice](#player-notices) says so.
+An `askImage(...)` shows its controls under its question, where `showButton` shows its button, in two steps. None of
+them enters the transcript, and none is preselected, so Space in the empty composer neither answers nor skips. The
+first step offers **Open camera** where the request allows the camera and a camera can be used, **Upload file** where
+it allows files, which opens the paperclip's picker, **Skip** for a request written with `allowSkip: true`, and **Use
+image**. Until there is an image, Use image is greyed but stays focusable: pointing at it, focusing it from the
+keyboard, or pressing it shows the tooltip "Take or choose an image first", which is also its accessible description.
+A photo taken or a file chosen or dropped then stands still on the Stage as the preview, at its own aspect and
+unmirrored as it will be used, over the Stage image and any camera view the script shows there, and Use image wears the
+theme's accent in the action-button material. Only Use image answers, recorded in the transcript as the player message
+`Image`. A new photo or file replaces the preview, and the replaced one is dropped.
+
+Open camera starts the camera step: the viewfinder opens over the Stage, or in the camera window when the script shows
+one, with no question and no control on the picture besides the viewfinder's mirror button, and the chat offers **Take
+photo**, **Self-timer (5 s)**, and **Back**. Take photo takes the photo at once. Self-timer first counts down five
+seconds: a number from 5 to 1 as large as the viewfinder allows, each appearing large and settling over the live
+picture, without the motion when the player prefers reduced motion. While the camera opens and during the countdown,
+Take photo and Self-timer are greyed. The photo taken returns to the first step as the preview; Back returns without a
+new photo, also during the countdown, which then takes none, and a file given during the camera step returns with that
+file. Once the player works in these controls, each step moves keyboard focus to its main control, such as Take photo
+in the camera step and Use image once there is a preview. The camera step uses the session camera when it is open and
+leaves it on; otherwise it opens a camera of its own, only for itself, and turns it off on the return to the first step
+and when the request ends. A camera that is denied, missing, broken, or ended shows why in an alert on the viewfinder,
+and the chat offers **Try again**, which asks for it again, and Back. The steps belong to their request: they close,
+dropping the preview, when the request ends or is interrupted, or its session is replaced or stopped by a Player error;
+a restored or resumed request starts at the first step without a preview and never takes a photo by itself. Where no
+camera can be used, such as on a page that is not a secure context, the first step offers no Open camera, and a request
+that allows only the camera cannot be answered with an image; a [player notice](#player-notices) says so.
+
+Skip, or its exact text submitted from the composer, answers the request with `null`, which the transcript records as
+the player message `Skip`; a camera the request opened turns off, as after any answer. Skip waits while a chosen image
+is being checked. Other typed text shows the composer notice, which names the routes the request offers and then also
+Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.", and the player notice of a
+request that allows only the camera, where none can be used, says "The camera cannot be used here. Choose Skip to
+answer without an image." A request without `allowSkip: true` shows no Skip.
 
 `askChoice` and `showButton` keep the composer enabled rather than visually disabling it:
 

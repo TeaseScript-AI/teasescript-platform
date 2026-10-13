@@ -264,12 +264,6 @@ test("an index or member that a value does not have names the value, its bounds,
       "Lists have no property 'size'. Use length, first, last, or random.",
       "items.size",
     ],
-    [
-      "let items = [1]\nitems.add(value: pick(1))",
-      "TSR015",
-      "add() takes its arguments without names. Remove 'value:'.",
-      "items.add(value: pick(1))",
-    ],
   ] as const) {
     assert.deepEqual(failure(`${PICK}${statements}\nexit`), [code, message, span], statements);
   }

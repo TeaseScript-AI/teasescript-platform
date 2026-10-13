@@ -571,15 +571,22 @@ test("get gives the element at an index, or its default for an index the list do
         ],
       ],
     ],
+    // A dict's `get` also needs a `default:`, so it is checked on any receiver.
+    [
+      `${DYNAMIC}say dynamic([1]).get(0)\nexit`,
+      [
+        [
+          "TSV020",
+          "'get(index or key, default: value)' needs a 'default:' for an index or key the value does not have. Read one that must exist as 'value[index]'.",
+          "dynamic([1]).get(0)",
+        ],
+      ],
+    ],
   ];
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).get(0, default: 3)\nexit`), [
     "TSR016",
     "Sets have no method 'get'.",
-  ]);
-  assert.deepEqual(failure(`${DYNAMIC}say dynamic([1]).get(0)\nexit`), [
-    "TSR028",
-    "'list.get(index, default: value)' takes an index and a 'default:' value.",
   ]);
 });
 

@@ -89,9 +89,11 @@ import {
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
+  LIST_REORDERS,
   LIST_SEARCHES,
   mayBeMessage,
   memberProblems,
+  positionalMethodProblems,
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
@@ -320,10 +322,11 @@ export function checkTypes(
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
   // that starts as null and that a read saw before its first other value, also one in another file, starts again with
-  // the type that value gives it.
+  // the type that value gives it, and a fallback for such a place keeps it where that value cannot be carried over.
   const widened: Widened = new Map();
   const decided: Decided = new Map();
   const copies: Copies = new Map();
+  const kept: KeptFallbacks = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
   // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
@@ -337,6 +340,7 @@ export function checkTypes(
       widened,
       decided,
       copies,
+      kept,
       storage,
       programs.length,
       onFile,
@@ -366,6 +370,7 @@ export function checkTypes(
     let last =
       !checker.widenedMore &&
       !checker.decidedMore &&
+      !checker.keptMore &&
       (!storageChanged || (!storageRead && !checker.copiedMore));
     let followed = false;
     if (last && storageChanged) {
@@ -425,6 +430,12 @@ type Decided = Map<Declaration, Map<string, Decision>>;
  * name: by the declaration of the variable that holds them, then by their path.
  */
 type Copies = Map<Declaration, Map<string, string>>;
+
+/**
+ * The `otherwise` expressions whose value counted as null so far where they were checked, but which a later value
+ * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
+ */
+type KeptFallbacks = Set<Expression>;
 
 /** The type that decided a slot, and the store that decided it. */
 interface Decision {
@@ -599,7 +610,9 @@ function storedPlace(slot: OpenType): OpenType | undefined {
 /**
  * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
  * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
- * deeper, or held a value the compiler cannot know, which a new slot would forget. Each slot is visited once.
+ * deeper, or held a value the compiler cannot know, which a new slot would forget. A value the compiler cannot know
+ * that the slot itself held does not count: the next check stores it again, into the decided type (#859). Each slot is
+ * visited once.
  */
 function replayableDecisions(): (decider: OpenType) => boolean {
   /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
@@ -607,24 +620,28 @@ function replayableDecisions(): (decider: OpenType) => boolean {
   return (decider) => {
     const onPath = new Set<OpenType>();
     const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
-    const enter = (slot: OpenType): void => {
+    const enter = (slot: OpenType, own = false): void => {
       onPath.add(slot);
-      frames.push({ slot, next: slotEdges(slot), clean: slot.heldUnknown === undefined });
+      frames.push({ slot, next: slotEdges(slot), clean: own || slot.heldUnknown === undefined });
     };
-    if (!verdicts.has(decider)) enter(decider);
+    // The verdict on the slot's own value is not kept for a slot that reaches this one.
+    const own = decider.heldUnknown !== undefined;
+    if (own || !verdicts.has(decider)) enter(decider, own);
+    let verdict = verdicts.get(decider);
     while (frames.length > 0) {
       const frame = frames[frames.length - 1]!;
       const next = frame.next.pop();
       if (next === undefined) {
         frames.pop();
         onPath.delete(frame.slot);
-        verdicts.set(frame.slot, frame.clean);
+        if (frame.slot === decider && own) verdict = frame.clean;
+        else verdicts.set(frame.slot, frame.clean);
         // What a slot reaches, the slots that reach it reach too.
         if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
       } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
       else if (!verdicts.has(next)) enter(next);
     }
-    return verdicts.get(decider)!;
+    return verdict ?? verdicts.get(decider)!;
   };
 }
 
@@ -1070,6 +1087,14 @@ class TypeChecker {
   /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
   copiedMore = false;
 
+  /** Whether this check found a fallback to keep that earlier checks did not (see {@link KeptFallbacks}). */
+  keptMore = false;
+
+  readonly #kept: KeptFallbacks;
+
+  /** The fallbacks of this check that replaced places that so far held only null, with those places. */
+  readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
+
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
    * variable it was copied from, which a mismatch in the copy names.
@@ -1139,6 +1164,14 @@ class TypeChecker {
       this.#copies.set(place.root, copies);
       this.copiedMore = true;
     }
+    // A fallback replaced a place that held only null where it was checked. When something decided that place after
+    // all, also in a way the next check cannot start with, the fallback keeps it from then on (see `fallbackType`).
+    const known = new Map<OpenType, boolean>();
+    for (const { node, slots } of this.#replaced)
+      if (!this.#kept.has(node) && !slots.every((slot) => heldOnlyNull(slot, known))) {
+        this.#kept.add(node);
+        this.keptMore = true;
+      }
   }
 
   readonly #decided: Decided;
@@ -1203,6 +1236,7 @@ class TypeChecker {
     widened: Widened,
     decided: Decided,
     copies: Copies,
+    kept: KeptFallbacks,
     storage: ReadonlyMap<string, StorageKeyType>,
     files: number,
     private readonly onFile: (file: number) => void,
@@ -1213,6 +1247,7 @@ class TypeChecker {
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
+    this.#kept = kept;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
@@ -1964,12 +1999,18 @@ class TypeChecker {
       statement.typeAnnotation === null ? null : this.#annotationType(statement.typeAnnotation);
     if (declared !== null && initializer.kind === "loadExpression")
       this.#loadReceivers.set(initializer, declared);
-    const value =
+    let value =
       initializer.kind === "playMediaExpression"
         ? yield* compileChild(this.#mediaTask(initializer, scope, name))
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
+      // A place that no value decided yet but that held a value the compiler cannot know, such as an element of `[]`
+      // after `add(load(key, default: null))`, gives such a value, so the variable is of unknown type, as after any
+      // other (rule 1.7): a later value does not decide it, and a known place checks what it holds when the script runs
+      // (#859).
+      if (members(value).some((part) => part.kind === "open" && part.heldUnknown !== undefined))
+        value = UNKNOWN_TYPE;
       type = this.#newPlaceType(written, value);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
@@ -2122,10 +2163,10 @@ class TypeChecker {
               scope,
             ),
           );
-          // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
+          // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
           if (checked !== statement.value)
             for (const member of members(nonNullType(receiver)).map(resolved))
-              if (isCollection(member)) flowInto(member.element, value);
+              if (isCollection(member)) this.#storeLoaded(member.element, value, statement.value);
           this.#recordRuntimeCheck(
             statement,
             elementStoreType(receiver) ?? UNKNOWN_TYPE,
@@ -2220,6 +2261,8 @@ class TypeChecker {
       loaded.kind === "loadExpression"
     )
       this.#loadReceivers.set(loaded, variable.type);
+    // What the variable holds where it is read, before a call in the value may end what is known about it.
+    const before = variable === undefined ? undefined : this.#currentType(variable);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
     // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
@@ -2237,6 +2280,14 @@ class TypeChecker {
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
+      const own =
+        variable === undefined ? undefined : this.#ownFallback(statement.value, variable, scope);
+      if (own !== undefined) {
+        yield* compileChild(this.#storeTask(place, own.expression, own.type));
+        // Where it was not null, the variable keeps the value it held, of the type the store may just have decided.
+        this.#assigned(variable!, union([nonNullType(before!), own.type]));
+        return;
+      }
       const checked = this.#checkedValue(statement.value);
       yield* compileChild(
         this.#storeTask(
@@ -2245,8 +2296,8 @@ class TypeChecker {
           checked === statement.value ? value : this.#typeOf(checked),
         ),
       );
-      // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
-      if (checked !== statement.value) flowInto(place.type, value);
+      // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
+      if (checked !== statement.value) this.#storeLoaded(place.type, value, statement.value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
@@ -4251,19 +4302,21 @@ class TypeChecker {
   }
 
   /**
-   * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
-   * values must be valid, and written sources must leave the player a way to answer.
+   * The message (question) and hint of `askImage` are shown text, the sources and `allowSkip:` are booleans, and `types:`
+   * and `mime:` are lists of texts. Written values must be valid, and written sources must leave the player a way to
+   * answer. The answer is an image reference, or also `null` unless `allowSkip:` is left out or written `false`.
    */
-  *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+  *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     if (expression.presentation !== undefined)
       yield* compileChild(this.#expressionTask(expression.presentation, scope));
     const sources: boolean[] = [];
+    let skippable = false;
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
       const name = argument.kind === "namedArgument" ? argument.name.name : "message";
       if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
       else if (name === "hint") this.#checkShownText(argument.value, type, "an input hint");
-      else if (name === "allowCamera" || name === "allowFile") {
+      else if (name === "allowCamera" || name === "allowFile" || name === "allowSkip") {
         this.#reportUnless(
           type,
           (member) => isScalar(member, "boolean"),
@@ -4271,7 +4324,8 @@ class TypeChecker {
           `'${name}:' takes true or false`,
         );
         const written = unwrapGrouping(argument.value);
-        if (written.kind === "booleanLiteral") sources.push(written.value);
+        if (name === "allowSkip") skippable = written.kind !== "booleanLiteral" || written.value;
+        else if (written.kind === "booleanLiteral") sources.push(written.value);
       } else if (name === "types" || name === "mime") {
         this.#reportUnless(
           type,
@@ -4289,6 +4343,7 @@ class TypeChecker {
     // Only both sources written as false leave no way to answer; an omitted source is allowed.
     if (sources.length === 2 && !sources[0] && !sources[1])
       this.#report(typeCode.invalidOperand, IMAGE_NO_SOURCE_MESSAGE, expression.span);
+    return skippable ? optional(STRING_TYPE) : STRING_TYPE;
   }
 
   /** A written `types:` or `mime:` list holds at least one entry, and each written text is valid. */
@@ -4710,7 +4765,14 @@ class TypeChecker {
       yield* compileChild(this.#expressionTask(node.right, scope));
       const changes = this.#flow.undo(start);
       if (unused === null) this.#flow.apply(this.#flow.join([new Map(), changes]));
-      type = fallbackType(left, plainType(this.#capture(node.right)));
+      const replaced: OpenType[] = [];
+      type = fallbackType(
+        left,
+        plainType(this.#capture(node.right)),
+        this.#kept.has(node),
+        replaced,
+      );
+      if (replaced.length > 0) this.#replaced.push({ node, slots: replaced });
       // The root's own type is recorded by its caller.
       if (node !== root) this.#types.set(node, type);
     }
@@ -5365,10 +5427,10 @@ class TypeChecker {
       return optional(STRING_TYPE);
     }
     if (isAskImageCall(expression)) {
-      yield* compileChild(this.#askImageTask(expression, scope));
-      // Like an interaction, it waits for the player, and its answer is always an image reference.
+      const answer = yield* compileChild(this.#askImageTask(expression, scope));
+      // Like an interaction, it waits for the player.
       this.#suspend();
-      return STRING_TYPE;
+      return answer;
     }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);
@@ -5392,7 +5454,7 @@ class TypeChecker {
     }
     const method = callee.property.name;
     // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
-    if (COLLECTION_CHANGES.has(method) || method === "sort" || method === "shuffle")
+    if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
       this.#noteChanged(callee.object);
     if (
       (method === "add" || method === "addAll" || method === "get") &&
@@ -5400,6 +5462,8 @@ class TypeChecker {
     )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
+    // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
+    if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
     // The receiver as it was evaluated, before the arguments run, for the checks of text operations and `join`. Only
     // they use it, so other methods, such as repeated `add` calls on a growing list, do not copy their receiver.
@@ -5417,7 +5481,7 @@ class TypeChecker {
     );
     if (collections && method === "add") {
       const argument = expression.arguments[0];
-      if (argument !== undefined && expression.arguments.length === 1) {
+      if (argument?.kind === "positionalArgument" && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
         const collection = this.#elementReceiver(callee.object, scope, receiver, type);
         yield* compileChild(
@@ -5436,7 +5500,7 @@ class TypeChecker {
     }
     if (method === "addAll" && members(value).every(isList)) {
       const argument = expression.arguments[0];
-      if (argument !== undefined && expression.arguments.length === 1) {
+      if (argument?.kind === "positionalArgument" && expression.arguments.length === 1) {
         yield* compileChild(
           this.#addAllTask(expression, callee.object, receiver, argument.value, scope),
         );
@@ -5539,16 +5603,25 @@ class TypeChecker {
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
-      if (textual || COLLECTION_METHODS.has(method)) {
+      const collection = all.some((member) => {
+        const kept = resolved(member);
+        return isListOrSet(kept) || kept.kind === "dict";
+      });
+      if (textual || COLLECTION_METHODS.has(method) || collection) {
         // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
         // that several members share at one place is reported once.
         const before = this.diagnostics.length;
         const atCall = members(resolved(receiverAtCall));
+        // A message or a permanent button takes `remove()` without arguments, which a list, set, or dict member rejects.
+        const removable = mayBe(receiver, "messageHandle", "permanentButton");
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
           // A list or set checks its own methods, also `indexOf` and `lastIndexOf`, which take any value on a list.
           if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
             return this.#collectionMethodType(method, kept, callee.property, expression);
+          // Its other methods, and a dict's in a union, take their arguments without names, in their number (V30 §16).
+          if (isListOrSet(kept) || kept.kind === "dict")
+            this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
             this.#reportProblems(
               memberProblems(
@@ -5584,7 +5657,8 @@ class TypeChecker {
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
-    // A set has no order to sort, shuffle, or take from, and no positions or repeated members to search for (V30 §16).
+    // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search for
+    // (V30 §16).
     else if (
       all.length === 1 &&
       isListOrSet(failing) &&
@@ -5679,8 +5753,8 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as evaluated,
-   * and gives its result (V30 §16).
+   * Checks `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as
+   * evaluated, and gives its result (V30 §16).
    */
   #collectionMethodType(
     method: string,
@@ -5691,7 +5765,7 @@ class TypeChecker {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
-    if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    if (LIST_REORDERS.has(method)) return NULL_TYPE;
     if (method === "take" || method === "takeLast")
       return { kind: "list", element: copyType(value.element) };
     if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
@@ -7045,6 +7119,56 @@ class TypeChecker {
   }
 
   /**
+   * After a store checked a load's default, stores the loaded value of type `loaded` in a place of type `place`: its
+   * objects, which may have other properties, and what it decides where the default decided nothing, such as after
+   * `default: null`. A load of a declared key decides the type it declares, and a load of a computed key gives a value
+   * of unknown type, which the place may then hold (#859).
+   */
+  #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
+    settle(place, loaded, expression.span);
+  }
+
+  /**
+   * For `x = x otherwise d`, which keeps `x` where it is not null and stores `d` where it is, as
+   * `if x == null { x = d }` does (#859), what it stores: `d` and its type, or for a chain, the chain after `x` and the
+   * type it gives. `undefined` for any other value, and where `x` is never null, so its fallback never runs.
+   */
+  #ownFallback(
+    expression: Expression,
+    variable: Variable,
+    scope: Scope,
+  ): { readonly expression: Expression; readonly type: StaticType } | undefined {
+    const chain: Extract<Expression, { kind: "binaryExpression" }>[] = [];
+    let value = unwrap(expression);
+    while (value.kind === "binaryExpression" && value.operator === "otherwise") {
+      chain.push(value);
+      value = unwrap(value.left);
+    }
+    const read = unwrap(value);
+    const entry = read.kind === "identifier" ? scope.resolve(read.name) : undefined;
+    if (
+      chain.length === 0 ||
+      entry?.kind !== "variable" ||
+      entry.variable !== variable ||
+      neverNull(this.#typeOf(value))
+    )
+      return undefined;
+    chain.reverse();
+    let type = plainType(this.#typeOf(chain[0]!.right));
+    for (const node of chain.slice(1)) {
+      const replaced: OpenType[] = [];
+      type = fallbackType(
+        type,
+        plainType(this.#typeOf(node.right)),
+        this.#kept.has(node),
+        replaced,
+      );
+      if (replaced.length > 0) this.#replaced.push({ node, slots: replaced });
+    }
+    return { expression: chain.length === 1 ? chain[0]!.right : expression, type };
+  }
+
+  /**
    * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7). The
    * place's type is read after the whole check, because a later value can still decide it.
    */
@@ -8243,6 +8367,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     // A list reorders in place; a set keeps its insertion order (V30 §16).
     case "sort":
     case "shuffle":
+    case "reverse":
       return value.kind === "list" ? NULL_TYPE : undefined;
     // A part of a list is a new list.
     case "take":
@@ -8354,8 +8479,11 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
 /** Property names whose write on a media handle first waits for the previous message's pacing. */
 const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
-/** Whether a value of this type may be one of the given handles, including a value of unknown type. */
-function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera")[]): boolean {
+/** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
+function mayBe(
+  type: StaticType,
+  ...kinds: ("timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list")[]
+): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
     return (
@@ -8754,11 +8882,32 @@ function neverNull(type: StaticType): boolean {
 /**
  * The type of `value otherwise fallback` (V30 §18): the value where it is never null, the fallback where it is only
  * null, and otherwise both, joined as for a list `get` default: where the fallback has a part that no value decided
- * yet, such as `[]`, as in a literal, and otherwise as a union, so an undecided value is not decided by its fallback.
+ * yet, such as `[]`, as in a literal, and otherwise as a union, so an undecided part of the value is not decided by its
+ * fallback.
+ *
+ * A value whose own type no value decided yet, such as `x` after `let x = null` once a load or a call may have stored
+ * in it, counts as what a read of it gives elsewhere (#859): a value the compiler cannot know where one reached it, and
+ * otherwise only null so far, which a fallback of known type other than null replaces, as `if x == null { x = 0 }`
+ * would. Where a later value decides it, the next check starts with that type, as for any read that saw it undecided.
+ * Where the next check cannot start with it, `keep` keeps the place in the result, as a union. The places replaced are
+ * added to `replaced`.
  */
-function fallbackType(value: StaticType, fallback: StaticType): StaticType {
+function fallbackType(
+  value: StaticType,
+  fallback: StaticType,
+  keep = false,
+  replaced: OpenType[] = [],
+): StaticType {
   if (neverNull(value)) return value;
-  const kept = nonNullType(value);
+  let kept = nonNullType(value);
+  const slots = members(kept).filter((member): member is OpenType => member.kind === "open");
+  if (slots.length > 0 && decidedValue(fallback).kind !== "never") {
+    if (slots.some((slot) => slot.heldUnknown !== undefined)) return UNKNOWN_TYPE;
+    if (!keep) {
+      replaced.push(...slots);
+      kept = decidedValue(kept);
+    }
+  }
   if (resolved(kept).kind === "never") return fallback;
   const undecided = (type: StaticType): boolean =>
     containsType(type, (part) => part.kind === "open");

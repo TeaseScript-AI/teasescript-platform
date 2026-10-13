@@ -7,8 +7,14 @@ import {
   type OklchColor,
 } from "./color.js";
 
-/** Opaque story-button material, shared by theme defaults and literal authored fills. */
-export function storyChoiceVariables(input: OklchColor): Record<string, string> {
+/**
+ * Opaque story-button material, shared by theme defaults and literal authored fills, as `--story-choice-*` variables;
+ * the theme sets its accent material under another `name`.
+ */
+export function storyChoiceVariables(
+  input: OklchColor,
+  name = "story-choice",
+): Record<string, string> {
   const base = mapToSrgb(input);
   const ink = authoredColorToOklch(blackOrWhiteInk(base, "APCA"));
   // Keep the established lighting when APCA chooses the opposite label colour.
@@ -30,7 +36,7 @@ export function storyChoiceVariables(input: OklchColor): Record<string, string> 
   }
   return Object.fromEntries(
     Object.entries({ ...fills, ink, depth: shift(-0.13), rim: shift(-0.075) }).map(
-      ([name, color]) => [`--story-choice-${name}`, oklchCss(color)],
+      ([part, color]) => [`--${name}-${part}`, oklchCss(color)],
     ),
   );
 }

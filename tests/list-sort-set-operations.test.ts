@@ -97,11 +97,55 @@ test("shuffle is a Fisher-Yates shuffle over the session's random draws", () => 
   assert.deepEqual(shuffled([0.99, 0.99, 0.99]), [["a, b, c, d"], 3]);
 });
 
-test("sort, shuffle, and set operations are checkpoint and resume equivalent", () => {
+test("reverse puts a list in reverse order in place, keeping its elements as they are", () => {
+  assert.deepEqual(
+    said(
+      DYNAMIC +
+        [
+          "let numbers = [1, 2, 3]",
+          "let result = numbers.reverse()",
+          "let none: integer[] = []",
+          "none.reverse()",
+          "let nested = [[1, 2], [3]]",
+          "nested.reverse()",
+          'let people = [{ name: "Ada", toys: ["rope"] }, { name: "Bo", toys: [] }]',
+          "people.reverse()",
+          'say "${numbers.join()} | ${result} | ${none.length} | ${nested == [[3], [1, 2]]} | ${people[1].toys.join()}"',
+          // Through a property, an element, a dict value, and values whose type the compiler cannot know, which reverse
+          // as what they are when the script runs.
+          "let box = { items: [1, 2], rows: [[1, 2]], table: dict{ a: [1, 2] } }",
+          "box.items.reverse()",
+          "box.rows[0].reverse()",
+          'box.table["a"].reverse()',
+          "let unknown = dynamic([1, 2])",
+          "unknown.reverse()",
+          'say "${box.items.join()} ${box.rows[0].join()} ${box.table["a"].join()} ${unknown.join()} ${dynamic("ab").reverse()}"',
+          // A loop visits the elements as they were when it started.
+          "let order = [1, 2, 3]",
+          "for item in order {",
+          "    order.reverse()",
+          '    say "${item}: ${order.join()}"',
+          "}",
+          "exit",
+        ].join("\n"),
+    ),
+    [
+      "3, 2, 1 | null | 0 | true | rope",
+      "2, 1 2, 1 2, 1 2, 1 ba",
+      "1: 3, 2, 1",
+      "2: 1, 2, 3",
+      "3: 3, 2, 1",
+    ],
+  );
+});
+
+test("sort, shuffle, reverse, and set operations are checkpoint and resume equivalent", () => {
   assertRuntimeResumeEquivalent(
     [
       'let tasks = ["kneel", "crawl", "beg", "wait"]',
       "tasks.shuffle()",
+      'say tasks.join(" ")',
+      "tasks.reverse()",
       'say tasks.join(" ")',
       "tasks.sort()",
       'say tasks.join(" ")',
@@ -112,19 +156,22 @@ test("sort, shuffle, and set operations are checkpoint and resume equivalent", (
 });
 
 test("a prepared element reference follows its element when the list is reordered", () => {
-  const source = [
-    'let items = [{ name: "first", done: false }, { name: "second", done: false }, { name: "third", done: false }]',
-    "function mark {",
-    "    items.shuffle()",
-    "    return true",
-    "}",
-    "items[0].done = mark()",
-    "for item in items {",
-    "    if item.done { say item.name }",
-    "}",
-    "exit",
-  ].join("\n");
-  for (const seed of [1, 2, 3, 4]) assert.deepEqual(said(source, seed), ["first"], `seed ${seed}`);
+  const source = (reorder: string) =>
+    [
+      'let items = [{ name: "first", done: false }, { name: "second", done: false }, { name: "third", done: false }]',
+      "function mark {",
+      `    items.${reorder}()`,
+      "    return true",
+      "}",
+      "items[0].done = mark()",
+      "for item in items {",
+      "    if item.done { say item.name }",
+      "}",
+      "exit",
+    ].join("\n");
+  for (const seed of [1, 2, 3, 4])
+    assert.deepEqual(said(source("shuffle"), seed), ["first"], `seed ${seed}`);
+  assert.deepEqual(said(source("reverse")), ["first"]);
 });
 
 test("set operations return a new collection of the receiver's kind with each element once", () => {
@@ -169,10 +216,29 @@ test("misuse the compiler can see is a compile error", () => {
       "shuffle",
     ],
     [
+      "let tags = set[1, 2]\ntags.reverse()\nexit",
+      "TSV043",
+      "A set keeps its insertion order, so it has no reverse(). Copy it into a list with toList() first.",
+      "reverse",
+    ],
+    [
       "let items = [1]\nitems.sort(1)\nexit",
       "TSV020",
       "sort() takes no arguments, received 1.",
       "items.sort(1)",
+    ],
+    [
+      "let items = [1]\nitems.reverse(1)\nexit",
+      "TSV020",
+      "reverse() takes no arguments, received 1.",
+      "items.reverse(1)",
+    ],
+    // Text and lists both have reverse() without arguments, so its arguments are checked on any receiver.
+    [
+      `${DYNAMIC}let items = dynamic([1])\nitems.reverse(by: 1)\nexit`,
+      "TSV022",
+      "reverse() takes its arguments without names. Remove 'by:'.",
+      "by",
     ],
     [
       "let items = [1]\nsay items.union()\nexit",
@@ -223,6 +289,10 @@ test("values the compiler cannot know are checked at runtime", () => {
   assert.deepEqual(failure(`${DYNAMIC}let items = dynamic([true])\nitems.sort()\nexit`), [
     "TSR060",
     "sort() sorts numbers, text, durations, or date and time values, not true or false (boolean).",
+  ]);
+  assert.deepEqual(failure(`${DYNAMIC}let tags = dynamic(set[1, 2])\ntags.reverse()\nexit`), [
+    "TSR016",
+    "A set keeps its insertion order, so it has no reverse(). Copy it into a list with toList() first.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items.union(dynamic(5))\nexit`), [
     "TSR060",

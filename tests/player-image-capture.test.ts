@@ -8,23 +8,28 @@ import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
   playerRuntimeMedia,
+  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface CaptureView {
   readonly phase: string;
-  readonly question: string;
+  readonly camera: boolean;
   readonly track: unknown;
-  readonly photo: string | null;
+  readonly ready: boolean;
+  readonly preview: string | null;
   readonly countdown: number | null;
 }
 interface Capture {
   readonly view: Readonly<Ref<CaptureView | null>>;
+  openCamera(): void;
   retry(): void;
-  shutter(): Promise<void>;
-  retake(): void;
-  use(): void;
+  back(): void;
+  takePhoto(): Promise<void>;
+  selfTimer(): Promise<void>;
+  choose(reference: string): boolean;
+  use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
 }
 let useImageCapture: (host: unknown) => Capture;
 
@@ -92,7 +97,7 @@ function harness(
   const media = new CapturedMediaStore(null, { create: () => "blob:photo", revoke() {} }, "test");
   const sessionCamera = new FakeCamera(media);
   sessionCamera.available = sessionCameraOpen;
-  // The capture's own camera, opened while the session camera is not open.
+  // The camera step's own camera, opened while the session camera is not open.
   const camera = new FakeCamera(media, opens);
   const session: ShallowRef<PlayerRuntimeSession | null> = shallowRef(
     createPlayerRuntimeSession(source),
@@ -110,57 +115,148 @@ function harness(
       cameraRevision,
       media,
       offered,
-      observe: () => session.value,
-      publish: (next: PlayerRuntimeSession) => (session.value = next),
       countdownStep,
     }),
   )!;
-  return { media, camera, sessionCamera, session, generation, cameraRevision, capture, scope };
+  /** A file the player chose, stored as the Player stores it. */
+  const file = () =>
+    media.add("image", new Blob([PNG], { type: "image/png" }), { width: 4, height: 3 }).reference;
+  /** "Use image", as the Player's interaction answers at the observed time. */
+  const use = () => {
+    const result = capture.use(session.value!);
+    if (result?.outcome.kind === "completed") session.value = result.session;
+    return result;
+  };
+  return {
+    media,
+    camera,
+    sessionCamera,
+    session,
+    generation,
+    cameraRevision,
+    capture,
+    scope,
+    file,
+    use,
+  };
 }
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 const SELFIE = 'let pick = askImage("Smile for me", hint: "Attach a photo")\nshowImage pick\nexit';
 
-test("the camera opens by itself with the request, and a photo answers only when it is used", async () => {
-  const { media, camera, session, capture } = harness(SELFIE);
+test("a request starts at the first step; Open camera leads to the camera, whose photo becomes the preview", async () => {
+  const { media, camera, session, capture, use } = harness(SELFIE);
+  assert.deepEqual(capture.view.value, {
+    phase: "choose",
+    camera: true,
+    track: null,
+    ready: false,
+    preview: null,
+    countdown: null,
+  });
+  assert.equal(camera.opened, 0, "the camera does not turn on by itself");
+  assert.equal(use(), null, "without an image there is nothing to use");
+  capture.openCamera();
   assert.equal(capture.view.value?.phase, "opening");
-  // The viewfinder shows the question, which the chat also shows; the hint only labels the composer.
-  assert.equal(capture.view.value?.question, "Smile for me");
   await settled();
   assert.equal(capture.view.value?.phase, "live");
   assert.ok(capture.view.value?.track);
-  await capture.shutter();
-  assert.equal(capture.view.value?.phase, "review");
-  assert.equal(capture.view.value?.photo, "blob:photo");
-  // The request still waits while the player decides.
-  assert.equal(playerRuntimeForeground(session.value!)?.kind, "ask-image");
-  capture.retake();
-  assert.equal(capture.view.value?.phase, "live");
-  assert.equal(media.holds(camera.taken[0]!, "image"), false, "the photo taken again is dropped");
-  await capture.shutter();
-  capture.use();
+  await capture.takePhoto();
+  // The photo is taken at once and the first step shows it, with the camera the request opened off again.
+  assert.equal(capture.view.value?.phase, "choose");
+  assert.equal(capture.view.value?.ready, true);
+  assert.equal(capture.view.value?.preview, "blob:photo");
+  assert.equal(capture.view.value?.track, null);
+  assert.equal(camera.released, 1);
+  assert.equal(
+    playerRuntimeForeground(session.value!)?.kind,
+    "ask-image",
+    "the request still waits",
+  );
+  assert.equal(use()?.outcome.kind, "completed");
   await settled();
   assert.equal(capture.view.value, null);
-  assert.equal(camera.released, 1, "the camera the request opened turns off after the answer");
   assert.equal(session.value?.state.status, "halted");
-  assert.equal(playerRuntimeMedia(session.value!.state).stage.image, camera.taken[1]);
-  assert.equal(media.holds(camera.taken[1]!, "image"), true, "the used photo stays");
+  assert.equal(playerRuntimeMedia(session.value!.state).stage.image, camera.taken[0]);
+  assert.equal(media.holds(camera.taken[0]!, "image"), true, "the used photo stays");
 });
 
-test("a file that answers the request turns the camera the request opened off", async () => {
-  const { media, camera, session, capture } = harness(SELFIE);
+test("a file chosen at either step becomes the preview, and each new image replaces the last", async () => {
+  const { media, camera, session, capture, file, use } = harness(SELFIE);
+  const first = file();
+  assert.equal(capture.choose(first), true);
+  assert.equal(capture.view.value?.phase, "choose");
+  assert.equal(capture.view.value?.ready, true);
+  capture.openCamera();
   await settled();
-  assert.equal(capture.view.value?.phase, "live");
-  const file = media.add("image", new Blob([PNG], { type: "image/png" }), { width: 4, height: 3 });
-  session.value = answerPlayerRuntimeImage(session.value!, file.reference, media)!.session;
+  await capture.takePhoto();
+  assert.equal(media.holds(first, "image"), false, "the photo replaced the file");
+  capture.openCamera();
   await settled();
-  assert.equal(capture.view.value, null);
-  assert.equal(camera.released, 1);
-  assert.equal(camera.taken.length, 0);
+  // A file given during the camera step returns to the first step and turns the camera off.
+  const second = file();
+  assert.equal(capture.choose(second), true);
+  assert.deepEqual(
+    [capture.view.value?.phase, camera.released, media.holds(camera.taken[0]!, "image")],
+    ["choose", 2, false],
+  );
+  use();
+  assert.equal(playerRuntimeMedia(session.value!.state).stage.image, second);
+});
+
+test("Back returns to the first step without a new photo and keeps the preview", async () => {
+  const { media, camera, capture } = harness(SELFIE);
+  capture.openCamera();
+  await settled();
+  await capture.takePhoto();
+  capture.openCamera();
+  await settled();
+  capture.back();
+  assert.deepEqual(
+    [capture.view.value?.phase, capture.view.value?.ready, camera.released, camera.taken.length],
+    ["choose", true, 2, 1],
+  );
+  assert.equal(media.holds(camera.taken[0]!, "image"), true);
+});
+
+test("the self-timer counts down from five over the live camera, then takes the photo", async () => {
+  const counts: (number | null)[] = [];
+  let capture!: Capture;
+  const harnessed = harness(SELFIE, {
+    countdownStep: async () => {
+      counts.push(capture.view.value?.countdown ?? null);
+      assert.ok(capture.view.value?.track, "the live camera stays during the countdown");
+    },
+  });
+  capture = harnessed.capture;
+  capture.openCamera();
+  await settled();
+  await capture.selfTimer();
+  assert.deepEqual(counts, [5, 4, 3, 2, 1]);
+  assert.equal(capture.view.value?.phase, "choose");
+  assert.equal(capture.view.value?.countdown, null);
+  assert.equal(harnessed.camera.taken.length, 1);
+});
+
+test("Back during the countdown takes no photo", async () => {
+  let capture!: Capture;
+  const harnessed = harness(SELFIE, {
+    countdownStep: async () => {
+      if (capture.view.value?.countdown === 3) capture.back();
+      await settled();
+    },
+  });
+  capture = harnessed.capture;
+  capture.openCamera();
+  await settled();
+  await capture.selfTimer();
+  assert.deepEqual([capture.view.value?.phase, capture.view.value?.ready], ["choose", false]);
+  assert.equal(harnessed.camera.taken.length, 0);
 });
 
 test("a camera that cannot be used offers Try again", async () => {
   const { camera, capture } = harness(SELFIE, { opens: [false, true] });
+  capture.openCamera();
   await settled();
   assert.equal(capture.view.value?.phase, "unavailable");
   assert.equal(capture.view.value?.track, null);
@@ -171,60 +267,63 @@ test("a camera that cannot be used offers Try again", async () => {
   assert.equal(camera.opened, 2);
 });
 
-test("a restored or new session asks for the camera again but takes no photo, and drops the old one", async () => {
+test("a restored or new session starts at the first step without the preview and takes no photo", async () => {
   const { media, camera, session, generation, capture } = harness(SELFIE);
+  capture.openCamera();
   await settled();
-  await capture.shutter();
-  assert.equal(capture.view.value?.phase, "review");
+  await capture.takePhoto();
+  capture.openCamera();
+  await settled();
   generation.value++;
   session.value = createPlayerRuntimeSession(SELFIE);
   await settled();
   assert.equal(media.holds(camera.taken[0]!, "image"), false);
-  assert.equal(capture.view.value?.phase, "live");
-  assert.equal(capture.view.value?.photo, null);
-  assert.equal(camera.opened, 2);
-  assert.equal(camera.taken.length, 1, "no photo is taken by itself");
+  assert.deepEqual([capture.view.value?.phase, capture.view.value?.ready], ["choose", false]);
+  assert.deepEqual([camera.opened, camera.released, camera.taken.length], [2, 2, 1]);
 });
 
-test("a photo that arrives after its request was answered is dropped", async () => {
-  const { media, camera, session, capture } = harness(SELFIE);
+test("a request answered otherwise closes its steps and drops the preview, also a photo still being taken", async () => {
+  const { media, camera, session, capture, file } = harness(SELFIE);
+  capture.openCamera();
+  await settled();
+  await capture.takePhoto();
+  capture.openCamera();
   await settled();
   let release!: () => void;
   camera.hold = new Promise((resolve) => (release = resolve));
-  const shot = capture.shutter();
-  // The countdown runs first; the photo is being taken once it ends.
-  while (capture.view.value?.phase === "countdown") await settled();
+  const shot = capture.takePhoto();
   assert.equal(capture.view.value?.phase, "taking");
-  const file = media.add("image", new Blob([PNG], { type: "image/png" }), { width: 4, height: 3 });
-  session.value = answerPlayerRuntimeImage(session.value!, file.reference, media)!.session;
+  session.value = answerPlayerRuntimeImage(session.value!, file(), media)!.session;
   await settled();
   release();
   await shot;
   assert.equal(capture.view.value, null);
+  assert.equal(camera.released, 2, "the camera the request opened turns off");
   assert.equal(media.holds(camera.taken[0]!, "image"), false);
+  assert.equal(media.holds(camera.taken[1]!, "image"), false);
 });
 
-test("a request without a question shows the viewfinder's own question", async () => {
-  const { capture } = harness('let pick = askImage(hint: "Attach a photo")\nexit');
-  assert.equal(capture.view.value?.question, "Take a photo");
-});
-
-test("no capture opens for a request without the camera, or where no camera can be used", async () => {
+test("a request without the camera, or where no camera can be used, offers none", async () => {
   const withoutCamera = harness("let pick = askImage(allowCamera: false)\nexit");
   const unusable = harness(SELFIE, { offered: false });
-  await settled();
-  assert.equal(withoutCamera.capture.view.value, null);
-  assert.equal(unusable.capture.view.value, null);
-  assert.equal(withoutCamera.camera.opened + unusable.camera.opened, 0);
+  for (const { capture, camera } of [withoutCamera, unusable]) {
+    assert.deepEqual([capture.view.value?.phase, capture.view.value?.camera], ["choose", false]);
+    capture.openCamera();
+    await settled();
+    assert.deepEqual([capture.view.value?.phase, camera.opened], ["choose", 0]);
+  }
 });
 
-test("a capture uses the open session camera and leaves it on after the answer", async () => {
-  const { camera, sessionCamera, session, capture } = harness(SELFIE, { sessionCameraOpen: true });
-  await settled();
+test("the camera step uses the open session camera and leaves it on", async () => {
+  const { camera, sessionCamera, session, capture, use } = harness(SELFIE, {
+    sessionCameraOpen: true,
+  });
+  capture.openCamera();
   assert.equal(capture.view.value?.phase, "live");
-  await capture.shutter();
-  capture.use();
-  await settled();
+  await capture.takePhoto();
+  capture.openCamera();
+  capture.back();
+  use();
   assert.equal(session.value?.state.status, "halted");
   assert.equal(sessionCamera.taken.length, 1);
   assert.deepEqual(
@@ -233,86 +332,26 @@ test("a capture uses the open session camera and leaves it on after the answer",
   );
 });
 
-test("the camera the request opens never opens the session camera", async () => {
-  const { camera, sessionCamera, capture } = harness(SELFIE);
-  await settled();
-  assert.equal(capture.view.value?.phase, "live");
-  assert.equal(camera.opened, 1);
-  assert.equal(sessionCamera.available, false);
-  assert.equal(sessionCamera.opened, 0);
-});
-
-test("a camera that ends while the player frames or reviews the photo offers Try again", async () => {
+test("a camera that ends while the player frames the photo offers Try again", async () => {
   const { camera, cameraRevision, capture } = harness(SELFIE);
+  capture.openCamera();
   await settled();
   camera.available = false;
   cameraRevision.value++;
   await settled();
-  assert.equal(capture.view.value?.phase, "unavailable");
-  capture.retry();
-  await settled();
-  await capture.shutter();
-  assert.equal(capture.view.value?.phase, "review");
-  camera.available = false;
-  cameraRevision.value++;
-  capture.retake();
   assert.equal(capture.view.value?.phase, "unavailable");
 });
 
-test("unmounting the Player ends the capture: its photo is dropped and the camera it opened turns off", async () => {
+test("unmounting the Player drops the preview and turns the camera it opened off", async () => {
   const { media, camera, capture, scope } = harness(SELFIE);
+  capture.openCamera();
   await settled();
-  await capture.shutter();
-  assert.equal(capture.view.value?.phase, "review");
+  await capture.takePhoto();
+  capture.openCamera();
+  await settled();
   scope.stop();
-  assert.equal(camera.released, 1);
+  assert.equal(camera.released, 2);
   assert.equal(media.holds(camera.taken[0]!, "image"), false);
-});
-
-test("the shutter counts down from five over the live camera before it takes the photo", async () => {
-  const counts: (number | null)[] = [];
-  let capture!: Capture;
-  const harnessed = harness(SELFIE, {
-    countdownStep: async () => {
-      counts.push(capture.view.value?.countdown ?? null);
-      assert.ok(capture.view.value?.track, "the live camera stays during the countdown");
-    },
-  });
-  capture = harnessed.capture;
-  await settled();
-  await capture.shutter();
-  assert.deepEqual(counts, [5, 4, 3, 2, 1]);
-  assert.equal(capture.view.value?.phase, "review");
-  assert.equal(capture.view.value?.countdown, null);
-  assert.equal(harnessed.camera.taken.length, 1);
-});
-
-test("a request answered during the countdown takes no photo", async () => {
-  let capture!: Capture;
-  let answer!: () => void;
-  const harnessed = harness(SELFIE, {
-    countdownStep: async () => {
-      if (capture.view.value?.countdown === 3) answer();
-      await settled();
-    },
-  });
-  capture = harnessed.capture;
-  answer = () => {
-    const file = harnessed.media.add("image", new Blob([PNG], { type: "image/png" }), {
-      width: 4,
-      height: 3,
-    });
-    harnessed.session.value = answerPlayerRuntimeImage(
-      harnessed.session.value!,
-      file.reference,
-      harnessed.media,
-    )!.session;
-  };
-  await settled();
-  await capture.shutter();
-  assert.equal(capture.view.value, null);
-  assert.equal(harnessed.camera.taken.length, 0);
-  assert.equal(harnessed.camera.released, 1);
 });
 
 test("unmounting the Player during the countdown counts no further and takes no photo", async () => {
@@ -323,8 +362,9 @@ test("unmounting the Player during the countdown counts no further and takes no 
       if (counts.length === 3) harnessed.scope.stop();
     },
   });
+  harnessed.capture.openCamera();
   await settled();
-  await harnessed.capture.shutter();
+  await harnessed.capture.selfTimer();
   assert.deepEqual(counts, [5, 4, 3]);
   assert.equal(harnessed.camera.taken.length, 0);
   assert.equal(harnessed.camera.released, 1);

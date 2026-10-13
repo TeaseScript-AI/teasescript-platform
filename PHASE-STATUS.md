@@ -21,11 +21,11 @@ accept syntax, architecture, or implementation details.
   deterministic random, weighted choice, and distributions, rounding, numeric, exponential, logarithm, angle,
   `min`/`max`, statistics, and trend built-ins, text operations and list `join`, `take`, `takeLast`, `indexOf`,
   `lastIndexOf`, `count`, and `get` with `default:`, `+` on two texts or two lists, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and set operations,
-  top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects
-  of several `.tease` files compile into one plan, with globals, global functions, and speakers shared
-  by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets from
-  `script(...)` references.
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle`/`reverse` and set
+  operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
+  (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
+  shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets
+  from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
@@ -55,8 +55,8 @@ accept syntax, architecture, or implementation details.
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
   shown again in a later run. Scripts show the camera's live view in a floating window or over the Stage with `showCamera [stage]` and hide it with `hideCamera`.
   `askImage(...)` is a mandatory image interaction under [Runtime](docs/RUNTIME.md#image-input); the Player answers it
-  with an image file chosen through a composer paperclip or dropped onto the composer, or with a photo taken and
-  reviewed in a viewfinder that opens by itself, stored like a photo. Recording APIs and the advanced package media API remain
+  in two steps under the question: a photo taken in a viewfinder the player opens, or an image file chosen or dropped
+  onto the composer, becomes a preview on the Stage, and "Use image" answers with it, stored like a photo. Recording APIs and the advanced package media API remain
   deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript

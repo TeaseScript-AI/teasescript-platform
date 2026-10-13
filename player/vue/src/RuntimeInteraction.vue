@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ForegroundControls from "./ForegroundControls.vue";
+import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
@@ -7,11 +7,11 @@ import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
-  answerPlayerRuntimeImage,
   playerRuntimeForeground,
   playerRuntimeForm,
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
+  skipPlayerRuntimeImage,
   skipPlayerRuntimePacing,
   cancelPlayerRuntimeForm,
   clearPlayerRuntimeFormField,
@@ -35,15 +35,14 @@ import type {
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
 import type { DebugAnswerInput } from "../../debug-export.js";
-import type { CapturedMediaAdmission } from "../../../src/index.js";
+import type { ImageCapture } from "./useImageCapture";
 
-/** How the host stores an image file the player chose for `askImage`, and vouches for it. */
+/** How the host stores an image file the player chose for `askImage`. */
 export interface PlayerImageInput {
   store(
     file: File,
     filters: ImageFileFilters,
   ): Promise<{ readonly reference: string } | { readonly message: string }>;
-  readonly admission: CapturedMediaAdmission;
   discard(reference: string): void;
   /** Whether a photo from the camera can answer here. */
   readonly camera: boolean;
@@ -75,8 +74,10 @@ const props = defineProps<{
    * rewind restored, which takes it with the next form input once that input adopted the state.
    */
   holdFormDrafts?: boolean;
-  /** Answers `askImage` with a chosen file; without it an image request offers no file input. */
+  /** Stores an image file chosen for `askImage`; without it an image request offers no file input. */
   images?: PlayerImageInput;
+  /** The steps of a presented `askImage` request, whose "Use image" answers it with the preview. */
+  capture?: ImageCapture;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
   debugCountdown?: string | null;
 }>();
@@ -198,6 +199,7 @@ const plan = computed(() => props.session?.plan);
 const attach = computed(() =>
   imageRequest.value?.allowFile === true &&
   props.images &&
+  props.capture &&
   plan.value !== undefined &&
   actionId.value !== undefined
     ? {
@@ -207,20 +209,38 @@ const attach = computed(() =>
       }
     : null,
 );
-// The camera opens by itself for a request that allows it, on the Stage or in the camera window.
+// "Open camera" shows the viewfinder for a request that allows the camera, on the Stage or in the camera window.
 const camera = computed(
   () => imageRequest.value?.allowCamera === true && props.images?.camera === true,
 );
-// Typed text never answers an image request; the notice names the routes it offers.
-const imageTextFeedback = computed(() =>
-  attach.value && camera.value
-    ? "Take a photo with the camera, or attach or drop an image."
-    : attach.value
-      ? "Attach an image with the paperclip, or drop it onto the message field."
-      : camera.value
-        ? "Take a photo with the camera."
-        : "",
-);
+// The image request's controls stand at the first step until its capture is open, as while Debug inspects a state.
+const imageControls = computed((): ImageControls | null => {
+  if (!imageRequest.value) return null;
+  const view = props.capture?.view.value ?? null;
+  return {
+    phase: view?.phase ?? "choose",
+    camera: camera.value,
+    file: attach.value !== null,
+    ready: view?.ready ?? false,
+  };
+});
+// Typed text answers an image request only as the exact text of its skip; the notice names the routes it offers.
+const imageTextFeedback = computed(() => {
+  const skip = imageRequest.value?.skip ?? null;
+  const routes =
+    attach.value && camera.value
+      ? ["Take a photo with the camera", "attach or drop an image"]
+      : attach.value
+        ? ["Attach an image with the paperclip", "drop it onto the message field"]
+        : camera.value
+          ? ["Take a photo with the camera"]
+          : [];
+  if (skip !== null)
+    return routes.length === 0
+      ? `Choose ${skip} to answer without an image.`
+      : `${routes.join(", ")}, or choose ${skip}.`;
+  return routes.length === 0 ? "" : `${routes.join(", or ")}.`;
+});
 type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
 /** Whether the image request the files are for is the one presented now. */
 function presents(request: ImageRequestIdentity): boolean {
@@ -234,7 +254,7 @@ function presents(request: ImageRequestIdentity): boolean {
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void; selectInput(): void } | null>(null);
+const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -416,7 +436,8 @@ async function complete(
   // The action the user acted on, when the input began earlier than this call (a held press).
   expectedActionId?: number,
 ) {
-  if (!props.session || submitting.value) return;
+  // While a chosen image is checked, it is the answer under way; a typed skip waits too.
+  if (!props.session || submitting.value || readingImage.value) return;
   suppressComposerRefocus = !refocusInput;
   restoreChoiceFocus =
     document.documentElement.dataset.playerKeyboardFocus === "true" &&
@@ -540,15 +561,15 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 });
 
 /**
- * Answers the image request the files are for with one chosen or dropped file. Files for a request that is no longer
- * presented, such as one a timer's request replaced while the picker was open, answer nothing. The file is checked and
- * stored first; when the request ended or the session was replaced meanwhile, or the runtime did not take the image,
- * the stored image is dropped.
+ * Makes one chosen or dropped file the preview of the image request the files are for, which "Use image" then answers
+ * with. Files for a request that is no longer presented, such as one a timer's request replaced while the picker was
+ * open, change nothing. The file is checked and stored first; when the request ended or the session was replaced
+ * meanwhile, the stored image is dropped. An inspected state Debug's rewind restored is adopted first, as for an answer.
  */
 async function submitImage(files: readonly File[], target: ImageRequestIdentity) {
   const request = imageRequest.value;
-  const images = props.images;
-  if (!request || !images || submitting.value || readingImage.value) return;
+  const { images, capture } = props;
+  if (!request || !images || !capture || submitting.value || readingImage.value) return;
   if (!presents(target)) {
     showFeedback("This interaction is no longer available.");
     return;
@@ -558,33 +579,37 @@ async function submitImage(files: readonly File[], target: ImageRequestIdentity)
     return;
   }
   readingImage.value = true;
-  let stored: Awaited<ReturnType<PlayerImageInput["store"]>>;
   try {
-    stored = await images.store(files[0]!, request);
+    const stored = await images.store(files[0]!, request);
+    if ("message" in stored) {
+      if (presents(target)) showFeedback(stored.message);
+      return;
+    }
+    const ready = presents(target) && (await (props.prepareInput?.() ?? true));
+    if (!ready || !presents(target) || !capture.choose(stored.reference))
+      images.discard(stored.reference);
   } finally {
     readingImage.value = false;
   }
-  const same = presents(target);
-  if ("message" in stored) {
-    if (same) showFeedback(stored.message);
-    return;
-  }
-  if (!same) {
-    images.discard(stored.reference);
-    return;
-  }
-  let accepted = false;
-  await complete(
-    (latest) => {
-      const result = answerPlayerRuntimeImage(latest, stored.reference, images.admission);
-      accepted = result?.outcome.kind === "completed";
-      return result;
-    },
-    false,
-    "interaction",
-    target.actionId,
-  );
-  if (!accepted) images.discard(stored.reference);
+}
+
+/**
+ * Moves the image request's steps at the player's control. "Upload file" opens the picker at once, within the press;
+ * the other controls first adopt an inspected state Debug's rewind restored, as an answer does.
+ */
+async function imageControl(control: ImageControl) {
+  const capture = props.capture;
+  if (!capture || !props.session || submitting.value || readingImage.value) return;
+  if (control === "file") return composer.value?.openPicker();
+  if (control === "use")
+    return complete(answer("button", (session) => capture.use(session)));
+  const ready = props.prepareInput?.() ?? true;
+  if (ready !== true && !(await ready)) return;
+  if (control === "camera") capture.openCamera();
+  else if (control === "photo") void capture.takePhoto();
+  else if (control === "timer") void capture.selfTimer();
+  else if (control === "back") capture.back();
+  else capture.retry();
 }
 
 function submit(source: "input" | "button") {
@@ -635,7 +660,8 @@ function submit(source: "input" | "button") {
               v-else
               :key="actionId ?? 0"
               :foreground="foreground"
-              :disabled="submitting"
+              :disabled="submitting || readingImage"
+              :image="imageControls"
               @activate="
                 (optionId) =>
                   complete(
@@ -646,6 +672,8 @@ function submit(source: "input" | "button") {
                     ),
                   )
               "
+              @skip="complete(answer('button', skipPlayerRuntimeImage))"
+              @image="imageControl"
             />
             <!-- Status text only: it is not announced each second and takes no input. -->
             <p

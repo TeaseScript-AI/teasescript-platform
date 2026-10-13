@@ -785,6 +785,7 @@ say toString(7).padStart(3, "0")          // 007
 | `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
 | `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
 | `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
+| `text.reverse()` | the text with its characters in reverse order, counted as Unicode code points (owner decision, 2026-10-13) |
 | `text.repeat(count)` | the text repeated `count` times |
 | `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged |
 
@@ -1562,6 +1563,7 @@ items.removeLast()
 items.clear()
 items.sort()
 items.shuffle()
+items.reverse()
 items.contains("map")
 items.indexOf("map")
 items.lastIndexOf("map")
@@ -1748,9 +1750,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
-- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set
-  `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error or
-  warning.
+- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
+  Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
+  or warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
   together), all text, all durations, all calendar durations of one family, or all dates, all times, all datetimes, or all
@@ -1761,7 +1763,9 @@ Runtime behavior:
 - `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
   draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
   elements draws nothing.
-- Sets keep their insertion order and have no `sort()` or `shuffle()`; copy a set into a list with `toList()` first.
+- `reverse()` puts a list's elements in reverse order in place (owner decision, 2026-10-13).
+- Sets keep their insertion order and have no `sort()`, `shuffle()`, or `reverse()`; copy a set into a list with
+  `toList()` first.
 - `intersection(other)`, `union(other)`, and `difference(other)` return a new collection of the receiver's kind and
   leave both operands unchanged. `other` may be a list or a set. The result holds each element once, in the receiver's
   order: `intersection` keeps the elements also in `other`, `difference` the elements not in `other`, and `union` all
@@ -2684,19 +2688,31 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
-`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route: while
-the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped onto
-the composer answers the request; outside such a request there is neither. A chosen image stays in the browser and is
-session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage references it.
-When the request allows the camera and the browser can capture, the camera turns on by itself as the request asks (owner
-round 5): the session camera when it is already open, otherwise one the request opens, which turns off again after the
-answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a script shows, with the
-request's question (or "Take a photo" without one) and the shutter on the picture; the shutter counts down five seconds,
-as a large animated number from 5 to 1 over the viewfinder, and the photo taken then shows with "Use this" and "Retake",
-and only "Use this" gives the script the photo. These are Player controls, not transcript messages. A camera that is
-denied or broken offers "Try again", and the paperclip keeps working. After a reload while the request waits, the camera
-is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not
-implemented yet.
+`askImage(...)` **status (Owner decisions, 2026-10-05 and 2026-10-13):** images only, for now. While the request
+waits, the Player shows its controls under the question in the chat, where `showButton` shows its button, in two steps.
+These are Player controls, not transcript messages.
+
+- **First step.** It offers **Open camera** when the request allows the camera and the browser can capture, **Upload
+  file** when it allows files, **Skip** when it is written with `allowSkip: true`, and **Use image**. Until the player
+  has taken a photo or chosen a file, Use image is greyed out: pointing at it or tapping it shows "Take or choose an
+  image first", and a screen reader announces it as unavailable with that reason. A photo taken or a file chosen then
+  stands still on the Stage as the preview, and Use image is enabled in the accent colour; only Use image gives the
+  script the image. A new photo or file replaces the preview.
+- **Camera step.** Open camera shows the viewfinder on the Stage, or in the camera window a script shows, with neither
+  the question nor a shutter on the picture. The chat then offers **Take photo**, which takes the photo at once,
+  **Self-timer (5 s)**, which counts down five seconds as a large animated number from 5 to 1 over the viewfinder and
+  then takes it, and **Back**. A photo taken returns to the first step with that photo as the preview; Back returns
+  without a new photo. A camera that is denied or broken offers **Try again** and **Back**.
+
+Upload file opens the browser's native file picker, as does a paperclip in the request's composer while the request
+allows files, and an image file dropped onto the composer is taken too; outside such a request there is neither. A
+chosen or dropped file becomes the preview, also during the camera step, and a cancelled picker changes nothing. A
+chosen image stays in the browser and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only
+while saved script storage references it. The camera step uses the session camera when it is already open, as in a
+script that uses `takePhoto()`; otherwise the request opens a camera of its own at Open camera, which turns off again
+on the return to the first step and after the answer. Skip answers `null`, and the player's transcript shows `Skip`. After
+a reload while the request waits, the Player starts again at the first step without a preview, and a photo is never
+taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
 
 ### Video input
 
@@ -2737,6 +2753,34 @@ let audio = askAudio(
 ```
 
 `askAudio(...)` returns one engine-managed audio reference as `string`.
+
+### Skipping a file input
+
+**Status:** Accepted (Owner decisions on #857, 2026-10-12, and 2026-10-13). Implemented for `askImage`; `askFile`,
+`askFiles`, `askVideo`, `askAudio`, and `askFolder` are not implemented yet.
+
+`askFile`, `askImage`, `askVideo`, `askAudio`, and `askFolder` take `allowSkip:`, which is `false` by default. Without
+it, or with `allowSkip: false`, the request waits until the player gives a file, and the result is a `string`. With
+`allowSkip: true` the Player also offers a skip control, **Skip** in the first step of `askImage`
+([Image input](#image-input)), and the request returns `null` when the player skips it, so its result is `string?` and
+needs a check or a fallback before it is used as text:
+
+```text
+let pic = askImage("Show me your setup", allowSkip: true) otherwise "images/no-photo.png"
+
+let doc = askFile("Upload your contract", allowSkip: true)
+if doc == null {
+    say "No contract, then."
+}
+```
+
+Only `allowSkip: false` written as a literal keeps the result `string`; any other value, such as a variable, may be
+`true`, so the result is `string?`. A value that is not `true` or `false` is a compile error where the compiler sees
+it, and otherwise a runtime error when the request opens. An answer stays an engine-managed reference (`string`), not
+a handle.
+
+`askFiles` takes `allowSkip:` as well. A skip returns `null`, so its result is `string[]?`, as for `askFile` and
+`askFolder`.
 
 ### Invalid input handling
 
@@ -2815,10 +2859,10 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`. A [form](#forms), `askForm(...)` or
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`, except a file input the player skips ([Skipping a file input](#skipping-a-file-input)). A [form](#forms), `askForm(...)` or
   `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or by its
   timeout with `onTimeout: "cancel"`.
-- Input functions complete only after valid input has been supplied.
+- Input functions complete only after valid input has been supplied, or a skip or cancellation the request allows.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
 - `types` accepts file extensions such as `".png"` and `".mp4"`.
@@ -2831,6 +2875,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askImage(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askVideo(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askAudio(...)` defaults to `allowMicrophone: true` and `allowFile: true`.
+- `askFile(...)`, `askFiles(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` default to `allowSkip: false`.
 
 ## 21. Blocking button
 **Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)

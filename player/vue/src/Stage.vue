@@ -9,6 +9,8 @@ const props = defineProps<{
    * request takes a photo there; the `camera` slot draws Player controls on that view.
    */
   camera?: MediaStreamTrack | null;
+  /** An image request's preview, the image that would answer it, shown still instead of the image and camera view. */
+  preview?: { src: string; alt: string } | null;
 }>();
 const emit = defineEmits<{
   mediaAspect: [ratio: number];
@@ -17,7 +19,8 @@ const emit = defineEmits<{
 }>();
 const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
 // The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
-// the camera's aspect while the view is shown. The image's own aspect is kept for when the view goes.
+// the camera's aspect while the view is shown. The image's own aspect is kept for when the view goes. A preview stands
+// in for both in the same way, at its own aspect.
 let imageAspect = 0;
 const cameraRatio = ref(4 / 3);
 const imageElement = ref<HTMLImageElement | null>(null);
@@ -35,22 +38,33 @@ watch(
     imageAspect = 0;
     failedSource.value = null;
     loadedSource.value = null;
-    if (!props.camera) emit("mediaAspect", 0);
+    if (!props.camera && !props.preview) emit("mediaAspect", 0);
   },
 );
 watch(
   () => props.camera,
   (track) => {
-    if (!track) emit("mediaAspect", imageAspect);
+    if (!track && !props.preview) emit("mediaAspect", imageAspect);
   },
 );
+watch(
+  () => props.preview?.src,
+  (src) => {
+    if (src === undefined) emit("mediaAspect", props.camera ? cameraRatio.value : imageAspect);
+  },
+);
+function previewLoaded(event: Event) {
+  const image = event.currentTarget;
+  if (image instanceof HTMLImageElement && image.naturalHeight)
+    emit("mediaAspect", image.naturalWidth / image.naturalHeight);
+}
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
   if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
   if (!image.naturalHeight) return;
   loadedSource.value = props.media.src;
   imageAspect = image.naturalWidth / image.naturalHeight;
-  if (!props.camera) emit("mediaAspect", imageAspect);
+  if (!props.camera && !props.preview) emit("mediaAspect", imageAspect);
 }
 // Only the image element on the Stage now counts, in its current state: a removed element, or one whose source was
 // replaced, may still finish loading its earlier source. The same holds for a successful load.
@@ -69,9 +83,10 @@ function cameraMeasured(ratio: number) {
 <template>
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
-      <img v-if="media" v-show="failedSource === null" ref="imageElement" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
+      <img v-if="media" v-show="failedSource === null && !preview" ref="imageElement" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
+      <img v-if="preview" :src="preview.src" :alt="preview.alt" class="stage-media" data-stage-preview @load="previewLoaded" />
       <div
-        v-if="camera || $slots.camera"
+        v-else-if="camera || $slots.camera"
         class="stage-camera"
         data-stage-camera
         :style="{ '--viewfinder-ratio': cameraRatio }"

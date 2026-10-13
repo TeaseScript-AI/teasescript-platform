@@ -114,10 +114,11 @@ reference grants access only when the trusted Player media store resolves it wit
 well-formed string, including one returned by `load`, is ordinary data. A file the player chooses for `askImage(...)`
 is external data: the Player identifies the image type from the file's bytes and has the browser decode it before
 storing it as session media, and only its reference reaches the runtime. An image request (`askImage(...)`) that
-allows the camera may open the camera when it asks, also when the session camera was not opened at Start, so the
-browser may ask permission then; it shows its viewfinder while it waits, takes a photo only from the player's shutter
-press, and turns a camera it opened itself off again after the answer. Such a camera serves only that request, never
-`takePhoto()` or a script's camera view, and a photo reaches the runtime only through "Use this". `takePhoto()` stays
+allows the camera may open the camera when the player chooses "Open camera", also when the session camera was not
+opened at Start, so the browser may ask permission then; it shows its viewfinder while the player frames the photo,
+takes a photo only from the player's "Take photo" or "Self-timer", and turns a camera it opened itself off again when
+the camera step ends. Such a camera serves only that request, never `takePhoto()` or a script's camera view, and a
+photo or file reaches the runtime only through "Use image". `takePhoto()` stays
 silent and uses only the camera opened at Start. A recording contains exactly the sources the author requests; whether
 video includes microphone audio never depends on whether a microphone is already open. How
 brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs

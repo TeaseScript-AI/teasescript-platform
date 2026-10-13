@@ -299,6 +299,21 @@ test("a key computed at runtime has no type", () => {
   assert.deepEqual(compiled.storageTypes, [{ key: "count", type: { kind: "integer" } }]);
 });
 
+test("a load into a variable that held only null gives it the loaded value's type (#859)", () => {
+  // The default null decides nothing; the declared key decides an integer, and a computed key a value of unknown type.
+  const source = (load: string, use: string) =>
+    `let level: integer? = load("level", default: null)\nlet n = "vel"\nlet x = null\nx = ${load}\nif x != null {\n    ${use}\n}\nexit`;
+  for (const load of ['load "level", default: null', 'load "le${n}", default: null'])
+    assert.deepEqual(codes(source(load, 'say "${x + 1}"')), [], load);
+  assert.deepEqual(errors(source('load "level", default: null', 'say x + "!"')), [
+    [
+      "TSV043",
+      `'+' joins text only with other text, not with a whole number (integer). Put the value in the text instead, as in "\${x}!".`,
+      'x + "!"',
+    ],
+  ]);
+});
+
 test("the plan gives each load its type and each key the type its saves fit", () => {
   const compiled = plan(
     [

@@ -2532,7 +2532,7 @@ class SemanticValidator {
       } else if (!IMAGE_REQUEST_OPTIONS.has(name)) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `askImage() has no argument '${name}'. It takes a message, hint:, allowCamera:, allowFile:, types:, and mime:.`,
+          `askImage() has no argument '${name}'. It takes a message, hint:, allowCamera:, allowFile:, allowSkip:, types:, and mime:.`,
           argument.name.span,
         );
       }

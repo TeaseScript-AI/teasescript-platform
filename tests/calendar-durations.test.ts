@@ -121,7 +121,7 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     ["TSP033", "A year has no fixed length. Write '1 calendar y'."],
   ]);
   // After a name, a member, a call, or parentheses too, also in an interpolation and over lines in parentheses.
-  const named = "let n = 3\nlet p = { delay: 3 }\nfunction f {\n  return 3\n}\n";
+  const named = "let n = 3\nlet p = { delay: 3 }\nfunction f {\n  return 3\n}\nlet xs = [3]\n";
   for (const [source, message] of [
     ["wait n months", "A month has no fixed length. Write 'n calendar months'."],
     ["let a = p.delay years", "A year has no fixed length. Write 'p.delay calendar years'."],
@@ -133,6 +133,52 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     ],
   ] as const)
     assert.deepEqual(diagnostics(`${named}${source}\nexit`), [["TSP033", message]], source);
+  // So does a short 'mo' or 'y', at the unit, also where a list or a call goes on after it.
+  for (const [source, message, column, unit] of [
+    ["wait n mo", "A month has no fixed length. Write 'n calendar mo'.", 7, "mo"],
+    [
+      "let a = getDate() + xs[0] y",
+      "A year has no fixed length. Write 'xs[0] calendar y'.",
+      26,
+      "y",
+    ],
+    ['let a = "${p.delay y}"', "A year has no fixed length. Write 'p.delay calendar y'.", 19, "y"],
+    [
+      "let a = [f() mo, 1 calendar day]",
+      "A month has no fixed length. Write 'f() calendar mo'.",
+      13,
+      "mo",
+    ],
+    [
+      'let b = showButton "Go", timeout: (n + 1) y',
+      "A year has no fixed length. Write '(n + 1) calendar y'.",
+      42,
+      "y",
+    ],
+  ] as const) {
+    const full = `${named}${source}\nexit`;
+    assert.deepEqual(
+      compileSource(full).diagnostics.map(({ code, message, span }) => [
+        code,
+        message,
+        span.start.line,
+        span.start.column,
+        full.slice(span.start.offset, span.end.offset),
+      ]),
+      [["TSP033", message, 6, column, unit]],
+      source,
+    );
+  }
+  // With an exact unit or with 'calendar', the same operands compile.
+  for (const source of [
+    "wait n s",
+    "wait (n + 1) seconds",
+    "let a = n calendar mo",
+    "let a = getDate() + xs[0] calendar y",
+    'let a = "${p.delay calendar y}"',
+    "let a = [f() calendar mo, 1 calendar day]",
+  ])
+    compileValidPlan(`${named}${source}\nexit`);
   assert.deepEqual(diagnostics("let a = 2 calendar\nexit"), [
     ["TSP033", "Expected a calendar unit after 'calendar': day, week, month, or year."],
   ]);
