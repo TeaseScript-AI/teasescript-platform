@@ -44,7 +44,7 @@ import {
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import type { InstructionTraceCollector } from "./instruction-trace.js";
+import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
   InterpreterEvent,
@@ -279,6 +279,8 @@ function templateText(text: string, part: string, span: SourceSpan): string {
 
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
+  /** Whether the instruction observer ended the operation before an instruction. */
+  public stopped = false;
   #evaluator: Evaluator | null = null;
 
   public constructor(
@@ -291,6 +293,8 @@ export class RuntimeExecutionContext {
     public readonly instructionTrace: InstructionTraceCollector | null = null,
     /** The operation's controlled randomness, or `null` when every draw is natural. */
     public readonly control: RandomControl | null = null,
+    /** The session host's instruction observer, or `null`. */
+    public readonly observer: RuntimeInstructionObserver | null = null,
   ) {}
 
   public evaluator(): Evaluator {
@@ -4377,6 +4381,15 @@ export function findBinding(
   name: string,
 ): RuntimeBindingSnapshot | undefined {
   return findBindingLocation(snapshot, plan, name)?.binding;
+}
+
+/** The ID of the scope that `name` refers to, as `findBinding` finds it; `GLOBAL_SCOPE_ID` for a global. */
+export function bindingScopeId(
+  snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
+  name: string,
+): number | undefined {
+  return findBindingLocation(snapshot, plan, name)?.frame.id;
 }
 
 function findBindingLocation(

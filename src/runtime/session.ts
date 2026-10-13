@@ -19,6 +19,7 @@ import {
   runValidatedState,
   stepValidatedStateToEvent,
   type RuntimeRunOptions,
+  type ValidatedRunOptions,
 } from "./engine.js";
 import {
   compileRandomPolicy,
@@ -29,9 +30,14 @@ import {
   type RandomDrawView,
   type RandomPolicy,
 } from "./random-control.js";
-import type { RuntimeBuiltinFunction, RuntimeCapabilities } from "./evaluator.js";
+import {
+  bindingScopeId,
+  type RuntimeBuiltinFunction,
+  type RuntimeCapabilities,
+} from "./evaluator.js";
 import type { InterpreterEvent } from "./events.js";
-import type { RuntimeInstructionTrace } from "./instruction-trace.js";
+import type { RuntimeInstructionObserver, RuntimeInstructionTrace } from "./instruction-trace.js";
+import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
 import { runtimeDebugPreview, type RuntimeDebugContext } from "./debug-trace.js";
 import {
   completeValidatedAction,
@@ -215,6 +221,12 @@ export interface RuntimeSessionVariablePreviews {
   readonly liveMessages: readonly RuntimeLiveMessageSnapshot[];
 }
 
+/** The options of a session operation that executes instructions. */
+export interface RuntimeSessionRunOptions extends RuntimeRunOptions {
+  /** Called before and after each instruction the operation executes (`docs/RUNTIME.md#runtime-sessions`). */
+  readonly instructionObserver?: RuntimeInstructionObserver;
+}
+
 /** The options of an operation that only takes a debug trace. */
 interface TraceOptions {
   readonly debugTrace?: RuntimeDebugContext;
@@ -232,6 +244,8 @@ export class RuntimeSession {
   #randomPolicy: RandomPolicy | null;
   #state: RuntimeSnapshot;
   #operating = false;
+  /** Whether an operation calls its instruction observer now, which may call `scopeOf`. */
+  #observing = false;
   /** What an operation threw, which ended the session, or `null`. */
   #thrown: { readonly error: unknown } | null = null;
 
@@ -259,9 +273,9 @@ export class RuntimeSession {
     return this.#plan;
   }
 
-  public run(options: RuntimeRunOptions = {}): RuntimeSessionResult {
+  public run(options: RuntimeSessionRunOptions = {}): RuntimeSessionResult {
     return this.#operate(
-      () => runOptions(options),
+      () => ({ ...runOptions(options), ...this.#observerOption(options) }),
       (state, checked) =>
         runValidatedState(this.#plan, state, this.#capabilities, {
           ...checked,
@@ -271,9 +285,9 @@ export class RuntimeSession {
     );
   }
 
-  public stepToEvent(options: RuntimeRunOptions = {}): RuntimeSessionResult {
+  public stepToEvent(options: RuntimeSessionRunOptions = {}): RuntimeSessionResult {
     return this.#operate(
-      () => runOptions(options),
+      () => ({ ...runOptions(options), ...this.#observerOption(options) }),
       (state, checked) =>
         stepValidatedStateToEvent(this.#plan, state, this.#capabilities, {
           ...checked,
@@ -284,12 +298,16 @@ export class RuntimeSession {
   }
 
   public executeInstruction(
-    options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+    options: Pick<
+      RuntimeSessionRunOptions,
+      "debugTrace" | "instructionTrace" | "instructionObserver"
+    > = {},
   ): RuntimeSessionResult {
     return this.#operate(
       () => ({
         ...traceOptions(options),
         ...instructionTraceOption(options),
+        ...this.#observerOption(options),
         randomPolicy: this.#randomPolicy,
       }),
       (state, checked) =>
@@ -305,7 +323,10 @@ export class RuntimeSession {
    */
   public resumeRandomDraw(
     request: unknown,
-    options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
+    options: Pick<
+      RuntimeSessionRunOptions,
+      "debugTrace" | "instructionTrace" | "instructionObserver"
+    > = {},
   ): RuntimeSessionOutcomeResult<RandomDrawResolutionOutcome> {
     return this.#operate(
       () => {
@@ -316,6 +337,7 @@ export class RuntimeSession {
         return {
           ...traceOptions(options),
           ...instructionTraceOption(options),
+          ...this.#observerOption(options),
           randomPolicy: this.#randomPolicy,
         };
       },
@@ -445,6 +467,21 @@ export class RuntimeSession {
         forcedRandomChoices: state.randomControl?.forcedChoices ?? 0,
       }),
     );
+  }
+
+  /**
+   * The scope that `name` refers to where execution stands, as `RuntimeDebugContext.variableRecord` takes it: a scope
+   * ID or `"global"`, or `null` when no variable of that name is visible, in work proportional to the scope depth. Also
+   * callable from an instruction observer while its operation runs.
+   */
+  public scopeOf(name: string): number | "global" | null {
+    const scope = (state: RuntimeSnapshot): number | "global" | null => {
+      if (typeof name !== "string") throw new TypeError("scopeOf takes a variable name.");
+      const id = bindingScopeId(state, this.#plan, name);
+      return id === undefined ? null : id === GLOBAL_SCOPE_ID ? "global" : id;
+    };
+    // The operation calling the observer stands between two instructions.
+    return this.#observing ? scope(this.#state) : this.#read(scope);
   }
 
   /** The date and time presentation in force where execution stands. */
@@ -606,6 +643,53 @@ export class RuntimeSession {
         throw error;
       }
     });
+  }
+
+  /**
+   * The instruction observer `options` gives, its callbacks read once and wrapped so that `scopeOf` works while they
+   * run. A malformed observer throws before the operation starts.
+   */
+  #observerOption(
+    options: Pick<RuntimeSessionRunOptions, "instructionObserver">,
+  ): Pick<ValidatedRunOptions, "instructionObserver"> {
+    const observer = options.instructionObserver;
+    if (observer === undefined) return {};
+    const given = typeof observer === "object" && observer !== null;
+    const before: unknown = given ? observer.before : undefined;
+    const after: unknown = given ? observer.after : undefined;
+    if (
+      !given ||
+      (before !== undefined && typeof before !== "function") ||
+      (after !== undefined && typeof after !== "function")
+    ) {
+      throw new TypeError(
+        "instructionObserver must be an object whose before and after, when given, are functions.",
+      );
+    }
+    return {
+      instructionObserver: {
+        ...(typeof before === "function" && {
+          before: (instruction: number, call: number): boolean | void => {
+            this.#observing = true;
+            try {
+              return before.call(observer, instruction, call);
+            } finally {
+              this.#observing = false;
+            }
+          },
+        }),
+        ...(typeof after === "function" && {
+          after: (instruction: number, next: number, call: number): void => {
+            this.#observing = true;
+            try {
+              after.call(observer, instruction, next, call);
+            } finally {
+              this.#observing = false;
+            }
+          },
+        }),
+      },
+    };
   }
 
   #read<T>(read: (state: RuntimeSnapshot) => T): T {

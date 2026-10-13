@@ -14,6 +14,17 @@ export interface RuntimeInstructionTrace {
   readonly branches: readonly (readonly [number, number])[];
 }
 
+/**
+ * A session host's observer of each instruction an operation executes, in order (`docs/RUNTIME.md#runtime-sessions`).
+ * `call` is the ID of the call frame that runs the instruction, 0 outside every call.
+ */
+export interface RuntimeInstructionObserver {
+  /** Called right before a planned instruction runs; returning `true` ends the operation there, before it runs. */
+  readonly before?: (instruction: number, call: number) => boolean | void;
+  /** Called once an instruction completed, with `next`, the instruction where execution continues. */
+  readonly after?: (instruction: number, next: number, call: number) => void;
+}
+
 /** Collects one call's instruction trace; the engine records into it at each instruction boundary. */
 export class InstructionTraceCollector {
   readonly #instructions = new Set<number>();
