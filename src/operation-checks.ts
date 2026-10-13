@@ -48,6 +48,7 @@ import {
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
+  type MethodParameters,
   type TextMember,
 } from "./text-operations.js";
 
@@ -67,8 +68,9 @@ export interface OperationProblem {
 /**
  * Compile-time problems with a member read (`call` is `null`) or method call: unknown text members, members of values
  * that have none, and visible misuse of text operation and `join` arguments, also on a receiver of unknown type for the
- * methods only text or only lists have. Objects, speakers, handles, unions, and the other list and set members are left
- * to the type check's own rules or to the runtime.
+ * methods only text or only lists have. On a receiver of unknown type, the arguments of the other methods are checked
+ * where no receiver with the method takes them. Objects, speakers, handles, unions, and the other list and set members
+ * are left to the type check's own rules or to the runtime.
  */
 export function memberProblems(
   receiver: Expression,
@@ -119,11 +121,16 @@ export function memberProblems(
     // Only lists have `count`, and a list's `indexOf` and `lastIndexOf` take any value, so only one argument without a
     // name is checked.
     if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
+    // A list's `get` takes an index and a dict's a key, each with a `default:`.
+    if (name === "get") return getProblems(undefined, property, call);
     const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
-    if (!member?.parameters) return [];
-    return name === "contains"
-      ? shapeProblems(member, call)
-      : argumentProblems(member, call, typeOf, undefined);
+    if (member?.parameters)
+      return name === "contains"
+        ? shapeProblems(member, call)
+        : argumentProblems(member, call, typeOf, undefined);
+    // Every receiver with one of the other methods takes as many arguments, but a message or a permanent button may take
+    // `remove()` without any.
+    return positionalMethodProblems(name, call, true);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
   const fix =
@@ -135,8 +142,11 @@ export function memberProblems(
   );
 }
 
-/** Argument names, which text operations and `join` never take, and the number of arguments. */
-function shapeProblems(member: TextMember, call: CallExpression): OperationProblem[] {
+/**
+ * Argument names, which text operations, `join`, and the methods of `POSITIONAL_METHODS` never take, and the number of
+ * arguments.
+ */
+function shapeProblems(member: MethodParameters, call: CallExpression): OperationProblem[] {
   const parameters = member.parameters!;
   const named = call.arguments.find((argument) => argument.kind === "namedArgument");
   if (named !== undefined)
@@ -655,6 +665,70 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "difference",
 ]);
 
+/** A method that takes positional arguments with these names. */
+function positionalMethod(name: string, ...parameters: string[]): [string, MethodParameters] {
+  return [name, { name, parameters: parameters.map((parameter) => ({ name: parameter })) }];
+}
+
+/**
+ * The parameters of the methods of lists and sets (V30 §16), timers and media (V30 §22), and date and time values
+ * (V30 §35) that take only positional arguments, besides `join`, the searches, `take`, and `takeLast`, which have their
+ * own checks. Every other receiver with one of these methods takes as many: text for `contains` and `reverse`, and a dict
+ * for `contains`, `remove`, and `clear`. Only a message and a permanent button take `remove()` without arguments (#836).
+ */
+const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
+  positionalMethod("add", "value"),
+  positionalMethod("addAll", "other"),
+  positionalMethod("remove", "value"),
+  positionalMethod("removeAt", "index"),
+  positionalMethod("removeFirst"),
+  positionalMethod("removeLast"),
+  positionalMethod("clear"),
+  positionalMethod("contains", "value"),
+  positionalMethod("sort"),
+  positionalMethod("shuffle"),
+  positionalMethod("reverse"),
+  positionalMethod("intersection", "other"),
+  positionalMethod("union", "other"),
+  positionalMethod("difference", "other"),
+  positionalMethod("toSet"),
+  positionalMethod("toList"),
+  positionalMethod("pause"),
+  positionalMethod("resume"),
+  positionalMethod("stop"),
+  positionalMethod("toISO"),
+  positionalMethod("formatDate"),
+  positionalMethod("formatTime"),
+  positionalMethod("formatDateTime"),
+  positionalMethod("toAbsoluteDateTime"),
+  positionalMethod("toDateTime"),
+  positionalMethod("toSeconds"),
+  positionalMethod("toMilliseconds"),
+]);
+
+/**
+ * Argument names and the number of arguments of a method in `POSITIONAL_METHODS`, which every receiver with the method
+ * rejects. Where the receiver may be a message or a permanent button (`removable`), `remove()` may have no argument.
+ */
+export function positionalMethodProblems(
+  name: string,
+  call: CallExpression,
+  removable: boolean,
+): OperationProblem[] {
+  const method = POSITIONAL_METHODS.get(name);
+  if (method === undefined) return [];
+  const problems = shapeProblems(method, call);
+  if (!removable || name !== "remove" || problems[0]?.kind !== "argumentCount") return problems;
+  if (call.arguments.length === 0) return [];
+  return [
+    {
+      kind: "argumentCount",
+      message: `remove() takes 1 argument, or none on a message or permanent button, received ${call.arguments.length}.`,
+      span: call.span,
+    },
+  ];
+}
+
 /**
  * Compile-time problems with `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, `intersection`,
  * `union`, or `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a
@@ -680,24 +754,8 @@ export function collectionMethodProblems(
         span: property.span,
       },
     ];
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: `${name}() takes its arguments without names. Remove '${named.name.name}:'.`,
-        span: named.name.span,
-      },
-    ];
-  const expected = reorders ? 0 : 1;
-  if (call.arguments.length !== expected)
-    return [
-      {
-        kind: "argumentCount",
-        message: `${name}() takes ${reorders ? "no arguments" : "1 argument (other)"}, received ${call.arguments.length}.`,
-        span: call.span,
-      },
-    ];
+  const shape = positionalMethodProblems(name, call, false);
+  if (shape.length > 0) return shape;
   if (name === "sort") {
     const message = sortProblem(receiverType.element);
     return message === undefined ? [] : [{ kind: "invalidOperand", message, span: property.span }];
@@ -810,14 +868,15 @@ function searchProblems(
 
 /**
  * Problems with a list's `get(index, default: value)`: one index and a `default:`, as a dict's `get` takes a key and a
- * `default:` (#844). The index is checked as for `list[index]`.
+ * `default:` (#844), also where the receiver may be either (`receiverType` is `undefined`). The index is checked as for
+ * `list[index]`.
  */
 function getProblems(
-  receiverType: StaticType & { readonly kind: "list" | "set" },
+  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
   property: Identifier,
   call: CallExpression,
 ): OperationProblem[] {
-  if (receiverType.kind === "set")
+  if (receiverType?.kind === "set")
     return [
       {
         kind: "invalidOperand",
@@ -837,13 +896,18 @@ function getProblems(
     ];
   const positional = call.arguments.length - named.length;
   if (positional === 1 && named.length === 1) return [];
+  const list = receiverType !== undefined;
   return [
     {
       kind: "argumentCount",
       message:
         positional === 1 && named.length === 0
-          ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
-          : "'get(index, default: value)' takes one index and a 'default:'.",
+          ? list
+            ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
+            : "'get(index or key, default: value)' needs a 'default:' for an index or key the value does not have. Read one that must exist as 'value[index]'."
+          : list
+            ? "'get(index, default: value)' takes one index and a 'default:'."
+            : "'get(index or key, default: value)' takes one index or key and a 'default:'.",
       span: call.span,
     },
   ];

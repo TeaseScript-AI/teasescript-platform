@@ -93,6 +93,7 @@ import {
   LIST_SEARCHES,
   mayBeMessage,
   memberProblems,
+  positionalMethodProblems,
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
@@ -5480,7 +5481,7 @@ class TypeChecker {
     );
     if (collections && method === "add") {
       const argument = expression.arguments[0];
-      if (argument !== undefined && expression.arguments.length === 1) {
+      if (argument?.kind === "positionalArgument" && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
         const collection = this.#elementReceiver(callee.object, scope, receiver, type);
         yield* compileChild(
@@ -5499,7 +5500,7 @@ class TypeChecker {
     }
     if (method === "addAll" && members(value).every(isList)) {
       const argument = expression.arguments[0];
-      if (argument !== undefined && expression.arguments.length === 1) {
+      if (argument?.kind === "positionalArgument" && expression.arguments.length === 1) {
         yield* compileChild(
           this.#addAllTask(expression, callee.object, receiver, argument.value, scope),
         );
@@ -5602,16 +5603,25 @@ class TypeChecker {
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
-      if (textual || COLLECTION_METHODS.has(method)) {
+      const collection = all.some((member) => {
+        const kept = resolved(member);
+        return isListOrSet(kept) || kept.kind === "dict";
+      });
+      if (textual || COLLECTION_METHODS.has(method) || collection) {
         // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
         // that several members share at one place is reported once.
         const before = this.diagnostics.length;
         const atCall = members(resolved(receiverAtCall));
+        // A message or a permanent button takes `remove()` without arguments, which a list, set, or dict member rejects.
+        const removable = mayBe(receiver, "messageHandle", "permanentButton");
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
           // A list or set checks its own methods, also `indexOf` and `lastIndexOf`, which take any value on a list.
           if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
             return this.#collectionMethodType(method, kept, callee.property, expression);
+          // Its other methods, and a dict's in a union, take their arguments without names, in their number (V30 §16).
+          if (isListOrSet(kept) || kept.kind === "dict")
+            this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
             this.#reportProblems(
               memberProblems(
@@ -8470,7 +8480,10 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
 const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
 /** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
-function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera" | "list")[]): boolean {
+function mayBe(
+  type: StaticType,
+  ...kinds: ("timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list")[]
+): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
     return (
