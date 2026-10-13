@@ -122,8 +122,8 @@ function restart {
 }
 // A text or a flag read of a key that values of another type are saved under too reads the value as stored and turns
 // it into text, or into true only for "true".
-// NOTE SX_LOAD_STRING_TEXT line 44: loadString() read the stored value as text, and the package saves values of another type under this key too, or reads it as one, so the value is read as stored and turned into text; a missing value is the empty text where the value stays in the read or its variable, and null where it goes on.
-let pick = "${load("game.pick", default: sexscriptLegacyValue(""))}"
+// NOTE SX_LOAD_STRING_TEXT line 44: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+let pick: string = "${load("game.pick", default: sexscriptLegacyValue(""))}"
 say prose "Pick ${pick}", instant
 function roll {
   save randomInteger(0..6) as "game.pick"

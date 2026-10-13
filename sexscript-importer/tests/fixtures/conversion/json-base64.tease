@@ -1,3 +1,24 @@
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 // JSON and Base64 text (V30 §30): JsonOutput.toJson() is toJson(), a text's bytes in Base64 toBase64(), decodeBase64()
 // bytes that new String() makes text again fromBase64(), and a JsonSlurper's parseText() fromJson(). Text that is not
 // Base64 or JSON gives a default where Groovy failed, here into the catch, which returned null as fromJson() does.
@@ -22,15 +43,21 @@ let report = decode(encode({ presetTitle: config.title, violations: 2 }))
 // NOTE SX_DICT_MISSING_KEY line 23: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 24: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 // NOTE SX_DICT_MISSING_KEY line 24: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-if report == null or not report.length > 0 {
+if not sexscriptLegacyTruth(report) {
   say prose "I cannot read your report", instant
 } else if config.title != report["presetTitle"] {
   say prose "That is not the corner time I ordered", instant
 } else if report["violations"] > 1 {
   say prose "You moved ${report["violations"]} times", instant
 }
-// NOTE SX_JSON_PARSE line 25: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
-// NOTE SX_DICT_MISSING_KEY line 25: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-let size = fromJson("{\"size\": 3}", default: null)["size"]
-say prose "Size ${size}", instant
+// A nested map's keys read as a map's too, a key "size" also; an array keeps its positions.
+// NOTE SX_JSON_PARSE line 26: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
+let data = fromJson("{\"config\": {\"title\": \"Yes\", \"size\": 3}, \"rolls\": [4, 6]}", default: null)
+// NOTE SX_DICT_MISSING_KEY line 27: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+let inner = data["config"]
+// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+say prose "${data["config"]["title"]} ${inner["size"]} ${data["rolls"][1]}", instant
 exit

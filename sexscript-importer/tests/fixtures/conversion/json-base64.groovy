@@ -22,5 +22,7 @@ def report = decode(encode([presetTitle: config.title, violations: 2]))
 if (!report) show("I cannot read your report")
 else if (config.title != report.presetTitle) show("That is not the corner time I ordered")
 else if (report.violations > 1) show("You moved " + report.violations + " times")
-def size = new groovy.json.JsonSlurper().parseText('{"size": 3}').size
-show("Size " + size)
+// A nested map's keys read as a map's too, a key "size" also; an array keeps its positions.
+def data = new groovy.json.JsonSlurper().parseText('{"config": {"title": "Yes", "size": 3}, "rolls": [4, 6]}')
+def inner = data.config
+show(data.config.title + " " + inner.size + " " + data.rolls[1])

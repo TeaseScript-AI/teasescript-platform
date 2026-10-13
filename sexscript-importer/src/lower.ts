@@ -621,6 +621,9 @@ export interface MapUses {
   dictionaries: Set<string>;
   /** Closures every return of which gives such a map, whose calls are dicts too. */
   dictionaryFunctions: Set<string>;
+  /** Variables that hold what a JsonSlurper's parseText() gave, and the closures that return it (jsonValueBindings). */
+  jsonValues: Set<string>;
+  jsonFunctions: Set<string>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -945,19 +948,17 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
   const dictionaryFunctions = new Set<string>();
-  // A variable that one file sets from a call of another file's dict function is a dict too, which may make a
-  // function of its file one: rounds until nothing changes.
-  for (let size = -1; size !== dictionaries.size + dictionaryFunctions.size;) {
-    size = dictionaries.size + dictionaryFunctions.size;
-    for (const { body, types, keys } of bodies) {
-      const found = dictionaryVariables(body, types, keys, dictionaryFunctions);
-      for (const name of found.variables) dictionaries.add(name);
-      for (const name of found.functions) dictionaryFunctions.add(name);
-    }
+  for (const { body, types, keys } of bodies) {
+    const found = dictionaryVariables(body, types, keys);
+    for (const name of found.variables) dictionaries.add(name);
+    for (const name of found.functions) dictionaryFunctions.add(name);
   }
+  const json = jsonValueBindings(bodies);
   const uses: MapUses = {
     dictionaries,
     dictionaryFunctions,
+    jsonValues: json.variables,
+    jsonFunctions: json.functions,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -14574,13 +14575,15 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
   // such a property, apart from a map key, so a receiver not proven to be a map is a list.
   if (
     (property === "size" || property === "length") &&
-    (isKnownListExpression(targetNode, context) || !isDictionary(targetNode, context))
+    (isKnownListExpression(targetNode, context) ||
+      (!isDictionary(targetNode, context) && !isJsonValue(targetNode, context)))
   ) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
-  if (isDictionary(targetNode, context)) {
-    // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536).
+  // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536), as does what a JsonSlurper's
+  // parseText() gave, also a map nested in it (V30 §30).
+  if (isDictionary(targetNode, context) || isJsonValue(targetNode, context)) {
     const target = lowerExpression(targetNode, context);
     if (target === null) return null;
     noteMissingKey(node, { receiver: targetNode, key: null, name: property }, context);
@@ -15767,8 +15770,6 @@ function dictionaryVariables(
   body: AstNode,
   types: TypeEnvironment,
   keys: BindingKeys,
-  /** Dict functions of the package's other files. */
-  known: ReadonlySet<string> = new Set(),
 ): { variables: Set<string>; functions: Set<string> } {
   const names = new Set<string>();
   const keyOf = (node: unknown): string | null => bindingKey(node, keys);
@@ -15788,9 +15789,6 @@ function dictionaryVariables(
   const aliases: Array<[string, string]> = [];
   // Variables set from a call of a closure of the script.
   const calls: Array<[string, string]> = [];
-  // A JsonSlurper's parse of a text, whose keys Groovy read as a map's, is a dict where it is an object (V30 §30).
-  const slurpers = jsonSlurperNames(body);
-  const jsonParse = (node: AstNode): boolean => isJsonParse(node, (name) => slurpers.has(name));
   walkAst(body, (node) => {
     if (node.kind === "binary" && node.operator === "[") {
       const name = keyOf(node.left);
@@ -15831,7 +15829,7 @@ function dictionaryVariables(
     const target = assigns ? keyOf(node.left) : null;
     const value = assigns ? asNode(node.right) : null;
     if (target === null || value === null) return;
-    if (dictionaryLiteral(value) || jsonParse(value)) names.add(target);
+    if (dictionaryLiteral(value)) names.add(target);
     const source = keyOf(value);
     if (source !== null) aliases.push([target, source]);
     const called =
@@ -15840,19 +15838,14 @@ function dictionaryVariables(
         : null;
     if (called !== null) calls.push([target, called]);
   });
-  // The closures whose every return gives a dict literal or a dict variable, or else null where another return gives a
-  // parsed JSON text, and that end in a return on every path, so that no last expression gives a value of its own
-  // (Groovy returned the value of a closure's last expression, also one at the end of an `if` or `else`).
+  // The closures whose every return gives a dict literal or a dict variable, and that end in a return on every path,
+  // so that no last expression gives a value of its own (Groovy returned the value of a closure's last expression,
+  // also one at the end of an `if` or `else`).
   const returns = new Map<string, AstNode[]>();
   const endsInReturn = (node: AstNode | null): boolean => {
     if (node === null) return false;
     if (node.kind === "return") return true;
     if (node.kind === "block") return endsInReturn(nodeArray(node.statements).at(-1) ?? null);
-    if (node.kind === "tryCatch")
-      return (
-        endsInReturn(asNode(node.try)) &&
-        nodeArray(node.catches).every((handler) => endsInReturn(asNode(handler.body)))
-      );
     if (node.kind === "if") {
       const otherwise = asNode(node.else);
       return (
@@ -15884,9 +15877,9 @@ function dictionaryVariables(
       for (const child of Object.values(value)) visit(child);
     };
     visit(statements);
-    if ((!open || values.some(jsonParse)) && values.length > 0) returns.set(name, values);
+    if (!open && values.length > 0) returns.set(name, values);
   });
-  const functions = new Set<string>(known);
+  const functions = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [target, source] of aliases) {
@@ -15898,11 +15891,7 @@ function dictionaryVariables(
     }
     for (const [name, values] of returns) {
       if (functions.has(name)) continue;
-      if (
-        !values.every(
-          (value) => dictionaryLiteral(value) || jsonParse(value) || names.has(keyOf(value) ?? ""),
-        )
-      )
+      if (!values.every((value) => dictionaryLiteral(value) || names.has(keyOf(value) ?? "")))
         continue;
       functions.add(name);
       changed = true;
@@ -15914,6 +15903,139 @@ function dictionaryVariables(
     }
   }
   return { variables: names, functions };
+}
+
+/**
+ * What a JsonSlurper's parseText() gave (V30 §30), whose keys Groovy read as a map's: the variables, by binding, that
+ * hold it, directly, as a key's value in it (a nested map), from another such variable, or from a call of a closure
+ * that returns it; and those closures, every return of which gives such a value or null, at least one such a value,
+ * which end in a return on every path. A call reaches another file's closure where its own file defines none of that
+ * name, and a name that some file defines as another closure is none (`conflicts`).
+ */
+function jsonValueBindings(bodies: readonly MapBody[]): {
+  variables: Set<string>;
+  functions: Set<string>;
+} {
+  const variables = new Set<string>();
+  const functions = new Set<string>();
+  const parts = bodies.map(({ body, keys }) => {
+    const slurpers = jsonSlurperNames(body);
+    const assignments: Array<[string, AstNode]> = [];
+    const closures = new Map<string, AstNode[] | null>();
+    const endsInReturn = (node: AstNode | null): boolean => {
+      if (node === null) return false;
+      if (node.kind === "return") return true;
+      if (node.kind === "block") return endsInReturn(nodeArray(node.statements).at(-1) ?? null);
+      if (node.kind === "tryCatch")
+        return (
+          endsInReturn(asNode(node.try)) &&
+          nodeArray(node.catches).every((handler) => endsInReturn(asNode(handler.body)))
+        );
+      if (node.kind === "if") {
+        const otherwise = asNode(node.else);
+        return (
+          endsInReturn(asNode(node.then)) &&
+          otherwise !== null &&
+          otherwise.kind !== "empty" &&
+          endsInReturn(otherwise)
+        );
+      }
+      return false;
+    };
+    walkAst(body, (node) => {
+      const assigns =
+        node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+      const target = assigns ? bindingKey(node.left, keys) : null;
+      const value = assigns ? asNode(node.right) : null;
+      if (target !== null && value !== null) assignments.push([target, value]);
+      const name = node.kind === "declaration" ? variableName(node.left) : null;
+      if (name === null || value?.kind !== "closure") return;
+      // The values its returns give, without null; null for a closure that may end without a return.
+      const statements = nodeArray(asNode(value.body)?.statements);
+      const values: AstNode[] = [];
+      const visit = (child: unknown): void => {
+        if (Array.isArray(child)) return child.forEach(visit);
+        if (!isAstNode(child) || child.kind === "closure") return;
+        if (child.kind === "return") {
+          const returned = asNode(child.value);
+          if (returned !== null && !isNullConstant(returned)) values.push(returned);
+          return;
+        }
+        for (const part of Object.values(child)) visit(part);
+      };
+      visit(statements);
+      closures.set(name, endsInReturn(statements.at(-1) ?? null) ? values : null);
+    });
+    return { keys, slurpers, assignments, closures, functions: new Set<string>() };
+  });
+  for (let size = -1; size !== variables.size + functions.size;) {
+    size = variables.size + functions.size;
+    // Names some file defines as a closure that gives no such value.
+    const conflicts = new Set(
+      parts.flatMap(({ closures, functions: own }) =>
+        [...closures.keys()].filter((name) => !own.has(name)),
+      ),
+    );
+    for (const part of parts) {
+      const isJson = (node: AstNode | null): boolean => {
+        if (node === null) return false;
+        if (isJsonParse(node, (name) => part.slurpers.has(name))) return true;
+        if (node.kind === "variable") return variables.has(bindingKey(node, part.keys) ?? "");
+        if (node.kind === "property")
+          return node.spreadSafe !== true && isJson(asNode(node.object));
+        if (node.kind === "binary" && node.operator === "[") return isJson(asNode(node.left));
+        const called =
+          node.kind === "methodCall" && node.implicitThis === true
+            ? constantString(node.method)
+            : null;
+        if (called === null) return false;
+        return part.closures.has(called)
+          ? part.functions.has(called)
+          : functions.has(called) && !conflicts.has(called);
+      };
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const [target, value] of part.assignments) {
+          if (!variables.has(target) && isJson(value)) {
+            variables.add(target);
+            changed = true;
+          }
+        }
+        for (const [name, values] of part.closures) {
+          if (part.functions.has(name) || values === null || values.length === 0) continue;
+          if (!values.every(isJson)) continue;
+          part.functions.add(name);
+          functions.add(name);
+          changed = true;
+        }
+      }
+    }
+  }
+  // A name that a file defines as another closure is no such function.
+  for (const { closures, functions: own } of parts)
+    for (const name of closures.keys()) if (!own.has(name)) functions.delete(name);
+  return { variables, functions };
+}
+
+/** Whether a node is or holds what a JsonSlurper's parseText() gave, as a value or a key's value in it (jsonValueBindings). */
+function isJsonValue(node: AstNode | null, context: LowerContext): boolean {
+  if (node === null) return false;
+  if (isJsonParse(node, (name) => context.java.analysis.jsonParsers.has(name))) return true;
+  if (node.kind === "variable") {
+    const key = bindingKey(node, context.bindings);
+    return (
+      key !== null && context.mapUses.jsonValues.has(key) && !context.shadowingReferences.has(node)
+    );
+  }
+  if (node.kind === "property")
+    return node.spreadSafe !== true && isJsonValue(asNode(node.object), context);
+  if (node.kind === "binary" && node.operator === "[")
+    return isJsonValue(asNode(node.left), context);
+  const called =
+    node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
+  return (
+    called !== null && context.mapUses.jsonFunctions.has(called) && context.functions.has(called)
+  );
 }
 
 /** Whether a Groovy map literal has a key that is no TeaseScript property name, so that it becomes a dict. */
@@ -18118,7 +18240,6 @@ function dictStatement(
  * returns one (dictionaryVariables).
  */
 function isDictionary(node: AstNode, context: LowerContext): boolean {
-  if (isJsonParse(node, (name) => context.java.analysis.jsonParsers.has(name))) return true;
   const called =
     node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
   if (called !== null)
