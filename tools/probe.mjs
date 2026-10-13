@@ -1,17 +1,22 @@
 #!/usr/bin/env node
 // Compiles one TeaseScript source with this checkout's build and prints its diagnostics. With --run it also runs the
-// script: messages show at once (no reading time), timed waits are skipped forward on the script's clock, and the
-// run stops when the script ends, fails (the runtime's own limits apply, such as its step limit for a busy loop), or
-// waits for the player (an answer, a button). It skips at most 10,000 timed waits.
+// script: default reading time is zero, and the script's clock moves forward to the next moment something is due (a
+// `wait`, an authored reading time, a timer), one moment at a time, so a timer's button or ask appears at its own time.
+// The run stops when the script ends, fails (the runtime's own limits apply, such as its step limit for a busy loop),
+// waits for the player (an answer, a button, also a timed button), or after 10,000 clock moves.
 // Usage: npm run probe -- [--run] [--json] <file.tease | ->   (- or no file reads standard input)
-// Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
-// Exit status: 0 no error, 1 compile errors, 3 runtime failure, 2 usage or missing build.
+// For JSON consumers, call `node tools/probe.mjs --json …` or `npm --silent run probe -- --json …`, so npm prints no
+// banner. Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
+// Exit status: 0 no error (also when the run stops waiting), 1 compile errors, 3 runtime failure, 2 usage, missing
+// build, or unreadable source.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage = "Usage: npm run probe -- [--run] [--json] <file.tease | ->";
-const maxTimedWaits = 10_000;
+const maxClockMoves = 10_000;
+// Foreground actions that complete by time alone; every other foreground wait needs the player or the host.
+const timedForeground = new Set(["delay", "chatPacingGate"]);
 const options = { run: false, json: false };
 const files = [];
 const args = process.argv.slice(2);
@@ -32,7 +37,13 @@ if (!existsSync(entry)) {
   process.exit(2);
 }
 const { compileSource, createFreshRuntimeSession } = await import(pathToFileURL(entry).href);
-const source = readFileSync(file === "-" ? 0 : file, "utf8");
+let source;
+try {
+  source = readFileSync(file === "-" ? 0 : file, "utf8");
+} catch (error) {
+  console.error(`Cannot read ${file === "-" ? "standard input" : file}: ${error.message}`);
+  process.exit(2);
+}
 const name = file === "-" ? "<stdin>" : file;
 
 const compiled = compileSource(source);
@@ -56,7 +67,8 @@ if (options.json) {
     console.log(run.summary);
   }
 }
-process.exit(compileFailed ? 1 : run?.status === "failed" ? 3 : 0);
+// exitCode, not exit(): a forced exit can cut off output still being written to a pipe.
+process.exitCode = compileFailed ? 1 : run?.status === "failed" ? 3 : 0;
 
 function runScript(plan) {
   // Zero reading time, so a `say` does not wait for the player's reading.
@@ -67,29 +79,26 @@ function runScript(plan) {
   });
   const events = [];
   let instructions = 0;
-  let timedWaits = 0;
+  let clockMoves = 0;
   let view = session.view();
   for (;;) {
     const result = session.run();
     instructions += result.instructionsExecuted;
     for (const event of result.events) events.push(describe(event));
     view = session.view();
-    const action = view.foregroundAction;
-    const timed =
-      view.status === "waiting" &&
-      action?.expectedCompletion === "time" &&
-      action.deadlineMs !== null;
-    if (!timed || timedWaits === maxTimedWaits) break;
-    timedWaits += 1;
-    // A timed wait (`wait`, a timer, a timed button): move the script's clock to its deadline and go on.
-    const observed = session.observeTime(action.deadlineMs);
+    const next = view.status === "waiting" ? nextDueMs(view) : null;
+    if (next === null || clockMoves === maxClockMoves) break;
+    clockMoves += 1;
+    // Only up to the earliest due moment: a timer due before a long `wait` runs first, and a button or ask it shows
+    // stops the probe before any later deadline (such as that button's own timeout) passes.
+    const observed = session.observeTime(next);
     for (const event of observed.events) events.push(describe(event));
   }
   const waiting =
     view.status === "waiting" ? `, waiting for ${actionKind(view.foregroundAction)}` : "";
   const limit =
-    timedWaits === maxTimedWaits && view.status === "waiting"
-      ? ` (stopped after ${maxTimedWaits} timed waits)`
+    clockMoves === maxClockMoves && view.status === "waiting"
+      ? ` (stopped after ${maxClockMoves} clock moves)`
       : "";
   const clock =
     view.currentSessionTimeMs > 0 ? `, script time ${view.currentSessionTimeMs} ms` : "";
@@ -100,6 +109,23 @@ function runScript(plan) {
     events,
     summary: `${view.status} after ${instructions} instructions${clock}${waiting}${limit}`,
   };
+}
+
+// The next moment the script waits for by time alone, or null when it waits for the player or the host. A foreground
+// interaction (an ask, a button with or without a timeout) always stops the probe.
+function nextDueMs(view) {
+  const foreground = view.foregroundAction;
+  if (foreground !== null && !timedForeground.has(foreground.kind)) return null;
+  const due = [];
+  if (foreground !== null && Number.isFinite(foreground.deadlineMs))
+    due.push(foreground.deadlineMs);
+  for (const action of view.backgroundActions) {
+    const deadline =
+      action.timer?.state === "running" ? action.timer.deadlineMs : action.deadlineMs;
+    if (Number.isFinite(deadline)) due.push(deadline);
+  }
+  if (due.length === 0) return null;
+  return Math.max(Math.min(...due), view.currentSessionTimeMs);
 }
 
 function describe(event) {
