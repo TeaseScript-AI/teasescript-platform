@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -2655,6 +2655,8 @@
+ 	implement5 = loadString("Banjo.spankparty.implement5")
+ 	implement6 = loadString("Banjo.spankparty.implement6")
+ 	implementArray = [implement1,implement2,implement3,implement4,implement5,implement6]
++	// Patched legacy bug: the goodbye draws read implementArrayGoodbye, which only setImplements filled, so a loaded party had none.
++	implementArrayGoodbye = implementArray.collect()
+ 	equalityMode = loadBoolean("Banjo.spankparty.equalityMode")
+ 	gauntletMode = loadBoolean("Banjo.spankparty.gauntletMode")
+ }

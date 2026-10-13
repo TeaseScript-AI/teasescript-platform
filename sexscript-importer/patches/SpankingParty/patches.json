@@ -20,6 +20,13 @@
       "category": "e",
       "reason": "The warm-up seating adds each player's spanker to the seating only when that player was spanked (p1spanked, p2spanked, p4spanked to p6spanked), but adds the third player's spanker under p2spanked again. With two players in gauntlet mode the third spanker, never set, joined the seating as the placeholder \"ERROR\" and could be paired with a player. Test p3spanked.",
       "diff": "warmup-p3-seat.diff"
+    },
+    {
+      "id": "goodbye-implements-load",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): loading a saved party (loadParty) restores implement1 ... implement6 and implementArray but not implementArrayGoodbye, which only setImplements (a new party) fills; selectGoodbye then sets implementArray = implementArrayGoodbye, an empty list, and draws implementArray[getRandom(n)], so a loaded party's goodbye picked up null implements in Groovy (V2 explorer: TSR025). Evident intent: the goodbye draws from the party's implements, as setImplements copies them with implementArray.collect(); the patch makes loadParty copy the loaded ones the same way.",
+      "diff": "goodbye-implements-load.diff"
     }
   ],
   "heldStandAlone": {

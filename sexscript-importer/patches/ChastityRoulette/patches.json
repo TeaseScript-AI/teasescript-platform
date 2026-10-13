@@ -20,6 +20,13 @@
       "category": "b",
       "reason": "getAge, getWeight, getOrgasm and getPSize read a stored whole number that is null before the first run, test it with number < 18, number < 50 or !number, and ask for it then, so they return a whole number on every path; the open read keeps their results open, and the callers' arithmetic on Age, Weight, LastOrgasm and PSize does not compile. A missing number reads 0 instead, int number = loadInteger(k) ?: 0, which each test treats as it treated null.",
       "diff": "whole-number-reads.diff"
+    },
+    {
+      "id": "max-multiplier-zero",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): in the Limits menu, the maximum-multiplier prompt shows 0 for a multiplier that is not set, and only a negative answer unset it, so accepting the shown 0 set MaxMultiplier to 0; every later spin then capped the multiplier at 0 and divided the days by (… * 0): Groovy gave 0 days for 0/0 and Long.MAX_VALUE days otherwise (V2 explorer: TSR036). Evident intent: 0 is the prompt's 'not set', and a maximum of 0 is no valid limit, so the patch unsets it (-1) for 0 as for a negative answer.",
+      "diff": "max-multiplier-zero.diff"
     }
   ]
 }

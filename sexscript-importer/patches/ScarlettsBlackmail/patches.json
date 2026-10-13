@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "In the German release branch an unquoted copy of the farewell sentence stands as code right before the show(...) that displays it (with the gender-dependent partner), so Groovy evaluated it as calls to undefined names and failed. Delete the stray line; the show call keeps the message.",
       "diff": "stray-prose.diff"
+    },
+    {
+      "id": "profile-chunks-return",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the profile is sent in chunks under scriptVersion_id_<n>, and sendProfileEncrypted stores their count under scriptVersion_id; on a returning visit (initiation completed) the script read receiveString(scriptVersion_id) as the profile, which is the count, so Groovy took the number's text as the profile and the next additions were stored after it, and the typed conversion stopped there (V2 explorer: TSR017). Evident intent: the returning visit continues the stored profile, which the first visit puts together from its chunks; the patch does the same, in ScarlettsBlackmail.groovy and ScarlettsBlackmail_de.groovy.",
+      "diff": "profile-chunks-return.diff"
     }
   ]
 }

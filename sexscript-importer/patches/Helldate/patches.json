@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "pantiesend-end",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): helldate3.groovy sets block = \"pantiesend\" at the end of the first panties branch, but no case \"pantiesend\" exists and the switch has no default, so the while (!endReached) loop spun forever there (V2 explorer: TSR037). Evident intent: every other branch of helldate3 ends at \"end1\", which says goodbye and ends the script; the patch goes to \"end1\".",
+      "diff": "pantiesend-end.diff"
+    }
+  ]
+}

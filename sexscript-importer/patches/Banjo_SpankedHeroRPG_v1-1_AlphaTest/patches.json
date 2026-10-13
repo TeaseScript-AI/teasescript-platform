@@ -48,6 +48,13 @@
       "category": "e",
       "reason": "A character without spells or techs keeps \"None\" first in its list, which the battle's Magic and Special menus read as knowing none; only the start and loading a save took it away (checkHasSpells, checkHasTechs). So a Fighter or Rogue who bought a spell, or a Mage who bought a tech, was told \"You don't know any spells!\" until the game was saved and loaded. Check the list after each spell and tech bought, as the start does.",
       "diff": "bought-spells-menu.diff"
+    },
+    {
+      "id": "arena-exit-reset",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the Arena loads a saved character (selectLoad), and its Exit returns to the title without resetting the game, so a New Game kept that character's learned technique flags; the new character's setTechs then learned none of them again (learnTech* skips a flag already set), and checkHasTechs removed \"None\" from techArray, which left it empty, so techArray[0] read null in Groovy and the technique menu had no button to press (V2 explorer: TSR025 at techArray[0]). Evident intent: a new game starts from the reset state, as after a Game Over (gameReset); the patch resets the game on leaving the Arena.",
+      "diff": "arena-exit-reset.diff"
     }
   ]
 }

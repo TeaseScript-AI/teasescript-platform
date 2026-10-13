@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "scenarioSelect dispatches scenarios 1-5 for all nine teachers, but each teacherSetN caps scenarios (Rutherford 4, Pepezcu 3, the others 2) and both random and manual selection stay within that cap; the 24 calls beyond each teacher's cap name scenario functions that were never written. Comment out those condition/call pairs in the author's style, in all three retained versions; every written scenario stays reachable as before.",
       "diff": "unwritten-scenarios.diff"
+    },
+    {
+      "id": "missing-detentions",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the student record is saved piece by piece in recordNew, names first and the detentions count last, and resetGame deletes the count; a record left without its count (the player left during its creation) loads detentions as null in recordLoad, and the next detention, detentions = detentions + 1, failed in Groovy with 'Cannot execute null+1' (V2 explorer: TSR027). Evident intent: a missing count is no detentions, as recordNew and resetOffenses start it at 0; the patch reads a missing count as 0 where the script loads it.",
+      "diff": "missing-detentions.diff"
     }
   ]
 }
