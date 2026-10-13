@@ -932,14 +932,14 @@ export interface CaptureInstruction extends InstructionBase {
 }
 
 /** The calls that may use the Player's file store, which `fileStore` instructions run. */
-export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "toJson" | "fromJson";
+export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "hashFile" | "toJson" | "fromJson";
 
 /**
- * `fileFromBase64(text, default:)`, `fileToBase64(file)`, or a `toJson` or `fromJson` without a written
- * `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store or read
- * them and waits, with the instruction itself as the continuation, and once the answer is handed off it runs again and
- * gives the result. Without files it gives the result at once. Its operands are temporaries or literals, so both runs
- * read the same values.
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashFile(file)`, or a `toJson` or `fromJson` without a
+ * written `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store,
+ * read, or hash them and waits, with the instruction itself as the continuation, and once the answer is handed off it
+ * runs again and gives the result. Without files it gives the result at once. Its operands are temporaries or literals,
+ * so both runs read the same values.
  */
 export interface FileStoreInstruction extends InstructionBase {
   readonly kind: "fileStore";

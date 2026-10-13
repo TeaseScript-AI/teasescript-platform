@@ -335,7 +335,12 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
-  if (DATA_TEXT_FUNCTIONS.has(name) || name === "fileFromBase64" || name === "fileToBase64")
+  if (
+    DATA_TEXT_FUNCTIONS.has(name) ||
+    name === "fileFromBase64" ||
+    name === "fileToBase64" ||
+    name === "hashFile"
+  )
     return dataTextProblems(name, call, typeOf);
   if (name === "toRegex") return regexConversionProblems(call, typeOf);
   if (!isConversionName(name)) return [];
@@ -382,10 +387,10 @@ export function builtinCallProblems(
 
 /**
  * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, `fromBase64(text, default:)`,
- * `fileFromBase64(text, default:)`, or `fileToBase64(file)` (V30 §13 and §33): their arguments, a required `default:`
- * that is missing, a `files:` of `toJson` or `fromJson` that is not true or false, text to read that can never be text,
- * and a value that is or may hold one that `toJson` cannot write. The text of `toBase64` and the file of `fileToBase64`
- * are checked where they are called.
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashText(text)`, or `hashFile(file)` (V30 §13 and §33):
+ * their arguments, a required `default:` that is missing, a `files:` of `toJson` or `fromJson` that is not true or
+ * false, text to read that can never be text, and a value that is or may hold one that `toJson` cannot write. The text
+ * of `toBase64` and `hashText` and the file of `fileToBase64` and `hashFile` are checked where they are called.
  */
 function dataTextProblems(
   name: string,
@@ -429,7 +434,7 @@ function dataTextProblems(
   if (positional.length !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" || name === "hashFile" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
       span: call.span,
     });
   else if (reads && !fallback)
@@ -438,7 +443,14 @@ function dataTextProblems(
       message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
       span: call.span,
     });
-  if (problems.length > 0 || name === "toBase64" || name === "fileToBase64") return problems;
+  if (
+    problems.length > 0 ||
+    name === "toBase64" ||
+    name === "fileToBase64" ||
+    name === "hashText" ||
+    name === "hashFile"
+  )
+    return problems;
   const value = positional[0]!;
   const type = typeOf(value);
   if (reads) {

@@ -2453,6 +2453,7 @@ export class InstructionCompiler {
     if (
       call !== "fileFromBase64" &&
       call !== "fileToBase64" &&
+      call !== "hashFile" &&
       call !== "toJson" &&
       call !== "fromJson"
     )

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -26,9 +27,9 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import type { PlayerFileStoreAnswer } from "../player/runtime-adapter.js";
 
 /*
- * fileFromBase64, fileToBase64, and toJson and fromJson with files (V30 §13 and §33), from source through the Player's
- * file store, which a fake store answers here as the trusted Player does: it keeps each file under a new reference and
- * vouches only for references it handed out, of the kind of their type.
+ * fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and §33), from source through the
+ * Player's file store, which a fake store answers here as the trusted Player does: it keeps each file under a new
+ * reference and vouches only for references it handed out, of the kind of their type, and hashes with a native digest.
  */
 
 const bytes = (...parts: (string | number[])[]): Buffer =>
@@ -75,6 +76,9 @@ const SAMPLES = {
 };
 
 const base64 = (name: keyof typeof SAMPLES) => SAMPLES[name].toString("base64");
+
+/** The SHA-256 of `data` from Node's native digest, as 64 lowercase hexadecimal digits. */
+const sha256 = (data: Buffer): string => createHash("sha256").update(data).digest("hex");
 
 test("a file's type comes from its first bytes, for the fixed list of image, audio, and video types", () => {
   const types = Object.fromEntries(
@@ -136,6 +140,13 @@ class FakeFileStore {
 
   answer(action: RuntimeFileStoreActionSnapshot): PlayerFileStoreAnswer {
     if (this.failing) return { kind: "failed" };
+    if (action.operation === "hash")
+      return {
+        kind: "hashed",
+        hashes: action.references.map((reference) =>
+          sha256(Buffer.from(this.files.get(reference)!.base64, "base64")),
+        ),
+      };
     return action.operation === "store"
       ? {
           kind: "stored",
@@ -265,6 +276,100 @@ test("fileFromBase64 stores a file and gives its reference, and fileToBase64 rea
     ["image", "file"],
   );
   assert.deepEqual(played.snapshot.storedFiles, ["stored:1", "stored:2"]);
+});
+
+test("hashFile gives a stored file's SHA-256 as sha256sum does, and the same as hashText where the bytes are the text", () => {
+  const store = new FakeFileStore();
+  const played = play(
+    [
+      // The bytes of the text "abc".
+      'let letters = fileFromBase64("YWJj", default: "")',
+      `let picture = fileFromBase64("${base64("png")}", default: "")`,
+      'let photo = takePhoto() otherwise ""',
+      "let lettersHash = hashFile(letters)",
+      'let textHash = hashText("abc")',
+      "let pictureHash = hashFile(picture)",
+      "let changed = hashFile(photo) != pictureHash",
+      'say "${hashFile(letters)}", instant',
+      "exit",
+    ].join("\n"),
+    store,
+  );
+  const { lettersHash, textHash, pictureHash, changed } = variables(played);
+  // FIPS 180-4's example for "abc".
+  assert.equal(lettersHash, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  assert.equal(textHash, lettersHash);
+  // As `sha256sum` gives it for the bytes of the PNG sample.
+  assert.equal(pictureHash, "02a3e298f1533f62558c58e4c70edcab9af5a50d62d925fd5390942020fb0fb8");
+  assert.equal(changed, true);
+  // Each hash asks for one stored file and is answered with its hash alone, never with its bytes.
+  assert.deepEqual(
+    played.requests.map((request) => [request.operation, request.files, request.references]),
+    [
+      ["store", [{ type: "application/octet-stream", base64: "YWJj" }], []],
+      ["store", [{ type: "image/png", base64: base64("png") }], []],
+      ["hash", [], ["stored:1"]],
+      ["hash", [], ["stored:2"]],
+      ["hash", [], ["stored:3"]],
+      ["hash", [], ["stored:1"]],
+    ],
+  );
+  assert.deepEqual(
+    played.events.flatMap((event) =>
+      event.kind === "actionCompleted" &&
+      "outcome" in event.settlement &&
+      event.settlement.actionKind === "fileStore"
+        ? [event.settlement.outcome]
+        : [],
+    ),
+    ["stored", "stored", "hashed", "hashed", "hashed", "hashed"],
+  );
+  assert.ok(played.events.some((event) => event.kind === "say" && event.text === lettersHash));
+});
+
+test("a hash completion must hold one SHA-256 in lowercase hexadecimal digits, and its handoff is checked on restore", () => {
+  const store = new FakeFileStore();
+  const plan = compileValidPlan(
+    'let letters = fileFromBase64("YWJj", default: "")\nlet hash = hashFile(letters)\nexit',
+  );
+  let snapshot = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  const kept = snapshot.foregroundAction;
+  assert.ok(kept?.kind === "fileStore");
+  snapshot = run(
+    plan,
+    completeAction(
+      plan,
+      snapshot,
+      { actionId: kept.actionId, actionKind: "fileStore", payload: store.answer(kept) },
+      { capturedMedia: store.admission },
+    ).snapshot,
+  ).snapshot;
+  const action = snapshot.foregroundAction;
+  assert.ok(action?.kind === "fileStore" && action.operation === "hash");
+  const hash = sha256(Buffer.from("abc"));
+  const complete = (payload: unknown) =>
+    completeAction(plan, snapshot, { actionId: action.actionId, actionKind: "fileStore", payload });
+  for (const payload of [
+    { kind: "hashed", hashes: [] },
+    { kind: "hashed", hashes: [hash, hash] },
+    { kind: "hashed", hashes: [hash.toUpperCase()] },
+    { kind: "hashed", hashes: [hash.slice(1)] },
+    { kind: "hashed", hashes: [hash], extra: true },
+    { kind: "read", files: ["YWJj"] },
+  ])
+    assert.equal(complete(payload).outcome.kind, "invalidPayload", JSON.stringify(payload));
+  const completed = complete({ kind: "hashed", hashes: [hash] });
+  assert.equal(completed.outcome.kind, "completed");
+  assert.deepEqual(validateRuntimeSnapshot(completed.snapshot, plan).errors, []);
+  const handoff = completed.snapshot.interactionResultHandoff;
+  assert.ok(handoff !== null);
+  const forged = {
+    ...completed.snapshot,
+    interactionResultHandoff: { ...handoff, result: list("not a hash") },
+  };
+  assert.deepEqual(validateRuntimeSnapshot(forged, plan).errors, [
+    "Runtime file store answer handoff is malformed.",
+  ]);
 });
 
 test("fileFromBase64 reads Base64 as fromBase64 does, and a data URL by its bytes, never by its declared type", () => {
@@ -444,20 +549,29 @@ test("a saved file is a file in a later session, whose host names it at Start", 
   assert.deepEqual(variables(unnamed).json, '["stored:1"]');
 });
 
-test("fileToBase64 needs a stored file this session knows", () => {
+test("fileToBase64 and hashFile need a stored file this session knows", () => {
   const pass =
     "Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.";
-  for (const [argument, message] of [
+  for (const [call, message] of [
     [
-      '"images/a.jpg"',
+      'fileToBase64("images/a.jpg")',
       `fileToBase64(...) reads a stored file, but "images/a.jpg" is not one. ${pass}`,
     ],
     [
-      'fromJson("1", default: null)',
+      'fileToBase64(fromJson("1", default: null))',
       `fileToBase64(...) reads a stored file, not a number. ${pass}`,
     ],
+    // A package path is a file of the package, not a stored file.
+    [
+      'hashFile("images/a.jpg")',
+      `hashFile(...) hashes a stored file, but "images/a.jpg" is not one. ${pass}`,
+    ],
+    [
+      'hashFile(fromJson("1", default: null))',
+      `hashFile(...) hashes a stored file, not a number. ${pass}`,
+    ],
   ] as const) {
-    const played = play(`let data = fileToBase64(${argument})\nexit`);
+    const played = play(`let data = ${call}\nexit`);
     assert.deepEqual(played.requests, []);
     assert.deepEqual(
       [played.snapshot.failure?.code, played.snapshot.failure?.message],
@@ -492,6 +606,7 @@ test("when the Player cannot keep a file the call gives its default with a warni
   );
   for (const [call, name] of [
     ["fileToBase64(photo)", "fileToBase64"],
+    ["hashFile(photo)", "hashFile"],
     ["toJson([photo])", "toJson"],
   ] as const) {
     const failing = new FakeFileStore();
@@ -619,6 +734,22 @@ test("the file functions are checked where the types show their arguments", () =
   assert.deepEqual(diagnostics('let f = fileToBase64("x", default: "")'), [
     ["TSV022", "fileToBase64(...) takes no named arguments. Remove 'default:'."],
   ]);
+  assert.deepEqual(diagnostics("let h = hashFile(3)"), [
+    [
+      "TSV043",
+      "hashFile(...) hashes a stored file, which is text (string), but this is a whole number (integer).",
+    ],
+  ]);
+  assert.deepEqual(diagnostics('let h = hashFile("x", type: "sha1")'), [
+    ["TSV022", "hashFile(...) takes no named arguments. Remove 'type:'."],
+  ]);
+  assert.deepEqual(diagnostics("let h = hashFile()"), [
+    ["TSV020", "hashFile(...) takes 1 argument (file), received 0."],
+  ]);
+  assert.deepEqual(
+    diagnostics("let hashFile = 1").map(([code]) => code),
+    ["TSV001"],
+  );
   assert.deepEqual(diagnostics('let j = toJson(1, files: "yes")'), [
     ["TSV043", "'files:' takes true or false (boolean), not text (string)."],
   ]);

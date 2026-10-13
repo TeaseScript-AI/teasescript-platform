@@ -27,6 +27,7 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "fromJson",
   "toBase64",
   "fromBase64",
+  "hashText",
   "toRegex",
   "round",
   "floor",
