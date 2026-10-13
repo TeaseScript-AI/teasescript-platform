@@ -399,8 +399,9 @@ test("escapeMarkup escapes a long text exactly, also where a surrogate pair or a
       assert.equal(escapeMarkup(text), expected(text), `length ${length}, offset ${offset}`);
     }
   }
-  // The first chunk ends inside a surrogate pair, after a lone high surrogate, on a lone low surrogate, and before one.
-  for (const lead of [8188, 8186, 8180, 8181]) {
+  // A first chunk of 8192 units of the text, or of the escaped text, ends inside a surrogate pair, after a lone high
+  // surrogate, on a lone low surrogate, and before one.
+  for (const lead of [8189, 8187, 8183, 8184, 8188, 8186, 8180, 8181]) {
     const text = "a".repeat(lead) + "a-😀\uD800[b]\uDC00:";
     assert.equal(escapeMarkup(text), expected(text), `lead ${lead}`);
   }
