@@ -310,7 +310,8 @@ test("toJson writes stored files as data URLs and fromJson stores them again, in
     [
       "let photo = takePhoto()",
       `let clip = fileFromBase64("${base64("ogg")}", default: "")`,
-      'let preset = { name: "Corner", photo: photo, media: [clip, photo, "images/a.jpg"] }',
+      'let files = dict { "photo": photo, "path": "images/a.jpg" }',
+      'let preset = { name: "Corner", files: files, media: [clip, photo, "images/a.jpg"] }',
       "let json = toJson(preset)",
       "let kept = toJson(preset, files: false)",
       "let read = fromJson(json, default: null)",
@@ -324,14 +325,18 @@ test("toJson writes stored files as data URLs and fromJson stores them again, in
   const { json, kept, read, text } = variables(played);
   assert.equal(
     json,
-    JSON.stringify({ name: "Corner", photo: jpeg, media: [ogg, jpeg, "images/a.jpg"] }),
+    JSON.stringify({
+      name: "Corner",
+      files: { photo: jpeg, path: "images/a.jpg" },
+      media: [ogg, jpeg, "images/a.jpg"],
+    }),
   );
   // Without files a reference stays its text.
   assert.equal(
     kept,
     JSON.stringify({
       name: "Corner",
-      photo: "stored:1",
+      files: { photo: "stored:1", path: "images/a.jpg" },
       media: ["stored:2", "stored:1", "images/a.jpg"],
     }),
   );
@@ -352,13 +357,17 @@ test("toJson writes stored files as data URLs and fromJson stores them again, in
     read,
     dict(
       ["name", "Corner"],
-      ["photo", "stored:3"],
+      ["files", dict(["photo", "stored:3"], ["path", "images/a.jpg"])],
       ["media", list("stored:4", "stored:3", "images/a.jpg")],
     ),
   );
   assert.deepEqual(
     text,
-    dict(["name", "Corner"], ["photo", jpeg], ["media", list(ogg, jpeg, "images/a.jpg")]),
+    dict(
+      ["name", "Corner"],
+      ["files", dict(["photo", jpeg], ["path", "images/a.jpg"])],
+      ["media", list(ogg, jpeg, "images/a.jpg")],
+    ),
   );
   assert.deepEqual(
     [...store.files.entries()].map(([reference, file]) => [reference, file.kind, file.base64]),
