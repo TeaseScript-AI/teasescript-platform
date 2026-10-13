@@ -2167,7 +2167,7 @@ class TypeChecker {
               scope,
             ),
           );
-          // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
+          // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
           if (checked !== statement.value)
             for (const member of members(nonNullType(receiver)).map(resolved))
               if (isCollection(member)) this.#storeLoaded(member.element, value, statement.value);
@@ -2298,7 +2298,7 @@ class TypeChecker {
           checked === statement.value ? value : this.#typeOf(checked),
         ),
       );
-      // The store checks a load's default, but stores the loaded value, whose objects may have other properties.
+      // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
       if (checked !== statement.value) this.#storeLoaded(place.type, value, statement.value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
@@ -7109,13 +7109,13 @@ class TypeChecker {
   }
 
   /**
-   * After a store checked a load's default, records what the loaded value of type `loaded` brings to a place of type
-   * `place`: the objects it may hold, and for a key computed at runtime, a value of unknown type, which a place that no
-   * value decided yet may then hold, as after any other value of unknown type (#859).
+   * After a store checked a load's default, stores the loaded value of type `loaded` in a place of type `place`: its
+   * objects, which may have other properties, and what it decides where the default decided nothing, such as after
+   * `default: null`. A load of a declared key decides the type it declares, and a load of a computed key gives a value
+   * of unknown type, which the place may then hold (#859).
    */
   #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
-    if (resolved(loaded).kind === "unknown") settle(place, loaded, expression.span);
-    else flowInto(place, loaded);
+    settle(place, loaded, expression.span);
   }
 
   /**
