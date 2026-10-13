@@ -284,11 +284,23 @@ test("a loop keeps a narrowing that only code a literal rules out would end", ()
     ["i < 2", ["let a = false and reset() == 0"], []],
     ["i < 2", ["let a = not true and reset() == 0"], []],
     ["i < 2", ["let a = true or reset() == 0"], []],
+    ["i < 2", ["let a = (false and i > 5) and reset() == 0"], []],
     ["i < 2", ["let a = 1 otherwise reset()"], ["TSV062"]],
     ["i < 2", ["let a = m otherwise 0 otherwise reset()"], ["TSV062"]],
+    ["i < 2", ["let a = (not true) otherwise reset()"], ["TSV062"]],
     ["i < 2", ["if false {", "    reset()", "}"], []],
     ["i < 2", ["if false {", "    x = null", "}"], []],
     ["i < 2", ["if true {", "    let a = 1", "} else {", "    reset()", "}"], []],
+    ["i < 2", ["if false and reset() == 0 {", '    say "never"', "}"], []],
+    ["i < 2", ["if i > 5 and false {", "    reset()", "}"], []],
+    ["i < 2", ["if (false and i > 5) and i > 0 {", "    reset()", "}"], []],
+    ["i < 2", ["if i > 5 or true {", "    let a = 1", "} else {", "    reset()", "}"], []],
+    [
+      "i < 2",
+      ["if i > 5 {", "    let a = 1", "} else if i > 6 and false {", "    reset()", "}"],
+      [],
+    ],
+    ["i < 2", ["while i > 5 and false {", "    reset()", "}"], []],
     ["i < 2", ["while false {", "    reset()", "}"], []],
     ["i < 2", ["repeat 0 {", "    reset()", "}"], []],
     ["i < 2", ["for e in [] {", "    reset()", "}"], []],
@@ -305,12 +317,37 @@ test("a loop keeps a narrowing that only code a literal rules out would end", ()
       source,
     );
   }
+  // An `and` chain that a literal decides as an `if` condition, as found in the corpus check of #876.
+  assert.deepEqual(
+    sayTexts(
+      [
+        "let y: integer? = null",
+        "function reset {",
+        "  y = null",
+        "  return true",
+        "}",
+        "y = 3",
+        "let i = 0",
+        "while i < y {",
+        "  if false and reset() {",
+        '    say "never"',
+        "  }",
+        "  i += 1",
+        "}",
+        'say "${i}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["3"],
+  );
   // Where a call may run, it still ends the narrowing at the loop's start, and so after the loop.
   for (const [condition, body] of [
     ["i < 2", ["let a = i > 5 and reset() == 0"]],
     ["i < 2", ["let a = false or reset() == 0"]],
     ["i < 2", ["let a = m otherwise reset()"]],
     ["i < 2", ["if false {", "    let a = 1", "} else {", "    reset()", "}"]],
+    ["i < 2", ["if i > 5 or false {", "    reset()", "}"]],
+    ["i < 2", ["if true and i > 5 {", "    reset()", "}"]],
     ["i < 2", ["while i > 5 {", "    reset()", "}"]],
     ["i < 2", ["repeat 1 {", "    reset()", "}"]],
     ["i < 2", ["for e in [1] {", "    reset()", "}"]],
