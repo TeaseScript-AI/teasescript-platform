@@ -313,6 +313,9 @@ export class RuntimeExecutionContext {
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
+  /** The builtin record `#builtins` was last filled from. */
+  #registered: RuntimeCapabilities["builtins"] = undefined;
+
   #referenceEpoch = 0;
 
   /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
@@ -338,8 +341,13 @@ export class Evaluator {
   }
 
   public refreshBuiltinRegistration(): void {
+    const builtins = this.capabilities.builtins;
+    // A frozen record, such as a session's, cannot change, and without one there is nothing to register.
+    if (builtins === this.#registered && (builtins === undefined || Object.isFrozen(builtins)))
+      return;
     for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
-    Object.assign(this.#builtins, this.capabilities.builtins ?? {});
+    Object.assign(this.#builtins, builtins ?? {});
+    this.#registered = builtins;
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
