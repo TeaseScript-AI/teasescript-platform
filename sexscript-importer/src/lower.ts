@@ -326,8 +326,8 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
-  /** Set while a map literal takes the place of what a JsonSlurper's parseText() gave: its maps are dicts. */
-  jsonLiterals?: true;
+  /** Map literals that take the place of what a JsonSlurper's parseText() gave, or that such a literal holds: dicts. */
+  jsonMaps?: Set<AstNode>;
   /** Java split() calls whose parts are read at a fixed position, `text.split(",")[1]`, which keep TeaseScript split(). */
   indexedSplits: Set<AstNode>;
   /** Variables that only ever hold null, a switch on which keeps only its default (nullOnlyVariables). */
@@ -11759,7 +11759,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return { kind: "list", items: withAllRecordFields(items) };
     }
     case "map":
-      return lowerMapExpression(node, context, context.jsonLiterals === true);
+      return lowerMapExpression(node, context, context.jsonMaps?.has(node) === true);
     case "gstring":
       return lowerGString(node, context);
     case "array":
@@ -12141,14 +12141,17 @@ function namedMapLiteral(
   const key = bindingKey(target, context.bindings) ?? "";
   const uses = context.mapUses;
   // A map that takes the place of what a JsonSlurper's parseText() gave is a dict as well, whose keys reads read, and
-  // so are the maps in it.
-  if (uses.jsonValues.has(key) && context.jsonLiterals !== true) {
-    context.jsonLiterals = true;
-    try {
-      return lowerMapExpression(node, context, true);
-    } finally {
-      delete context.jsonLiterals;
-    }
+  // so are the maps that it and the lists in it hold.
+  if (uses.jsonValues.has(key)) {
+    const maps = (context.jsonMaps ??= new Set());
+    const visit = (part: AstNode | null): void => {
+      if (part?.kind === "map") {
+        maps.add(part);
+        for (const entry of nodeArray(part.entries)) visit(asNode(entry.value));
+      } else if (part?.kind === "list") for (const item of nodeArray(part.items)) visit(item);
+    };
+    visit(node);
+    return lowerMapExpression(node, context, true);
   }
   if (!uses.dictionaries.has(key))
     return lowerMapExpression(node, context, false, uses.recordFields.get(key) ?? []);
