@@ -1480,24 +1480,19 @@ files that `fileToBase64` reads, and fails where `fileToBase64` fails: for anoth
 is recorded as that of `fileToBase64`: a restore or a replay can reuse a recorded result without asking the store again.
 
 ```text
-// A secret answer: the script holds its hash, not the answer.
-let answer = askText("What is the password?")
-if hashText(answer) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e" {
-    say "Correct."
-}
-
-// A code from a keyholder or another program that hashes the same text.
+// A secret answer or a keyholder's code: the script holds its hash, not the code itself.
 let code = askText("The code from your keyholder")
-if code == hashText("week 3 done") {
+if hashText(code) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e" {
     say "Released."
 }
 
 // Whether a file has changed: its hash against the one saved last time.
 let image = askImage("Show me your corner")
-if hashFile(image) == load("cornerHash", default: "") {
+let hash = hashFile(image)
+if hash == load("cornerHash", default: "") {
     say "That is the same photo as last time."
 }
-save hashFile(image) as "cornerHash"
+save hash as "cornerHash"
 ```
 
 A hash hides a secret only when the secret has many possible values. A number from 1 to 1000 can be found by hashing all
