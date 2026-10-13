@@ -507,6 +507,13 @@ export function clearSerializableDict(dict: SerializableRuntimeDict): void {
   dictIndexes.delete(dict);
 }
 
+/** The index a dict has built, if any, for tests that compare it with the entries. */
+export function builtSerializableDictIndex(
+  dict: SerializableRuntimeDict,
+): ReadonlyMap<string, SerializableRuntimeDictEntry> | undefined {
+  return dictIndexes.get(dict);
+}
+
 /**
  * The member keys of a set, aligned with its items, kept between operations so that adding or finding a member keys only
  * that member instead of comparing it with every other one; removing one still shifts the later keys and items. A set's
