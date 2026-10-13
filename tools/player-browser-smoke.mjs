@@ -298,6 +298,8 @@ async function desktopScenario(cdp) {
   await evaluate(cdp, `document.querySelector('#composer-input').value=''`);
   await evaluate(cdp, `document.querySelector('#composer-input').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await waitForNextPacingGate(cdp, firstGate);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
   await waitFor(
     cdp,
     `document.querySelector('#interaction-controls button')?.textContent === 'Continue'`,
@@ -431,10 +433,11 @@ async function pointerScenario(cdp) {
     "selecting transcript text must not skip pacing",
   );
   await evaluate(cdp, `document.getSelection().removeAllRanges()`);
-  await evaluate(
-    cdp,
-    `document.querySelector('#player-panel').dispatchEvent(new PointerEvent('pointerup', {bubbles:true, button:0, isPrimary:true, pointerType:'mouse'}))`,
-  );
+  const pressPlayerSpace = `document.querySelector('#player-panel').dispatchEvent(new PointerEvent('pointerup', {bubbles:true, button:0, isPrimary:true, pointerType:'mouse'}))`;
+  await evaluate(cdp, pressPlayerSpace);
+  // The second message holds the script for its reading time too, and the playground has no clock.
+  await waitForNextPacingGate(cdp, firstGate);
+  await evaluate(cdp, pressPlayerSpace);
   await waitFor(
     cdp,
     `document.querySelector('#interaction-controls button')?.textContent === 'Continue'`,
@@ -510,10 +513,11 @@ async function replacedCheckpointScenario(cdp) {
 async function narrowScenario(cdp) {
   await click(cdp, "#run");
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'waiting'`);
-  await evaluate(
-    cdp,
-    `document.querySelector('#player-panel').dispatchEvent(new PointerEvent('pointerup', {bubbles:true, button:0, isPrimary:true, pointerType:'touch'}))`,
-  );
+  const firstGate = await activeActionId(cdp);
+  const touchPlayerSpace = `document.querySelector('#player-panel').dispatchEvent(new PointerEvent('pointerup', {bubbles:true, button:0, isPrimary:true, pointerType:'touch'}))`;
+  await evaluate(cdp, touchPlayerSpace);
+  await waitForNextPacingGate(cdp, firstGate);
+  await evaluate(cdp, touchPlayerSpace);
   await waitFor(
     cdp,
     `document.querySelector('#interaction-controls button')?.textContent === 'Continue'`,
@@ -1242,6 +1246,19 @@ async function activeActionId(cdp) {
   return value(
     cdp,
     `JSON.parse(document.querySelector('#runtime-state').textContent).foregroundAction?.actionId ?? null`,
+  );
+}
+
+/** Waits until a skip moved the script from one message's reading time to the next message's. */
+async function waitForNextPacingGate(cdp, previousGate) {
+  await waitFor(
+    cdp,
+    `(() => {
+      const action = JSON.parse(document.querySelector('#runtime-state').textContent).foregroundAction;
+      return action?.kind === 'chatPacingGate' && action.actionId !== ${JSON.stringify(previousGate)};
+    })()`,
+    8_000,
+    "The skip did not move on to the next message's reading time",
   );
 }
 
