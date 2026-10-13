@@ -680,11 +680,13 @@ restoring the Stage; in `late-image`, an invalid image that fails only after the
 neither hides that image nor is reported. Its `photo-colour` package's green Stage photo, downloaded only once, colours
 the background, the theme's surfaces in both modes, and the accent; the photo accent A/B test's B changes only the
 accent back to the theme's; the background's effects stay centred on the photo after the window shrank behind an image
-request's preview; the empty Stage after `hideImage` gives every theme colour back; and switching light/dark while the
-colour fades keeps text readable, in both directions. The `audio-overlap` package, whose `seeked` notifications arrive
-late as under load, plays one sound twice with overlap, another beside them, then a loop of 30 overlapping instances:
-each instance plays to its end once without rewinding or stopping another, and finished instances release their
-elements for reuse.
+request's preview; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
+theme's return, and a mode change switch at once; a fade between photos keeps the background's luminance, and switching
+light/dark during it keeps text readable in both directions; afterwards the authored speaker and prose colours are
+adapted to the background shown, in Standard and High contrast. The `audio-overlap` package, whose `seeked`
+notifications arrive late as under load, plays one sound twice with overlap, another beside them, then a loop of 30
+overlapping instances: each instance plays to its end once without rewinding or stopping another, and finished instances
+release their elements for reuse.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

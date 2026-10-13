@@ -2516,8 +2516,10 @@ async function lateImageScenario(cdp, origin) {
  * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
  * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
  * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
- * the empty Stage after `hideImage` gives every theme colour back; and switching light/dark while the colour fades keeps
- * text readable on the background and in the message bubble, in both directions.
+ * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, and a
+ * mode change switch at once; from one photo to the next in a mode the background fades at the same luminance, and
+ * switching light/dark during that fade keeps text readable, in both directions. Afterwards the transcript's authored
+ * speaker and prose colours are adapted to the background shown, in Standard and High contrast.
  */
 async function photoColourScenario(cdp, origin, profile) {
   await setViewport(cdp, 1440, 900);
@@ -2528,65 +2530,119 @@ async function photoColourScenario(cdp, origin, profile) {
   const hue = (colour) =>
     `(() => { const probe = document.createElement('span'); probe.style.color = ${colour}; document.body.append(probe); const context = document.createElement('canvas').getContext('2d'); context.fillStyle = getComputedStyle(probe).color; probe.remove(); context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; const max = Math.max(r, g, b), min = Math.min(r, g, b); if (max === min) return null; const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min); return Math.round(((h * 60) % 360 + 360) % 360); })()`;
   const green = (degrees) => degrees !== null && degrees > 80 && degrees < 160;
-  // The lower WCAG contrast of the text on the background and of the message bubble's text, as the screen shows them now.
+  // WCAG relative luminance of a colour as the screen shows it.
+  const luminance = `const luminance = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0); };`;
+  const background = `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`;
+  const backgroundLuminance = `(() => { ${luminance} return luminance(${background}); })()`;
+  // The lower WCAG contrast of the text on the background and of a message bubble's text, as the screen shows them now.
   const contrast = `(() => {
-    const rgb = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3); };
-    const luminance = (colour) => rgb(colour).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    ${luminance}
     const ratio = (first, second) => { const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a); return (high + 0.05) / (low + 0.05); };
     const bubble = getComputedStyle(document.querySelector('.message-speaker'));
-    const background = getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor;
-    return Math.min(ratio(bubble.color, bubble.backgroundColor), ratio(getComputedStyle(document.body).color, background));
+    return Math.min(ratio(bubble.color, bubble.backgroundColor), ratio(getComputedStyle(document.body).color, ${background}));
   })()`;
+  const readable = async (label) => {
+    const ratio = await value(cdp, contrast);
+    assertEqual(ratio >= 4.5, true, `${label}: text at ${ratio.toFixed(2)} to 1`);
+  };
+  // Every colour the transcript shows, and the same once the transcript has read the theme again after a root change
+  // that paints nothing: they differ when its authored colours were adapted to an earlier background.
+  const shown = `[...document.querySelectorAll('.transcript-entry, .transcript-entry *')].map((element) => { const style = getComputedStyle(element); return style.color + ' on ' + style.backgroundColor; }).join(', ')`;
+  const adapted = async (label) => {
+    const before = await value(cdp, shown);
+    await evaluate(
+      cdp,
+      `document.documentElement.classList.add('smoke-reread'); document.documentElement.classList.remove('smoke-reread');`,
+    );
+    await delay(150);
+    assertEqual(
+      await value(cdp, shown),
+      before,
+      `${label}: authored colours adapted to an earlier background`,
+    );
+  };
   const switchMode = async (mode) => {
     await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
     await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
   };
   const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
+  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
+  const stageShows = (name) =>
+    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/${name}'); })()`;
+  const press = async (label) => {
+    await waitFor(
+      cdp,
+      `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
+    );
+    await physicalClick(cdp, "[data-foreground-controls] button");
+  };
+  // Shows the next photo and waits for its colour to start fading in; the background keeps its luminance meanwhile.
+  const fadeTo = async (name) => {
+    const settled = await value(cdp, backgroundLuminance);
+    await waitFor(
+      cdp,
+      `${stageShows(name)} && ${fading}`,
+      5_000,
+      `The colour of ${name} did not fade in`,
+    );
+    for (let sample = 0; sample < 3; sample += 1) {
+      const now = await value(cdp, backgroundLuminance);
+      assertEqual(
+        Math.abs(now - settled) / settled < 0.05,
+        true,
+        `The background's luminance changed during a fade between photos: ${settled.toFixed(3)} to ${now.toFixed(3)}`,
+      );
+      await delay(60);
+    }
+  };
   const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
   const differing = (first, second) =>
     Object.keys({ ...first, ...second }).filter((name) => first[name] !== second[name]);
-  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
-  const chooseAccent = async (option) => {
+  const settings = async (change) => {
     await physicalClick(cdp, "[data-settings-trigger]");
     await waitFor(cdp, `!!document.querySelector('[data-player-setting="photo-accent"]')`);
-    await physicalClick(cdp, `[data-player-setting="photo-accent"] input[value="${option}"]`);
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-player-setting="photo-accent"] input[value="${option}"]').checked`,
-    );
+    await change();
     await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
     await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
   };
+  const chooseAccent = (option) =>
+    settings(async () => {
+      await physicalClick(cdp, `[data-player-setting="photo-accent"] input[value="${option}"]`);
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-player-setting="photo-accent"] input[value="${option}"]').checked`,
+      );
+    });
+  const chooseContrast = (option) =>
+    settings(async () => {
+      const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
+      const before = await value(cdp, secondary);
+      await evaluate(
+        cdp,
+        `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
+      );
+      await waitFor(
+        cdp,
+        `${secondary} !== ${JSON.stringify(before)}`,
+        3_000,
+        `Contrast ${option} was not applied`,
+      );
+    });
   await navigate(cdp, `${origin}/player/?package=photo-colour`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   const theme = await value(cdp, roles);
   photoColourRequests.count = 0;
   await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `${photo} && ${fading} && !!document.querySelector('.message-speaker')`,
-    8_000,
-    "The Stage photo did not colour the Player",
-  );
+  await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
+  assertEqual(await value(cdp, fading), false, "The first photo's colour faded in");
   // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
   // caching it.
   assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
-  // Light to dark while the photo's colour fades in: the background switches with its text.
-  await switchMode("dark");
-  const lightToDark = await value(cdp, contrast);
-  assertEqual(
-    lightToDark >= 4.5,
-    true,
-    `Text during a fade, light to dark: ${lightToDark.toFixed(2)} to 1`,
-  );
-  await delay(900);
-  await switchMode("light");
+  await waitFor(cdp, `document.querySelectorAll('.transcript-entry').length >= 3`);
+  await adapted("The first photo");
   const withPhoto = await value(cdp, roles);
   for (const [name, colour] of [
-    [
-      "background",
-      `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`,
-    ],
+    ["background", background],
     ["canvas role", `'var(--theme-surface-canvas)'`],
     ["accent", `'var(--theme-accent-solid)'`],
   ])
@@ -2612,14 +2668,18 @@ async function photoColourScenario(cdp, origin, profile) {
     "",
     "A did not restore the photo accent",
   );
+  await chooseContrast("high");
   await switchMode("dark");
+  assertEqual(await value(cdp, fading), false, "A mode change faded");
   assertEqual(
     green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
     true,
     "The dark canvas is not green",
   );
+  await adapted("Dark mode, High contrast");
   // The window shrinks while an image request's preview hides the photo; once answered, the photo shows again in its
   // new box, and the background's effects are centred on it.
+  await waitFor(cdp, visible("[data-composer-attach]"));
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
   await waitFor(cdp, decodedPreview, 8_000, "The chosen image showed no preview");
@@ -2640,18 +2700,33 @@ async function photoColourScenario(cdp, origin, profile) {
     3_000,
     "The background's effects are not centred on the photo after the preview",
   );
-  // Dark to light while the colour fades out: the empty Stage gives the theme's own colours back.
-  const press = `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === 'Hide')`;
-  await waitFor(cdp, `!!${press}`);
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, `!${photo} && ${fading}`, 5_000, "The empty Stage kept the photo's colours");
+  await setViewport(cdp, 1440, 900);
+  // Dark to light during a fade between photos: the background switches together with its text.
+  await press("Next");
+  await fadeTo("red.svg");
+  await readable("During a fade between photos");
   await switchMode("light");
-  const darkToLight = await value(cdp, contrast);
-  assertEqual(
-    darkToLight >= 4.5,
-    true,
-    `Text during a fade, dark to light: ${darkToLight.toFixed(2)} to 1`,
-  );
+  await readable("Dark to light during a fade");
+  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
+  await adapted("A mode change during a fade");
+  // A fade between photos ends with the authored colours adapted to the new background.
+  await press("Back");
+  await fadeTo("green.svg");
+  await waitFor(cdp, `!${fading}`, 2_000, "The fade did not end");
+  await adapted("After a fade between photos");
+  // Light to dark during a fade between photos.
+  await press("Again");
+  await fadeTo("red.svg");
+  await switchMode("dark");
+  await readable("Light to dark during a fade");
+  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
+  // The empty Stage gives the theme's own colours back at once.
+  await chooseContrast("standard");
+  await press("Hide");
+  await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
+  assertEqual(await value(cdp, fading), false, "The theme's colours faded in");
+  await adapted("The theme's return");
+  await switchMode("light");
   assertEqual(
     differing(theme, await value(cdp, roles)).join(", "),
     "",

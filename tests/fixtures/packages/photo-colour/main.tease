@@ -1,7 +1,19 @@
-// Photo colours: the green photo colours the Player, and the empty Stage gives the theme's colours back.
+// Photo colours: the Stage photos colour the Player, and the empty Stage gives the theme's colours back.
+speaker guide {
+    displayName: "Guide"
+    color: "#7a9a3a"
+}
 showImage "images/green.svg"
-say "A green photo."
+say "A green photo.", instant
+say as guide "Spoken in the guide's colour.", instant
+say prose(color: "#eeeeee") "Authored prose on the background.", instant
 let picture: string = askImage(hint: "Add an image")
+showButton "Next"
+showImage "images/red.svg"
+showButton "Back"
+showImage "images/green.svg"
+showButton "Again"
+showImage "images/red.svg"
 showButton "Hide"
 hideImage
 showButton "Done"

@@ -351,13 +351,13 @@ function readPalette() {
     link: resolveColour(element, "var(--markup-link)", "#0000ee"),
   };
 }
-// Theme changes update the document, not this component's props.
+// Theme changes update the document, not this component's props; the background settles when a photo colour's fade ends.
 let paletteObserver: MutationObserver | null = null;
 onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
   paletteObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["style", "class", "data-player-theme"],
+    attributeFilter: ["style", "class", "data-player-theme", "data-photo-fade"],
   });
 });
 onBeforeUnmount(() => {
