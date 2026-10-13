@@ -85,7 +85,7 @@ implemented in its V30 call form (`let picture = askImage("Add an image")`, and 
 that is `null` when the player skips it; see [Image input](RUNTIME.md#image-input) and
 [V30 §20](specifications/accepted-syntaxes-v30.md#skipping-a-file-input)),
 `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms)),
-and `showPopup` ([Popups](#popups));
+`showPopup`, and `openUrl` ([Popups and web addresses](#popups-and-web-addresses));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
@@ -156,17 +156,23 @@ instruction without producing a result or binding. See [timer semantics](specifi
 
 `askNumber` trims surrounding whitespace, accepts the ordinary TeaseScript decimal and scientific-number forms on one line, returns a finite number, and records the trimmed submitted text in the transcript rather than reformatting it. Locale decimal commas, thousands separators, units, and natural-language phrases are not accepted by the deterministic first POC.
 
-### Popups
+### Popups and web addresses
 
 ```tease
 showPopup "Task completed"
 showPopup(message: "Well done, ${name}", buttonText: "Continue")
+openUrl("https://example.com")
 ```
 
 `showPopup` shows its message in a dialog outside the chat with one button, `OK` unless `buttonText:` renames it, and
 waits until the player closes it; neither enters the transcript, and it gives no value
 ([§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)). The call form also takes the
 message without its name, first. A block may interrupt it like any interaction ([Runtime](RUNTIME.md#generic-foreground-interactions)).
+
+`openUrl` takes one web address: text that is an `http` or `https` URL, never a list (compile error `TSV043` for a
+written one, runtime error `TSR050` otherwise). After it the address is open in a new tab, and then the script goes on:
+right after the player's click the Player opens it at once, otherwise the player opens it from a button that shows
+"Open" and the address's host ([§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)).
 
 ### Compact choices
 

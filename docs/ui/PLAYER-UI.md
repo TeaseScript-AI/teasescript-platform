@@ -918,6 +918,16 @@ adds nothing to the transcript. Meanwhile the composer takes no answer. A block 
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
 panel and its rewind stay usable beside it, and Escape closes it only while focus is inside it.
 
+`openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
+form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script
+goes on, with nothing in the chat. Otherwise, or when the browser does not open the tab, it shows a button where
+`showButton` shows its button, "Open" and the address's host, such as "Open example.com" (a working label), and the
+composer takes no answer; default focus goes to the button instead of the composer, and the player's click opens the
+tab and lets the script go on. A request that a reload, a restore, or Debug's rewind brought back always shows the
+button: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
+address, so the page there cannot reach the Player; the browser sends it at most the Player's origin as referrer.
+Neither the address nor the button enters the transcript.
+
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay
