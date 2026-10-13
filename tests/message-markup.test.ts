@@ -39,6 +39,36 @@ test("parses exact line-start block forms and preserves line endings", () => {
   assert.equal(messageMarkupVisibleText(markup), markup.visibleText);
 });
 
+test("only a line feed ends a line, and a carriage return before it belongs to the ending", () => {
+  const lines = (text: string) =>
+    parseMessageMarkup(text).blocks.flatMap((block) =>
+      (block.kind === "heading"
+        ? [block.line]
+        : block.kind === "list"
+          ? block.items.map((item) => item.line)
+          : block.lines
+      ).map((line) => [line.text, line.ending]),
+    );
+  assert.deepEqual(lines(""), [["", ""]]);
+  assert.deepEqual(lines("\n"), [
+    ["", "\n"],
+    ["", ""],
+  ]);
+  assert.deepEqual(lines("a\rb\r"), [["a\rb\r", ""]]);
+  assert.deepEqual(lines("\r\r\n\r\n"), [
+    ["\r", "\r\n"],
+    ["", "\r\n"],
+    ["", ""],
+  ]);
+  assert.deepEqual(lines("a\n\nb\r\nc\n"), [
+    ["a", "\n"],
+    ["", "\n"],
+    ["b", "\r\n"],
+    ["c", "\n"],
+    ["", ""],
+  ]);
+});
+
 test("requires exact block marker spelling and separates adjacent block kinds", () => {
   const markup = parseMessageMarkup(
     [
@@ -399,8 +429,9 @@ test("escapeMarkup escapes a long text exactly, also where a surrogate pair or a
       assert.equal(escapeMarkup(text), expected(text), `length ${length}, offset ${offset}`);
     }
   }
-  // The first chunk ends inside a surrogate pair, after a lone high surrogate, on a lone low surrogate, and before one.
-  for (const lead of [8188, 8186, 8180, 8181]) {
+  // A first chunk of 8192 units of the text, or of the escaped text, ends inside a surrogate pair, after a lone high
+  // surrogate, on a lone low surrogate, and before one.
+  for (const lead of [8189, 8187, 8183, 8184, 8188, 8186, 8180, 8181]) {
     const text = "a".repeat(lead) + "a-😀\uD800[b]\uDC00:";
     assert.equal(escapeMarkup(text), expected(text), `lead ${lead}`);
   }

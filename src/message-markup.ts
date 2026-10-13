@@ -313,27 +313,26 @@ export function escapedMarkupLength(text: string): number {
   return length;
 }
 
-/** How many UTF-16 code units `escapeMarkup` collects before it makes them a string; a bounded argument count. */
+/** Matches each of `ESCAPABLE_CHARACTERS`, which it writes as `\uXXXX` escapes, so that none is pattern syntax. */
+const ESCAPABLE_PATTERN = new RegExp(
+  `[${Array.from(ESCAPABLE_CHARACTERS, (character) => {
+    const hex = character.charCodeAt(0).toString(16).padStart(4, "0");
+    return `\\u${hex}`;
+  }).join("")}]`,
+  "g",
+);
+
+/** How many UTF-16 code units of the text `escapeMarkup` escapes in one replacement; bounds the matches it holds. */
 const ESCAPE_CHUNK_LENGTH = 8192;
-const BACKSLASH = 0x5c;
 
 export function escapeMarkup(text: string): string {
-  // The escaped text is written in chunks of code units, not as a string per character, which for a long text would
-  // take far more memory than the text. Every escapable character is a single code unit, so a surrogate pair, also one
-  // split between two chunks, is copied unchanged.
+  // Every escapable character is a single code unit, so a surrogate pair, also one split between two chunks, is copied
+  // unchanged.
+  if (text.length <= ESCAPE_CHUNK_LENGTH) return text.replace(ESCAPABLE_PATTERN, "\\$&");
   const chunks: string[] = [];
-  let units: number[] = [];
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code < 0x80 && ESCAPABLE_CODES[code] === 1) units.push(BACKSLASH);
-    units.push(code);
-    if (units.length >= ESCAPE_CHUNK_LENGTH) {
-      chunks.push(String.fromCharCode.apply(null, units));
-      units = [];
-    }
-  }
-  chunks.push(String.fromCharCode.apply(null, units));
-  return chunks.length === 1 ? chunks[0]! : chunks.join("");
+  for (let start = 0; start < text.length; start += ESCAPE_CHUNK_LENGTH)
+    chunks.push(text.slice(start, start + ESCAPE_CHUNK_LENGTH).replace(ESCAPABLE_PATTERN, "\\$&"));
+  return chunks.join("");
 }
 
 function cloneMessageMarkupLine(line: MessageMarkupLine): MessageMarkupLine {
@@ -476,8 +475,7 @@ function isDenseArray(value: unknown): value is unknown[] {
 function splitLines(text: string): SourceLine[] {
   const lines: SourceLine[] = [];
   let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    if (text.charCodeAt(index) !== 10) continue;
+  for (let index = text.indexOf("\n"); index >= 0; index = text.indexOf("\n", start)) {
     const hasCarriageReturn = index > start && text.charCodeAt(index - 1) === 13;
     lines.push({
       text: text.slice(start, hasCarriageReturn ? index - 1 : index),

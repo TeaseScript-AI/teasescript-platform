@@ -44,6 +44,15 @@ test("statistics of a list of numbers", () => {
   );
 });
 
+test("median and percentile sort a copy and leave the list in its order", () => {
+  assert.deepEqual(
+    said(
+      'let scores = [3, 9, 1]\nsay "${median(scores)} ${percentile(scores, 100)} ${scores.join(" ")}"\nexit',
+    ),
+    ["3 9 3 9 1"],
+  );
+});
+
 test("statistics read a property with by:, and durations give durations", () => {
   assert.deepEqual(
     said(
@@ -433,6 +442,21 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
     "TSR016",
     "Sets have no method 'indexOf'.",
   ]);
+});
+
+test("a number, text, or boolean equals only the same value of its kind, also among lists, and 0 equals -0", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let mixed: (number | boolean | string | number[])[] = [[1], true, "1", 1, 0, 1]',
+        'say "${mixed.indexOf(1)} ${mixed.lastIndexOf(1)} ${mixed.indexOf(-0)} ${mixed.lastIndexOf(true)} ${mixed.indexOf("1")} ${mixed.indexOf(false)} ${mixed.lastIndexOf([1])} ${mixed.contains(0)}"',
+        "mixed.remove(1)",
+        'say "${mixed.length} ${mixed.indexOf(1)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["3 5 4 1 2 null 0 true", "5 4"],
+  );
 });
 
 test("get gives the element at an index, or its default for an index the list does not have", () => {

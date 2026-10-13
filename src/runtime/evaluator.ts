@@ -3569,6 +3569,9 @@ export class Evaluator {
     value: SerializableRuntimeValue,
     last = false,
   ): number {
+    // A scalar equals only the same scalar, as strict equality compares it; runtime numbers are never NaN.
+    if (value === null || typeof value !== "object")
+      return last ? items.lastIndexOf(value) : items.indexOf(value);
     for (let step = 0; step < items.length; step += 1) {
       const index = last ? items.length - 1 - step : step;
       if (serializableEquals(items[index]!, value)) return index;
