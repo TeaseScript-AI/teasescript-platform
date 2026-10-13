@@ -132,11 +132,11 @@ function close() {
         ref="textArea"
         :model-value="text"
         readonly
-        rows="8"
+        rows="12"
         spellcheck="false"
-        :aria-label="title"
+        aria-label="Text to copy or download"
         variant="code"
-        class="max-h-[50dvh] break-all"
+        class="max-h-[50dvh]"
         data-export-text-field
       />
       <div class="flex flex-wrap items-center gap-2" @keydown="heldKey">
@@ -152,12 +152,13 @@ function close() {
           Close
         </Button>
       </div>
-      <p role="status" class="text-sm" data-export-text-status>
+      <!-- One line stays reserved, so the dialog does not move when a short status appears. -->
+      <p role="status" class="min-h-5 text-sm" data-export-text-status>
         {{
           copyStatus === "copied"
             ? "Copied."
             : copyStatus === "failed"
-              ? "Copying did not work here. The text is selected, so copy it yourself or use Download."
+              ? "Could not copy. The text is selected, so copy it by hand or use Download."
               : ""
         }}
       </p>
