@@ -32,10 +32,25 @@ export const LIST_FUNCTIONS: ReadonlySet<string> = new Set([
   "randomWeighted",
 ]);
 
-/** The problems with a call of a list function, and its result type. */
+/** The problems with a call of a list function, the properties it reads by name, and its result type. */
 export interface ListFunctionCheck {
   readonly problems: readonly OperationProblem[];
+  readonly reads: readonly ListPropertyRead[];
   readonly type: StaticType;
+}
+
+/**
+ * A property that a list function reads from each element, named by text such as `by: "count"`. Whether the elements
+ * can have it is decided at the end of the check, from code anywhere in the project (#845).
+ */
+export interface ListPropertyRead {
+  /** The text that names the property. */
+  readonly at: Expression;
+  readonly name: string;
+  /** The type of the elements. */
+  readonly objects: StaticType;
+  /** The error when no element can have the property. */
+  readonly message: string;
 }
 
 /** The kind of the values a list function reads, when the compiler knows it. */
@@ -56,6 +71,7 @@ interface Context {
   readonly call: CallExpression;
   readonly typeOf: (expression: Expression) => StaticType;
   readonly problems: OperationProblem[];
+  readonly reads: ListPropertyRead[];
 }
 
 /**
@@ -68,9 +84,9 @@ export function listFunctionCheck(
   typeOf: (expression: Expression) => StaticType,
   known: (expression: Expression) => number | undefined,
 ): ListFunctionCheck {
-  const context: Context = { name, call, typeOf, problems: [] };
+  const context: Context = { name, call, typeOf, problems: [], reads: [] };
   const type = listFunctionType(context, known);
-  return { problems: context.problems, type };
+  return { problems: context.problems, reads: context.reads, type };
 }
 
 function listFunctionType(
@@ -235,17 +251,15 @@ function valuesType(
     else key = staticVisibleText(property);
   }
   const type = forUse(typeOf(list));
-  if (!isKnown(type)) return UNKNOWN_TYPE;
   const lists = members(type).map(resolved);
   const other = lists.find((member) => isKnown(member) && member.kind !== "list");
   if (other !== undefined) {
     problem(context, `${name}(...) needs a list, not ${describeValue(other)}.`, list);
     return UNKNOWN_TYPE;
   }
-  if (!lists.every(isKnown)) return UNKNOWN_TYPE;
-  const element = union(
-    lists.map((member) => (member.kind === "list" ? member.element : UNKNOWN_TYPE)),
-  );
+  const element = lists.every(isKnown)
+    ? union(lists.map((member) => (member.kind === "list" ? member.element : UNKNOWN_TYPE)))
+    : UNKNOWN_TYPE;
   if (property === undefined) return element;
   // Every element the compiler knows must be an object, also when the property's type stays unknown.
   const parts = members(element).map(resolved);
@@ -258,19 +272,18 @@ function valuesType(
     );
     return UNKNOWN_TYPE;
   }
+  if (key === undefined) return UNKNOWN_TYPE;
+  // Code checked later may still give the elements the property, so whether they can have it is decided at the end.
+  context.reads.push({
+    at: property,
+    name: key,
+    objects: element,
+    message: `${name}(...): the objects in this list have no property '${key}'.`,
+  });
   const found: StaticType[] = [];
   for (const member of parts) {
-    if (member.kind !== "object" || member.properties === null || key === undefined)
-      return UNKNOWN_TYPE;
-    const value = member.properties.get(key);
-    if (value === undefined) {
-      problem(
-        context,
-        `${name}(...): the objects in this list have no property '${key}'.`,
-        property,
-      );
-      return UNKNOWN_TYPE;
-    }
+    const value = member.kind === "object" ? member.properties?.get(key) : undefined;
+    if (value === undefined) return UNKNOWN_TYPE;
     found.push(value);
   }
   return found.length === 0 ? UNKNOWN_TYPE : union(found);
