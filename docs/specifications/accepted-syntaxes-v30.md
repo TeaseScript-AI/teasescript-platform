@@ -3956,6 +3956,9 @@ Rules:
 - `showPopup` has one confirmation button.
 - Yes/no questions use `askBoolean(...)`, not `showPopup`.
 
+**Status (Owner decision, 2026-10-13):** the popup is a dialog outside the chat with its message and one button, which
+closes it. The player can only close it, and `buttonText` only renames the button.
+
 ### System notification
 
 ```text
@@ -4059,6 +4062,14 @@ openUrl("https://example.com")
 ```
 
 `openUrl(...)` performs navigation and returns no value.
+
+**Status (Owner decision, 2026-10-13):** after `openUrl(...)` the URL is open in a new tab, and then the script goes on:
+the script waits until the Player opened it. Right after the player's click, such as on `showButton`, `askChoice`, or a
+form, the Player opens the URL in a new tab at once. When the browser would block that, because there was no recent
+click or the tab does not open, the Player shows a button where `showButton` shows its button, and the player's click
+on it opens the tab. After a reload, a restore, or a replay the Player never opens the URL by itself: a restored
+waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another written URL is a compile error,
+and another value fails at runtime.
 
 How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
 
