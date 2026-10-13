@@ -1324,6 +1324,61 @@ let pause = max(1 minute, remaining)
 let boundedLevel = max(1, min(level, 10))
 ```
 
+### JSON and Base64
+**Status:** Accepted (Owner decision, 2026-10-13)
+
+These protected functions exchange data with other programs as text:
+
+```text
+toJson(value)
+fromJson(text, default: value)
+toBase64(text)
+fromBase64(text, default: value)
+```
+
+`toJson` writes a value as compact JSON text:
+
+| Value | JSON |
+| --- | --- |
+| text, `integer`, `number`, `true` and `false`, `null` | the same |
+| list, set | an array, a set in its order |
+| dict, object | an object, in key order |
+| `date`, `time`, `datetime` | ISO text, as `.toISO()` gives it |
+| `absoluteDateTime` | ISO text in UTC, ending in `Z` |
+| `duration` | its number of milliseconds |
+| `speaker` | an object with a copy of its properties |
+
+A `calendarDuration`, `range`, `script`, `timer`, `media`, `messageHandle`, or permanent button cannot be written: that
+is a compile error where the types show it, and a runtime error otherwise.
+
+`fromJson` reads JSON text. An object becomes a dict in the order of its keys, an array a list, whose elements may be of
+different types, and text, numbers, `true`, `false`, and `null` stay what they are; a whole number becomes an `integer`
+and any other number a `number`. A key that appears more than once keeps its first position with its last value, as in
+a dict ([§40](#40-dictionaries)). A date or time comes back as text, which `toDate`, `toTime`, `toDateTime`, and
+`toAbsoluteDateTime` read. The compiler does not know the result's type: test it with `is`, or declare it, and the
+runtime checks it as any value whose type is not known:
+
+```text
+let tasks: string[] = fromJson(saved, default: [])
+let preset = fromJson(text, default: null)
+if preset is dict {
+    say "${preset.length} settings"
+}
+```
+
+`toBase64` encodes text as UTF-8 in standard Base64, with padding and without line breaks. `fromBase64` decodes Base64
+into UTF-8 text. It ignores spaces and line breaks, accepts the URL alphabet (`-` and `_` instead of `+` and `/`), and
+does not need the padding.
+
+`fromJson` and `fromBase64` need their `default:`, which may be any value, also `null`; a call without one is a compile
+error. Text that is not JSON, or that is not Base64 or whose bytes are not UTF-8, gives the default, never a runtime
+error.
+
+```text
+let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
+let decoded = fromJson(fromBase64(text, default: ""), default: null)
+```
+
 ### Numeric functions
 **Status:** Accepted (Owner decision, 2026-10-07)
 
@@ -3969,6 +4024,25 @@ if t < 5 min {
     say "Back already? Again."
 }
 ```
+
+### Export text
+**Status:** Accepted (Owner decision, 2026-10-13)
+
+```text
+exportText(report)
+exportText(report, title: "Your report", fileName: "report.json")
+```
+
+`exportText` shows a dialog with its title and the text in a read-only code field, which scrolls when the text is
+long, and the buttons Copy, Download, and Close. The script waits until the player closes it, as for `showPopup`.
+
+- `title` is optional and defaults to `"Copy or download"`. `fileName` is optional and defaults to `"text.txt"`.
+- Copy copies the whole text. When the browser refuses or cannot copy it, the text is selected for copying, with a short
+  hint to use Download.
+- Download saves the text as the file `fileName`, of type `text/plain;charset=utf-8`.
+- Nothing enters the transcript. A reload while it waits shows it again. Copying and downloading are the player's own
+  actions, which a replay never does.
+- `exportText` gives no value.
 
 ### System notification
 
