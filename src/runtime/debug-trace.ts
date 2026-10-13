@@ -219,6 +219,13 @@ export interface RuntimeDebugTraceStatus {
 export interface RuntimeDebugTraceOptions {
   readonly maxRecords?: number;
   readonly maxAccountedBytes?: number;
+  /** `false` keeps no value previews: every record's `preview` is `null`. */
+  readonly previews?: boolean;
+  /**
+   * The dependencies a record keeps, a positive integer or `Infinity` for all of them; by default
+   * `RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies`.
+   */
+  readonly maxDependencies?: number;
 }
 
 /** A source span as the runtime carries it: plan provenance, or a rich span copied from it. */
@@ -240,9 +247,14 @@ export class RuntimeDebugContext {
   readonly #store: TraceStore;
 
   public constructor(options: RuntimeDebugTraceOptions = {}) {
+    const maxDependencies = options.maxDependencies;
     this.#store = new TraceStore(
       positiveLimit(options.maxRecords, RUNTIME_DEBUG_TRACE_LIMITS.maxRecords),
       positiveLimit(options.maxAccountedBytes, RUNTIME_DEBUG_TRACE_LIMITS.maxAccountedBytes),
+      options.previews !== false,
+      maxDependencies === Infinity
+        ? Infinity
+        : positiveLimit(maxDependencies, RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies),
     );
     stores.set(this, this.#store);
   }
@@ -262,6 +274,17 @@ export class RuntimeDebugContext {
   /** A retained record of the current epoch, or `null`. */
   public record(id: number): RuntimeDebugRecord | null {
     return this.#store.view(id);
+  }
+
+  /**
+   * Releases the retained records up to ID `upTo`, which the host has read, as the bounds drop records, except that the
+   * version index keeps naming them: `variableRecord` and `storageRecord` still give their IDs, and later records still
+   * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. Between
+   * operations and in an instruction observer it releases them; while an instruction runs, nothing.
+   */
+  public release(upTo: number): void {
+    if (typeof upTo !== "number") throw new TypeError("release takes a record ID.");
+    this.#store.release(upTo);
   }
 
   /** The output record of the `say` event with this sequence in the current epoch, or `null`. */
@@ -323,6 +346,8 @@ export function closeDebugTrace(
 export interface DebugDependencies {
   ids: number[];
   omitted: number;
+  /** The IDs as a set, once there are more than a scan checks quickly. */
+  seen?: Set<number> | undefined;
 }
 
 export function emptyDependencies(): DebugDependencies {
@@ -346,6 +371,19 @@ interface TraceRecord {
   bytes: number;
   /** Further index keys that name this record, dropped with it. */
   aliases: string[] | null;
+}
+
+/**
+ * What a released record leaves while the version index may still name it: its ID and keys, so that the bounds drop
+ * those entries with it, and staging still finds the version it would restore.
+ */
+class ReleasedRecord {
+  public constructor(
+    public readonly id: number,
+    public readonly key: string | null,
+    public aliases: string[] | null,
+    public bytes: number,
+  ) {}
 }
 
 /** A branch decision while execution is on the side it took: `[start, end)` of call frame `frame`. */
@@ -400,18 +438,29 @@ interface Stage {
   readonly outer: Stage | null;
 }
 
-/** Bytes counted for a record besides its text, and for a version-index entry besides its key. */
+/**
+ * Bytes counted for a record besides its text, for a version-index entry besides its key, and for a released record
+ * that the index still names.
+ */
 const RECORD_OVERHEAD_BYTES = 160;
 const INDEX_OVERHEAD_BYTES = 48;
+const RELEASED_RECORD_BYTES = 32;
+
+/** Dependency lists up to this length are deduplicated by a scan; an uncapped longer one uses a set. */
+const SCANNED_DEPENDENCIES = 32;
 
 /**
  * The recorder behind a `RuntimeDebugContext`. Every recording method is guarded: a failure stops recording and is
  * reported in `status()`, and never reaches the script's execution.
  */
 export class TraceStore {
-  /** Retained records from `#head` on; dropped slots before it are emptied so their data can be released. */
-  #records: (TraceRecord | undefined)[] = [];
+  /**
+   * The queue from `#head` on: released records up to `#retained`, as stubs while the index may name them and empty
+   * slots otherwise, then retained records. Dropped slots before `#head` are emptied so their data can be released.
+   */
+  #records: (TraceRecord | ReleasedRecord | undefined)[] = [];
   #head = 0;
+  #retained = 0;
   #nextId = 1;
   #bytes = 0;
   #versions = new Map<string, number>();
@@ -453,6 +502,8 @@ export class TraceStore {
   public constructor(
     private readonly maxRecords: number,
     private readonly maxBytes: number,
+    private readonly previews: boolean,
+    private readonly maxDependencies: number,
   ) {}
 
   reset(origin: "start" | "restore"): void {
@@ -503,6 +554,7 @@ export class TraceStore {
   #clear(): void {
     this.#records = [];
     this.#head = 0;
+    this.#retained = 0;
     this.#bytes = 0;
     this.#versions = new Map();
     this.#outputs = new Map();
@@ -524,6 +576,7 @@ export class TraceStore {
     this.#failure = error instanceof Error ? error.message : String(error);
     this.#records = [];
     this.#head = 0;
+    this.#retained = 0;
     this.#bytes = 0;
     this.#versions = new Map();
     this.#outputs = new Map();
@@ -682,6 +735,7 @@ export class TraceStore {
     if (id === null) return;
     this.acc.ids.length = 0;
     this.acc.omitted = 0;
+    this.acc.seen = undefined;
     this.acc.ids.push(id);
   }
 
@@ -977,7 +1031,7 @@ export class TraceStore {
           forced: false,
         }),
       );
-      this.#lastRandom = this.#find(id) ?? null;
+      this.#lastRandom = this.#retainedRecord(id) ?? null;
       this.#add(this.acc, id);
     } catch (error) {
       this.#fail(error);
@@ -995,6 +1049,10 @@ export class TraceStore {
   randomResult(value: SerializableRuntimeValue): void {
     const record = this.#lastRandom;
     if (this.#failure !== null || record === null) return;
+    if (!this.previews) {
+      this.#lastRandom = null;
+      return;
+    }
     try {
       const preview = previewOf(value);
       const grown = 2 * (preview.text.length - (record.preview?.length ?? 0));
@@ -1205,7 +1263,7 @@ export class TraceStore {
     if (this.#failure !== null) return;
     try {
       // Staged records still retained are the newest; older ones the bounds dropped meanwhile stay dropped.
-      while (this.#records.length > this.#head && this.#records.at(-1)!.id >= stage.nextId)
+      while (this.#records.length > this.#retained && this.#records.at(-1)!.id >= stage.nextId)
         this.#bytes -= this.#records.pop()!.bytes;
       this.#nextId = stage.nextId;
       // Staged decisions are undone with the state they steered; a decision recorded meanwhile is recorded anew.
@@ -1256,7 +1314,7 @@ export class TraceStore {
     // Where and when a decision recorded on first use was made.
     decided: Decision | null = null,
   ): number {
-    const preview = hasValue ? previewOf(value) : null;
+    const preview = hasValue && this.previews ? previewOf(value) : null;
     const record: TraceRecord = {
       id: this.#nextId,
       kind,
@@ -1283,16 +1341,21 @@ export class TraceStore {
     return record.id;
   }
 
-  /** Drops the oldest records, with the index entries that still name them, until the trace fits its bounds. */
+  /**
+   * Drops the oldest records, released ones too, with the index entries that still name them, until the trace fits its
+   * bounds.
+   */
   #evict(): void {
     while (
       this.#records.length > this.#head &&
       (this.#records.length - this.#head > this.maxRecords || this.#bytes > this.maxBytes)
     ) {
-      const record = this.#records[this.#head]!;
+      const record = this.#records[this.#head];
       this.#records[this.#head] = undefined;
       this.#head += 1;
       this.#truncated = true;
+      // A released record that the index no longer named left nothing else.
+      if (record === undefined) continue;
       this.#bytes -= record.bytes;
       for (const key of record.aliases === null ? [record.key] : [record.key, ...record.aliases]) {
         if (key === null) continue;
@@ -1302,14 +1365,43 @@ export class TraceStore {
         }
         this.#forgetUndo(key, record.id);
       }
+      if (record instanceof ReleasedRecord) continue;
       if (record.detail?.kind === "output") this.#outputs.delete(record.detail.eventSequence);
       if (this.#stageImageId === record.id) this.#stageImageId = null;
       if (this.#lastRandom === record) this.#lastRandom = null;
     }
-    // Compact the queue once its dropped prefix is as long as what it retains.
+    if (this.#retained < this.#head) this.#retained = this.#head;
+    // Compact the queue once its dropped prefix is as long as what it keeps.
     if (this.#head > 1024 && this.#head * 2 > this.#records.length) {
       this.#records = this.#records.slice(this.#head);
+      this.#retained -= this.#head;
       this.#head = 0;
+    }
+  }
+
+  /** See `RuntimeDebugContext.release`. */
+  release(upTo: number): void {
+    // A stage still open may roll a key back to a version it keeps, which must stay findable.
+    if (this.#failure !== null || this.#stage !== null) return;
+    try {
+      while (this.#retained < this.#records.length && this.#retainedAt(this.#retained).id <= upTo) {
+        const record = this.#retainedAt(this.#retained);
+        this.#bytes -= record.bytes;
+        const indexed =
+          (record.key !== null && this.#versions.get(record.key) === record.id) ||
+          (record.aliases?.some((key) => this.#versions.get(key) === record.id) ?? false);
+        const stub = indexed
+          ? new ReleasedRecord(record.id, record.key, record.aliases, RELEASED_RECORD_BYTES)
+          : undefined;
+        this.#records[this.#retained] = stub;
+        if (stub !== undefined) this.#bytes += stub.bytes;
+        if (record.detail?.kind === "output") this.#outputs.delete(record.detail.eventSequence);
+        if (this.#stageImageId === record.id) this.#stageImageId = null;
+        if (this.#lastRandom === record) this.#lastRandom = null;
+        this.#retained += 1;
+      }
+    } catch (error) {
+      this.#fail(error);
     }
   }
 
@@ -1341,20 +1433,32 @@ export class TraceStore {
   }
 
   #limit(): number {
-    return RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies;
+    return this.maxDependencies;
   }
 
   #add(deps: DebugDependencies, id: number): void {
     addDependency(deps, id, this.#limit());
   }
 
-  #find(id: number): TraceRecord | undefined {
-    if (this.#records.length === this.#head) return undefined;
-    const first = this.#records[this.#head]!.id;
-    // IDs are consecutive in the queue: rollback reuses the IDs it removes. Dropped records before the head are gone.
-    if (id < first) return undefined;
-    const record = this.#records[this.#head + (id - first)];
+  /** A record in the queue, retained or released, or `undefined` once it is gone. */
+  #find(id: number): TraceRecord | ReleasedRecord | undefined {
+    // IDs are consecutive in the queue, up to the last one given: rollback reuses the IDs it removes. Dropped records
+    // before the head are gone.
+    const index = this.#records.length - (this.#nextId - id);
+    if (index < this.#head) return undefined;
+    const record = this.#records[index];
     return record?.id === id ? record : undefined;
+  }
+
+  /** The record at `index`, which is `#retained` or after it. */
+  #retainedAt(index: number): TraceRecord {
+    // EVIDENCE: invariant: the slots from `#retained` on hold retained records.
+    return this.#records[index] as TraceRecord;
+  }
+
+  #retainedRecord(id: number): TraceRecord | undefined {
+    const record = this.#find(id);
+    return record instanceof ReleasedRecord ? undefined : record;
   }
 
   current(key: string): number | null {
@@ -1374,10 +1478,10 @@ export class TraceStore {
     const latest = new Map<number, number>();
     for (
       let index = this.#records.length - 1;
-      index >= this.#head && latest.size < limit;
+      index >= this.#retained && latest.size < limit;
       index -= 1
     ) {
-      const record = this.#records[index]!;
+      const record = this.#retainedAt(index);
       if (record.detail?.kind !== "output") continue;
       const messageId = record.detail.messageId ?? record.detail.eventSequence;
       if (!latest.has(messageId)) latest.set(messageId, record.id);
@@ -1391,17 +1495,17 @@ export class TraceStore {
     const ids: number[] = [];
     for (
       let index = this.#records.length - 1;
-      index >= this.#head && ids.length < limit;
+      index >= this.#retained && ids.length < limit;
       index -= 1
     ) {
-      const record = this.#records[index]!;
+      const record = this.#retainedAt(index);
       if (record.kind === kind) ids.push(record.id);
     }
     return Object.freeze(ids);
   }
 
   view(id: number): RuntimeDebugRecord | null {
-    const record = this.#find(id);
+    const record = this.#retainedRecord(id);
     if (record === undefined) return null;
     const plan = this.#plan;
     const span =
@@ -1429,7 +1533,10 @@ export class TraceStore {
       previewTruncated: record.previewTruncated,
       dependencies: Object.freeze(
         record.dependencies.map((dependency) =>
-          Object.freeze({ id: dependency, retained: this.#find(dependency) !== undefined }),
+          Object.freeze({
+            id: dependency,
+            retained: this.#retainedRecord(dependency) !== undefined,
+          }),
         ),
       ),
       omittedDependencies: record.omitted,
@@ -1440,7 +1547,7 @@ export class TraceStore {
           ? null
           : Object.freeze({
               id: record.control,
-              retained: this.#find(record.control) !== undefined,
+              retained: this.#retainedRecord(record.control) !== undefined,
             }),
     });
   }
@@ -1451,9 +1558,9 @@ export class TraceStore {
       origin: this.#pendingOrigin ?? this.#origin,
       recording: this.#failure === null,
       failure: this.#failure,
-      records: this.#records.length - this.#head,
-      firstRecord: this.#records[this.#head]?.id ?? null,
-      lastRecord: this.#records.at(-1)?.id ?? null,
+      records: this.#records.length - this.#retained,
+      firstRecord: this.#records[this.#retained]?.id ?? null,
+      lastRecord: this.#records.length > this.#retained ? this.#records.at(-1)!.id : null,
       accountedBytes: this.#bytes,
       truncated: this.#truncated,
       draws: this.#draws,
@@ -1511,9 +1618,16 @@ function storageKeyOf(key: string): string {
 }
 
 function addDependency(deps: DebugDependencies, id: number, limit: number): void {
-  if (deps.ids.includes(id)) return;
-  if (deps.ids.length < limit) deps.ids.push(id);
-  else deps.omitted += 1;
+  const ids = deps.ids;
+  if (ids.length < SCANNED_DEPENDENCIES || limit <= SCANNED_DEPENDENCIES) {
+    if (ids.includes(id)) return;
+  } else if ((deps.seen ??= new Set(ids)).has(id)) return;
+  if (ids.length >= limit) {
+    deps.omitted += 1;
+    return;
+  }
+  ids.push(id);
+  deps.seen?.add(id);
 }
 
 function addAll(target: DebugDependencies, source: DebugDependencies, limit: number): void {

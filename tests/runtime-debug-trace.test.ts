@@ -7,6 +7,7 @@ import {
   compileSource,
   completeAction,
   createCheckpoint,
+  createFreshRuntimeSession,
   deserializeCheckpoint,
   observeTime,
   pressPermanentButton,
@@ -19,6 +20,7 @@ import {
   type ProjectSourceFile,
   type RuntimeDebugRecord,
   type RuntimeScriptStorageEntrySnapshot,
+  type RuntimeSession,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import {
@@ -1541,6 +1543,218 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   assert.ok(small.status().truncated);
   assert.ok(small.status().accountedBytes <= 4096);
   assert.ok(small.status().records < 53);
+
+  // Uncapped, a record keeps every distinct cause, also one read again past the first 32.
+  const repeated = compile(
+    [
+      ...names.map((name, index) => `let ${name} = ${index}`),
+      `let total = ${names.join(" + ")} + v40 + v3`,
+      "exit",
+    ].join("\n"),
+  );
+  const complete = new RuntimeDebugContext({ maxDependencies: Infinity });
+  const completed = play(repeated, { trace: complete });
+  const scope = completed.snapshot.frames[0]!.id;
+  const all = record(complete, complete.variableRecord(scope, "total"));
+  assert.deepEqual(
+    all.dependencies.map((dependency) => dependency.id),
+    names.map((name) => complete.variableRecord(scope, name)),
+  );
+  assert.equal(all.omittedDependencies, 0);
+});
+
+/** A record as data that does not change while the trace keeps it: dependencies and `control` by ID. */
+function recordData(entry: RuntimeDebugRecord) {
+  return {
+    ...entry,
+    dependencies: entry.dependencies.map((dependency) => dependency.id),
+    control: entry.control?.id ?? null,
+  };
+}
+
+const RELEASED = [
+  "let base = 5",
+  "function addUp(n) {",
+  "    if n == 0 {",
+  "        return 0",
+  "    }",
+  "    return n + addUp(n - 1)",
+  "}",
+  "let total = 0",
+  "for i in 1..=40 {",
+  "    total += addUp(i % 4)",
+  "}",
+  "wait 1 s",
+  "let later = base + total",
+  "for pass in 1..=3 {",
+  "    let inner = pass + later",
+  '    say "${inner}", instant',
+  "    wait 1 s",
+  "}",
+  'say "${later} ${base}", instant',
+  "exit",
+].join("\n");
+
+/**
+ * Plays `plan` through a session, a second at a time, calling `between` after each operation and, when given, after each
+ * instruction from an observer.
+ */
+function playSession(
+  plan: InstructionPlan,
+  debugTrace: RuntimeDebugContext,
+  between: () => void,
+  everyInstruction = false,
+  pauseAtDraws = false,
+): RuntimeSession {
+  const session = createFreshRuntimeSession(
+    plan,
+    { seed: SEED, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+    pauseAtDraws ? { randomControl: {} } : {},
+  );
+  const observed = everyInstruction ? { instructionObserver: { after: between } } : {};
+  for (let guard = 0; ; guard += 1) {
+    assert.ok(guard < 100, "the scenario must end");
+    session.run({ debugTrace, ...observed });
+    between();
+    // A paused draw takes its natural outcome.
+    for (let draw = session.view().randomDraw; draw !== null; draw = session.view().randomDraw) {
+      session.resumeRandomDraw(
+        { drawId: draw.drawId, outcome: "natural" },
+        { debugTrace, ...observed },
+      );
+      between();
+    }
+    const view = session.view();
+    if (view.status !== "waiting") return session;
+    session.observeTime(view.currentSessionTimeMs + 1_000, [], { debugTrace });
+    between();
+  }
+}
+
+/** The current version of each variable the session holds, by the trace's version index. */
+function currentVersions(session: RuntimeSession, trace: RuntimeDebugContext) {
+  const snapshot = session.exportTrustedSnapshot();
+  return [
+    ...snapshot.globals.map((binding) => trace.variableRecord("global", binding.name)),
+    ...[...snapshot.frames, ...snapshot.retainedScopes].flatMap((scope) =>
+      scope.bindings.map((binding) => trace.variableRecord(scope.id, binding.name)),
+    ),
+  ];
+}
+
+test("released records leave the trace, while later records and the version index keep naming them", () => {
+  const plan = compile(RELEASED);
+  const kept = new RuntimeDebugContext();
+  const keptSession = playSession(plan, kept, () => {});
+  const expected = records(kept).map(recordData);
+  assert.ok(expected.length > 300);
+
+  for (const everyInstruction of [false, true]) {
+    const released = new RuntimeDebugContext();
+    const read = new Map<number, ReturnType<typeof recordData>>();
+    const session = playSession(
+      plan,
+      released,
+      () => {
+        for (const entry of records(released)) read.set(entry.id, recordData(entry));
+        released.release(released.status().lastRecord ?? 0);
+      },
+      everyInstruction,
+    );
+    // Each record, read before it was released, is the record of a trace that releases nothing.
+    assert.deepEqual([...read.values()], expected);
+    assert.deepEqual(currentVersions(session, released), currentVersions(keptSession, kept));
+    const status = released.status();
+    assert.deepEqual([status.records, status.firstRecord, status.lastRecord], [0, null, null]);
+    assert.equal(status.truncated, false);
+    assert.ok(status.accountedBytes < kept.status().accountedBytes);
+    assert.equal(released.record(expected.at(-1)!.id), null);
+    assert.deepEqual([released.outputs(), released.recentMessages()], [[], []]);
+    assert.equal(released.outputRecord(1), null);
+  }
+
+  // A later record names a released cause, which reads as no longer retained.
+  const partly = new RuntimeDebugContext();
+  let first = true;
+  const partlySession = playSession(plan, partly, () => {
+    if (first) partly.release(partly.status().lastRecord ?? 0);
+    first = false;
+  });
+  const root = partlySession.exportTrustedSnapshot().frames[0]!.id;
+  const base = partly.variableRecord(root, "base")!;
+  assert.equal(partly.record(base), null);
+  assert.deepEqual(
+    record(partly, partly.variableRecord(root, "later")).dependencies.find(
+      (dependency) => dependency.id === base,
+    ),
+    { id: base, retained: false },
+  );
+});
+
+test("paused and resumed draws name the released versions that a trace releasing nothing names", () => {
+  const plan = compile(
+    [
+      "let x = 1",
+      "wait 1 s",
+      "repeat 3 {",
+      "    x = x + randomInteger(1..=6)",
+      "}",
+      'say "${x}", instant',
+      "exit",
+    ].join("\n"),
+  );
+  const collect = (release: boolean) => {
+    const trace = new RuntimeDebugContext();
+    const read = new Map<number, ReturnType<typeof recordData>>();
+    const between = () => {
+      for (const entry of records(trace)) read.set(entry.id, recordData(entry));
+      if (release) trace.release(trace.status().lastRecord ?? 0);
+    };
+    const session = playSession(plan, trace, between, false, true);
+    return { read: [...read.values()], versions: currentVersions(session, trace) };
+  };
+  const kept = collect(false);
+  assert.deepEqual(collect(true), kept);
+  assert.equal(kept.read.filter((entry) => entry.kind === "random").length, 3);
+  assert.deepEqual(
+    kept.read.filter((entry) => entry.kind === "unrecorded"),
+    [],
+  );
+});
+
+test("a released record keeps its place in the bounds, which drop it like any other", () => {
+  const plan = compile(RELEASED);
+  const collect = (trace: RuntimeDebugContext, release: boolean) => {
+    const read = new Map<number, ReturnType<typeof recordData>>();
+    const session = playSession(plan, trace, () => {
+      for (const entry of records(trace)) read.set(entry.id, recordData(entry));
+      if (release) trace.release(trace.status().lastRecord ?? 0);
+    });
+    return { read, versions: currentVersions(session, trace), truncated: trace.status().truncated };
+  };
+  const kept = collect(new RuntimeDebugContext({ maxRecords: 64 }), false);
+  const released = collect(new RuntimeDebugContext({ maxRecords: 64 }), true);
+  assert.equal(kept.truncated, true);
+  assert.deepEqual(released, kept);
+  assert.ok(
+    [...kept.read.values()].some(
+      (entry) => entry.kind === "unrecorded" && entry.detail?.kind === "unrecorded",
+    ),
+    "the bounds dropped versions that were read again",
+  );
+});
+
+test("a trace without previews records the same history without value text", () => {
+  const plan = compile(RELEASED);
+  const withPreviews = new RuntimeDebugContext();
+  const withoutPreviews = new RuntimeDebugContext({ previews: false });
+  play(plan, { trace: withPreviews });
+  play(plan, { trace: withoutPreviews });
+  assert.deepEqual(
+    records(withoutPreviews),
+    records(withPreviews).map((entry) => ({ ...entry, preview: null, previewTruncated: false })),
+  );
+  assert.ok(withoutPreviews.status().accountedBytes < withPreviews.status().accountedBytes);
 });
 
 test("a deserialized checkpoint traced from its restore matches the untraced continuation", () => {

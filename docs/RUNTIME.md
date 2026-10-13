@@ -1791,7 +1791,16 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   records with their index entries, a record larger than the budget at once; a dependency on a dropped record reads as
   not retained. Previews and labels stop at 1,024 characters while they are written, a longer storage key is not
   indexed, and a record keeps at most 32 dependencies and counts the others as omitted.
-  These are debugger tuning values, not language limits.
+  These are debugger tuning values, not language limits. A host sets them with `new RuntimeDebugContext({ maxRecords,
+  maxAccountedBytes, maxDependencies })`, where `maxDependencies: Infinity` keeps every dependency; `previews: false`
+  keeps no value previews, so every record's `preview` is `null`.
+- **Release.** `release(upTo)` drops the retained records up to that ID, which a host has read: `record`, `outputs`,
+  `recentMessages`, `outputRecord`, and `stageImageRecord` no longer give them, and a dependency on one reads as not
+  retained. The version index keeps naming them, so `variableRecord` and `storageRecord` still give their IDs and
+  later records still name them as dependencies: record IDs and dependencies stay those of a trace that releases
+  nothing. A released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge
+  toward the accounted bytes while the index names it, until the bounds drop it with its index entries. Called while
+  an instruction runs, such as from a builtin, `release` does nothing.
 - **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),
