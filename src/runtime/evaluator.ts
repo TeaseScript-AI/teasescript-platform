@@ -44,7 +44,7 @@ import {
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import type { InstructionTraceCollector } from "./instruction-trace.js";
+import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
   InterpreterEvent,
@@ -277,8 +277,19 @@ function templateText(text: string, part: string, span: SourceSpan): string {
   return text + part;
 }
 
+/** Builtin records that a session created and froze itself, with data properties only (`RuntimeSession`). */
+const ADMITTED_BUILTINS = new WeakSet<object>();
+
+/** Marks a builtin record the engine created and froze, which reading never changes; returns it. */
+export function admittedBuiltinRecord<T extends object>(record: T): T {
+  ADMITTED_BUILTINS.add(record);
+  return record;
+}
+
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
+  /** Whether the instruction observer ended the operation before an instruction. */
+  public stopped = false;
   #evaluator: Evaluator | null = null;
 
   public constructor(
@@ -291,6 +302,8 @@ export class RuntimeExecutionContext {
     public readonly instructionTrace: InstructionTraceCollector | null = null,
     /** The operation's controlled randomness, or `null` when every draw is natural. */
     public readonly control: RandomControl | null = null,
+    /** The session host's instruction observer, or `null`. */
+    public readonly observer: RuntimeInstructionObserver | null = null,
   ) {}
 
   public evaluator(): Evaluator {
@@ -312,6 +325,9 @@ export class RuntimeExecutionContext {
 
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+
+  /** The builtin record `#builtins` was last filled from. */
+  #registered: RuntimeCapabilities["builtins"] = undefined;
 
   #referenceEpoch = 0;
 
@@ -338,8 +354,16 @@ export class Evaluator {
   }
 
   public refreshBuiltinRegistration(): void {
+    const builtins = this.capabilities.builtins;
+    // A session's admitted record cannot change; a host's record is read again, as reading it may give or do more.
+    if (
+      builtins === this.#registered &&
+      (builtins === undefined || ADMITTED_BUILTINS.has(builtins))
+    )
+      return;
     for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
-    Object.assign(this.#builtins, this.capabilities.builtins ?? {});
+    Object.assign(this.#builtins, builtins ?? {});
+    this.#registered = builtins;
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
@@ -4369,6 +4393,15 @@ export function findBinding(
   name: string,
 ): RuntimeBindingSnapshot | undefined {
   return findBindingLocation(snapshot, plan, name)?.binding;
+}
+
+/** The ID of the scope that `name` refers to, as `findBinding` finds it; `GLOBAL_SCOPE_ID` for a global. */
+export function bindingScopeId(
+  snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
+  name: string,
+): number | undefined {
+  return findBindingLocation(snapshot, plan, name)?.frame.id;
 }
 
 function findBindingLocation(

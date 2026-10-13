@@ -150,7 +150,10 @@ export {
   type RuntimeOperationResult,
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
-export type { RuntimeInstructionTrace } from "./runtime/instruction-trace.js";
+export type {
+  RuntimeInstructionObserver,
+  RuntimeInstructionTrace,
+} from "./runtime/instruction-trace.js";
 export {
   randomDrawAlternatives,
   type RandomDrawAlternatives,
@@ -189,6 +192,7 @@ export {
   type RuntimeSessionOptions,
   type RuntimeSessionOutcomeResult,
   type RuntimeSessionResult,
+  type RuntimeSessionRunOptions,
   type RuntimeSessionScopePreview,
   type RuntimeSessionVariablePreview,
   type RuntimeSessionVariablePreviews,

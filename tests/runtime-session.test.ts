@@ -912,3 +912,339 @@ exit
   assert.deepEqual(session.view().cameraView, null);
   assert.deepEqual(session.view().queuedBlocks, 0);
 });
+
+/** Calls, recursion, a global function, a timer block that shares a variable, loops, and branches across waits. */
+const OBSERVED = `global level = 2
+function addUp(n) {
+    if n == 0 {
+        return 0
+    }
+    let rest = addUp(n - 1)
+    return n + rest
+}
+global function double(x) {
+    return x * 2 + level
+}
+function watch(limit) {
+    let beats = 0
+    let t = timer(duration: 1 s, async: true, repeat: true) {
+        beats += 1
+    }
+    while beats < limit {
+        wait 1 s
+    }
+    t.stop()
+    return beats
+}
+let total = addUp(3)
+let doubled = double(total)
+let i = 0
+while i < 3 {
+    let step = i * 10 + total
+    i += 1
+}
+for pass in 1..=2 {
+    let inner = pass + total
+}
+repeat 2 {
+    total += 1
+}
+let counted = watch(2)
+say "\${total} \${doubled} \${counted}", instant
+exit
+`;
+
+type Observed = readonly (
+  readonly ["before", number, number] | readonly ["after", number, number, number]
+)[];
+
+/** Runs `session` to its end: `execute` runs it until it waits, then a second passes. */
+function driveToEnd(session: RuntimeSession, execute: () => void): void {
+  for (let guard = 0; ; guard += 1) {
+    assert.ok(guard < 100, "the scenario must end");
+    execute();
+    const view = session.view();
+    if (view.status !== "waiting") return;
+    session.observeTime(view.currentSessionTimeMs + 1_000);
+  }
+}
+
+/** What an observer sees, taken independently by single-stepping: each executed instruction, its successor, its call. */
+function steppedObservations(session: RuntimeSession): Observed {
+  const seen: (Observed[number] & unknown[])[] = [];
+  driveToEnd(session, () => {
+    while (session.view().runnable) {
+      const call = session.callStack().at(-1)?.id ?? 0;
+      const [executed] = session.executeInstruction({ instructionTrace: true }).instructionTrace!
+        .instructions;
+      // A step that starts a block executes no instruction.
+      if (executed === undefined) continue;
+      seen.push(
+        ["before", executed, call],
+        ["after", executed, session.view().nextInstruction, call],
+      );
+    }
+  });
+  return seen;
+}
+
+function recordingObserver(seen: unknown[][]) {
+  return {
+    before: (instruction: number, call: number) => {
+      seen.push(["before", instruction, call]);
+    },
+    after: (instruction: number, next: number, call: number) => {
+      seen.push(["after", instruction, next, call]);
+    },
+  };
+}
+
+test("an instruction observer sees each instruction in order with its successor and call", () => {
+  const plan = compileValidPlan(OBSERVED);
+  const stepped = steppedObservations(createFreshRuntimeSession(plan, IMMEDIATE));
+  const observed = createFreshRuntimeSession(plan, IMMEDIATE);
+  const seen: unknown[][] = [];
+  const instructionObserver = recordingObserver(seen);
+  driveToEnd(observed, () => observed.run({ instructionObserver }));
+  assert.deepEqual(seen, stepped);
+  // Recursion, the global function, the function with the timer, and each timer round are calls of their own.
+  assert.ok(new Set(seen.map((entry) => entry.at(-1))).size >= 8);
+
+  // An observer that never stops changes no result, event, state, or trace.
+  const plain = createFreshRuntimeSession(plan, IMMEDIATE);
+  const watched = createFreshRuntimeSession(plan, IMMEDIATE);
+  const plainTrace = new RuntimeDebugContext();
+  const watchedTrace = new RuntimeDebugContext();
+  for (let guard = 0; plain.view().status !== "halted"; guard += 1) {
+    assert.ok(guard < 100);
+    assert.deepEqual(
+      watched.run({
+        debugTrace: watchedTrace,
+        instructionTrace: true,
+        instructionObserver: recordingObserver([]),
+      }),
+      plain.run({ debugTrace: plainTrace, instructionTrace: true }),
+    );
+    const nowMs = plain.view().currentSessionTimeMs + 1_000;
+    assert.deepEqual(
+      watched.observeTime(nowMs, [], { debugTrace: watchedTrace }),
+      plain.observeTime(nowMs, [], { debugTrace: plainTrace }),
+    );
+  }
+  assert.equal(
+    serializeCheckpoint(watched.exportCheckpoint()),
+    serializeCheckpoint(plain.exportCheckpoint()),
+  );
+  const all = (trace: RuntimeDebugContext) => {
+    const { firstRecord, lastRecord } = trace.status();
+    return Array.from({ length: lastRecord! - firstRecord! + 1 }, (_, index) =>
+      trace.record(firstRecord! + index),
+    );
+  };
+  assert.deepEqual(all(watchedTrace), all(plainTrace));
+  assert.deepEqual(watchedTrace.status(), plainTrace.status());
+});
+
+test("an observer that returns true ends the run before that instruction, as stepping there would", () => {
+  const plan = compileValidPlan(OBSERVED);
+  const loopStart = plan.instructions.findIndex((instruction) => instruction.kind === "loopStart");
+  const stopped = createFreshRuntimeSession(plan, IMMEDIATE);
+  let starts = 0;
+  const ran = stopped.run({
+    instructionObserver: { before: (instruction) => instruction === loopStart && ++starts === 3 },
+  });
+  assert.equal(stopped.view().nextInstruction, loopStart);
+  assert.equal(stopped.view().runnable, true);
+  const stepped = createFreshRuntimeSession(plan, IMMEDIATE);
+  const events = [];
+  for (let step = 0; step < ran.instructionsExecuted; step += 1)
+    events.push(...stepped.executeInstruction().events);
+  assert.deepEqual(ran.events, events);
+  assert.equal(
+    serializeCheckpoint(stopped.exportCheckpoint()),
+    serializeCheckpoint(stepped.exportCheckpoint()),
+  );
+
+  // Stopping before the first instruction executes nothing; continuing gives the uninterrupted run.
+  const before = serializeCheckpoint(stopped.exportCheckpoint());
+  assert.equal(
+    stopped.run({ instructionObserver: { before: () => true } }).instructionsExecuted,
+    0,
+  );
+  assert.equal(serializeCheckpoint(stopped.exportCheckpoint()), before);
+  const whole = createFreshRuntimeSession(plan, IMMEDIATE);
+  driveToEnd(whole, () => whole.run());
+  driveToEnd(stopped, () => stopped.run());
+  assert.equal(
+    serializeCheckpoint(stopped.exportCheckpoint()),
+    serializeCheckpoint(whole.exportCheckpoint()),
+  );
+});
+
+test("an instruction a paused draw undoes gets its after once the resumed draw lets it complete", () => {
+  const plan = compileValidPlan(`let rolls = []
+repeat 3 {
+    rolls.add(randomInteger(1..=6))
+}
+say "\${rolls}", instant
+exit
+`);
+  const natural = createFreshRuntimeSession(plan, IMMEDIATE);
+  const expected: unknown[][] = [];
+  natural.run({ instructionObserver: recordingObserver(expected) });
+
+  const paused = createFreshRuntimeSession(plan, IMMEDIATE, { randomControl: {} });
+  const seen: unknown[][] = [];
+  const instructionObserver = recordingObserver(seen);
+  paused.run({ instructionObserver });
+  for (let guard = 0; paused.view().randomDraw !== null; guard += 1) {
+    assert.ok(guard < 10);
+    const { drawId } = paused.view().randomDraw!;
+    paused.resumeRandomDraw({ drawId, outcome: "natural" }, { instructionObserver });
+  }
+  assert.deepEqual(seen, expected);
+  assert.equal(
+    serializeCheckpoint(paused.exportCheckpoint()),
+    serializeCheckpoint(natural.exportCheckpoint()),
+  );
+});
+
+/** The scope of each name the running code sees, read from an export by the rules of ADR 0022 §3, §5, and §6. */
+function exportedScopes(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+): Map<string, number | "global"> {
+  const scopes = new Map<string, number | "global">();
+  const take = (scope: RuntimeSnapshot["frames"][number] | undefined) => {
+    for (const binding of scope?.bindings ?? []) scopes.set(binding.name, scope!.id);
+  };
+  for (const binding of snapshot.globals) scopes.set(binding.name, "global");
+  const call = snapshot.callFrames.at(-1);
+  if (call?.kind === "function") {
+    if (plan.functions[call.functionId - 1]?.global !== true)
+      take(
+        [...snapshot.frames, ...snapshot.retainedScopes].find(
+          (scope) => scope.id === call.rootScopeId,
+        ),
+      );
+    for (const capture of call.captures) scopes.set(capture.name, capture.scopeId);
+  }
+  for (const frame of snapshot.frames.slice(call?.scopeBaseDepth ?? 0)) take(frame);
+  return scopes;
+}
+
+test("scopeOf gives the scope an export shows and the version a read takes, also inside an observer", () => {
+  const plan = compileValidPlan(OBSERVED);
+  const names = ["level", "n", "rest", "x", "limit", "beats", "t", "total", "doubled", "i", "step"];
+  names.push("pass", "inner", "counted", "missing");
+
+  // Between instructions, against a full export at each.
+  const stepped = createFreshRuntimeSession(plan, IMMEDIATE);
+  const expected: (number | "global" | null)[][] = [];
+  driveToEnd(stepped, () => {
+    while (stepped.view().runnable) {
+      const scopes = exportedScopes(plan, stepped.exportTrustedSnapshot());
+      const at = names.map((name) => stepped.scopeOf(name));
+      assert.deepEqual(
+        at,
+        names.map((name) => scopes.get(name) ?? null),
+      );
+      // A step that starts a block executes no instruction, so no observer sees it.
+      if (
+        stepped.executeInstruction({ instructionTrace: true }).instructionTrace!.instructions[0] !==
+        undefined
+      )
+        expected.push(at);
+    }
+  });
+  assert.ok(
+    expected.some((at) => at.includes("global") && at.some((scope) => typeof scope === "number")),
+  );
+
+  // Inside an observer, where it names the version that the instruction then reads.
+  const observed = createFreshRuntimeSession(plan, IMMEDIATE);
+  const trace = new RuntimeDebugContext();
+  const seen: (number | "global" | null)[][] = [];
+  let versions = new Map<string, readonly [number | "global", number | null]>();
+  let first = 1;
+  let checked = 0;
+  driveToEnd(observed, () =>
+    observed.run({
+      debugTrace: trace,
+      instructionObserver: {
+        before: () => {
+          const at = names.map((name) => observed.scopeOf(name));
+          seen.push(at);
+          versions = new Map(
+            names.flatMap((name, index) => {
+              const scope = at[index]!;
+              return scope === null ? [] : [[name, [scope, trace.variableRecord(scope, name)]]];
+            }),
+          );
+          first = (trace.status().lastRecord ?? 0) + 1;
+        },
+        after: () => {
+          for (let id = first; id <= (trace.status().lastRecord ?? 0); id += 1) {
+            for (const dependency of trace.record(id)!.dependencies) {
+              const read = dependency.id < first ? trace.record(dependency.id)?.variable : null;
+              if (read === undefined || read === null || !versions.has(read.name)) continue;
+              assert.deepEqual([read.scope, dependency.id], versions.get(read.name), read.name);
+              checked += 1;
+            }
+          }
+        },
+      },
+    }),
+  );
+  assert.deepEqual(seen, expected);
+  assert.ok(checked > 10);
+  // EVIDENCE: fixture: a name that is not text is a deliberately malformed argument.
+  const notAName = 42 as never;
+  assert.throws(() => stepped.scopeOf(notAName), TypeError);
+});
+
+test("an observer may only call scopeOf on its session, and an observer that throws ends it", () => {
+  const plan = compileValidPlan("let a = 1\nlet b = a + 1\nexit");
+  const session = createFreshRuntimeSession(plan, IMMEDIATE);
+  // EVIDENCE: fixture: deliberately malformed observers, which an untyped caller may pass.
+  for (const instructionObserver of [null, 1, { before: 1 }, { after: "no" }] as never[])
+    assert.throws(() => session.run({ instructionObserver }), TypeError);
+  assert.equal(session.view().nextInstruction, 0);
+  const calls: unknown[] = [];
+  session.run({
+    instructionObserver: {
+      before: () => {
+        calls.push(session.scopeOf("a"));
+        assert.throws(() => session.view(), RuntimeSessionError);
+        assert.throws(() => session.exportTrustedSnapshot(), RuntimeSessionError);
+      },
+    },
+  });
+  assert.equal(session.view().status, "halted");
+  assert.ok(calls.length > 0);
+
+  const failing = createFreshRuntimeSession(plan, IMMEDIATE);
+  const error = new Error("observer failed");
+  assert.throws(
+    () =>
+      failing.run({
+        instructionObserver: {
+          after: () => {
+            throw error;
+          },
+        },
+      }),
+    error,
+  );
+  assert.throws(() => failing.view(), RuntimeSessionError);
+
+  // An instruction that fails does not complete, so it gets no after.
+  const faulty = compileValidPlan("let items = [1]\nlet item = items[5]\nexit");
+  const seen: unknown[][] = [];
+  const failed = createFreshRuntimeSession(faulty, IMMEDIATE);
+  failed.run({ instructionObserver: recordingObserver(seen) });
+  const failure = failed.view().nextInstruction;
+  assert.equal(failed.view().status, "failed");
+  assert.deepEqual(seen.at(-1), ["before", failure, 0]);
+  assert.equal(seen.filter((entry) => entry[1] === failure).length, 1);
+});

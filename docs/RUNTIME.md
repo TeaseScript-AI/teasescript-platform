@@ -963,6 +963,16 @@ operations stay as they are.
   state. Host requests, observations, and capability results keep their complete capture and validation; the state
   itself is not captured or validated again. An operation started while another operation of the same session runs, such
   as from a builtin, throws `RuntimeSessionError`; through a builtin that becomes the usual `TSR012` failure.
+- **Instruction observer.** `run`, `stepToEvent`, `executeInstruction`, and `resumeRandomDraw` also take
+  `instructionObserver: { before(instruction, call), after(instruction, next, call) }`, both optional, for a host that
+  follows execution in order, such as a coverage explorer. `call` is the ID of the call frame that runs the instruction,
+  0 outside every call. `before` is called once due blocks were dispatched, right before a planned instruction runs;
+  returning `true` ends the operation there, which leaves the state that executing the same instructions one at a time
+  leaves. `after` is called once the instruction completed, with `next`, where execution continues; an instruction that
+  fails gets none, and one that a paused draw undid gets only its `after`, from the `resumeRandomDraw` that completes
+  it. While a callback runs, the session's operation is under way: `scopeOf` may be called, any other session call
+  throws `RuntimeSessionError`, and a callback that throws ends the session like any error thrown during an operation.
+  An observer that never returns `true` changes no result, event, state, or trace.
 - **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, `outcome`
   where the snapshot API has one, and `randomChoices` and `randomRefusal` when it has them, as deeply frozen copies that
   share nothing with the session's state. `view()` returns the operational state a host acts on, also detached and
@@ -977,8 +987,10 @@ operations stay as they are.
   return position, scope depth, and the kind of block that interrupted it, also in work proportional to the call depth;
   `variablePreviews()` gives the globals, scopes, and kept scopes with bounded previews of their values, and the current
   text of each message with a handle, in work proportional to the number of variables and those texts, not to the size
-  of the values; and `temporalPresentation()` gives the date and time presentation in force. `inspect()` returns `inspectRuntimeState`'s detached debugger inspection after capturing and validating the
-  whole state. Storage and other script data are read from an export.
+  of the values; `temporalPresentation()` gives the date and time presentation in force; and `scopeOf(name)` gives the
+  scope `name` refers to where execution stands, a scope ID or `"global"` as `RuntimeDebugContext.variableRecord` takes
+  it, or `null`, in work proportional to the scope depth. `inspect()` returns `inspectRuntimeState`'s detached debugger
+  inspection after capturing and validating the whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
   data that later operations do not change; importing it again crosses the external-data boundary. For trusted hosts
   only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or validation,
@@ -1779,7 +1791,19 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   records with their index entries, a record larger than the budget at once; a dependency on a dropped record reads as
   not retained. Previews and labels stop at 1,024 characters while they are written, a longer storage key is not
   indexed, and a record keeps at most 32 dependencies and counts the others as omitted.
-  These are debugger tuning values, not language limits.
+  These are debugger tuning values, not language limits. A host sets them with `new RuntimeDebugContext({ maxRecords,
+  maxAccountedBytes, maxDependencies })`, where `maxDependencies: Infinity` keeps every dependency; `previews: false`
+  keeps no value previews, so every record's `preview` is `null`.
+- **Release.** `release(upTo)` drops the retained records up to that ID, which a host has read: `record`, `outputs`,
+  `recentMessages`, `outputRecord`, and `stageImageRecord` no longer give them, and a dependency on one reads as not
+  retained. The version index keeps naming them, so `variableRecord` and `storageRecord` still give their IDs and
+  later records still name them as dependencies: record IDs and dependencies stay those of a trace that releases
+  nothing. A released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge
+  toward the accounted bytes while the index names it, until the bounds drop it with its index entries. `release` works
+  between operations, also after one threw, and in an instruction observer's callbacks; while an operation otherwise
+  runs, as in a builtin, `randomControl.decide`, or `capturedMedia.holds`, it does nothing. `status()` counts and names
+  retained records only; its `nextRecord`, the ID the next record gets, stays meaningful after a release: the records an
+  instruction or an operation made have the IDs from `nextRecord` before it up to `nextRecord` after it.
 - **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),
@@ -1788,7 +1812,8 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   the sequence of its first event and whether it set the Stage image, so that a host can tell a message shown or an
   image set before the epoch from one whose record was dropped.
 - **Queries.** `record(id)` gives a detached JSON-safe view; `outputRecord(eventSequence)`, `outputs(limit)`,
-  `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
+  `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs. A
+  session's `scopeOf(name)` gives the scope that a name refers to.
 - **Branch decisions.** A variable write, `return` value, storage write, message, or Stage image names in `control`
   the innermost branch decision of the same call on whose taken side it happened: an `if`, `else if`, or `else`, a
   `switch` case or `default`, a `while` round, the right side of an `and`, `or`, or `otherwise` that a pausing operand
@@ -1804,7 +1829,8 @@ returns the same snapshot, events, random state, and checkpoint with or without 
 A development and testing aid, such as a coverage explorer: `run`, `stepToEvent`, `executeInstruction`,
 `runValidatedState`, `stepValidatedStateToEvent`, and the session methods of those names take the option
 `instructionTrace: true`, and their result then also holds `instructionTrace` (`RuntimeInstructionTrace`), what that
-call executed. Both lists are in ascending order and hold each entry once, so the plan bounds their size.
+call executed. Both lists are in ascending order and hold each entry once, so the plan bounds their size. A session
+host that needs the order and every occurrence uses the [instruction observer](#runtime-sessions) instead.
 
 - `instructions`: the plan index of every instruction the call executed, including one that failed. Starting a timer,
   media, or permanent-button block executes none; the block's own instructions follow.

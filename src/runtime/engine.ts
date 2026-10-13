@@ -98,15 +98,14 @@ import {
 import { activeFunctionFrame, contextRootId } from "./activations.js";
 import {
   bindingKey,
-  closeDebugTrace,
   loopKey,
   stateKey,
-  openDebugTrace,
+  withDebugTrace,
   type DebugDependencies,
   type RuntimeDebugContext,
   type TraceStore,
 } from "./debug-trace.js";
-import { InstructionTraceCollector } from "./instruction-trace.js";
+import { InstructionTraceCollector, type RuntimeInstructionObserver } from "./instruction-trace.js";
 import { detachPreparedReferencesForMutation, GLOBAL_SCOPE_ID } from "./prepared-references.js";
 export type {
   ActionCompletionOutcome,
@@ -240,9 +239,10 @@ export interface RuntimeRunOptions {
   readonly randomControl?: RandomControlOptions;
 }
 
-/** Run options of engine-owned state, whose host already checked its random control once. */
+/** Run options of engine-owned state, whose host already checked its random control and observer once. */
 export interface ValidatedRunOptions extends RuntimeRunOptions {
   readonly randomPolicy?: RandomPolicy | null;
+  readonly instructionObserver?: RuntimeInstructionObserver;
 }
 
 function instructionTraceFor(
@@ -274,19 +274,18 @@ export function executeInstruction(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, inputSnapshot);
-  const executed = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "executeInstruction",
-    null,
+  return withDebugTrace(options.debugTrace, captured.plan, inputSnapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "executeInstruction",
+      null,
+    ),
   );
-  closeDebugTrace(trace, executed);
-  return executed;
 }
 
 /** Executes one instruction of engine-owned plan/state that already passed complete validation. */
@@ -296,23 +295,23 @@ export function executeValidatedInstruction(
   capabilities: RuntimeCapabilities = {},
   options: Pick<
     ValidatedRunOptions,
-    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy"
+    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy" | "instructionObserver"
   > = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const executed = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "executeInstruction",
-    null,
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "executeInstruction",
+      null,
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, executed);
-  return executed;
 }
 
 /** How many instructions an operation executed so far, including one whose due work a draw then paused. */
@@ -342,8 +341,9 @@ function executeCapturedInstruction(
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
   progress: Progress,
+  observeStart = true,
 ): void {
-  const executed = executeInstructionBoundary(plan, snapshot, context);
+  const executed = executeInstructionBoundary(plan, snapshot, context, observeStart);
   progress.executed += executed;
   progress.counted += executed;
   if (
@@ -360,6 +360,7 @@ function executeInstructionBoundary(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
+  observeStart: boolean,
 ): number {
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return 0;
@@ -371,6 +372,16 @@ function executeInstructionBoundary(
   }
   if (snapshot.status === "waiting") return 0;
   const instructionIndex = snapshot.nextInstruction;
+  const call = currentCallFrameId(snapshot) ?? 0;
+  const observer = context.observer;
+  if (
+    observeStart &&
+    observer !== null &&
+    observeBefore(context.trace, observer, instructionIndex, call)
+  ) {
+    context.stopped = true;
+    return 0;
+  }
   // Every region of a validated plan ends in a transfer, so execution never runs past one.
   const instruction = plan.instructions[instructionIndex]!;
 
@@ -389,13 +400,10 @@ function executeInstructionBoundary(
     );
   snapshot.status = "running";
   const evaluator = context.evaluator();
-  context.trace?.at(
-    instructionIndex,
-    snapshot.currentSessionTimeMs,
-    currentCallFrameId(snapshot) ?? 0,
-  );
+  context.trace?.at(instructionIndex, snapshot.currentSessionTimeMs, call);
   const instructionTrace = context.instructionTrace;
   instructionTrace?.visit(instructionIndex);
+  let failed = false;
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, context.events);
     instructionTrace?.settle(instructionIndex, instruction, snapshot.nextInstruction);
@@ -416,6 +424,7 @@ function executeInstructionBoundary(
       if (unit) control.discardUnit(context.trace);
       throw error;
     }
+    failed = true;
     failSnapshot(
       snapshot,
       failure.toInfo(),
@@ -426,7 +435,43 @@ function executeInstructionBoundary(
     snapshot.contextualSpeaker = null;
   }
   if (unit) control.endUnit(context.trace);
+  // A failed instruction did not complete; the operation ends with its failure.
+  if (observer !== null && !failed)
+    observeAfter(context.trace, observer, instructionIndex, snapshot.nextInstruction, call);
   return 1;
+}
+
+/** Calls an observer's `before` between two instructions, where its host may release records of the trace. */
+function observeBefore(
+  trace: TraceStore | null,
+  observer: RuntimeInstructionObserver,
+  instruction: number,
+  call: number,
+): boolean {
+  if (observer.before === undefined) return false;
+  if (trace !== null) trace.betweenInstructions = true;
+  try {
+    return observer.before(instruction, call) === true;
+  } finally {
+    if (trace !== null) trace.betweenInstructions = false;
+  }
+}
+
+/** Calls an observer's `after` between two instructions, where its host may release records of the trace. */
+function observeAfter(
+  trace: TraceStore | null,
+  observer: RuntimeInstructionObserver,
+  instruction: number,
+  next: number,
+  call: number,
+): void {
+  if (observer.after === undefined) return;
+  if (trace !== null) trace.betweenInstructions = true;
+  try {
+    observer.after(instruction, next, call);
+  } finally {
+    if (trace !== null) trace.betweenInstructions = false;
+  }
 }
 
 export function stepToEvent(
@@ -437,19 +482,18 @@ export function stepToEvent(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const stepped = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "stepToEvent",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "stepToEvent",
+      instructionBudget(options.instructionBudget),
+    ),
   );
-  closeDebugTrace(trace, stepped);
-  return stepped;
 }
 
 /** Steps engine-owned plan/state that already passed complete validation. */
@@ -460,19 +504,19 @@ export function stepValidatedStateToEvent(
   options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const stepped = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "stepToEvent",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "stepToEvent",
+      instructionBudget(options.instructionBudget),
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, stepped);
-  return stepped;
 }
 
 export function run(
@@ -483,19 +527,18 @@ export function run(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const ran = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "run",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "run",
+      instructionBudget(options.instructionBudget),
+    ),
   );
-  closeDebugTrace(trace, ran);
-  return ran;
 }
 
 /** Runs engine-owned plan/state that already passed complete validation. */
@@ -506,19 +549,19 @@ export function runValidatedState(
   options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const ran = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "run",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "run",
+      instructionBudget(options.instructionBudget),
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, ran);
-  return ran;
 }
 
 /**
@@ -534,6 +577,7 @@ function driveRoot(
   policy: RandomPolicy | null,
   root: "run" | "stepToEvent" | "executeInstruction",
   budget: number | null,
+  observer: RuntimeInstructionObserver | undefined = undefined,
 ): RuntimeOperationResult {
   if (snapshot.randomControl?.pending != null) return result(snapshot, [], 0);
   const control = randomControlFor(plan, policy, trace);
@@ -544,6 +588,7 @@ function driveRoot(
     trace,
     instructionTraceFor(plan, options),
     control,
+    observer ?? null,
   );
   const progress = startProgress(snapshot, 0);
   try {
@@ -577,7 +622,11 @@ function runInstructions(
   budget: number,
   untilEvent: boolean,
 ): void {
-  while (executionRunnable(snapshot) && !(untilEvent && context.events.length > 0)) {
+  while (
+    !context.stopped &&
+    executionRunnable(snapshot) &&
+    !(untilEvent && context.events.length > 0)
+  ) {
     if (snapshot.currentSessionTimeMs > progress.budgetTimeMs) {
       progress.budgetTimeMs = snapshot.currentSessionTimeMs;
       progress.counted = 0;
@@ -654,18 +703,9 @@ export function resumeRandomDraw(
 ): PendingActionOperationResult<RandomDrawResolutionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const resumed = resumeCaptured(
-    captured.plan,
-    captured.snapshot,
-    request,
-    capabilities,
-    options,
-    trace,
-    policy,
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    resumeCaptured(captured.plan, captured.snapshot, request, capabilities, options, trace, policy),
   );
-  closeDebugTrace(trace, resumed);
-  return resumed;
 }
 
 /** Resolves the paused draw of engine-owned plan/state that already passed complete validation. */
@@ -676,14 +716,22 @@ export function resumeValidatedRandomDraw(
   capabilities: RuntimeCapabilities = {},
   options: Pick<
     ValidatedRunOptions,
-    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy"
+    "debugTrace" | "instructionTrace" | "randomControl" | "randomPolicy" | "instructionObserver"
   > = {},
 ): PendingActionOperationResult<RandomDrawResolutionOutcome> {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const resumed = resumeCaptured(plan, snapshot, request, capabilities, options, trace, policy);
-  closeDebugTrace(trace, resumed);
-  return resumed;
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    resumeCaptured(
+      plan,
+      snapshot,
+      request,
+      capabilities,
+      options,
+      trace,
+      policy,
+      options.instructionObserver,
+    ),
+  );
 }
 
 function resumeCaptured(
@@ -694,6 +742,7 @@ function resumeCaptured(
   options: Pick<RuntimeRunOptions, "instructionTrace">,
   trace: TraceStore | null,
   policy: RandomPolicy | null,
+  observer: RuntimeInstructionObserver | undefined = undefined,
 ): PendingActionOperationResult<RandomDrawResolutionOutcome> {
   const pending = snapshot.randomControl?.pending ?? null;
   if (pending === null) return pendingResult(snapshot, [], { kind: "noPendingDraw" } as const);
@@ -722,12 +771,14 @@ function resumeCaptured(
     trace,
     instructionTraceFor(plan, options),
     control,
+    observer ?? null,
   );
   const progress = startProgress(snapshot, pending.instructionsUsed ?? 0);
   const budget = pending.instructionBudget;
   try {
+    // The observer saw the paused instruction start before the draw paused it.
     if (pending.unit === "instruction")
-      executeCapturedInstruction(plan, snapshot, context, progress);
+      executeCapturedInstruction(plan, snapshot, context, progress, false);
     else processDueWork(plan, snapshot, context.events, trace, control);
     control.assertReplayDone();
     if (pending.root === "run" || (pending.root === "stepToEvent" && !pending.eventsBefore))
