@@ -630,6 +630,7 @@ export interface MapUses {
   jsonValues: Set<string>;
   jsonFunctions: Set<string>;
   jsonClosures: Map<string, Map<string, boolean>>;
+  jsonMixed: Set<string>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -968,6 +969,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     jsonValues: json.variables,
     jsonFunctions: json.functions,
     jsonClosures: json.closures,
+    jsonMixed: json.mixed,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -7162,10 +7164,7 @@ function lowerAssignment(
     right.kind === "map" && variableTarget !== null && operator === "="
       ? namedMapLiteral(targetNode, right, context)
       : lowerExpression(right, context);
-  const value =
-    variableTarget !== null && operator === "="
-      ? jsonShaped(targetNode, right, lowered, context)
-      : lowered;
+  const value = operator === "=" ? jsonShaped(targetNode, right, lowered, context) : lowered;
   if (value === null) {
     const targetName = variableTarget ?? "indexed target";
     return [
@@ -12141,9 +12140,9 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
 
 /** A map literal stored in a variable: a dict for a dict variable, else an object that declares every used field. */
 /**
- * A value that a variable holding what a JsonSlurper's parseText() gave takes instead, such as a map as a fallback,
- * whose keys reads of the variable read as a dict's (isJsonValue): it goes through toJson() and fromJson(), so that its
- * maps are dicts as well, as parsed JSON's are. A value that is parsed JSON itself, null, or no map or list stays.
+ * A map or list literal that takes the place of what a JsonSlurper's parseText() gave (jsonValueBindings), such as a
+ * fallback, or that is written into such a value, `data.config = [title: "x"]`: reads read its keys as a dict's, so it
+ * goes through toJson() and fromJson(), which make its maps dicts as parsed JSON's are, with its text kept as text.
  */
 function jsonShaped(
   target: AstNode,
@@ -12151,16 +12150,15 @@ function jsonShaped(
   value: IrExpression | null,
   context: LowerContext,
 ): IrExpression | null {
-  const key = bindingKey(target, context.bindings);
-  if (
-    value === null ||
-    key === null ||
-    !context.mapUses.jsonValues.has(key) ||
-    isNullConstant(right) ||
-    isJsonValue(right, context) ||
-    (inferType(right, context.types) & (OBJECT | LIST)) === 0
-  )
-    return value;
+  const key = target.kind === "variable" ? bindingKey(target, context.bindings) : null;
+  const into =
+    key !== null
+      ? context.mapUses.jsonValues.has(key)
+      : (target.kind === "property" && isJsonValue(asNode(target.object), context)) ||
+        (target.kind === "binary" &&
+          target.operator === "[" &&
+          isJsonValue(asNode(target.left), context));
+  if (value === null || !into || (right.kind !== "map" && right.kind !== "list")) return value;
   addDiagnostic(
     context,
     "SX_JSON_VALUE",
@@ -12168,11 +12166,12 @@ function jsonShaped(
     "This variable holds parsed JSON, whose keys its reads read as a dict's; Groovy kept this value as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.",
     right.span,
   );
+  const plain = { files: { kind: "literal" as const, value: false } };
   return {
     kind: "call",
     name: "fromJson",
-    positional: [{ kind: "call", name: "toJson", positional: [value], named: {} }],
-    named: { default: { kind: "literal", value: null } },
+    positional: [{ kind: "call", name: "toJson", positional: [value], named: plain }],
+    named: { default: { kind: "literal", value: null }, ...plain },
   };
 }
 
@@ -14640,6 +14639,15 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
+  const mixedKey = targetNode.kind === "variable" ? bindingKey(targetNode, context.bindings) : null;
+  if (mixedKey !== null && context.mapUses.jsonMixed.has(mixedKey))
+    addDiagnostic(
+      context,
+      "SX_JSON_MIXED",
+      "warning",
+      `${variableName(targetNode)} holds parsed JSON and also values the conversion does not follow (a parameter, a tuple, or a compound assignment sets it), so this read stays a property read, which stops the script where the value is parsed JSON (a dict).`,
+      node.span,
+    );
   // Groovy read `value.size` of what a JsonSlurper's parseText() gave as a map's key, or a list's length.
   if (property === "size" && !context.writeTargets.has(node) && isJsonValue(targetNode, context)) {
     const target = lowerExpression(targetNode, context);
@@ -15975,17 +15983,26 @@ function dictionaryVariables(
  * that returns it; and those closures, every return of which gives such a value or null, at least one such a value,
  * which end in a return on every path. A call reaches another file's closure where its own file defines none of that
  * name, and a name that some file defines as another closure is none (`conflicts`).
+ *
+ * Only a variable every value of which is such a value, null, or a map or list literal (which jsonShaped gives the JSON
+ * shape) counts: a parameter, a variable a tuple or a compound assignment (`+=`, `<<`, `++`) sets, and one that takes
+ * any other value are left out (`excluded`), and so are the variables and closures that take their values from them.
+ * Their reads stay as they were.
  */
 function jsonValueBindings(bodies: readonly MapBody[]): {
   variables: Set<string>;
   functions: Set<string>;
   closures: Map<string, Map<string, boolean>>;
+  /** Left-out bindings that also hold such a value (SX_JSON_MIXED). */
+  mixed: Set<string>;
 } {
   const variables = new Set<string>();
   const functions = new Set<string>();
   const parts = bodies.map(({ body, keys, source }) => {
     const slurpers = jsonSlurperNames(body);
     const assignments: Array<[string, AstNode]> = [];
+    // Bindings that take values the analysis does not follow.
+    const unfollowed = new Set<string>();
     const closures = new Map<string, AstNode[] | null>();
     const endsInReturn = (node: AstNode | null): boolean => {
       if (node === null) return false;
@@ -16008,8 +16025,28 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       return false;
     };
     walkAst(body, (node) => {
+      if (node.kind === "closure" && source !== undefined) {
+        for (const parameter of groovyParameters(node.parameters) ?? [])
+          unfollowed.add(scopedBindingKey(parameter.name, node.span, source));
+      }
+      const compound =
+        node.kind === "binary" &&
+        typeof node.operator === "string" &&
+        /^(?:[-+*/%&|^]|<<|>>>?|\*\*)=$|^<<$/u.test(node.operator);
+      if (compound || node.kind === "postfix" || node.kind === "prefix") {
+        const changed = bindingKey(compound ? node.left : node.value, keys);
+        if (changed !== null) unfollowed.add(changed);
+      }
       const assigns =
         node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+      const left = assigns ? asNode(node.left) : null;
+      if (left !== null && left.kind !== "variable") {
+        // A tuple, `def (a, b) = …`.
+        for (const item of nodeArray(left.items)) {
+          const key = bindingKey(item, keys);
+          if (key !== null) unfollowed.add(key);
+        }
+      }
       const target = assigns ? bindingKey(node.left, keys) : null;
       const value = assigns ? asNode(node.right) : null;
       if (target !== null && value !== null) assignments.push([target, value]);
@@ -16031,54 +16068,105 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       visit(statements);
       closures.set(name, endsInReturn(statements.at(-1) ?? null) ? values : null);
     });
-    return { keys, slurpers, assignments, closures, functions: new Set<string>(), source };
+    return {
+      keys,
+      slurpers,
+      assignments,
+      closures,
+      functions: new Set<string>(),
+      source,
+      unfollowed,
+    };
   });
-  // Rounds until no file finds another variable or closure.
-  const found = (): number =>
-    variables.size + parts.reduce((total, part) => total + part.functions.size, 0);
-  for (let size = -1; size !== found();) {
-    size = found();
-    // Names some file defines as a closure that gives no such value.
-    const conflicts = new Set(
-      parts.flatMap(({ closures, functions: own }) =>
-        [...closures.keys()].filter((name) => !own.has(name)),
-      ),
-    );
-    for (const part of parts) {
-      const isJson = (node: AstNode | null): boolean => {
-        if (node === null) return false;
-        if (isJsonParse(node, (name) => part.slurpers.has(name))) return true;
-        if (node.kind === "variable") return variables.has(bindingKey(node, part.keys) ?? "");
-        if (node.kind === "property")
-          return node.spreadSafe !== true && isJson(asNode(node.object));
-        if (node.kind === "binary" && node.operator === "[") return isJson(asNode(node.left));
-        const called =
-          node.kind === "methodCall" && node.implicitThis === true
-            ? constantString(node.method)
-            : null;
-        if (called === null) return false;
-        return part.closures.has(called)
-          ? part.functions.has(called)
-          : functions.has(called) && !conflicts.has(called);
-      };
-      for (let changed = true; changed;) {
-        changed = false;
-        for (const [target, value] of part.assignments) {
-          if (!variables.has(target) && isJson(value)) {
-            variables.add(target);
+  const excluded = new Set(parts.flatMap((part) => [...part.unfollowed]));
+  // Rounds of the analysis without the excluded bindings, until no variable it finds takes another value.
+  for (let settled = false; !settled;) {
+    variables.clear();
+    functions.clear();
+    for (const part of parts) part.functions.clear();
+    // Rounds until no file finds another variable or closure.
+    const found = (): number =>
+      variables.size + parts.reduce((total, part) => total + part.functions.size, 0);
+    for (let size = -1; size !== found();) {
+      size = found();
+      // Names some file defines as a closure that gives no such value.
+      const conflicts = new Set(
+        parts.flatMap(({ closures, functions: own }) =>
+          [...closures.keys()].filter((name) => !own.has(name)),
+        ),
+      );
+      for (const part of parts) {
+        const isJson = (node: AstNode | null): boolean => {
+          if (node === null) return false;
+          if (isJsonParse(node, (name) => part.slurpers.has(name))) return true;
+          if (node.kind === "variable") return variables.has(bindingKey(node, part.keys) ?? "");
+          if (node.kind === "property")
+            return node.spreadSafe !== true && isJson(asNode(node.object));
+          if (node.kind === "binary" && node.operator === "[") return isJson(asNode(node.left));
+          const called =
+            node.kind === "methodCall" && node.implicitThis === true
+              ? constantString(node.method)
+              : null;
+          if (called === null) return false;
+          return part.closures.has(called)
+            ? part.functions.has(called)
+            : functions.has(called) && !conflicts.has(called);
+        };
+        for (let changed = true; changed;) {
+          changed = false;
+          for (const [target, value] of part.assignments) {
+            if (!variables.has(target) && !excluded.has(target) && isJson(value)) {
+              variables.add(target);
+              changed = true;
+            }
+          }
+          for (const [name, values] of part.closures) {
+            if (part.functions.has(name) || values === null || values.length === 0) continue;
+            if (!values.every(isJson)) continue;
+            part.functions.add(name);
+            functions.add(name);
             changed = true;
           }
         }
-        for (const [name, values] of part.closures) {
-          if (part.functions.has(name) || values === null || values.length === 0) continue;
-          if (!values.every(isJson)) continue;
-          part.functions.add(name);
-          functions.add(name);
-          changed = true;
+      }
+    }
+
+    // A variable the rounds found that takes a value other than such a value, null, or a map or list literal.
+    settled = true;
+    for (const part of parts) {
+      const isJson = (node: AstNode | null): boolean =>
+        node !== null &&
+        (isJsonParse(node, (name) => part.slurpers.has(name)) ||
+          (node.kind === "variable" && variables.has(bindingKey(node, part.keys) ?? "")) ||
+          (node.kind === "property" && node.spreadSafe !== true && isJson(asNode(node.object))) ||
+          (node.kind === "binary" && node.operator === "[" && isJson(asNode(node.left))) ||
+          (node.kind === "methodCall" &&
+            node.implicitThis === true &&
+            (part.closures.has(constantString(node.method) ?? "")
+              ? part.functions.has(constantString(node.method) ?? "")
+              : functions.has(constantString(node.method) ?? ""))));
+      const shaped = (node: AstNode | null): boolean =>
+        node !== null &&
+        (isJson(node) ||
+          isNullConstant(node) ||
+          node.kind === "map" ||
+          node.kind === "list" ||
+          (node.kind === "elvis" && shaped(asNode(node.boolean)) && shaped(asNode(node.false))) ||
+          (node.kind === "ternary" && shaped(asNode(node.true)) && shaped(asNode(node.false))));
+      for (const [target, value] of part.assignments) {
+        if (variables.has(target) && !excluded.has(target) && !shaped(value)) {
+          excluded.add(target);
+          settled = false;
         }
       }
     }
   }
+  // The left-out variables that hold such a value too.
+  const mixed = new Set<string>();
+  for (const part of parts)
+    for (const [target, value] of part.assignments)
+      if (excluded.has(target) && isJsonParse(value, (name) => part.slurpers.has(name)))
+        mixed.add(target);
   // A name that a file defines as another closure is no such function for calls of other files; a file's own calls
   // go to its own closures (jsonClosures).
   const closures = new Map<string, Map<string, boolean>>();
@@ -16091,7 +16179,7 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
     }
     closures.set(file, known);
   }
-  return { variables, functions, closures };
+  return { variables, functions, closures, mixed };
 }
 
 /** Whether a node is or holds what a JsonSlurper's parseText() gave, as a value or a key's value in it (jsonValueBindings). */

@@ -105,7 +105,8 @@ with a `// NOTE`; a JsonSlurper's `parse()` of such a JSON file is the value it 
 and lists. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work. JSON and
 Base64 text convert to the native functions (V30 §30): `JsonOutput.toJson(v)` is `toJson(v)`, a JsonSlurper's
 `parseText(t)` is `fromJson(t, default: null)`, whose keys read as a dict's also through the variables and functions it
-reaches, a text's `bytes.encodeBase64()` is `toBase64(t)`, and `decodeBase64()` bytes that `new String()` makes text
+reaches (a map or list literal such a variable takes as well goes through `toJson`/`fromJson`; a variable that a
+parameter, a tuple, or a compound assignment also sets keeps property reads, with `SX_JSON_MIXED`), a text's `bytes.encodeBase64()` is `toBase64(t)`, and `decodeBase64()` bytes that `new String()` makes text
 again are `fromBase64(t, default: "")`.
 
 Java library calls convert where their receiver and arguments are proven and TeaseScript has the same behavior
