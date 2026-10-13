@@ -370,7 +370,7 @@ class Parser {
    * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
-  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §1). */
   #insideDelimiters = false;
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   readonly #shared: SharedParse;
@@ -3523,6 +3523,8 @@ class Parser {
       ),
     );
     if (type === null) return value;
+    // A type test ends its operand too (see `#parseMultiplicative`).
+    this.#skipNewlinesBeforeOperator();
     return Object.freeze({
       kind: "typeTestExpression",
       value,
@@ -3679,12 +3681,15 @@ class Parser {
 
   *#parseMultiplicative(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseUnaryArithmetic());
-    while (
-      expression !== null &&
-      (this.#check(TokenKind.Star) ||
-        this.#check(TokenKind.Slash) ||
-        this.#check(TokenKind.Percent))
-    ) {
+    while (expression !== null) {
+      // Every operand but a type test ends here, so each level above finds an operator that starts the next line.
+      this.#skipNewlinesBeforeOperator();
+      if (
+        !this.#check(TokenKind.Star) &&
+        !this.#check(TokenKind.Slash) &&
+        !this.#check(TokenKind.Percent)
+      )
+        break;
       const operator = this.#advance();
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseUnaryArithmetic());
@@ -4670,7 +4675,7 @@ class Parser {
 
   /**
    * The offset of the token after a `,` and any newlines after it, or `null` without a comma. Inside delimiters a line
-   * break does not end the expression, so the comma may also start the next line there (V30 §2). Nested interactions
+   * break does not end the expression, so the comma may also start the next line there (V30 §1). Nested interactions
    * that end at the same token reuse one scan of the newlines.
    */
   #offsetAfterComma(): number | null {
@@ -5302,6 +5307,17 @@ class Parser {
     this.#skipNewlines();
   }
 
+  /**
+   * Inside `()`, `[]`, and object literals, where a line break does not end an expression, a binary operator may also
+   * start the next line (V30 §1): skips the newlines before one, so that it continues the expression. Elsewhere a
+   * newline before an operator ends the statement.
+   */
+  #skipNewlinesBeforeOperator(): void {
+    if (!this.#insideDelimiters || !this.#check(TokenKind.Newline)) return;
+    const after = this.#shared.newlineRuns.ends[this.#current]!;
+    if (startsBinaryOperator(this.tokens, after)) this.#current = after;
+  }
+
   #reportPositionalAfterNamed(span: SourceSpan): void {
     this.#reportSpan(
       parserDiagnosticCode.mixedArguments,
@@ -5628,16 +5644,39 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
  */
 function continuesExpression(kind: TokenKind): boolean {
   return (
+    isBinaryOperatorKind(kind) ||
+    kind === TokenKind.Comma ||
+    kind === TokenKind.KeywordNot ||
+    kind === TokenKind.Bang
+  );
+}
+
+/**
+ * Whether the token at `index` starts a binary operator, also a symbol that the parser reads as a word operator, such
+ * as `&&` or `??`. After a value, `-` and `+` subtract and add; `not` and `!` only negate the value after them. A `|`
+ * only separates the types of a union, which the type's own context continues (see `TypeContext`).
+ */
+function startsBinaryOperator(tokens: readonly Token[], index: number): boolean {
+  const token = tokens[index]!;
+  const next = tokens[index + 1];
+  return (
+    (isBinaryOperatorKind(token.kind) && token.kind !== TokenKind.Pipe) ||
+    (token.kind === TokenKind.Question &&
+      next?.kind === TokenKind.Question &&
+      next.span.start.offset === token.span.end.offset)
+  );
+}
+
+/** Binary operators, and the symbols `|` and `&` that the parser reads as `or` and `and`. */
+function isBinaryOperatorKind(kind: TokenKind): boolean {
+  return (
     isComparisonKind(kind) ||
     kind === TokenKind.KeywordIs ||
-    kind === TokenKind.Comma ||
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
-    kind === TokenKind.KeywordNot ||
     kind === TokenKind.KeywordOtherwise ||
     kind === TokenKind.Pipe ||
     kind === TokenKind.Ampersand ||
-    kind === TokenKind.Bang ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||
