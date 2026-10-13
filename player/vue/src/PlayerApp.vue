@@ -83,9 +83,18 @@ const props = withDefaults(
 // The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
 const viewfinderMirrored = ref(true);
-// An image request takes its photo in the camera window the script shows, otherwise on the Stage, where it shows the
-// camera instead of any camera view the script shows there.
-const capture = computed(() => props.player.imageCapture.view.value);
+// An image request's camera step shows its viewfinder in the camera window the script shows, otherwise on the Stage,
+// where it shows the camera instead of any camera view the script shows there. Its first step shows the preview on the
+// Stage, over the Stage image and any camera view there.
+const imageSteps = computed(() => props.player.imageCapture.view.value);
+const capture = computed(() =>
+  imageSteps.value !== null && imageSteps.value.phase !== "choose" ? imageSteps.value : null,
+);
+const imagePreview = computed(() =>
+  imageSteps.value?.phase === "choose" && imageSteps.value.preview !== null
+    ? { src: imageSteps.value.preview, alt: "Preview of your image" }
+    : null,
+);
 const captureInWindow = computed(
   () => capture.value !== null && props.player.viewfinderPlacement.value === "window",
 );
@@ -499,18 +508,13 @@ async function toggleFullscreen() {
             v-model:camera-mirrored="viewfinderMirrored"
             :media="stageMedia"
             :camera="stageCamera"
+            :preview="imagePreview"
             @media-aspect="mediaAspect = $event"
             @media-load="player.stageImageLoad"
             @media-failure="player.stageImageFailure"
           >
             <template v-if="capture && !captureInWindow" #camera>
-              <ImageCapture
-                :view="capture"
-                @shutter="player.imageCapture.shutter"
-                @retake="player.imageCapture.retake"
-                @use="player.imageCapture.use"
-                @retry="player.imageCapture.retry"
-              />
+              <ImageCapture :view="capture" />
             </template>
           </Stage>
         </template>
@@ -524,14 +528,7 @@ async function toggleFullscreen() {
             v-model:mirrored="viewfinderMirrored"
             :track="captureInWindow ? capture!.track : player.viewfinder.value"
           >
-            <ImageCapture
-              v-if="captureInWindow"
-              :view="capture!"
-              @shutter="player.imageCapture.shutter"
-              @retake="player.imageCapture.retake"
-              @use="player.imageCapture.use"
-              @retry="player.imageCapture.retry"
-            />
+            <ImageCapture v-if="captureInWindow" :view="capture!" />
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation
@@ -643,6 +640,7 @@ async function toggleFullscreen() {
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"
           :images="player.images"
+          :capture="player.imageCapture"
           :debug-countdown="debug.countdownText.value"
           @update:session="player.update"
         >

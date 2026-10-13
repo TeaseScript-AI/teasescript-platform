@@ -73,6 +73,7 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
       variables: {
         ...themeCssVariables(theme),
         ...storyChoiceVariables(theme.roles["surface-control"]),
+        ...storyChoiceVariables(theme.roles["accent-solid"], "story-accent"),
       },
     });
   });

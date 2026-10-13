@@ -13,6 +13,8 @@ const props = defineProps<{
   label?: string | undefined;
   /** The button Space in the empty composer activates; it is marked, but never chosen by itself. */
   preselected?: boolean | undefined;
+  /** The one control that completes a Player step, such as "Use image", in the theme's accent material. */
+  accent?: boolean | undefined;
 }>();
 const emit = defineEmits<{ widthChange: [] }>();
 const labelElement = ref<HTMLElement | null>(null);
@@ -78,6 +80,7 @@ const material = computed(() =>
     :disabled="disabled"
     :aria-disabled="inactive ? 'true' : undefined"
     :data-preselected="preselected ? '' : undefined"
+    :data-accent="accent ? '' : undefined"
     :aria-keyshortcuts="preselected ? playerKeys.preselectedButton.name : undefined"
   >
     <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{ props.label }}</span>
@@ -112,6 +115,17 @@ const material = computed(() =>
 }
 .player-action-button[data-preselected] {
   --player-action-ring: 0 0 0 1px var(--theme-accent-solid);
+}
+/* The theme's accent material, which `usePlayerTheme` derives as it derives the default one. */
+.player-action-button[data-accent] {
+  --story-choice-top: var(--story-accent-top);
+  --story-choice-bottom: var(--story-accent-bottom);
+  --story-choice-hover-top: var(--story-accent-hover-top);
+  --story-choice-hover-bottom: var(--story-accent-hover-bottom);
+  --story-choice-pressed: var(--story-accent-pressed);
+  --story-choice-ink: var(--story-accent-ink);
+  --story-choice-depth: var(--story-accent-depth);
+  --story-choice-rim: var(--story-accent-rim);
 }
 .player-action-label {
   min-width: 0;
