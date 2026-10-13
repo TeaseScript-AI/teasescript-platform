@@ -138,7 +138,8 @@ function surrogateInPattern(source: string): number | null {
       const close = source.indexOf("}", index + 3);
       if (close < 0) return null;
       const digits = source.slice(index + 3, close);
-      const value = /^[0-9A-Fa-f]{1,8}$/u.test(digits) ? Number.parseInt(digits, 16) : -1;
+      // RE2 takes any number of hex digits, also leading zeros.
+      const value = /^[0-9A-Fa-f]+$/u.test(digits) ? Number.parseInt(digits, 16) : -1;
       if (value >= 0xd800 && value <= 0xdfff) return value;
       index = close + 1;
       continue;
@@ -199,6 +200,7 @@ export function regexSizeEstimate(source: string): number {
   const open = (capturing: boolean): Group => ({ alternatives: 0, before: 0, last: 0, capturing });
   const groups: Group[] = [open(false)];
   let group = groups[0]!;
+  const namedClassEnds = { next: -2 };
   // Sizes stop growing at a ceiling far above any limit, so that nested repeats never overflow a number, and every
   // step only adds and multiplies, so a size over a limit stays over it.
   const sum = (left: number, right: number): number => Math.min(left + right, ESTIMATE_CEILING);
@@ -286,7 +288,7 @@ export function regexSizeEstimate(source: string): number {
       continue;
     }
     if (character === "[") {
-      const end = classEnd(source, index);
+      const end = classEnd(source, index, namedClassEnds);
       if (end < 0) break;
       item(1);
       index = end;
@@ -314,21 +316,23 @@ export function regexSizeEstimate(source: string): number {
 /** Where size estimates stop growing: far above any limit, and small enough to multiply exactly. */
 const ESTIMATE_CEILING = 1_000_000;
 
-/** The end of the class that starts with `[` at `start`, as RE2 reads it, or -1 when it does not end. */
-function classEnd(source: string, start: number): number {
+/**
+ * The end of the class that starts with `[` at `start`, as RE2 reads it, or -1 when it does not end. `named` holds the
+ * next `:]` of the pattern, -1 when there is none and -2 before the first search, which all classes of one pattern share,
+ * so that the search goes over the pattern once.
+ */
+function classEnd(source: string, start: number, named: { next: number }): number {
   let index = start + 1;
   if (source[index] === "^") index += 1;
   // A `]` right after the opening `[` or `[^` is a character of the class.
   let first = true;
-  // The next `:]`, searched for again only once a named class has been passed, so the search stays linear.
-  let named = -2;
   while (index < source.length) {
     if (source[index] === "]" && !first) return index + 1;
     first = false;
     if (source.startsWith("[:", index)) {
-      if (named !== -1 && named < index) named = source.indexOf(":]", index);
-      if (named >= 0) {
-        index = named + 2;
+      if (named.next !== -1 && named.next < index) named.next = source.indexOf(":]", index);
+      if (named.next >= 0) {
+        index = named.next + 2;
         continue;
       }
     }

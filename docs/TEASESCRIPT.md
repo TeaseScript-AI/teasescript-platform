@@ -435,8 +435,9 @@ had afterwards. Patterns are data compiled within the [regex
 limits](RESOURCE-LIMITS.md#retained-poc-policies-and-defaults), never JavaScript. The engine is imported eagerly;
 loading it on demand needs only `src/regex-engine.ts` to load re2js before the host compiles source or validates or runs
 data that may hold a regex. The unbundled playground maps it like `colorjs.io`. The lexer tells a regex from division by
-the token before a `/`; where a parse with errors expected a value at a `/` that the lexer took for division, as after
-`say as vera`, the parser lexes and parses the source again with a regex there.
+the token before a `/`, also after `say as speaker`; where a parse with errors expected a value at a `/` that the lexer
+took for division, as after a message mode or a skip word, the parser lexes and parses the source again with a regex
+there, and tooling that lexes part of the source again reads those places the same way.
 
 The RE2 dialect differs from JavaScript in ways authors meet: `\d`, `\w`, and `\s` match ASCII characters only, so
 `\p{Nd}` matches every decimal digit and `\p{L}` every letter; `i` folds single characters, so `ß` does not match `ss`;

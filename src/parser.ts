@@ -98,6 +98,11 @@ import { TokenKind, type Token } from "./token.js";
 
 export interface ParseResult {
   readonly program: Program;
+  /**
+   * The offsets of each `/` that starts a regex literal although the token before does not show it (V30 §8), which
+   * lexing the source or a part of it again needs to read it the same way.
+   */
+  readonly regexStarts: ReadonlySet<number>;
   /** The file's `---` header, or `null` when it has none. */
   readonly header: ScriptHeader | null;
   readonly diagnostics: readonly Diagnostic[];
@@ -327,6 +332,7 @@ export function parse(source: string): ParseResult {
     }
     return Object.freeze({
       program,
+      regexStarts,
       header: header.header,
       diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
       statementRanges: Object.freeze(parser.statementRanges()),

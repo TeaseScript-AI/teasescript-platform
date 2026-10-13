@@ -235,8 +235,20 @@ test("lexing tells a regex from division and comments by whether an operand is e
       ")",
       // A `/` where RE2 reads a named class or quoted text does not end the literal.
       'say "${"/".matches(/[[:alpha:]/]/)} ${"/".matches(/[^[:space:]/]/)} ${"[".matches(/\\Q[\\E/)} ${"a/b".matches(/\\Qa/b\\E/)}"',
+      // Quoted text without `\E` runs to the closing slash, and `\/` there does not end the literal either.
+      'say "${"a\\\\/b".matches(/\\Qa\\/b/)} ${"\\\\/".matches(/\\Q\\//)}"',
     ),
-    ["4 4 6 3 4 1", "4", "true", "true", "true", "true true false", "true", "true false true true"],
+    [
+      "4 4 6 3 4 1",
+      "4",
+      "true",
+      "true",
+      "true",
+      "true true false",
+      "true",
+      "true false true true",
+      "true true",
+    ],
   );
   // Where the grammar expects a value after a word, as after a speaker or a message mode, the parse finds the regex.
   assert.deepEqual(
@@ -608,6 +620,10 @@ test("a pattern cannot hold half of a character, and text with lone surrogates i
     "A regex cannot hold half of a character: '\\x{D83D}' is a surrogate, which stands for half of a character such as an emoji. Write the whole character, as in '\\x{1F600}'.";
   assert.deepEqual(diagnostics("let r = /(\\x{D83D})/\nexit"), [["TSV063", half, "/(\\x{D83D})/"]]);
   assert.equal(firstDiagnostic("let r = /[\\x{DE00}]/\nexit")?.[0], "TSV063");
+  // RE2 takes any number of hex digits.
+  assert.equal(firstDiagnostic("let r = /(\\x{00000D83D})/\nexit")?.[0], "TSV063");
+  assert.equal(firstDiagnostic("let r = /\\x{000000000DE00}/\nexit")?.[0], "TSV063");
+  assert.deepEqual(diagnostics("let r = /\\x{00000001F600}/\nexit"), []);
   // Quoted or escaped, the same characters are text.
   assert.deepEqual(diagnostics("let r = /\\Q\\x{D83D}\\E|\\\\x{D83D}/\nexit"), []);
   // From text, and with a lone surrogate written in the text, the pattern gives the default.

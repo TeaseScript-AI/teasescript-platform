@@ -257,7 +257,8 @@ class Lexer {
   /**
    * Whether a `/` here starts a regex literal (V30 §8) rather than dividing: the grammar expects an operand, because the
    * token before it, past line breaks, does not end one. A name, a number, text, a regex, `true`, `false`, `null`, a
-   * closing `)`, `]`, or `}`, and a word after `.` end an operand; `save` is a command that takes a value.
+   * closing `)`, `]`, or `}`, and a word after `.` end an operand. The parser finds the places the token before does not
+   * show, such as after a message mode (see `parse`).
    */
   #regexMayStart(): boolean {
     let index = this.#tokens.length - 1;
@@ -266,8 +267,13 @@ class Lexer {
     if (previous === undefined) return true;
     if (this.#tokens[index - 1]?.kind === TokenKind.Dot) return false;
     switch (previous.kind) {
+      // `save` takes a value, and so does `say as speaker`.
       case TokenKind.Identifier:
-        return previous.lexeme === "save";
+        return (
+          previous.lexeme === "save" ||
+          (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
+            this.#tokens[index - 2]?.kind === TokenKind.KeywordSay)
+        );
       case TokenKind.NumberLiteral:
       case TokenKind.StringEnd:
       case TokenKind.RegexLiteral:
@@ -318,6 +324,11 @@ class Lexer {
         return;
       }
       if (quoted) {
+        // As everywhere, `\/` does not end the literal.
+        if (character === "\\") {
+          pattern += this.#advanceCodeUnit();
+          if (this.#isAtEnd() || this.#peek() === "\n" || this.#peek() === "\r") break;
+        }
         pattern += this.#advanceCodePoint();
         continue;
       }
