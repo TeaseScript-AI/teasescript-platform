@@ -39,7 +39,8 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   permanent buttons (`showPermanentButton`, `button.remove()`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
-  protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, where a paced
+  protected compact interactions on one typed foreground family, which also holds `showPopup`'s dialog outside the
+  chat; and ADR 0018 resumable `say` pacing, where a paced
   `say` lasts its reading time before anything after it runs, with typed skip settlement. A `say` used as a value gives a `messageHandle`
   whose `text` changes the message in place and whose `remove()` takes it out of the conversation
   ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows, announces politely, and Debug explains and

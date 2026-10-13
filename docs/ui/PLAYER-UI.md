@@ -911,6 +911,13 @@ answer without an image." A request without `allowSkip: true` shows no Skip.
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
 
+`showPopup` adds no controls to the chat. A dialog over the session, in the look of the other Player dialogs, shows
+the popup's message, which names the dialog, and one button with its `buttonText`, `OK` by default, which takes focus.
+The button, by click, Enter, or Space, and Escape close it, not a click beside it; closing it continues the script and
+adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
+until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
+panel and its rewind stay usable beside it, and Escape closes it only while focus is inside it.
+
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay

@@ -84,7 +84,8 @@ The broader parenthesized V30 APIs and their advanced parameters remain deferred
 implemented in its V30 call form (`let picture = askImage("Add an image")`, and with `allowSkip: true` a `string?`
 that is `null` when the player skips it; see [Image input](RUNTIME.md#image-input) and
 [V30 §20](specifications/accepted-syntaxes-v30.md#skipping-a-file-input)),
-and `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
+`askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms)),
+and `showPopup` ([Popups](#popups));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
@@ -154,6 +155,18 @@ instruction without producing a result or binding. See [timer semantics](specifi
 `askText` normalizes line endings to `LF`, otherwise preserves submitted text, and rejects whitespace-only input. It does not automatically trim, change case, or apply Unicode normalization.
 
 `askNumber` trims surrounding whitespace, accepts the ordinary TeaseScript decimal and scientific-number forms on one line, returns a finite number, and records the trimmed submitted text in the transcript rather than reformatting it. Locale decimal commas, thousands separators, units, and natural-language phrases are not accepted by the deterministic first POC.
+
+### Popups
+
+```tease
+showPopup "Task completed"
+showPopup(message: "Well done, ${name}", buttonText: "Continue")
+```
+
+`showPopup` shows its message in a dialog outside the chat with one button, `OK` unless `buttonText:` renames it, and
+waits until the player closes it; neither enters the transcript, and it gives no value
+([§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)). The call form also takes the
+message without its name, first. A block may interrupt it like any interaction ([Runtime](RUNTIME.md#generic-foreground-interactions)).
 
 ### Compact choices
 

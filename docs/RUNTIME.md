@@ -72,7 +72,7 @@ reference adapter are implemented. The production cross-origin player/host integ
 One discriminated pending-action family must carry JSON-safe data equivalent to:
 
 ```text
-kind: button | text | number | temporal | image | choice | form
+kind: button | text | number | temporal | image | choice | form | popup
 action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set
@@ -151,7 +151,11 @@ Completion semantics are:
   positive with a representable deadline at `appeared + timeout`; otherwise the instruction fails with `TSR050` before
   the button appears. Reaching the deadline is a time settlement, below: the settlement kind is `timedOut`, it
   publishes `actionCompleted` without a `playerTranscript` event, and its result is exactly the timeout. A click that
-  arrives later returns `alreadySettled` with that settlement.
+  arrives later returns `alreadySettled` with that settlement;
+- `showPopup` ([V30 §31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)) is a `popup`
+  interaction whose UI holds its message and button text, `OK` without `buttonText:`, both shown text that a computed
+  form evaluates once, in written order, before the popup opens. It has no result, and only `{ kind: "activate" }`, the
+  player closing it, completes it: the settlement has no transcript text, and only `actionCompleted` is published.
 
 A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
@@ -167,7 +171,8 @@ UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The grammar of an identifier choice value is the current ASCII TeaseScript identifier form. Choice completion matching uses one linear option pass.
 
-Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
+Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second, except for a
+popup, which publishes no transcript. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
 destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
 single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
