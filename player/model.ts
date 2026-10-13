@@ -91,6 +91,24 @@ export type PlayerForegroundPresentation =
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
   | {
+      /**
+       * `openUrl`: the button with `buttonText` ("Open link" by default) that opens `url` in a new tab, shown where
+       * `showButton` shows its button when the Player does not open it at once. It never shows the address, which may be
+       * a surprise.
+       */
+      readonly kind: "open-url";
+      readonly accessibleName: string;
+      readonly url: string;
+      readonly buttonText: string;
+    }
+  | {
+      /** `showPopup`: a dialog outside the chat with the message and one button, which closes it. */
+      readonly kind: "popup";
+      readonly accessibleName: string;
+      readonly message: string;
+      readonly buttonText: string;
+    }
+  | {
       /** `ask-date`, `ask-time`, and `ask-datetime` use the browser's date and time controls, which submit ISO text. */
       readonly kind: "ask-text" | "ask-number" | "ask-date" | "ask-time" | "ask-datetime";
       readonly accessibleName: string;

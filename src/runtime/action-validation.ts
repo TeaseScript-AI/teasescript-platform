@@ -19,6 +19,7 @@ import {
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isCanonicalTagList } from "../tags.js";
+import { canonicalWebUrl } from "../web-url.js";
 import {
   type Instruction,
   type InteractionChoiceOption,
@@ -27,6 +28,8 @@ import {
   type InteractionUiPayload,
   type InstructionPlan,
   type PlanSourceLocation,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
+  DEFAULT_POPUP_BUTTON_TEXT,
 } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -383,8 +386,9 @@ function validSettlementIdentityAndEventSequences(
     );
   }
   if (settlement.actionKind !== "interaction") return true;
-  // A button that timed out publishes no player transcript.
-  if (settlement.settlementKind === "timedOut") return settlement.transcriptEventSequence === null;
+  // A button that timed out, a closed popup, and an opened `openUrl` publish no player transcript.
+  if (settlement.settlementKind === "timedOut" || silentInteraction(settlement.interactionKind))
+    return settlement.transcriptEventSequence === null;
   return (
     positiveSafeInteger(settlement.transcriptEventSequence) &&
     settlement.requestEventSequence < settlement.transcriptEventSequence &&
@@ -1091,7 +1095,7 @@ function validInteractionAction(
   )
     return false;
   const expected =
-    action.interactionKind === "button"
+    action.interactionKind === "button" || silentInteraction(action.interactionKind)
       ? action.destinationTemporary === null
         ? "none"
         : "duration"
@@ -1115,10 +1119,12 @@ function validInteractionAction(
     !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)
   )
     return false;
+  // Only a button may give a value; a popup and an `openUrl` never do.
   if (
     action.destinationTemporary !== null
-      ? !positiveSafeInteger(action.destinationTemporary)
-      : action.interactionKind !== "button"
+      ? !positiveSafeInteger(action.destinationTemporary) ||
+        silentInteraction(action.interactionKind)
+      : action.interactionKind !== "button" && !silentInteraction(action.interactionKind)
   )
     return false;
   if (
@@ -1272,6 +1278,26 @@ function preparedInteractionUiMatchesAction(
           actual.background)
     );
   }
+  // The temporaries keep the canonical address and the button text the request opened with.
+  if (prepared.kind === "url")
+    return (
+      runtimeTemporaryValue(temporaries, prepared.urlTemporary) === actual.url &&
+      (prepared.buttonTextTemporary === undefined
+        ? actual.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT
+        : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText) &&
+      (prepared.alwaysButtonTemporary === undefined
+        ? actual.alwaysButton === false
+        : runtimeTemporaryValue(temporaries, prepared.alwaysButtonTemporary) ===
+          actual.alwaysButton)
+    );
+  if (prepared.kind === "popup") {
+    return (
+      runtimeTemporaryValue(temporaries, prepared.messageTemporary) === actual.message &&
+      (prepared.buttonTextTemporary === undefined
+        ? actual.buttonText === DEFAULT_POPUP_BUTTON_TEXT
+        : runtimeTemporaryValue(temporaries, prepared.buttonTextTemporary) === actual.buttonText)
+    );
+  }
   if (prepared.kind === "text" || prepared.kind === "number") {
     const hint =
       prepared.hintTemporary === null
@@ -1399,12 +1425,16 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             ]
           : kind === "form"
             ? ["kind", "shape", "fields", "hint", "submit", "cancel", "timeout", "accessibleName"]
-            : [
-                "kind",
-                "options",
-                "accessibleName",
-                ...("preselected" in value ? ["preselected"] : []),
-              ];
+            : kind === "popup"
+              ? ["kind", "message", "buttonText", "accessibleName"]
+              : kind === "url"
+                ? ["kind", "url", "buttonText", "alwaysButton", "accessibleName"]
+                : [
+                    "kind",
+                    "options",
+                    "accessibleName",
+                    ...("preselected" in value ? ["preselected"] : []),
+                  ];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1431,7 +1461,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
     return true;
   };
   const expectedKey =
-    kind === "button"
+    kind === "button" || silentInteraction(kind)
       ? "continue"
       : kind === "number"
         ? "number"
@@ -1459,6 +1489,17 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
       (!("background" in value) || isNormalizedOpaqueColor(value.background))
     );
   }
+  if (kind === "popup")
+    return count(value.message) && count(value.buttonText) && !measurementExhausted;
+  // The address is canonical.
+  if (kind === "url")
+    return (
+      count(value.url) &&
+      count(value.buttonText) &&
+      !measurementExhausted &&
+      canonicalWebUrl(value.url) === value.url &&
+      typeof value.alwaysButton === "boolean"
+    );
   if (kind === "form") return validFormUi(value, count) && !measurementExhausted;
   if (kind === "image")
     return (
@@ -1522,6 +1563,14 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   } else if (actual.accessibleName.key !== expected.accessibleName.key) return false;
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
+  if (expected.kind === "popup")
+    return actual.message === expected.message && actual.buttonText === expected.buttonText;
+  if (expected.kind === "url")
+    return (
+      actual.url === expected.url &&
+      actual.buttonText === expected.buttonText &&
+      actual.alwaysButton === expected.alwaysButton
+    );
   if (expected.kind === "text" || expected.kind === "number")
     return (
       actual.hint === expected.hint &&
@@ -1779,7 +1828,8 @@ function validSettlementKindData(
     !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    (timedOut
+    // A timed-out button or form, a closed popup, and an opened `openUrl` add nothing to the transcript.
+    (timedOut || silentInteraction(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
         settlement.requestEventSequence >= settlement.completionEventSequence
@@ -1798,7 +1848,9 @@ function validSettlementKindData(
   )
     return false;
   let resultValid: boolean;
-  if (settlement.interactionKind === "button") {
+  if (silentInteraction(settlement.interactionKind)) {
+    resultValid = settlement.result === null && settlement.destinationTemporary === null;
+  } else if (settlement.interactionKind === "button") {
     resultValid =
       settlement.destinationTemporary === null
         ? settlement.result === null
@@ -1842,6 +1894,7 @@ function validSettlementKindData(
   if (!resultValid) return false;
 
   if (
+    !silentInteraction(settlement.interactionKind) &&
     (settlement.interactionKind !== "button" || settlement.destinationTemporary !== null) &&
     !positiveSafeInteger(settlement.destinationTemporary)
   )
@@ -1911,8 +1964,23 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
+/** A popup or an `openUrl`: an interaction that gives no value and adds nothing to the transcript. */
+function silentInteraction(kind: unknown): boolean {
+  return kind === "popup" || kind === "url";
+}
+
 function isInteractionKind(value: unknown): value is InteractionKind {
-  return isOneOf(value, ["button", "text", "number", "choice", "temporal", "image", "form"]);
+  return isOneOf(value, [
+    "button",
+    "text",
+    "number",
+    "choice",
+    "temporal",
+    "image",
+    "form",
+    "popup",
+    "url",
+  ]);
 }
 
 /** A form's answers: an object, dict, or list of runtime values. Its recorded UI decides which. */
@@ -1999,6 +2067,19 @@ function preparedUiFitsPresentedUi(
     return false;
   if (prepared.kind === "button")
     return "background" in ui === (prepared.backgroundTemporary !== undefined);
+  // The temporaries are cleared after completion; the recorded request was checked by its shape. A request without
+  // `buttonText:` or `alwaysButton:` shows the defaults.
+  if (prepared.kind === "url")
+    return (
+      (prepared.buttonTextTemporary !== undefined ||
+        ui.buttonText === DEFAULT_OPEN_URL_BUTTON_TEXT) &&
+      (prepared.alwaysButtonTemporary !== undefined || ui.alwaysButton === false)
+    );
+  // A popup without `buttonText:` shows the default text.
+  if (prepared.kind === "popup")
+    return (
+      prepared.buttonTextTemporary !== undefined || ui.buttonText === DEFAULT_POPUP_BUTTON_TEXT
+    );
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&

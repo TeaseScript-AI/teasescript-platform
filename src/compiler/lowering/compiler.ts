@@ -1,5 +1,6 @@
 import type {
   Block,
+  CallArgument,
   Expression,
   TimerParts,
   SayParts,
@@ -13,6 +14,8 @@ import type {
   InteractionExpression,
   ShowButtonParts,
   ShowPermanentButtonParts,
+  ShowPopupStatement,
+  OpenUrlStatement,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -54,6 +57,8 @@ import type {
   TagQueryExpressionPlan,
   UnitPlan,
 } from "../../plan/model.js";
+import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
+import { canonicalWebUrl } from "../../web-url.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -359,6 +364,12 @@ export class InstructionCompiler {
         return;
       case "hideCameraStatement":
         this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
+        return;
+      case "showPopupStatement":
+        yield* compileChild(this.#lowerShowPopupTask(statement));
+        return;
+      case "openUrlStatement":
+        yield* compileChild(this.#lowerOpenUrlTask(statement));
         return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
@@ -1664,6 +1675,142 @@ export class InstructionCompiler {
     }
     this.#emitTemporaryCleanup(preparedTemporaryIds, parts.span);
     return lowered;
+  }
+
+  /**
+   * Lowers a `showPopup` (V30 §31). A static message and button text embed the popup's UI; otherwise the requesting
+   * speaker is captured, as for any interaction, and the written arguments are evaluated once, in written order, into
+   * temporaries that the popup reads when it opens.
+   */
+  *#lowerShowPopupTask(statement: ShowPopupStatement): CompileTask<void> {
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const message = statement.arguments.find(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    if (message === undefined) throw new TypeError("A popup without a message reached lowering.");
+    const buttonText = statement.arguments.find((argument) => argument !== message);
+    const staticMessage = staticVisibleText(message.value);
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_POPUP_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    if (staticMessage !== undefined && staticButtonText !== undefined) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "popup",
+        target: "standardChat",
+        speaker: null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: { kind: "popup", message: staticMessage, buttonText: staticButtonText, accessibleName },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "popup",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "popup",
+        messageTemporary: temporaries.get(message)!,
+        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+        accessibleName,
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
+  }
+
+  /**
+   * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address, button text,
+   * and `alwaysButton:` embed the request; the address is checked and made canonical here. Otherwise the arguments are
+   * evaluated once, in written order, into temporaries that the request checks when it opens.
+   */
+  *#lowerOpenUrlTask(statement: OpenUrlStatement): CompileTask<void> {
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const [address] = statement.arguments;
+    if (address === undefined) throw new TypeError("openUrl without an address reached lowering.");
+    const named = (name: string) =>
+      statement.arguments.find(
+        (argument) => argument.kind === "namedArgument" && argument.name.name === name,
+      );
+    const buttonText = named("buttonText");
+    const alwaysButton = named("alwaysButton");
+    const written = staticVisibleText(address.value);
+    const url = written === undefined ? null : canonicalWebUrl(written);
+    const staticButtonText =
+      buttonText === undefined ? DEFAULT_OPEN_URL_BUTTON_TEXT : staticVisibleText(buttonText.value);
+    let writtenAlways = alwaysButton?.value;
+    while (writtenAlways?.kind === "parenthesizedExpression")
+      writtenAlways = writtenAlways.expression;
+    const staticAlways =
+      writtenAlways === undefined
+        ? false
+        : writtenAlways.kind === "booleanLiteral"
+          ? writtenAlways.value
+          : undefined;
+    if (url !== null && staticButtonText !== undefined && staticAlways !== undefined) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "url",
+        target: "standardChat",
+        speaker: null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: {
+          kind: "url",
+          url,
+          buttonText: staticButtonText,
+          alwaysButton: staticAlways,
+          accessibleName,
+        },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, statement.span);
+    const temporaries = new Map<CallArgument, number>();
+    for (const argument of statement.arguments)
+      temporaries.set(
+        argument,
+        this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerExpressionTask(argument.value)),
+          argument.value.span,
+        ).temporaryId,
+      );
+    const buttonTextTemporary = buttonText === undefined ? undefined : temporaries.get(buttonText);
+    const alwaysButtonTemporary =
+      alwaysButton === undefined ? undefined : temporaries.get(alwaysButton);
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "url",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "url",
+        urlTemporary: temporaries.get(address)!,
+        ...(buttonTextTemporary === undefined ? {} : { buttonTextTemporary }),
+        ...(alwaysButtonTemporary === undefined ? {} : { alwaysButtonTemporary }),
+        accessibleName,
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
   }
 
   /**

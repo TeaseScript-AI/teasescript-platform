@@ -911,6 +911,26 @@ answer without an image." A request without `allowSkip: true` shows no Skip.
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
 
+`showPopup` adds no controls to the chat. A dialog over the session, in the look of the other Player dialogs, shows
+the popup's message, which names the dialog, and one button with its `buttonText`, `OK` by default, which takes focus.
+The button, by click, Enter, or Space, and Escape close it, not a click beside it; closing it continues the script and
+adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
+until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
+panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
+the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup or an `openUrl`
+button waits, the composer shows no hint.
+
+`openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
+form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes
+on, with nothing in the chat. Otherwise, when the browser does not open the tab, and always for an `openUrl` written
+with `alwaysButton: true`, it shows a button where `showButton` shows its button: its `buttonText`, **Open link** by
+default, never the address, which may be meant as a surprise; the composer takes no answer; default focus goes to the
+button instead of the composer, and the player's click opens the tab and lets the script go on. A request that a reload,
+a restore, Debug's rewind, or its Return brought back always shows the button, also when turning Debug off reinstates
+its session: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
+address, so the page there cannot reach the Player; the browser sends it at most the Player's origin as referrer.
+Neither the address nor the button enters the transcript.
+
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay

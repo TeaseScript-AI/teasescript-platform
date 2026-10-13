@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
+import PopupDialog from "./PopupDialog.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  closePlayerRuntimePopup,
+  openPlayerRuntimeUrl,
+  playerRuntimeUrlRequest,
   playerRuntimeForeground,
   playerRuntimeForm,
   playerRuntimePacingGate,
@@ -35,6 +39,7 @@ import type {
 } from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
 import type { DebugAnswerInput } from "../../debug-export.js";
+import { openUrlTab } from "../../url-tab.js";
 import type { ImageCapture } from "./useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -80,6 +85,8 @@ const props = defineProps<{
   capture?: ImageCapture;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
   debugCountdown?: string | null;
+  /** Whether a popup is modal; while Debug runs it is not, so the Debug panel stays usable beside it. */
+  popupModal?: boolean;
 }>();
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
@@ -253,6 +260,8 @@ function presents(request: ImageRequestIdentity): boolean {
 }
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
+// The session's area, which a popup that is not modal centres on, beside the Debug panel.
+const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
 const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
@@ -351,6 +360,41 @@ useEventListener(
   { capture: true },
 );
 
+/**
+ * `openUrl` (V30 §33): when this session's own run requested it and the player's recent click lets the browser open a
+ * tab, the Player opens the address at once and settles the request, so its button never shows. Each request is tried
+ * once, when its runtime session first presents it: one that a block interrupted, or that Debug's Return or turning
+ * Debug off reinstates with its session, is not tried again. A request a restore, rewind, or reload brought back is
+ * never opened by itself, and neither is one written with `alwaysButton: true` or one whose tab the browser did not
+ * open: its button opens it.
+ */
+const urlTried = new WeakMap<PlayerRuntimeSession["engine"], Set<number>>();
+watch(
+  [actionId, () => props.reset],
+  () => {
+    const session = props.session;
+    const id = actionId.value;
+    if (!session || id === undefined || foreground.value?.kind !== "open-url") return;
+    const tried = urlTried.get(session.engine) ?? new Set<number>();
+    urlTried.set(session.engine, tried);
+    if (tried.has(id)) return;
+    tried.add(id);
+    // Typically an answer the player just gave presents it, while that answer still holds the controls.
+    if (!playerRuntimeUrlRequest(session)?.atOnce) return;
+    // Host input happens at the observed time; settling must not be refused once the tab is open.
+    const observed = props.observeTime ? props.observeTime() : session;
+    const request = observed ? playerRuntimeUrlRequest(observed) : null;
+    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url)) return;
+    const result = openPlayerRuntimeUrl(observed);
+    if (result) emit("update:session", result.session);
+  },
+  { immediate: true },
+);
+/** The player's click on an `openUrl`'s button opens its address in a new tab, then settles it. */
+function openUrl(session: PlayerRuntimeSession) {
+  const request = playerRuntimeUrlRequest(session);
+  return request !== null && openUrlTab(request.url) ? openPlayerRuntimeUrl(session) : null;
+}
 function focusInput() {
   composer.value?.focusInput();
 }
@@ -399,12 +443,17 @@ watch(
       !active.isConnected &&
       (document.activeElement === null || document.activeElement === document.body) &&
       hoverAvailable.value;
-    // Progression may restore composer focus, but must not steal it from Tools/dialogs.
+    // Progression may restore composer focus, but must not steal it from Tools/dialogs. A popup focuses its button.
     if (
       (ownedFocus || returnToChoice || unownedFocus || releasedFocus) &&
-      (foreground.value || pacing.value)
+      (foreground.value || pacing.value) &&
+      foreground.value?.kind !== "popup"
     ) {
-      if (wasEditing) focusInput();
+      // An `openUrl`'s button stands in for the composer, which takes no answer meanwhile.
+      if (foreground.value?.kind === "open-url") {
+        if (!keyboardNavigation) document.documentElement.dataset.playerKeyboardFocus = "false";
+        root.value?.querySelector<HTMLElement>("[data-open-url]")?.focus({ preventScroll: true });
+      } else if (wasEditing) focusInput();
       // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
       else if (composerFocused && !root.value?.contains(document.activeElement)) focusInput();
       else if (unownedFocus || releasedFocus) {
@@ -673,6 +722,7 @@ function submit(source: "input" | "button") {
                   )
               "
               @skip="complete(answer('button', skipPlayerRuntimeImage))"
+              @open="complete(answer('button', openUrl))"
               @image="imageControl"
             />
             <!-- Status text only: it is not announced each second and takes no input. -->
@@ -689,10 +739,25 @@ function submit(source: "input" | "button") {
       <template #interaction>
         <!-- Above the composer, so the transcript's inset makes room for it. -->
         <slot name="end" />
+        <!-- Outside the chat; while it waits, the composer takes no answer. -->
+        <PopupDialog
+          v-if="foreground?.kind === 'popup'"
+          :key="actionId ?? 0"
+          :message="foreground.message"
+          :button-text="foreground.buttonText"
+          :modal="popupModal ?? true"
+          :busy="submitting"
+          :area="composition"
+          @close="complete(answer('button', closePlayerRuntimePopup))"
+        />
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="!foreground && !pacing"
+          :disabled="
+            (!foreground && !pacing) ||
+            foreground?.kind === 'popup' ||
+            foreground?.kind === 'open-url'
+          "
           :pacing="!foreground && !!pacing"
           :preselected="preselected !== undefined"
           :buttons-only="
@@ -703,11 +768,13 @@ function submit(source: "input" | "button") {
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="
-            formEditor
-              ? formEditor.hint
-              : foreground && 'hint' in foreground
-                ? foreground.hint
-                : 'Type your response…'
+            foreground?.kind === 'popup' || foreground?.kind === 'open-url'
+              ? ''
+              : formEditor
+                ? formEditor.hint
+                : foreground && 'hint' in foreground
+                  ? foreground.hint
+                  : 'Type your response…'
           "
           :attach="attach"
           :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"

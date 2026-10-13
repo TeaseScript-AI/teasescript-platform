@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 87;
+export const INSTRUCTION_PLAN_VERSION = 88;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -543,8 +543,13 @@ export interface StopAudioInstruction extends InstructionBase {
   readonly kind: "stopAudio";
 }
 
+/** The text of a popup's button when `showPopup` gives no `buttonText:` (V30 §31). */
+export const DEFAULT_POPUP_BUTTON_TEXT = "OK";
+/** The text of the button of `openUrl` when it gives no `buttonText:` (V30 §33). */
+export const DEFAULT_OPEN_URL_BUTTON_TEXT = "Open link";
+
 export type InteractionKind =
-  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form";
+  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form" | "popup" | "url";
 /**
  * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
  * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
@@ -616,6 +621,28 @@ export type InteractionUiPayload =
        * it is marked and Space activates it, but it is never chosen by itself (V30 §19, §20). Absent without one.
        */
       readonly preselected?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `showPopup` (V30 §31): a dialog outside the chat with the message and one button, which closes it. Neither
+       * enters the transcript.
+       */
+      readonly kind: "popup";
+      readonly message: string;
+      readonly buttonText: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `openUrl` (V30 §33): the Player opens the canonical web address `url` in a new tab, at once after the player's
+       * recent click, otherwise, and always with `alwaysButton`, from its button with `buttonText` where `showButton`
+       * shows its button.
+       */
+      readonly kind: "url";
+      readonly url: string;
+      readonly buttonText: string;
+      readonly alwaysButton: boolean;
       readonly accessibleName: InteractionAccessibleName;
     }
   | ({
@@ -759,6 +786,24 @@ export type PreparedInteractionUiPayload =
        * any other value fails as the choice would open. Without it, a value no button has warns.
        */
       readonly booleanPrefill?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "popup";
+      /** Hold the evaluated message and button text until the popup opens, then their text. */
+      readonly messageTemporary: number;
+      /** Absent when the button keeps its default text. */
+      readonly buttonTextTemporary?: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "url";
+      /** Holds the evaluated address until the request opens, then its canonical form. */
+      readonly urlTemporary: number;
+      /** Holds the evaluated button text until the request opens, then its text; absent for the default text. */
+      readonly buttonTextTemporary?: number;
+      /** Holds the evaluated `alwaysButton:`; absent for `false`. */
+      readonly alwaysButtonTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

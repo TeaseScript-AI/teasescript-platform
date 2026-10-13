@@ -56,6 +56,8 @@ import type {
   LoadExpression,
   SaveStatement,
   ShowImageStatement,
+  ShowPopupStatement,
+  OpenUrlStatement,
   CalendarDurationUnit,
   DurationUnit,
   UnitExpression,
@@ -120,6 +122,8 @@ export interface StatementRange {
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
+  "showPopup",
+  "openUrl",
   "hideImage",
   "hideCamera",
   "stopAudio",
@@ -428,6 +432,12 @@ class Parser {
     if (this.#checkIdentifier("hideCamera")) {
       return this.#parseHideCameraStatement();
     }
+    if (this.#checkIdentifier("showPopup")) {
+      return yield* parseChild(this.#parseShowPopupStatement());
+    }
+    if (this.#checkIdentifier("openUrl")) {
+      return yield* parseChild(this.#parseOpenUrlStatement());
+    }
     if (this.#checkIdentifier("stopAudio")) {
       return this.#parseStopAudioStatement();
     }
@@ -510,6 +520,74 @@ class Parser {
         this.#synchronizeStatement();
         return null;
     }
+  }
+
+  /**
+   * `showPopup <message>`, or the call `showPopup(...)` when a parenthesis follows (V30 §31). The command form takes only
+   * the message, as one positional argument.
+   */
+  *#parseShowPopupStatement(): ParseTask<ShowPopupStatement | null> {
+    const command = this.#advance();
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      const call = yield* parseChild(
+        this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+      );
+      return Object.freeze({
+        kind: "showPopupStatement",
+        arguments: call.arguments,
+        span: copySpan(call.span),
+      });
+    }
+    const message = this.#parseExpression();
+    if (message === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected the popup's message after 'showPopup', as in 'showPopup \"Task completed\"'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    if (this.#check(TokenKind.Comma)) {
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        'The command form of showPopup takes only the message. For other button text, write \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
+        this.#peek(),
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    return Object.freeze({
+      kind: "showPopupStatement",
+      arguments: Object.freeze([
+        Object.freeze({
+          kind: "positionalArgument",
+          value: message,
+          span: copySpan(message.span),
+        } satisfies PositionalArgument),
+      ]),
+      span: spanFrom(command.span, message.span),
+    });
+  }
+
+  /** `openUrl(<url>)` (V30 §33), which has only the call form. */
+  *#parseOpenUrlStatement(): ParseTask<OpenUrlStatement | null> {
+    const command = this.#advance();
+    if (!this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        "openUrl takes its web address in parentheses, as in 'openUrl(\"https://example.com\")'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    return Object.freeze({
+      kind: "openUrlStatement",
+      arguments: call.arguments,
+      span: copySpan(call.span),
+    });
   }
 
   *#parseShowButtonStatement(): ParseTask<ShowButtonStatement | null> {

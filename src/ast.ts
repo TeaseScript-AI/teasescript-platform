@@ -17,6 +17,8 @@ export type Statement =
   | HideImageStatement
   | ShowCameraStatement
   | HideCameraStatement
+  | ShowPopupStatement
+  | OpenUrlStatement
   | ShowPermanentButtonStatement
   | PlayMediaStatement
   | StopAudioStatement
@@ -193,6 +195,24 @@ export interface ShowCameraExpression {
 /** `hideCamera`: hides every camera view. */
 export interface HideCameraStatement {
   readonly kind: "hideCameraStatement";
+  readonly span: SourceSpan;
+}
+
+/**
+ * `showPopup <message>`, or the call `showPopup(message: ..., buttonText: ...)` (V30 §31), whose message may also be
+ * written without its name, first. The command form is one positional argument. It waits until the player closes the
+ * popup and gives no value.
+ */
+export interface ShowPopupStatement {
+  readonly kind: "showPopupStatement";
+  readonly arguments: readonly CallArgument[];
+  readonly span: SourceSpan;
+}
+
+/** `openUrl(<url>)` (V30 §33): offers the player the URL to open; it gives no value. */
+export interface OpenUrlStatement {
+  readonly kind: "openUrlStatement";
+  readonly arguments: readonly CallArgument[];
   readonly span: SourceSpan;
 }
 

@@ -113,6 +113,11 @@ export interface PlayerRuntimeSession {
   readonly revision: number;
   /** What this publication shows; see `PlayerRuntimeState`. */
   readonly state: PlayerRuntimeState;
+  /**
+   * The first event sequence this session's own runs emitted: a restored session came with the events before it, as
+   * history. `0` for a session that started fresh.
+   */
+  readonly liveEventSequence: number;
   readonly events: readonly InterpreterEvent[];
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   /** By the sequence of the event that created it, the index of each script message in `transcriptEntries`. */
@@ -654,7 +659,13 @@ function restoredSession(
   debugTrace: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
   const runtime = createRuntimeSession(plan, snapshot);
-  const session = emptySession(runtime.plan, runtime, recorder, debugTrace);
+  const session = emptySession(
+    runtime.plan,
+    runtime,
+    recorder,
+    debugTrace,
+    snapshot.nextEventSequence,
+  );
   if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
   // Restored values are trustworthy, but their history is not part of the checkpoint.
   debugTrace?.reset("restore");
@@ -706,6 +717,20 @@ export function playerRuntimeForeground(
         accessibleName,
         label: action.ui.buttonLabel,
         ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
+      });
+    case "popup":
+      return Object.freeze({
+        kind: "popup",
+        accessibleName,
+        message: action.ui.message,
+        buttonText: action.ui.buttonText,
+      });
+    case "url":
+      return Object.freeze({
+        kind: "open-url",
+        accessibleName,
+        url: action.ui.url,
+        buttonText: action.ui.buttonText,
       });
     case "text":
       return Object.freeze({
@@ -909,6 +934,8 @@ export type PlayerDebugWaitKind =
   | "choice"
   | "input"
   | "image"
+  | "popup"
+  | "url"
   | "pacing"
   | "media"
   | "save"
@@ -983,7 +1010,9 @@ function debugWaitKind(
     case "interaction":
       return action.interactionKind === "button" ||
         action.interactionKind === "choice" ||
-        action.interactionKind === "image"
+        action.interactionKind === "image" ||
+        action.interactionKind === "popup" ||
+        action.interactionKind === "url"
         ? action.interactionKind
         : "input";
     case "chatPacingGate":
@@ -1536,6 +1565,50 @@ export function skipPlayerRuntimeImage(
   return completePlayerAction(session, action, { kind: "skip" });
 }
 
+/**
+ * The `openUrl` the Player can settle now, or `null`: the presented request, while nothing else can run and scene time
+ * has caught up, so that settling it cannot be refused once the tab is open. `atOnce` says whether the Player may open
+ * it without the click on its button: this session's own run requested it, written without `alwaysButton: true`. A
+ * request that a restore, a rewind, or a reload brought back is not live, and the Player never opens it by itself.
+ */
+export function playerRuntimeUrlRequest(
+  session: PlayerRuntimeSession,
+): { readonly actionId: number; readonly url: string; readonly atOnce: boolean } | null {
+  const { state } = session;
+  const action = activeInteraction(state);
+  if (
+    action?.ui.kind !== "url" ||
+    state.status !== "waiting" ||
+    state.runnable ||
+    state.randomDraw !== null ||
+    state.currentSessionTimeMs < state.observedSessionTimeMs
+  )
+    return null;
+  return Object.freeze({
+    actionId: action.actionId,
+    url: action.ui.url,
+    atOnce: !action.ui.alwaysButton && action.requestEventSequence >= session.liveEventSequence,
+  });
+}
+
+/** Reports that the Player opened the presented `openUrl`'s address in a new tab, which continues the script. */
+export function openPlayerRuntimeUrl(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "url") return null;
+  return completePlayerAction(session, action, { kind: "opened" });
+}
+
+/** Closes the presented popup, which continues the script. */
+export function closePlayerRuntimePopup(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.state);
+  if (action?.interactionKind !== "popup") return null;
+  return completePlayerAction(session, action, { kind: "activate" });
+}
+
 export function activatePlayerRuntimeButton(
   session: PlayerRuntimeSession,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
@@ -2083,6 +2156,7 @@ function emptySession(
   runtime: RuntimeSession,
   recorder: DebugRecorder | null,
   debugTrace: RuntimeDebugContext | null,
+  liveEventSequence = 0,
 ): PlayerRuntimeSession {
   const engine = new PlayerRuntimeEngine(runtime, 0);
   return Object.freeze({
@@ -2090,6 +2164,7 @@ function emptySession(
     engine,
     revision: 0,
     state: engine.stateAt({ revision: 0, recorder: null }),
+    liveEventSequence,
     recorder,
     debugTrace,
     events: [],

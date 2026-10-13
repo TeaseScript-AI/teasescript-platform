@@ -3956,6 +3956,9 @@ Rules:
 - `showPopup` has one confirmation button.
 - Yes/no questions use `askBoolean(...)`, not `showPopup`.
 
+**Status (Owner decision, 2026-10-13):** the popup is a dialog outside the chat with its message and one button, which
+closes it. The player can only close it, and `buttonText` only renames the button.
+
 ### System notification
 
 ```text
@@ -4059,6 +4062,29 @@ openUrl("https://example.com")
 ```
 
 `openUrl(...)` performs navigation and returns no value.
+
+Button text and a button that always shows:
+
+```text
+openUrl("https://example.com", buttonText: "Claim your reward")
+openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your reward")
+```
+
+**Status (Owner decisions, 2026-10-13):** `openUrl(...)` waits until the URL is open in a new tab. That is usually
+immediate, and when the browser needs a click from the player first, the Player shows a button for it where
+`showButton` shows its button, without the URL. After a reload, a restore, or a replay the Player never opens the URL
+by itself: a restored waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another written URL is
+a compile error, and another value fails at runtime.
+
+Rules:
+
+- `buttonText` is optional and is the text of the button, `"Open link"` by default, with the rules of `showPopup`'s
+  `buttonText`.
+- `alwaysButton` is optional, `true` or `false`, and defaults to `false`. With `true` the Player always shows the
+  button, also right after a click, and the script waits for the click on it. With `false` the Player opens the URL at
+  once after a recent click and shows the button only when the browser needs that click.
+- Either way the script goes on once the tab is open.
+- A wrong type or an unknown named argument is a compile error, as for other named arguments.
 
 How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
 

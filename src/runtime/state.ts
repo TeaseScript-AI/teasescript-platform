@@ -123,7 +123,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 76;
+export const RUNTIME_SNAPSHOT_VERSION = 77;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -953,6 +953,16 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
         ...(option.background === undefined ? {} : { background: option.background }),
       })),
       ...(ui.preselected === undefined ? {} : { preselected: ui.preselected }),
+      accessibleName,
+    };
+  if (ui.kind === "popup")
+    return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
+  if (ui.kind === "url")
+    return {
+      kind: "url",
+      url: ui.url,
+      buttonText: ui.buttonText,
+      alwaysButton: ui.alwaysButton,
       accessibleName,
     };
   if (ui.kind === "button")

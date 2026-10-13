@@ -126,6 +126,16 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.backgroundTemporary);
           if (instruction.preparedUi.timeoutTemporary !== undefined)
             output.add(instruction.preparedUi.timeoutTemporary);
+        } else if (instruction.preparedUi.kind === "url") {
+          output.add(instruction.preparedUi.urlTemporary);
+          if (instruction.preparedUi.buttonTextTemporary !== undefined)
+            output.add(instruction.preparedUi.buttonTextTemporary);
+          if (instruction.preparedUi.alwaysButtonTemporary !== undefined)
+            output.add(instruction.preparedUi.alwaysButtonTemporary);
+        } else if (instruction.preparedUi.kind === "popup") {
+          output.add(instruction.preparedUi.messageTemporary);
+          if (instruction.preparedUi.buttonTextTemporary !== undefined)
+            output.add(instruction.preparedUi.buttonTextTemporary);
         } else if (
           instruction.preparedUi.kind === "image" ||
           instruction.preparedUi.kind === "form"

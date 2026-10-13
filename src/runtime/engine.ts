@@ -15,6 +15,8 @@ import {
   type PlanSourceLocation,
   type PlanTag,
   type PreparedInteractionUiPayload,
+  DEFAULT_OPEN_URL_BUTTON_TEXT,
+  DEFAULT_POPUP_BUTTON_TEXT,
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
@@ -217,6 +219,7 @@ import {
   isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
+import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "../web-url.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
@@ -1574,6 +1577,48 @@ function materializeInteractionUi(
         : { background: backgroundColor(read(prepared.backgroundTemporary).value) }),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "popup") {
+    ui = {
+      kind: "popup",
+      message: readText(prepared.messageTemporary),
+      buttonText:
+        prepared.buttonTextTemporary === undefined
+          ? DEFAULT_POPUP_BUTTON_TEXT
+          : readText(prepared.buttonTextTemporary),
+      accessibleName: prepared.accessibleName,
+    };
+  } else if (prepared.kind === "url") {
+    // A web address is checked and made canonical as the request opens; the temporary keeps the canonical form.
+    const temporary = read(prepared.urlTemporary);
+    const url = typeof temporary.value === "string" ? canonicalWebUrl(temporary.value) : null;
+    if (url === null)
+      throw fault(
+        "TSR050",
+        `${OPEN_URL_RULE}, but this is ${describeShownValue(temporary.value)}. ${OPEN_URL_FIX}`,
+        span,
+      );
+    stagedWrites.push({ temporaryId: temporary.id, value: url });
+    const buttonText =
+      prepared.buttonTextTemporary === undefined
+        ? DEFAULT_OPEN_URL_BUTTON_TEXT
+        : readText(prepared.buttonTextTemporary);
+    const always =
+      prepared.alwaysButtonTemporary === undefined
+        ? false
+        : read(prepared.alwaysButtonTemporary).value;
+    if (typeof always !== "boolean")
+      throw fault(
+        "TSR050",
+        `'alwaysButton:' of openUrl takes true or false, but this is ${describeShownValue(always)}. Write true or false.`,
+        span,
+      );
+    ui = {
+      kind: "url",
+      url,
+      buttonText,
+      alwaysButton: always,
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
@@ -1867,6 +1912,8 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
+  else if (ui.kind === "popup") strings.push(ui.message, ui.buttonText);
+  else if (ui.kind === "url") strings.push(ui.url, ui.buttonText);
   else if (ui.kind === "form") {
     // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
     for (const text of formUiTexts(ui)) strings.push(text);
@@ -1895,7 +1942,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     if (bytes === null)
       throw fault(
         "TSR052",
-        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its labels, hints, prefill or choice values, or file filters.`,
+        `The text in this interaction adds up to more than ${MAX_INTERACTION_AGGREGATE_UTF8_BYTES.toLocaleString("en-US")} bytes of UTF-8. Shorten its message, labels, hints, prefill or choice values, file filters, or web address.`,
         span,
       );
     aggregate += bytes;
@@ -2557,6 +2604,16 @@ function cloneInteractionUi(
       accessibleName,
     };
   }
+  if (ui.kind === "popup")
+    return { kind: "popup", message: ui.message, buttonText: ui.buttonText, accessibleName };
+  if (ui.kind === "url")
+    return {
+      kind: "url",
+      url: ui.url,
+      buttonText: ui.buttonText,
+      alwaysButton: ui.alwaysButton,
+      accessibleName,
+    };
   if (ui.kind === "button")
     return {
       kind: "button",
