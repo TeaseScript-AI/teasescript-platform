@@ -180,7 +180,7 @@ export function analyzeText(root: AstNode): TextAnalysis {
     textBuffers,
     bufferValues,
     closureFields: closureFields(tree),
-    textReverses: textReverses(tree),
+    textReverses: textReverses(tree, closureFields(tree)),
   };
 }
 
@@ -211,7 +211,8 @@ const TEXT_ONLY_METHODS = new Set([
  * also a `reverse()` of the same receiver inside that method's arguments, which read nothing that may change it
  * (BuzzQuiz's `QFiles[r0].reverse().substring(0, QFiles[r0].reverse().indexOf("/"))`).
  */
-function textReverses(tree: Tree): Set<AstNode> {
+function textReverses(tree: Tree, closures: ReadonlySet<string>): Set<AstNode> {
+  const unchanging = (node: AstNode): boolean => effectFree(node, closures);
   const isReverse = (node: AstNode | null | undefined): node is AstNode =>
     node?.kind === "methodCall" &&
     constantString(node.method) === "reverse" &&
@@ -230,7 +231,7 @@ function textReverses(tree: Tree): Set<AstNode> {
     const isReceiver = textOnly(parent) && asNode(parent!.object) === node;
     if (!isReceiver && !textOnly(receiver)) continue;
     found.add(node);
-    if (isReceiver && repeatable(receiver) && argumentsOf(parent!).every(effectFree))
+    if (isReceiver && repeatable(receiver) && argumentsOf(parent!).every(unchanging))
       provers.set(parent!, key(receiver));
   }
   for (const node of reverses) {
@@ -257,8 +258,11 @@ const READING_METHODS = new Set([
   "length",
 ]);
 
-/** Whether evaluating a value changes nothing: no assignment, step, construction, or call that may run code. */
-function effectFree(node: AstNode): boolean {
+/**
+ * Whether evaluating a value changes nothing: no assignment, step, construction, or call that may run code, also not a
+ * map's closure that a method call with its key runs (`closures`, closureFields).
+ */
+function effectFree(node: AstNode, closures: ReadonlySet<string>): boolean {
   if (node.kind === "postfix" || node.kind === "prefix" || node.kind === "constructorCall")
     return false;
   if (node.kind === "binary" && typeof node.operator === "string") {
@@ -269,13 +273,22 @@ function effectFree(node: AstNode): boolean {
     )
       return false;
   }
-  if (node.kind === "methodCall" && !READING_METHODS.has(constantString(node.method) ?? ""))
+  // A reading method of a value: a call without a receiver, or of the script itself, runs a function or closure of the
+  // script, whatever its name.
+  if (
+    node.kind === "methodCall" &&
+    (!READING_METHODS.has(constantString(node.method) ?? "") ||
+      closures.has(constantString(node.method) ?? "") ||
+      node.implicitThis === true ||
+      asNode(node.object) === null ||
+      ["this", "main", "super"].includes(variableName(node.object) ?? ""))
+  )
     return false;
   if (node.kind === "closure") return false;
   for (const [name, value] of Object.entries(node)) {
     if (name === "span") continue;
     for (const child of Array.isArray(value) ? value : [value])
-      if (isAstNode(child) && !effectFree(child)) return false;
+      if (isAstNode(child) && !effectFree(child, closures)) return false;
   }
   return true;
 }
