@@ -8,6 +8,7 @@ import { run } from "../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/script-storage.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
@@ -254,6 +255,75 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
     ).snapshot.failure,
     null,
   );
+});
+
+test("a loop keeps a narrowing that only code a literal rules out would end", () => {
+  // Where `reset` runs, `x` may be null afterwards, also on the loop's next iteration (rule 5.5).
+  const script = (condition: string, body: readonly string[]) =>
+    [
+      "let x: integer | null = 1",
+      "let m: integer | null = null",
+      "let calls = 0",
+      "function reset {",
+      "    x = null",
+      "    calls += 1",
+      "    return 0",
+      "}",
+      "let i = 0",
+      `while ${condition} {`,
+      "    let y = x + 1",
+      "    i += 1",
+      ...body.map((line) => `    ${line}`),
+      "}",
+      'say "${x + 1} ${calls}"',
+      "exit",
+    ].join("\n");
+  // A literal rules out the call or the assignment in these forms, in a loop body or condition: the script compiles,
+  // and at runtime `reset` never runs.
+  for (const [condition, body, warnings] of [
+    ["i < 2", ["let a = false and reset() == 0"], []],
+    ["i < 2", ["let a = not true and reset() == 0"], []],
+    ["i < 2", ["let a = true or reset() == 0"], []],
+    ["i < 2", ["let a = 1 otherwise reset()"], ["TSV062"]],
+    ["i < 2", ["let a = m otherwise 0 otherwise reset()"], ["TSV062"]],
+    ["i < 2", ["if false {", "    reset()", "}"], []],
+    ["i < 2", ["if false {", "    x = null", "}"], []],
+    ["i < 2", ["if true {", "    let a = 1", "} else {", "    reset()", "}"], []],
+    ["i < 2", ["while false {", "    reset()", "}"], []],
+    ["i < 2", ["repeat 0 {", "    reset()", "}"], []],
+    ["i < 2", ["for e in [] {", "    reset()", "}"], []],
+    ["i < 2 and (true or reset() == 0)", [], []],
+    ["i < (2 otherwise reset())", [], ["TSV062"]],
+  ] as const) {
+    const source = script(condition, body);
+    const plan = compileValidPlan(source, {}, warnings);
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+    assert.equal(result.snapshot.failure, null, source);
+    assert.deepEqual(
+      result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["2 0"],
+      source,
+    );
+  }
+  // Where a call may run, it still ends the narrowing at the loop's start, and so after the loop.
+  for (const [condition, body] of [
+    ["i < 2", ["let a = i > 5 and reset() == 0"]],
+    ["i < 2", ["let a = false or reset() == 0"]],
+    ["i < 2", ["let a = m otherwise reset()"]],
+    ["i < 2", ["if false {", "    let a = 1", "} else {", "    reset()", "}"]],
+    ["i < 2", ["while i > 5 {", "    reset()", "}"]],
+    ["i < 2", ["repeat 1 {", "    reset()", "}"]],
+    ["i < 2", ["for e in [1] {", "    reset()", "}"]],
+    ["i < 2 or reset() == 0", []],
+  ] as const)
+    assert.deepEqual(
+      errors(script(condition, body)),
+      [
+        ["TSV043", "x"],
+        ["TSV043", "x"],
+      ],
+      script(condition, body),
+    );
 });
 
 test("a change in place keeps a null check, but not a test the change may undo", () => {
