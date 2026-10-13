@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
+import PopupDialog from "./PopupDialog.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  closePlayerRuntimePopup,
   playerRuntimeForeground,
   playerRuntimeForm,
   playerRuntimePacingGate,
@@ -80,6 +82,8 @@ const props = defineProps<{
   capture?: ImageCapture;
   /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
   debugCountdown?: string | null;
+  /** Whether a popup is modal; while Debug runs it is not, so the Debug panel stays usable beside it. */
+  popupModal?: boolean;
 }>();
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
@@ -399,10 +403,11 @@ watch(
       !active.isConnected &&
       (document.activeElement === null || document.activeElement === document.body) &&
       hoverAvailable.value;
-    // Progression may restore composer focus, but must not steal it from Tools/dialogs.
+    // Progression may restore composer focus, but must not steal it from Tools/dialogs. A popup focuses its button.
     if (
       (ownedFocus || returnToChoice || unownedFocus || releasedFocus) &&
-      (foreground.value || pacing.value)
+      (foreground.value || pacing.value) &&
+      foreground.value?.kind !== "popup"
     ) {
       if (wasEditing) focusInput();
       // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
@@ -689,10 +694,20 @@ function submit(source: "input" | "button") {
       <template #interaction>
         <!-- Above the composer, so the transcript's inset makes room for it. -->
         <slot name="end" />
+        <!-- Outside the chat; while it waits, the composer takes no answer. -->
+        <PopupDialog
+          v-if="foreground?.kind === 'popup'"
+          :key="actionId ?? 0"
+          :message="foreground.message"
+          :button-text="foreground.buttonText"
+          :modal="popupModal ?? true"
+          :busy="submitting"
+          @close="complete(answer('button', closePlayerRuntimePopup))"
+        />
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="!foreground && !pacing"
+          :disabled="(!foreground && !pacing) || foreground?.kind === 'popup'"
           :pacing="!foreground && !!pacing"
           :preselected="preselected !== undefined"
           :buttons-only="
