@@ -5759,7 +5759,9 @@ class TypeChecker {
               ? handleMemberMessage(failing.kind, method, "call")
               : failing.kind === "permanentButton"
                 ? `Permanent buttons have no method '${method}'. Use remove().`
-                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+                : failing.kind === "speaker"
+                  ? speakerMethodMessage(method, expressionLabel(callee.object))
+                  : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -9053,6 +9055,11 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
   ["messageHandle", "Message"],
   ["permanentButton", "Permanent button"],
 ]);
+
+/** The message for a method call on a speaker, which has properties but no methods (V30 §37). */
+function speakerMethodMessage(method: string, label: string | null): string {
+  return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
+}
 
 /** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(

@@ -67,17 +67,24 @@ test("a method that no value has is a compile error on a value of unknown type",
 });
 
 test("a method call on a speaker is a compile error", () => {
-  const cases: [string, string][] = [
-    ["say vera.trim()", "trim"],
-    ["let other = vera\nother.foo()", "foo"],
-    ['say as vera "${speaker.foo()}"', "foo"],
-    ["function use(x: speaker | string) {\n    x.foo()\n}", "foo"],
+  const cases: [string, string, string][] = [
+    ["say vera.trim()", "trim", "vera.title"],
+    ["let other = vera\nother.foo()", "foo", "other.title"],
+    ['say as vera "${speaker.foo()}"', "foo", "speaker.title"],
+    ["let cast = [vera]\ncast[0].foo()", "foo", "title"],
+    ["function use(x: speaker | string) {\n    x.foo()\n}", "foo", "x.title"],
   ];
-  for (const [statements, name] of cases) {
+  for (const [statements, name, property] of cases) {
     const source = `${VERA}${statements}\nexit`;
     assert.deepEqual(
       diagnostics(source),
-      [["TSV043", `A speaker has no method '${name}'.`, name]],
+      [
+        [
+          "TSV043",
+          `A speaker has no methods, so it has no '${name}'. Use one of its properties instead, such as '${property}'.`,
+          name,
+        ],
+      ],
       statements,
     );
   }
