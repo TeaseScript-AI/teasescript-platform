@@ -538,8 +538,11 @@ type DeferredCheck = {
       readonly kind: "property";
       readonly site: Expression;
       readonly span: SourceSpan;
-      /** The error, given the properties that the objects read can have. */
-      readonly message: (properties: readonly string[]) => string;
+      /**
+       * The error, given a function for the properties that the objects read can have, which walks their places again
+       * (see {@link missingPropertyReads}).
+       */
+      readonly message: (properties: () => readonly string[]) => string;
     }
 );
 
@@ -5286,29 +5289,27 @@ class TypeChecker {
   /** Notes a property access, also by `+=` or `-=` (see {@link #noteMissingProperty}). */
   #noteMissingAccess(read: PropertyAccessExpression, object: StaticType): void {
     const name = read.property.name;
-    this.#noteMissingProperty(
-      read,
-      name,
-      object,
-      read.property.span,
-      (properties) =>
-        missingPropertyMessage(expressionLabel(read.object), name, properties) +
-        misspelledPropertyHint(name, properties),
-    );
+    this.#noteMissingProperty(read, name, object, read.property.span, (properties) => {
+      const names = properties();
+      return (
+        missingPropertyMessage(expressionLabel(read.object), name, names) +
+        misspelledPropertyHint(name, names)
+      );
+    });
   }
 
   /**
-   * Notes a read of the property `name` from a value of type `object` at `site`. When every value it may be is an object
-   * whose properties the compiler knows, and none has the property, the end of the check reports `message` at `span` if
-   * no object at that place can have it when the script runs (#845); any other read the runtime checks (TSR017, or
-   * TSR060 for a list function).
+   * Notes a read of the property `name` from a value of type `object` at `site`. When every value it may be is an
+   * object whose properties the compiler knows, and none has the property, the end of the check reports `message` at
+   * `span` if no object at that place can have it when the script runs (#845); any other read the runtime checks
+   * (TSR017, or TSR060 for a list function).
    */
   #noteMissingProperty(
     site: Expression,
     name: string,
     object: StaticType,
     span: SourceSpan,
-    message: (properties: readonly string[]) => string,
+    message: (properties: () => readonly string[]) => string,
   ): void {
     const objects = members(object).map(resolved);
     const tables = objects.flatMap((member) =>
@@ -5359,11 +5360,11 @@ class TypeChecker {
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
       } else if (check.kind === "property") {
-        const names = missing.get(check.site);
-        if (names !== undefined) {
+        const properties = missing.get(check.site);
+        if (properties !== undefined) {
           this.#file = check.file;
           const before = this.diagnostics.length;
-          this.#report(typeCode.invalidOperand, check.message(names), check.span);
+          this.#report(typeCode.invalidOperand, check.message(properties), check.span);
           found = this.diagnostics.splice(before);
         }
       } else {

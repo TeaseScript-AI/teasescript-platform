@@ -869,12 +869,13 @@ interface PropertyPath {
  * Ends the recording of a check and tells for each read whether an object at its place can have its property when the
  * script runs (#845). It cannot when the property is in none of the tables whose objects may reach that place: the
  * place's own, their sources, and, for a place inside a property of another, that property of every table whose objects
- * may reach the other place. A read that no object can satisfy gives the properties its objects can have, in table
- * order; any other gives `undefined`, also when objects whose properties the compiler cannot know may reach the place.
+ * may reach the other place. A read that no object can satisfy gives a function for the properties its objects can
+ * have, in table order, which walks their places again, so it is called only for an error that names them; any other
+ * read gives `undefined`, also when objects whose properties the compiler cannot know may reach the place.
  */
 export function missingPropertyReads(
   reads: readonly PropertyRead[],
-): (readonly string[] | undefined)[] {
+): ((() => readonly string[]) | undefined)[] {
   const recorded = lineage;
   lineage = null;
   if (recorded === null || reads.length === 0) return reads.map(() => undefined);
@@ -905,12 +906,13 @@ export function missingPropertyReads(
     indexes.push(index);
     byName.set(read.name, indexes);
   }
-  const missing: (readonly string[] | undefined)[] = reads.map(() => undefined);
+  const missing: ((() => readonly string[]) | undefined)[] = reads.map(() => undefined);
   for (const [name, indexes] of byName) {
     const places = new PropertyPlaces(name, holders, root, extend);
-    for (const index of indexes)
-      if (!places.read(reads[index]!.tables))
-        missing[index] = places.properties(reads[index]!.tables);
+    for (const index of indexes) {
+      const { tables } = reads[index]!;
+      if (!places.read(tables)) missing[index] = () => places.properties(tables);
+    }
   }
   return missing;
 }
