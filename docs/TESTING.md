@@ -658,7 +658,8 @@ file. Its `popup` package shows `showPopup` dialogs whose button takes focus: th
 popup does not close it, a fresh Enter, Escape, Space, or a click on the button does and a click beside it does not, a
 reload shows the waiting popup again, and no popup text reaches the transcript. Its `open-url` package, served as a
 catalog that names pages of the smoke's server, checks that right after a click `openUrl` opens its address at once in
-a tab without an opener and the script goes on, that without a recent click its button "Open <host>" opens it, and that
+a tab without an opener and the script goes on, that with `alwaysButton: true` its button, with its `buttonText:`,
+shows also right after a click and opens it, that without a recent click its button "Open link" opens it, and that
 after a reload the address does not open by itself, also not from the click on Continue, but from its button. A choice and a form toggle held
 down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
 `missing-media` package, which refers to a

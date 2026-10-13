@@ -162,6 +162,8 @@ instruction without producing a result or binding. See [timer semantics](specifi
 showPopup "Task completed"
 showPopup(message: "Well done, ${name}", buttonText: "Continue")
 openUrl("https://example.com")
+openUrl("https://example.com", buttonText: "Claim your reward")
+openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your reward")
 ```
 
 `showPopup` shows its message in a dialog outside the chat with one button, `OK` unless `buttonText:` renames it, and
@@ -169,10 +171,12 @@ waits until the player closes it; neither enters the transcript, and it gives no
 ([§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)). The call form also takes the
 message without its name, first. A block may interrupt it like any interaction ([Runtime](RUNTIME.md#generic-foreground-interactions)).
 
-`openUrl` takes one web address: text that is an `http` or `https` URL, never a list (compile error `TSV043` for a
-written one, runtime error `TSR050` otherwise). After it the address is open in a new tab, and then the script goes on:
-right after the player's click the Player opens it at once, otherwise the player opens it from a button that shows
-"Open" and the address's host ([§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)).
+`openUrl` takes one web address first, without a name: text that is an `http` or `https` URL, never a list (compile
+error `TSV043` for a written one, runtime error `TSR050` otherwise). It waits until the address is open in a new tab:
+usually at once, and when the browser needs a click from the player first, the Player shows a button for it, which
+never shows the address. `buttonText:` is the button's text, "Open link" by default, with the rules of `showPopup`'s,
+and `alwaysButton: true` shows the button also right after a click, so the player opens the tab with it; either way the
+script goes on once the tab is open ([§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)).
 
 ### Compact choices
 

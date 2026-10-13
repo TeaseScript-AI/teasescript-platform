@@ -157,14 +157,16 @@ Completion semantics are:
   form evaluates once, in written order, before the popup opens. It has no result, and only `{ kind: "activate" }`, the
   player closing it, completes it: the settlement has no transcript text, and only `actionCompleted` is published;
 - `openUrl` ([V30 §33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references))
-  is a `url` interaction whose UI holds the canonical web address and the text of its button. The address must be
-  text that parses as an absolute `http:` or `https:` URL with a host (the rule of message links); a written one is
-  checked by the compiler, and any other fails with `TSR050` as the request opens. The canonical form, in the URL
-  standard's serialization, is what the Player opens; the button text is "Open" and the address's host, a working
-  label. It has no result, and only `{ kind: "opened" }`, the Player's report that it opened the address in a new
+  is a `url` interaction whose UI holds the canonical web address, the text of its button (`buttonText:`, "Open link"
+  by default), and `alwaysButton` (`false` by default). The address must be text that parses as an absolute `http:` or
+  `https:` URL with a host (the rule of message links); a written one is checked by the compiler, and any other fails
+  with `TSR050` as the request opens, as does an `alwaysButton:` that is not `true` or `false`. A computed request
+  evaluates its arguments once, in written order. The canonical form, in the URL standard's serialization, is what the
+  Player opens. It has no result, and only `{ kind: "opened" }`, the Player's report that it opened the address in a new
   tab, completes it, as for a popup without a transcript. The Player opens the address at once only for a request
-  that its own run of the session requested while the player's activation lasts, and settles it; otherwise, and for a
-  request that a restore, a rewind, or a reload brought back, it shows the button, whose click opens the address
+  that its own run of the session requested while the player's activation lasts, without `alwaysButton: true`, and
+  settles it; otherwise, and for a request that a restore, a rewind, or a reload brought back, it shows the button,
+  whose click opens the address
   ([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)).
 
 A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
@@ -1572,7 +1574,7 @@ restart, and report the failure with its debug export.
 | `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
 | `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
 | `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, a camera placement, a message's text, an `openUrl` address that is not an `http` or `https` URL, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
+| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, a camera placement, a message's text, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
 | `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
