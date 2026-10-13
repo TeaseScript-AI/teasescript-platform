@@ -110,7 +110,8 @@ export function memberProblems(
   }
   if (type.kind === "unknown" || type.kind === "open") {
     // Only lists have `join`, and only text has the other text methods, so their arguments are checked even when the
-    // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections.
+    // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections,
+    // and text and lists both have `reverse` without arguments.
     if (call === null) return [];
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
@@ -636,13 +637,15 @@ export function rootName(expression: Expression): string | null {
 /** The list methods that search for a value: its first or last position, or how often it occurs (V30 §16). */
 export const LIST_SEARCHES: ReadonlySet<string> = new Set(["indexOf", "lastIndexOf", "count"]);
 
+/** The list methods that reorder a list in place, which a set, keeping its insertion order, does not have (V30 §16). */
+export const LIST_REORDERS: ReadonlySet<string> = new Set(["sort", "shuffle", "reverse"]);
+
 /**
  * The list methods that reorder a list in place, take part of it, search it, or read an element with a default, and
  * the set operations of lists and sets (V30 §16, ADR 0013).
  */
 export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
-  "sort",
-  "shuffle",
+  ...LIST_REORDERS,
   "take",
   "takeLast",
   ...LIST_SEARCHES,
@@ -653,9 +656,9 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Compile-time problems with `sort`, `shuffle`, `take`, `takeLast`, a search, `get`, `intersection`, `union`, or
- * `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a position of
- * a set, elements `sort` cannot order, and a set operation's argument that is neither a list nor a set.
+ * Compile-time problems with `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, `intersection`,
+ * `union`, or `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a
+ * position of a set, elements `sort` cannot order, and a set operation's argument that is neither a list nor a set.
  */
 export function collectionMethodProblems(
   name: string,
@@ -668,7 +671,7 @@ export function collectionMethodProblems(
   if (name === "get") return getProblems(receiverType, property, call);
   if (name === "take" || name === "takeLast")
     return takeProblems(name, receiverType, property, call, typeOf);
-  const reorders = name === "sort" || name === "shuffle";
+  const reorders = LIST_REORDERS.has(name);
   if (reorders && receiverType.kind === "set")
     return [
       {

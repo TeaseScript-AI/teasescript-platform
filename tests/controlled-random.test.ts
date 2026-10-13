@@ -101,14 +101,15 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       ].join("\n"),
     ),
   }),
-  /** A collection change and a warning before later draws of the same instruction. */
+  /** Collection changes and a warning before later draws of the same instruction. */
   changeBeforeDraw: () => ({
     stepMs: 2000,
     plan: project(
       [
         "let items = [1, 2, 3, 4, 5]",
         "let pair = [items.removeFirst(), randomInteger(1..=6), items.remove(99), items.random]",
-        'say "${pair[0]} ${pair[1]} ${pair[3]} ${items.length}"',
+        "let flipped = [items.reverse(), items.random]",
+        'say "${pair[0]} ${pair[1]} ${pair[3]} ${items.length} ${flipped[1]} ${items.first}"',
         "exit",
       ].join("\n"),
     ),
@@ -524,7 +525,7 @@ test("a restore without the builtins resumes a draw after a builtin's recorded c
 test("a change before a draw in the same instruction happens once, with its warning", () => {
   const scenario = SCENARIOS.changeBeforeDraw!();
   const paused = drive(scenario, "pause", forced);
-  assert.deepEqual(said(paused), ["1 6 5 4"]);
+  assert.deepEqual(said(paused), ["1 6 5 4 2 5"]);
   assert.equal(
     paused.events.filter((event) => event.kind === "developerWarning").length,
     1,

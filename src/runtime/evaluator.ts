@@ -1567,6 +1567,7 @@ export class Evaluator {
             ...SET_OPERATIONS,
             "sort",
             "shuffle",
+            "reverse",
             "add",
             "addAll",
             "remove",
@@ -2318,6 +2319,7 @@ export class Evaluator {
             );
           case "sort":
           case "shuffle":
+          case "reverse":
             throw fault(
               "TSR016",
               `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
@@ -2458,6 +2460,14 @@ export class Evaluator {
           this.#reorderList(
             receiver,
             name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
+          );
+          return null;
+        // The last element first: the old indexes from the end.
+        case "reverse":
+          expect(0);
+          this.#reorderList(
+            receiver,
+            receiver.items.map((_, index) => receiver.items.length - 1 - index),
           );
           return null;
         case "intersection":
@@ -3876,6 +3886,7 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set([
   "clear",
   "sort",
   "shuffle",
+  "reverse",
 ]);
 
 const DICT_TEXT_MESSAGE =

@@ -244,7 +244,7 @@ export function preparePreparedReferencesForListRemoval(
 
 /**
  * Moves prepared references into the items of `receiver` along with their items when the list is reordered in place,
- * as by `sort` and `shuffle`. `newIndexOf[old]` is the new index of the item at `old`.
+ * as by `sort`, `shuffle`, and `reverse`. `newIndexOf[old]` is the new index of the item at `old`.
  */
 export function preparePreparedReferencesForListReorder(
   snapshot: RuntimeSnapshot,

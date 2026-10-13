@@ -479,6 +479,7 @@ const MUTATING_CALLS: ReadonlySet<string> = new Set([
   "clear",
   "sort",
   "shuffle",
+  "reverse",
   "pause",
   "resume",
   "stop",

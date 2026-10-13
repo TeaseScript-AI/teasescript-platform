@@ -65,6 +65,7 @@ export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
   member("uppercase", [], "string"),
   member("lowercase", [], "string"),
   member("uppercaseFirst", [], "string"),
+  member("reverse", [], "string"),
   member("repeat", [count("count")], "string"),
   member("padStart", [count("length"), fill], "string"),
   member("padEnd", [count("length"), fill], "string"),
