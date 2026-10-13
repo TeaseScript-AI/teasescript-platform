@@ -100,7 +100,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "border-default": neutral(dark ? (high ? 75 : 52) : high ? 35 : 65),
     "border-strong": neutral(dark ? (high ? 90 : 70) : high ? 20 : 45),
     "text-primary": neutral(dark ? (high ? 100 : 96) : high ? 0 : 18),
-    "text-secondary": neutral(dark ? (high ? 96 : 80) : high ? 18 : 40),
+    // One tone above its target in dark mode, so that tinted state surfaces of any hue keep it readable.
+    "text-secondary": neutral(dark ? (high ? 97 : 81) : high ? 18 : 40),
     "text-on-accent": onAccent,
     "accent-solid": accent,
     "accent-soft": accentTone(accent, dark ? 25 : 92),
