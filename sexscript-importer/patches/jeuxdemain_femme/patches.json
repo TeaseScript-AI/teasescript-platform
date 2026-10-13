@@ -6,7 +6,7 @@
       "category": "b",
       "reason": "The clitoris, nipple and labia calibration animations start a background Thread whose showButton(text, 60) waits for a click or 60 seconds while the animation plays, then saves the seconds waited (clitoErec, tetonErec, nympheErec, which later scale the automatic rounds), clears jeuxdemain.stopButton so the animation loop ends, and shows the result image. TeaseScript has no threads; a permanent button with a 60-second asynchronous timer does the same. The rounds move into a function so the paused form can remove the button and stop the timer when the animation ends. Coordinator decision: a patch, not a converter rule.",
       "file": "jeuxdemain_femme.tease",
-      "baseHash": "7c69149758822a8de4226ba12c093db93dc76da19f6f0e03670b9b1d16441ecf",
+      "baseHash": "9012245f3eff5839588522df88d3efb49c6e70822108f95e1671169f3becb75b",
       "edits": [
         {
           "find": "let stopJouis = false\n",
@@ -39,7 +39,7 @@
           "count": 1
         },
         {
-          "find": "  if sexscriptLegacyTruth(pause) {\n    save true as \"jeuxdemain.stopButton\"\n    // TODO SX_DYNAMIC_OR_OBJECT_CALL line 330: Object/dynamic Groovy method calls are not lowered by the first slice.\n    // | def b = Thread.start ('pausebouton')\n    // | {\n    // | try {\n    // | \tdef but = showButton(\"Je vais jouir...\",60)\n    // | \tsave(\"jeuxdemain.nympheErec\",but);\n    // | \tsave(\"jeuxdemain.stopButton\", false);\n    // | \t//show(but);\n    // | \tsetImage (\"jeuxdemain/nymphes.jpg\");\n    // | \tThread.currentThread().interrupt();\n    // | \t}\n    // | catch (InterruptedException e)\n    // | \t{\n    // |     \t\t\t show \"Catched exception\";\n    // |     \t\t\t Thread.currentThread().interrupt();\n    // | \t}\n    // |  \t\t}\n    let b = null\n    //show(but);\n  } else {\n    save true as \"jeuxdemain.stopButton\"\n  }\n  while nbTour > 0 {\n    let n = 1\n    playAudio async \"tom.wav\"\n    while n < 73 and load(\"jeuxdemain.stopButton\", default: false) == true {\n      showImage \"jeuxdemain/fente${n}.png\"\n      wait tempsImageF s\n      n += 1\n    }\n    nbTour -= 1\n  }\n",
+          "find": "  if sexscriptLegacyTruth(pause) {\n    save true as \"jeuxdemain.stopButton\"\n    // TODO SX_DYNAMIC_OR_OBJECT_CALL line 332: Object/dynamic Groovy method calls are not lowered by the first slice.\n    // | def b = Thread.start ('pausebouton')\n    // | {\n    // | try {\n    // | \tdef but = showButton(\"Je vais jouir...\",60)\n    // | \tsave(\"jeuxdemain.nympheErec\",but);\n    // | \tsave(\"jeuxdemain.stopButton\", false);\n    // | \t//show(but);\n    // | \tsetImage (\"jeuxdemain/nymphes.jpg\");\n    // | \tThread.currentThread().interrupt();\n    // | \t}\n    // | catch (InterruptedException e)\n    // | \t{\n    // |     \t\t\t show \"Catched exception\";\n    // |     \t\t\t Thread.currentThread().interrupt();\n    // | \t}\n    // |  \t\t}\n    let b = null\n    //show(but);\n  } else {\n    save true as \"jeuxdemain.stopButton\"\n  }\n  while nbTour > 0 {\n    let n = 1\n    playAudio async \"tom.wav\"\n    while n < 73 and load(\"jeuxdemain.stopButton\", default: false) == true {\n      showImage \"jeuxdemain/fente${n}.png\"\n      wait tempsImageF s\n      n += 1\n    }\n    nbTour -= 1\n  }\n",
           "replace": "  if pause {\n    save true as \"jeuxdemain.stopButton\"\n    jeuxPauseStart = getAbsoluteDateTime()\n    let pauseButton = showPermanentButton \"Je vais jouir...\" {\n      jeuxPauseStop(\"jeuxdemain.nympheErec\", (getAbsoluteDateTime() - jeuxPauseStart) / 1 s, \"jeuxdemain/nymphes.jpg\")\n    }\n    let pauseTimer = timer async hidden 60 s {\n      jeuxPauseStop(\"jeuxdemain.nympheErec\", 60, \"jeuxdemain/nymphes.jpg\")\n    }\n    animationFenteRounds(tempsImageF, nbTour)\n    pauseButton.remove()\n    pauseTimer.stop()\n  } else {\n    save true as \"jeuxdemain.stopButton\"\n    animationFenteRounds(tempsImageF, nbTour)\n  }\n",
           "count": 1
         }
@@ -51,6 +51,13 @@
       "category": "b",
       "reason": "The metronome sets mStrokes and mBPS only in its strokes and seconds branches and then loops over 1..mStrokes, so TeaseScript sees a value that may be null there. Both start at 0; every caller passes one of the two modes, so the start value is never used.",
       "diff": "metronome-start.diff"
+    },
+    {
+      "id": "zero-speed-factor",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): animationFente's automatic mode draws its speed factor as getRandom(10)/5, which is 0 one time in ten, and divides the saved calibration time by it for the round count; Groovy's floating-point division gave Infinity (or NaN for a time of 0), whose rounding left no animation rounds, while the converted division stops the script (V2 explorer: TSR036 at jeuxdemain_femme.tease:376). The factor 0 is evidently unintended; the patch keeps what the player saw, no rounds, without dividing by zero.",
+      "diff": "zero-speed-factor.diff"
     }
   ]
 }

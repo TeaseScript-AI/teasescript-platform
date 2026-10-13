@@ -53,6 +53,7 @@ import {
   type TextAnalysis,
 } from "./java-text.ts";
 import { packageFilePath } from "./lower.ts";
+import { onlyOf, STRING } from "./types.ts";
 
 /** What the rules need from the lowering of the current file. */
 export interface JavaRuleHost {
@@ -176,10 +177,19 @@ interface ResourceAnalysis {
   readonly presenceValues: ReadonlySet<AstNode>;
   /** Variables assigned once with a path text known whole (constantPaths). */
   readonly constants: ReadonlyMap<string, string>;
-  /** JsonSlurper variables: assigned one `new JsonSlurper()` and read only by `parse(file)` of a package file. */
+  /**
+   * JsonSlurper variables: assigned one `new JsonSlurper()` and read only by `parse(file)` of a package file or by
+   * `parseText(text)`.
+   */
   readonly jsonParsers: ReadonlySet<string>;
   /** The `new JsonSlurper()` constructors that JsonSlurper variables are assigned. */
   readonly jsonValues: ReadonlySet<AstNode>;
+  /**
+   * `decodeBase64()` calls whose bytes only become text again, `new String(text.decodeBase64())`, also through a
+   * variable every read of which is such a `new String(bytes)`; and those variables.
+   */
+  readonly base64Values: ReadonlySet<AstNode>;
+  readonly base64Variables: ReadonlySet<string>;
 }
 
 const FILE_TYPES = new Set(["File", "java.io.File"]);
@@ -197,6 +207,8 @@ const STREAM_TYPES = new Map<string, Charset | "reader" | "wrap">([
 const INI_TYPES = new Set(["Wini", "org.ini4j.Wini"]);
 const PROPERTIES_TYPES = new Set(["Properties", "java.util.Properties"]);
 const JSON_TYPES = new Set(["JsonSlurper", "groovy.json.JsonSlurper"]);
+const JSON_OUTPUT_TYPES = new Set(["JsonOutput", "groovy.json.JsonOutput"]);
+const STRING_TYPES = new Set(["String", "java.lang.String"]);
 /** Constructors that write the file their first argument names. */
 const WRITER_TYPES = new Set([
   "FileWriter",
@@ -362,6 +374,8 @@ function emptyAnalysis(): ResourceAnalysis {
     constants: new Map(),
     jsonParsers: new Set(),
     jsonValues: new Set(),
+    base64Values: new Set(),
+    base64Variables: new Set(),
   };
 }
 
@@ -386,7 +400,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     if (kinds.length > 0 && kinds.every((kind) => kind === kinds[0]))
       variables.set(name, kinds[0]!);
   }
-  // JsonSlurper variables whose only use parses one file, as trick_or_treat_poker reads its mistress's data.
+  // JsonSlurper variables whose only uses parse a file, as trick_or_treat_poker reads its mistress's data, or a text.
   const jsonParsers = new Set<string>();
   const jsonValues = new Set<AstNode>();
   for (const [name, values] of tree.assignments) {
@@ -404,13 +418,35 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
       reads.every((reference) => {
         const member = memberOf(reference, tree);
         return (
-          member?.property === false && member.name === "parse" && member.arguments.length === 1
+          member?.property === false &&
+          (member.name === "parse" || member.name === "parseText") &&
+          member.arguments.length === 1
         );
       })
     ) {
       jsonParsers.add(name);
       jsonValues.add(value);
     }
+  }
+  // Bytes that `decodeBase64()` gave and only `new String(bytes)` reads, as KeyholdingService and ToyExpanded's corner
+  // time decode text.
+  const decoded = (node: AstNode | null): node is AstNode =>
+    node?.kind === "methodCall" &&
+    constantString(node.method) === "decodeBase64" &&
+    argumentsOf(node).length === 0 &&
+    asNode(node.object) !== null;
+  const madeText = (node: AstNode): boolean => {
+    const argument = argumentOf(node, tree);
+    return argument !== null && argument.index === 0 && bytesCharset(argument.call) !== null;
+  };
+  const base64Values = new Set(tree.calls.filter((call) => decoded(call) && madeText(call)));
+  const base64Variables = new Set<string>();
+  for (const [name, values] of tree.assignments) {
+    const reads = tree.reads.get(name) ?? [];
+    if (tree.parameters.has(name) || values.length === 0 || reads.length === 0) continue;
+    if (!values.every(decoded) || !reads.every(madeText)) continue;
+    base64Variables.add(name);
+    for (const value of values) base64Values.add(value);
   }
   const properties = new Set<string>();
   for (const [name, values] of tree.assignments) {
@@ -506,7 +542,135 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     constants,
     jsonParsers,
     jsonValues,
+    base64Values,
+    base64Variables,
   };
+}
+
+const JSON_PARSE_NOTE =
+  "JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.";
+const BASE64_DECODE_NOTE =
+  "Groovy's decodeBase64() failed on a character outside Base64, and new String() made the bytes text in the player's platform charset (on Windows usually windows-1252); fromBase64() reads UTF-8, which is the same for ASCII text, also takes the URL-safe alphabet, and gives empty text for text that is not Base64 or whose bytes are no UTF-8.";
+const BASE64_ENCODE_NOTE =
+  "Java took the text's bytes in the player's platform charset (on Windows usually windows-1252); toBase64() encodes the text as UTF-8, which is the same for ASCII text.";
+
+/**
+ * Whether a node is a JsonSlurper's `parseText(text)`, of a `new JsonSlurper()` or of a variable `slurper` names, whose
+ * result jsonCall lowers to fromJson(), and whose keys Groovy read as a map's.
+ */
+export function isJsonParse(node: AstNode, slurper: (name: string) => boolean): boolean {
+  const receiver = asNode(node.object);
+  return (
+    node.kind === "methodCall" &&
+    constantString(node.method) === "parseText" &&
+    argumentsOf(node).length === 1 &&
+    receiver !== null &&
+    ((receiver.kind === "constructorCall" &&
+      JSON_TYPES.has(String(receiver.type)) &&
+      argumentsOf(receiver).length === 0) ||
+      slurper(variableName(receiver) ?? ""))
+  );
+}
+
+/** Variables assigned only `new JsonSlurper()`. */
+export function jsonSlurperNames(root: AstNode): Set<string> {
+  const names = new Set<string>();
+  for (const [name, values] of buildTree(root).assignments) {
+    if (
+      values.length > 0 &&
+      values.every(
+        (value) =>
+          value?.kind === "constructorCall" &&
+          JSON_TYPES.has(String(value.type)) &&
+          argumentsOf(value).length === 0,
+      )
+    )
+      names.add(name);
+  }
+  return names;
+}
+
+/**
+ * JSON and Base64 (V30 §30): `JsonOutput.toJson(value)`, a JsonSlurper's `parseText(text)`, `decodeBase64()` bytes
+ * that become text again (base64Values), and a text's `bytes.encodeBase64()`, also with `toString()`.
+ */
+function jsonCall(
+  node: AstNode,
+  receiver: AstNode,
+  name: string,
+  args: readonly AstNode[],
+  host: JavaRuleHost,
+): IrExpression | null | undefined {
+  const { analysis } = host.state;
+  const call = (
+    callee: string,
+    positional: IrExpression[],
+    named: Record<string, IrExpression> = {},
+  ): IrExpression => ({ kind: "call", name: callee, positional, named });
+  const owner = dottedName(receiver);
+  if (
+    name === "toJson" &&
+    args.length === 1 &&
+    owner !== null &&
+    JSON_OUTPUT_TYPES.has(owner) &&
+    !host.isVariable(owner.split(".")[0]!)
+  ) {
+    const value = host.lower(args[0]!);
+    return value === null ? null : call("toJson", [value]);
+  }
+  if (isJsonParse(node, (slurper) => analysis.jsonParsers.has(slurper))) {
+    const text = host.lower(args[0]!);
+    if (text === null) return null;
+    noteOnce(host, "SX_JSON_PARSE", JSON_PARSE_NOTE, node.span);
+    return call("fromJson", [text], { default: { kind: "literal", value: null } });
+  }
+  if (name === "decodeBase64" && analysis.base64Values.has(node)) {
+    const text = host.lower(receiver);
+    if (text === null) return null;
+    noteOnce(host, "SX_BASE64_DECODE", BASE64_DECODE_NOTE, node.span);
+    return call("fromBase64", [text], { default: { kind: "literal", value: "" } });
+  }
+  const encoded =
+    name === "encodeBase64"
+      ? node
+      : name === "toString" &&
+          receiver.kind === "methodCall" &&
+          constantString(receiver.method) === "encodeBase64"
+        ? receiver
+        : null;
+  const bytes = encoded === null || args.length > 0 ? null : asNode(encoded.object);
+  if (bytes === null || argumentsOf(encoded!).length > 0) return undefined;
+  // The bytes of a text: `text.bytes`, or `text.getBytes()` in the platform's charset or in UTF-8.
+  const charset =
+    bytes.kind === "property" && constantString(bytes.property) === "bytes"
+      ? "platform"
+      : bytes.kind === "methodCall" && constantString(bytes.method) === "getBytes"
+        ? argumentsOf(bytes).length === 0
+          ? "platform"
+          : argumentsOf(bytes).length === 1 &&
+              constantString(argumentsOf(bytes)[0])?.toLowerCase().replace(/[_-]/gu, "") === "utf8"
+            ? "utf-8"
+            : null
+        : null;
+  const textNode = asNode(bytes.object);
+  if (charset === null || textNode === null || !onlyOf(host.valueType(textNode), STRING))
+    return undefined;
+  const text = host.lower(textNode);
+  if (text === null) return null;
+  if (charset === "platform") noteOnce(host, "SX_BASE64_ENCODE", BASE64_ENCODE_NOTE, node.span);
+  return call("toBase64", [text]);
+}
+
+/**
+ * The charset in which `new String(bytes)` makes its bytes text: the platform's, or UTF-8 where the code names it; null
+ * for another constructor or charset.
+ */
+function bytesCharset(node: AstNode): "platform" | "utf-8" | null {
+  if (node.kind !== "constructorCall" || !STRING_TYPES.has(String(node.type))) return null;
+  const args = argumentsOf(node);
+  if (args.length === 1) return "platform";
+  const charset = args.length === 2 ? constantString(args[1]) : null;
+  return charset?.toLowerCase().replace(/[_-]/gu, "") === "utf8" ? "utf-8" : null;
 }
 
 /**
@@ -1021,6 +1185,14 @@ export function javaConstructor(
   }
   if (analysis.propertiesValues.has(node)) return { kind: "object", properties: [], dict: true };
   if (analysis.presenceValues.has(node)) return filePresence(node, host);
+  // `new String(bytes)` of decoded Base64 is the text that fromBase64() gave (jsonCall).
+  const bytes = argumentsOf(node)[0];
+  if (
+    bytes !== undefined &&
+    bytesCharset(node) !== null &&
+    (analysis.base64Values.has(bytes) || analysis.base64Variables.has(variableName(bytes) ?? ""))
+  )
+    return host.lower(bytes);
   return temporalConstructor(node, host) ?? textConstructor(node, host);
 }
 
@@ -1091,6 +1263,8 @@ export function javaMethodCall(
     analysis.jsonParsers.has(variableName(receiver) ?? "")
   )
     return packageJsonRead(node, args[0]!, host);
+  const json = jsonCall(node, receiver, name, args, host);
+  if (json !== undefined) return json;
   const table = variableName(receiver);
   if (table === null || !analysis.properties.has(table))
     return temporalCall(node, name, args, host) ?? textCall(node, name, args, host);

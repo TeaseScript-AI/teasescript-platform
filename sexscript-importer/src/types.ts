@@ -7,6 +7,7 @@ import {
   walkAst,
   type AstNode,
 } from "./ast.ts";
+import { dottedName } from "./java-ast.ts";
 
 /**
  * Flow-insensitive value-type sets for legacy Groovy expressions. A set bit means the value may have that type;
@@ -144,6 +145,8 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["toLowerCase", STRING],
   ["toString", STRING],
   ["toUpperCase", STRING],
+  // Groovy's Base64 of bytes, a Writable that gives its text.
+  ["encodeBase64", STRING],
   ["trim", STRING],
   // A Date's milliseconds, and the pixel size of a Java image or icon.
   ["getTime", NUMBER],
@@ -373,6 +376,11 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
   if (receiver === "Math") return NUMBER;
+  if (
+    name === "toJson" &&
+    ["JsonOutput", "groovy.json.JsonOutput"].includes(dottedName(asNode(node.object)) ?? "")
+  )
+    return STRING;
   // Java's static number parsers, such as Integer.parseInt(text).
   if (
     ["Integer", "Long", "Double", "Float"].includes(receiver ?? "") &&

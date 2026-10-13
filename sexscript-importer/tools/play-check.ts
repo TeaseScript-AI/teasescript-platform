@@ -88,7 +88,11 @@ interface Browser {
   newContext(options: {
     ignoreHTTPSErrors: boolean;
     viewport: { width: number; height: number };
-  }): Promise<{ newPage(): Promise<Page>; close(): Promise<void> }>;
+  }): Promise<{
+    newPage(): Promise<Page>;
+    close(): Promise<void>;
+    on(event: "page", listener: (page: { close(): Promise<void> }) => void): void;
+  }>;
   close(): Promise<void>;
 }
 
@@ -293,6 +297,12 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1280, height: 900 },
+    });
+    // A tab that openUrl opens closes at once, before its address loads; the first page is the Player's.
+    let player = true;
+    context.on("page", (tab) => {
+      if (player) player = false;
+      else void tab.close().catch(() => undefined);
     });
     let result: RunResult;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -741,6 +751,24 @@ async function playOnce(
             }
             counts[skip ? 1 : 0] = counts[skip ? 1 : 0]! + 1;
           });
+        } else if (kind === "popup" || kind === "export") {
+          // showPopup's dialog closes with its one button, and exportText's with Close.
+          const control = kind === "popup" ? "[data-popup-button]" : "[data-export-text-close]";
+          taken.push(`${site} → [close ${kind === "popup" ? "popup" : "export dialog"}]`);
+          stopped = await answer(`the ${kind} dialog at ${site}`, async () => {
+            await page.click(control, { timeout: 5_000 });
+          });
+        } else if (kind === "url") {
+          // openUrl opens its tab at once after a recent click; otherwise the Player shows a button for the click.
+          const button = await page.evaluate(
+            () => document.querySelector("[data-open-url]") !== null,
+          );
+          if (button) {
+            taken.push(`${site} → [open link]`);
+            stopped = await answer(`the link at ${site}`, async () => {
+              await page.click("[data-open-url]", { timeout: 5_000 });
+            });
+          }
         } else if (kind === "form" && state.options.length > 0) {
           // A form, such as the legacy profile's toggles of owned toys and clothes: every other run switches all
           // toggles on, the others keep them as offered; then it is submitted, the first of the form's actions.

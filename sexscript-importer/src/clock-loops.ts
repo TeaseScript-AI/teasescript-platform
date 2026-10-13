@@ -224,7 +224,7 @@ function advancesIn(value: IrExpression, advancing: ReadonlySet<string>): boolea
         : advancesIn(value.left, advancing) || advancesIn(value.right, advancing);
     case "call":
       return (
-        (value.local === true && advancing.has(value.name)) ||
+        (value.local === true ? advancing.has(value.name) : PLAYER_CALLS.has(value.name)) ||
         value.positional.some((argument) => advancesIn(argument, advancing)) ||
         Object.values(value.named).some((argument) => advancesIn(argument, advancing))
       );
@@ -232,6 +232,9 @@ function advancesIn(value: IrExpression, advancing: ReadonlySet<string>): boolea
       return childExpressions(value).some((child) => advancesIn(child, advancing));
   }
 }
+
+/** Calls that wait until the player closes their dialog; `openUrl` waits only where the browser needs a click. */
+const PLAYER_CALLS = new Set(["showPopup", "exportText"]);
 
 /** The expressions directly inside an expression, also the values of a text's parts and an object's properties. */
 function childExpressions(value: IrExpression): IrExpression[] {
@@ -303,11 +306,11 @@ function mayWaitHere(
     case "playAudio":
       return node.async !== true;
     case "call":
-      return (
-        node.local === true &&
-        typeof node.name === "string" &&
-        (functions.has(node.name) ? mayWait.has(node.name) : true)
-      );
+      return typeof node.name === "string" && node.local === true
+        ? functions.has(node.name)
+          ? mayWait.has(node.name)
+          : true
+        : PLAYER_CALLS.has(String(node.name)) || node.name === "openUrl";
     default:
       return false;
   }

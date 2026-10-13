@@ -35,6 +35,7 @@ import {
   storageKeyShape,
   withGuardedInputs,
 } from "./lower.ts";
+import { BOOLEAN, inferType, NUMBER, STRING } from "./types.ts";
 import { withNestedBlocks, withoutRepeatedChainText } from "./repeated-text.ts";
 import {
   helperDefinitionOrder,
@@ -68,6 +69,8 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "chance",
   "findImages",
   "floor",
+  "fromBase64",
+  "fromJson",
   "getDate",
   "getDateTime",
   "getTime",
@@ -80,13 +83,16 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "randomInteger",
   "round",
   "showButton",
+  "showPopup",
   "sign",
   "sqrt",
   "takePhoto",
+  "toBase64",
   "toBoolean",
   "toDate",
   "toDateTime",
   "toInteger",
+  "toJson",
   "toNumber",
   "toString",
   "toTime",
@@ -1826,6 +1832,19 @@ function packageSavedKeys(
   kinds: ReadonlySet<"number" | "boolean" | "string">,
 ): ReadonlySet<string> {
   const keys = new Set<string>();
+  // A value of one type that its expression shows without variables, such as `getTime()` or `count * 2`.
+  const environment = { variables: new Map(), localFunctions: packageFunctionNames(files) };
+  const kindOf = (value: AstNode): string | null => {
+    if (value.kind === "constant") return typeof value.value;
+    const type = inferType(value, environment);
+    return type === NUMBER
+      ? "number"
+      : type === BOOLEAN
+        ? "boolean"
+        : type === STRING
+          ? "string"
+          : null;
+  };
   for (const file of files) {
     walkAst(file.root, (node) => {
       if (node.kind !== "methodCall" || node.implicitThis !== true) return;
@@ -1838,7 +1857,7 @@ function packageSavedKeys(
       const key = keyNode === undefined ? null : storageKeyShape(keyNode);
       const inner = valueNode?.kind === "unaryMinus" ? valueNode.value : valueNode;
       const value = isAstNode(inner) ? inner : null;
-      const kind = value?.kind === "constant" ? typeof value.value : null;
+      const kind = value === null ? null : kindOf(value);
       if (
         key !== null &&
         (kind === "number" || kind === "boolean" || kind === "string") &&

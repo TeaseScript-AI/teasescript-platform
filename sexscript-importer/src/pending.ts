@@ -11,7 +11,6 @@ import type { MediaFile } from "./workarounds.ts";
  * packages never contain the shims.
  */
 const PENDING_CALLS = new Map<string, string>([
-  ["openUrl", "openUrl()"],
   ["chooseFile", "chooseFile()"],
   ["showBackgroundImage", "layered scene"],
   ["showOverlayImage", "layered scene"],
@@ -176,9 +175,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
             : { ...item, target: { ...item.target, path: expression(item.target.path) } },
         ];
       case "showPopup":
-        return [
-          callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
-        ];
+        return [{ ...item, message: expression(item.message) }];
       case "permanentButton":
         return [{ ...item, label: expression(item.label) }];
       case "showButton":
@@ -290,10 +287,8 @@ export type { MediaFile } from "./workarounds.ts";
 /** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only. */
 export function pendingHostFunctions(shim: PendingShim): Record<string, HostFunction> {
   const implementations = new Map<string, HostFunction>([
-    ["showPopup", () => null],
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],
-    ["openUrl", () => null],
     // As when the player cancels the file chooser.
     ["chooseFile", () => null],
   ]);

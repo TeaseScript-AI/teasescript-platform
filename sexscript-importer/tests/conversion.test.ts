@@ -70,7 +70,7 @@ const projectResult = await Promise.all([
 
 // Output that uses only implemented TeaseScript must compile as generated.
 registerFixtures("conversion", false);
-// The accepted forms the importer otherwise replaces with workarounds (popups, boolean lists, URLs, files), which the
+// The accepted forms the importer otherwise replaces with workarounds (files, layered scenes), which the
 // current compiler does not implement yet, must compile once they are replaced by placeholder calls, so everything
 // except the pending capabilities is compiler-checked.
 registerFixtures("conversion-accepted", true, { accepted: new Set(ACCEPTED_FORMS) });

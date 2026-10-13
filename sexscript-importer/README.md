@@ -78,12 +78,12 @@ between two events exceeds the product's instruction budget, which fails in the 
 With a single directory argument, the sibling `images/` folder holds the package's images.
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
-`// NOTE` at every site, so that converted packages play natively: `showPopup` the message and an OK button, `openUrl`
-the link in the chat and a button, and an image composition its base image. Legacy `getBooleans` becomes native
+`// NOTE` at every site, so that converted packages play natively: an image composition becomes its base image. Legacy
+`showPopup` is native `showPopup`, whose open time gives the legacy seconds where a script uses them
+(`toInteger(showPopup(m) / 1 s)`), and `useUrl` is `openUrl`. Legacy `getBooleans` becomes native
 `askBooleans message, texts:, prefill:`, with `cancel:` where the script tests the answers for null, as the legacy
-dialog's Cancel gave null. `--accepted` (every form) or `--accepted=showPopup,openUrl,chooseFile,layeredScene`
-emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
-stand-ins.
+dialog's Cancel gave null. `--accepted` (every form) or `--accepted=chooseFile,layeredScene` emits the accepted forms
+instead, for when `main` implements them; the report then compiles and runs them through host stand-ins.
 
 The output follows `main`'s time model (#512, ADR 0026; `src/time-model.ts`): `n * 1 calendar day` (and `calendar`
 months and years) where legacy stepped by calendar days and wherever a date moves, and elapsed time on a date and time
@@ -102,7 +102,11 @@ A package text file that no script of the package writes, such as quiz lines, Pr
 part of the package as converted: a `File`, stream, or reader over it becomes its path text, and `readLines()`,
 `Properties.load()`, and `Wini.get()` read a generated function that holds the file's text at conversion time, marked
 with a `// NOTE`; a JsonSlurper's `parse()` of such a JSON file is the value it gave, written out as objects, dicts,
-and lists. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work.
+and lists. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work. JSON and
+Base64 text convert to the native functions (V30 §30): `JsonOutput.toJson(v)` is `toJson(v)`, a JsonSlurper's
+`parseText(t)` is `fromJson(t, default: null)`, whose keys read as a dict's also through the variables and functions it
+reaches, a text's `bytes.encodeBase64()` is `toBase64(t)`, and `decodeBase64()` bytes that `new String()` makes text
+again are `fromBase64(t, default: "")`.
 
 Java library calls convert where their receiver and arguments are proven and TeaseScript has the same behavior
 (`src/java-time.ts`, `src/java-text.ts`): a Calendar or Date becomes a `datetime`, a Random object the session's random
@@ -807,7 +811,6 @@ node --test tests/*.test.ts
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler, as the `main.tease` of a project with a stub for each file it transfers to.
 `tests/fixtures/conversion-accepted/` holds output converted with `--accepted`, which uses accepted but not yet
-implemented TeaseScript (`showPopup`, `openUrl`, `chooseFile`); it must compile once those capabilities
-are replaced by placeholder calls. Both groups must also run to the
+implemented TeaseScript (`chooseFile`); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

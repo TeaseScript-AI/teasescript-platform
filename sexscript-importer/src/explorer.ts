@@ -344,7 +344,9 @@ type InteractionPayload =
   | { readonly kind: "submittedText"; readonly submittedText: string }
   | { readonly kind: "image"; readonly reference: string }
   | { readonly kind: "submit" }
-  | { readonly kind: "cancel" };
+  | { readonly kind: "cancel" }
+  | { readonly kind: "opened" }
+  | { readonly kind: "close" };
 
 /** Duration of one pass of every media file. */
 const MEDIA_PASS_MS = 1000;
@@ -674,11 +676,11 @@ export class Session {
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
       // happens meanwhile. So is a button between two clock reads whose difference a condition compares, and one
       // whose result is compared with a value in the state.
+      // A popup whose open time the script keeps is timed as a button is.
+      const timedKind = ui.kind === "button" || ui.kind === "popup";
       const kept =
-        ui.kind === "button" &&
-        action.expectedResult === "duration" &&
-        action.destinationTemporary !== null;
-      const timed = ui.kind === "button" ? this.#timedConstants(runtime, action, state) : null;
+        timedKind && action.expectedResult === "duration" && action.destinationTemporary !== null;
+      const timed = timedKind ? this.#timedConstants(runtime, action, state) : null;
       if (kept || (timed !== null && timed.numbers.length + timed.durations.length > 0)) {
         const now = Number(view.observedSessionTimeMs);
         const constants = kept
@@ -689,7 +691,11 @@ export class Session {
           : timed!;
         for (const afterMs of thinkTimes(constants)) {
           if (until === null || now + afterMs < until)
-            options.push({ kind: "button", label: String(ui.buttonLabel), afterMs });
+            options.push({
+              kind: "button",
+              label: String(ui.kind === "popup" ? ui.buttonText : ui.buttonLabel),
+              afterMs,
+            });
         }
       }
     }
@@ -809,6 +815,12 @@ export class Session {
         accepted = "completed";
         break;
       case "button": {
+        // A popup closes, an openUrl opens its address, and an exportText dialog closes, each in one way only.
+        if (action.interactionKind === "url" || action.interactionKind === "export") {
+          result = completion({ kind: action.interactionKind === "url" ? "opened" : "close" });
+          accepted = "completed";
+          break;
+        }
         if (input.afterMs !== undefined) {
           const until = Number(view.observedSessionTimeMs) + input.afterMs;
           const observed = runtime.call(
@@ -1535,6 +1547,12 @@ function interactionOptions(
   switch (ui.kind) {
     case "button":
       return [{ kind: "button", label: String(ui.buttonLabel) }];
+    // A popup, an openUrl, and an exportText dialog go on one way: closing, the opened address, or closing.
+    case "popup":
+    case "url":
+      return [{ kind: "button", label: String(ui.buttonText) }];
+    case "export":
+      return [{ kind: "button", label: "Close" }];
     case "choice":
       return list(ui.options).map((option, index) => ({
         kind: "option",

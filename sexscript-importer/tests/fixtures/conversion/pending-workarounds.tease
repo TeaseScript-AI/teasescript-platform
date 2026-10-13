@@ -1,7 +1,5 @@
-speaker system {
-  title: "System"
-}
-// Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
+// Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript, and forms
+// that main implements now are native.
 // getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
 let toys = askBooleans prose "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
 let clothes = [false]
@@ -24,23 +22,20 @@ if gags == null or gags[0] == false {
 if toys[0] == true {
   say prose "Fetch the paddle", instant
 }
-// showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
-// NOTE SX_POPUP_WORKAROUND line 13: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
-say prose "Time for a break", instant
-showButton "OK"
-// NOTE SX_POPUP_WORKAROUND line 14: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
-say prose "Kneel until you close this", instant
-let seconds = toInteger((showButton "OK") / 1 s)
+// showPopup is native; the legacy result was the whole seconds until the player closed the popup.
+showPopup "Time for a break"
+let seconds = toInteger(showPopup("Kneel until you close this") / 1 s)
 say prose "You knelt ${seconds} seconds", instant
-// useUrl: the link in the chat and a button to continue.
-// NOTE SX_OPEN_URL_WORKAROUND line 17: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
-say as system "Open this link: https://example.com/rules", instant
-showButton "Continue"
+// useUrl is openUrl(); an address without its scheme gets https://, and empty text opened nothing.
+openUrl("https://example.com/rules")
+// NOTE SX_OPEN_URL_SCHEME line 19: useUrl() named this address without its scheme, which the computer's browser completed; openUrl() opens it with https://.
+openUrl("https://cornertime.github.io")
+// NOTE SX_OPEN_URL_EMPTY line 20: useUrl() of empty text opened no page, so nothing opens here.
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
-// NOTE SX_FILE_PHOTO line 19: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did.
+// NOTE SX_FILE_PHOTO line 22: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did.
 let photo = askImage prose ("Pick a photo of yourself", allowSkip: true)
 // Without a title, there is nothing to say before the request.
-// NOTE SX_FILE_PHOTO line 21: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+// NOTE SX_FILE_PHOTO line 24: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let another = askImage()
 if photo == null {
   say prose "No photo, then", instant

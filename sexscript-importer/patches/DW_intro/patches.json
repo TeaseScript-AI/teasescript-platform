@@ -20,6 +20,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): DW_intro reads loadInteger(\"DareWiliam.zip.launch.lasttime\") and computes getTime() - lasttime, but no script of the package saves that key, so the read was null and Groovy failed (V2 explorer: TSR027); and DareWiliam/zip returns to DW_intro, which would send the player back to it at once. Evident intent: the intro runs the report when it last ran more than 30 seconds ago, so the report stores its launch time and a missing time means it never ran. The patch reads a missing time as 0 and makes zip.groovy save its launch time.",
       "diff": "zip-launch-time.diff"
+    },
+    {
+      "id": "wrap-up-without-start",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the no-cum wrap-up code 963654 reads loadInteger(\"DareWiliam.Time\"), which only the start code 964158 saves, and computes getTime() - startTime; entered without the start, the time was null and Groovy failed (V2 explorer: TSR027 at DareWiliam/tasks.tease:424). Evident intent: a wrap-up without its start has nothing to check, as the anal wrap-up 48684923 ends at once when its saved start (DareWiliam.Anal) is missing. The wrap-up ends there when no start time is saved. The anal wrap-up's own time read (tasks.tease:716-717) needs no patch: its guard on DareWiliam.Anal holds, since 45682134 saves Anal together with the time.",
+      "diff": "wrap-up-without-start.diff"
     }
   ]
 }

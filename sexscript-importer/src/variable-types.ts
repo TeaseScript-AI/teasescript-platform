@@ -2443,6 +2443,11 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["askInteger", scalar("integer")],
   ["askBoolean", scalar("boolean")],
   ["showButton", scalar("duration")],
+  ["showPopup", scalar("duration")],
+  ["toJson", scalar("string")],
+  ["toBase64", scalar("string")],
+  // The conversion gives fromBase64() empty text as its default (java-data.ts).
+  ["fromBase64", scalar("string")],
   // A photo reference, or null where the camera took none (V30 §33); a requested image always arrives.
   ["takePhoto", { kind: "optional", value: scalar("string") }],
   ["askImage", scalar("string")],

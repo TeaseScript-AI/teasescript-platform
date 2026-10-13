@@ -37,10 +37,7 @@ if ready and sure {
   say prose "Starting ${count} rounds at ${start}", instant
 }
 // showPopup() returned the seconds until the player closed it.
-// NOTE SX_POPUP_ELAPSED line 21: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
-let popupStart = getAbsoluteDateTime().toSeconds()
-showPopup "Come here!"
-let late = getAbsoluteDateTime().toSeconds() - popupStart
+let late = toInteger(showPopup("Come here!") / 1 s)
 if late > 60 {
   say prose "What took you so long?", instant
 }
@@ -48,11 +45,7 @@ function title {
   wait 1 s
   return "Ready?"
 }
-// NOTE SX_POPUP_ELAPSED line 24: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.
-let popupMessage2 = title()
-let popupStart2 = getAbsoluteDateTime().toSeconds()
-showPopup popupMessage2
-let slow = getAbsoluteDateTime().toSeconds() - popupStart2
+let slow = toInteger(showPopup(title()) / 1 s)
 // getImage() took a webcam picture and returned its path, or null.
 // NOTE SX_CAMERA_FALLBACK line 26: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let photo: string? = takePhoto()

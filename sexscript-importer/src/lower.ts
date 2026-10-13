@@ -38,7 +38,9 @@ import {
   javaConstructor,
   javaDataStatements,
   javaDeclaration,
+  isJsonParse,
   javaFileState,
+  jsonSlurperNames,
   javaMethodCall,
   javaProperty,
   viewedText,
@@ -261,8 +263,6 @@ interface LowerContext {
   ignoredInputs: number;
   /** Counter for temporaries that hold a switch value evaluated once for an if chain. */
   switchValues: number;
-  /** Counter for variables that keep the start time of a popup whose waiting time is used. */
-  popupTimers: number;
   /** Names of generated variables, kept apart from each other and from authored variables. */
   generatedNames: Set<string>;
   resultUses: ReadonlySet<string>;
@@ -945,10 +945,15 @@ function passedOnValues(body: AstNode, keys: BindingKeys, types: TypeEnvironment
 function mapUsesOf(bodies: readonly MapBody[]): MapUses {
   const dictionaries = new Set<string>();
   const dictionaryFunctions = new Set<string>();
-  for (const { body, types, keys } of bodies) {
-    const found = dictionaryVariables(body, types, keys);
-    for (const name of found.variables) dictionaries.add(name);
-    for (const name of found.functions) dictionaryFunctions.add(name);
+  // A variable that one file sets from a call of another file's dict function is a dict too, which may make a
+  // function of its file one: rounds until nothing changes.
+  for (let size = -1; size !== dictionaries.size + dictionaryFunctions.size;) {
+    size = dictionaries.size + dictionaryFunctions.size;
+    for (const { body, types, keys } of bodies) {
+      const found = dictionaryVariables(body, types, keys, dictionaryFunctions);
+      for (const name of found.variables) dictionaries.add(name);
+      for (const name of found.functions) dictionaryFunctions.add(name);
+    }
   }
   const uses: MapUses = {
     dictionaries,
@@ -2085,7 +2090,6 @@ function lowerFileOnce(
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
-    popupTimers: 0,
     generatedNames: new Set(),
     resultUses: options.resultUses ?? packageResultUses([file]),
     directoryFiles: options.directoryFiles ?? new Map(),
@@ -3478,7 +3482,6 @@ function lowerHelperMethod(
     actions: baseContext.actions,
     ignoredInputs: 0,
     switchValues: 0,
-    popupTimers: 0,
     generatedNames: new Set(),
   };
   const parameters: IrFunctionParameter[] = [];
@@ -4526,6 +4529,11 @@ function needsOwnStatement(node: AstNode, context: LowerContext): boolean {
  */
 function evaluationChildren(node: AstNode): AstNode[] {
   if (node.kind === "closure") return [];
+  // A map evaluates each entry's key and then its value; an entry itself is no value.
+  if (node.kind === "map")
+    return nodeArray(node.entries).flatMap((entry) =>
+      [asNode(entry.key), asNode(entry.value)].filter((part) => part !== null),
+    );
   if (node.kind === "methodCall") {
     const receiver = node.implicitThis === true ? null : asNode(node.object);
     const args = asNode(node.arguments);
@@ -7971,9 +7979,7 @@ function lowerCallStatement(
       return [{ kind: "showButton", label, timeout: legacyTimeout ?? timeout, span }];
     }
     case "showPopup":
-      return oneArgumentStatement(args, context, node, (message) =>
-        popupStatements(message, span, context),
-      );
+      return oneArgumentStatement(args, context, node, (message) => popupStatements(message, span));
     case "useUrl":
       return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
     case "setImage": {
@@ -8149,25 +8155,38 @@ function lowerCollectionAssignment(
   const call = callParts(right);
   const receiver = asNode(right.object);
   if (call === null || call.inherited || receiver === null) return null;
+  // Groovy `sort(false)` gives a sorted copy and leaves the list as it was.
+  const sortsCopy =
+    call.name === "sort" &&
+    call.arguments.length === 1 &&
+    constantValue(call.arguments[0]) === false;
   if (
     call.name === "sort" &&
-    call.arguments.length === 0 &&
-    !declaration &&
-    variableName(receiver) === target &&
+    (call.arguments.length === 0 || sortsCopy) &&
+    variableName(receiver) !== null &&
+    (sortsCopy || (!declaration && variableName(receiver) === target)) &&
     isKnownListExpression(receiver, context)
   ) {
-    // `list = list.sort()` sorts the list in place, which TeaseScript sort() does as well.
-    const parameterWrite = parameterListWrite(receiver, right, context);
-    if (parameterWrite !== null)
-      return [unsupportedStatement(context, right, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
+    // `list = list.sort()` sorts the list in place, which TeaseScript sort() does as well; `copy = list.sort(false)`
+    // sorts a copy, which assignment makes (ADR 0014).
+    if (!sortsCopy) {
+      const parameterWrite = parameterListWrite(receiver, right, context);
+      if (parameterWrite !== null)
+        return [unsupportedStatement(context, right, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
+    }
     const list: IrExpression = { kind: "variable", name: target };
-    return [
-      {
-        kind: "expression",
-        expression: { kind: "methodCall", target: list, name: "sort", arguments: [] },
-        span,
-      },
-    ];
+    const sorted: IrStatement = {
+      kind: "expression",
+      expression: { kind: "methodCall", target: list, name: "sort", arguments: [] },
+      span,
+    };
+    if (variableName(receiver) === target && !declaration) return [sorted];
+    const source = lowerExpression(receiver, context);
+    if (source === null) return null;
+    const assigned: IrStatement = declaration
+      ? { kind: "let", name: target, value: source, span }
+      : { kind: "assign", target: list, operator: "=", value: source, span };
+    return [assigned, sorted];
   }
   if (
     call.name === "reverse" &&
@@ -14832,6 +14851,11 @@ function lowerObjectMethodCallExpression(
     }
   }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
+    // The text of Groovy's Base64 of a text is that Base64 (java-data.ts).
+    if (targetNode.kind === "methodCall" && constantString(targetNode.method) === "encodeBase64") {
+      const java = javaMethodCall(node, name, argumentsNodes, javaHost(context));
+      if (java !== undefined) return java;
+    }
     const listParts = listText(targetNode, context);
     if (listParts !== undefined) return listParts === null ? null : templateOrLiteral(listParts);
     const value = lowerExpression(targetNode, context);
@@ -15743,6 +15767,8 @@ function dictionaryVariables(
   body: AstNode,
   types: TypeEnvironment,
   keys: BindingKeys,
+  /** Dict functions of the package's other files. */
+  known: ReadonlySet<string> = new Set(),
 ): { variables: Set<string>; functions: Set<string> } {
   const names = new Set<string>();
   const keyOf = (node: unknown): string | null => bindingKey(node, keys);
@@ -15762,6 +15788,9 @@ function dictionaryVariables(
   const aliases: Array<[string, string]> = [];
   // Variables set from a call of a closure of the script.
   const calls: Array<[string, string]> = [];
+  // A JsonSlurper's parse of a text, whose keys Groovy read as a map's, is a dict where it is an object (V30 §30).
+  const slurpers = jsonSlurperNames(body);
+  const jsonParse = (node: AstNode): boolean => isJsonParse(node, (name) => slurpers.has(name));
   walkAst(body, (node) => {
     if (node.kind === "binary" && node.operator === "[") {
       const name = keyOf(node.left);
@@ -15802,7 +15831,7 @@ function dictionaryVariables(
     const target = assigns ? keyOf(node.left) : null;
     const value = assigns ? asNode(node.right) : null;
     if (target === null || value === null) return;
-    if (dictionaryLiteral(value)) names.add(target);
+    if (dictionaryLiteral(value) || jsonParse(value)) names.add(target);
     const source = keyOf(value);
     if (source !== null) aliases.push([target, source]);
     const called =
@@ -15811,14 +15840,19 @@ function dictionaryVariables(
         : null;
     if (called !== null) calls.push([target, called]);
   });
-  // The closures whose every return gives a dict literal or a dict variable, and that end in a return on every path,
-  // so that no last expression gives a value of its own (Groovy returned the value of a closure's last expression,
-  // also one at the end of an `if` or `else`).
+  // The closures whose every return gives a dict literal or a dict variable, or else null where another return gives a
+  // parsed JSON text, and that end in a return on every path, so that no last expression gives a value of its own
+  // (Groovy returned the value of a closure's last expression, also one at the end of an `if` or `else`).
   const returns = new Map<string, AstNode[]>();
   const endsInReturn = (node: AstNode | null): boolean => {
     if (node === null) return false;
     if (node.kind === "return") return true;
     if (node.kind === "block") return endsInReturn(nodeArray(node.statements).at(-1) ?? null);
+    if (node.kind === "tryCatch")
+      return (
+        endsInReturn(asNode(node.try)) &&
+        nodeArray(node.catches).every((handler) => endsInReturn(asNode(handler.body)))
+      );
     if (node.kind === "if") {
       const otherwise = asNode(node.else);
       return (
@@ -15850,9 +15884,9 @@ function dictionaryVariables(
       for (const child of Object.values(value)) visit(child);
     };
     visit(statements);
-    if (!open && values.length > 0) returns.set(name, values);
+    if ((!open || values.some(jsonParse)) && values.length > 0) returns.set(name, values);
   });
-  const functions = new Set<string>();
+  const functions = new Set<string>(known);
   for (let changed = true; changed;) {
     changed = false;
     for (const [target, source] of aliases) {
@@ -15864,7 +15898,11 @@ function dictionaryVariables(
     }
     for (const [name, values] of returns) {
       if (functions.has(name)) continue;
-      if (!values.every((value) => dictionaryLiteral(value) || names.has(keyOf(value) ?? "")))
+      if (
+        !values.every(
+          (value) => dictionaryLiteral(value) || jsonParse(value) || names.has(keyOf(value) ?? ""),
+        )
+      )
         continue;
       functions.add(name);
       changed = true;
@@ -18080,6 +18118,7 @@ function dictStatement(
  * returns one (dictionaryVariables).
  */
 function isDictionary(node: AstNode, context: LowerContext): boolean {
+  if (isJsonParse(node, (name) => context.java.analysis.jsonParsers.has(name))) return true;
   const called =
     node.kind === "methodCall" && node.implicitThis === true ? constantString(node.method) : null;
   if (called !== null)
@@ -18246,12 +18285,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     if (call.name === "receiveInteger") return { kind: "load", key, integer: true, received: true };
     if (call.name === "loadFloat") return { kind: "load", key, number: true };
     const shape = storageKeyShape(call.arguments[0]!);
-    if (call.name === "loadString" && shape !== null && context.nonTextKeys.has(shape)) {
+    if (
+      (call.name === "loadString" || call.name === "receiveString") &&
+      shape !== null &&
+      context.nonTextKeys.has(shape)
+    ) {
       addDiagnostic(
         context,
         "SX_LOAD_STRING_TEXT",
         "warning",
-        "loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.",
+        `${call.name}() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.`,
         node.span,
       );
       return useHelper(context, "text", [{ kind: "load", key }]);
@@ -18324,64 +18367,29 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         };
       }
       return useHelper(context, "random", args);
-    case "showPopup": {
-      // TeaseScript popups return nothing; the legacy result was the seconds until the player closed it.
-      const root = context.statementRoot;
-      if (args.length !== 1 || root === null || !isHoistable(root, node, context)) {
+    case "showPopup":
+      if (args.length !== 1)
         return unsupportedExpression(
           context,
           node,
-          "SX_POPUP_POSITION",
-          "The popup's waiting time is used inside a larger expression that cannot run around the popup; assign showPopup() to a variable first.",
+          "SX_POPUP_ARITY",
+          "showPopup() must have one argument.",
         );
-      }
-      context.popupTimers += 1;
-      const start = context.popupTimers === 1 ? "popupStart" : `popupStart${context.popupTimers}`;
-      // Legacy timing started once the message was computed.
-      let message = args[0]!;
-      if (!isPure(call.arguments[0]!, context)) {
-        const name = start.replace("popupStart", "popupMessage");
-        context.prelude.push({ kind: "let", name, value: message, span: node.span });
-        message = { kind: "variable", name };
-      }
-      // The workaround's OK button closes the popup, so its waiting time is the popup's, in whole seconds as legacy
-      // counted them.
-      if (!context.accepted.has("showPopup")) {
-        const [text] = popupStatements(message, node.span, context);
-        context.prelude.push(text!);
-        return {
-          kind: "call",
-          name: "toInteger",
-          positional: [
-            {
-              kind: "binary",
-              operator: "/",
-              left: { kind: "button", label: { kind: "literal", value: "OK" }, timeout: null },
-              right: { kind: "duration", value: 1, unit: "s" },
-            },
-          ],
-          named: {},
-        };
-      }
-      const seconds = currentSeconds();
-      addDiagnostic(
-        context,
-        "SX_POPUP_ELAPSED",
-        "warning",
-        `showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getAbsoluteDateTime().toSeconds(), in whole seconds.`,
-        node.span,
-      );
-      context.prelude.push(
-        { kind: "let", name: start, value: seconds, span: node.span },
-        ...popupStatements(message, node.span, context),
-      );
+      // The legacy result was the whole seconds until the player closed the popup; showPopup gives how long it was
+      // open as a duration (V30 §31).
       return {
-        kind: "binary",
-        operator: "-",
-        left: seconds,
-        right: { kind: "variable", name: start },
+        kind: "call",
+        name: "toInteger",
+        positional: [
+          {
+            kind: "binary",
+            operator: "/",
+            left: { kind: "call", name: "showPopup", positional: args, named: {} },
+            right: { kind: "duration", value: 1, unit: "s" },
+          },
+        ],
+        named: {},
       };
-    }
     case "getTime":
       // Legacy getTime() returned Unix seconds; TeaseScript getTime() is the local time of day (#532).
       return args.length === 0
@@ -18491,9 +18499,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_URL_ARITY",
           "useUrl() must have one argument.",
         );
-      if (context.accepted.has("openUrl"))
-        return { kind: "call", name: "openUrl", positional: args, named: {} };
-      // Legacy useUrl returned nothing; the link and its button run before the statement.
+      // Legacy useUrl returned nothing; the address opens before the statement.
       context.prelude.push(...urlStatements(args[0]!, node.span, context));
       return { kind: "literal", value: null };
     }
@@ -22293,56 +22299,76 @@ function switchState(command: string): "ON" | "OFF" | null {
   return null;
 }
 
-/** A popup, or its workaround while main does not implement showPopup: the message and an OK button. */
-function popupStatements(
-  message: IrExpression,
-  span: SourceSpan | null,
-  context: LowerContext,
-): IrStatement[] {
-  if (context.accepted.has("showPopup")) return [{ kind: "showPopup", message, span }];
-  addDiagnostic(
-    context,
-    "SX_POPUP_WORKAROUND",
-    "warning",
-    "Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.",
-    span,
-  );
-  return [
-    { kind: "say", value: message, span },
-    { kind: "showButton", label: { kind: "literal", value: "OK" }, timeout: null, span },
-  ];
+/** A popup (V30 §31): the message in a dialog that the player closes. */
+function popupStatements(message: IrExpression, span: SourceSpan | null): IrStatement[] {
+  return [{ kind: "showPopup", message, span }];
 }
 
-/** openUrl(), or its workaround while main does not implement it: the link in the chat and a button to continue. */
+/** File types a written address without a scheme names a page of the package by, not a web site. */
+const PAGE_EXTENSIONS = new Set(["html", "htm", "txt", "pdf", "jpg", "jpeg", "png", "gif"]);
+
+/**
+ * openUrl() (V30 §33), which opens only http and https addresses. A written address without its scheme, which the
+ * computer's browser completed, gets https://; empty text opened no page, and a page of the package cannot open.
+ */
 function urlStatements(
   url: IrExpression,
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
-  if (context.accepted.has("openUrl"))
-    return [
-      {
-        kind: "expression",
-        expression: { kind: "call", name: "openUrl", positional: [url], named: {} },
+  let address = url;
+  if (
+    url.kind === "literal" &&
+    typeof url.value === "string" &&
+    !/^https?:\/\//iu.test(url.value)
+  ) {
+    const written = url.value.trim();
+    if (written === "") {
+      addDiagnostic(
+        context,
+        "SX_OPEN_URL_EMPTY",
+        "warning",
+        "useUrl() of empty text opened no page, so nothing opens here.",
         span,
-      },
-    ];
-  addDiagnostic(
-    context,
-    "SX_OPEN_URL_WORKAROUND",
-    "warning",
-    "Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.",
-    span,
-  );
-  return [
-    systemSay(
-      url.kind === "literal" && typeof url.value === "string"
-        ? { kind: "literal", value: `Open this link: ${url.value}` }
-        : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
-      span,
+      );
+      return [];
+    }
+    const host = written.split("/")[0]!;
+    const suffix = host.slice(host.lastIndexOf(".") + 1).toLowerCase();
+    if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/iu.test(host) || PAGE_EXTENSIONS.has(suffix)) {
+      addDiagnostic(
+        context,
+        "SX_OPEN_URL_PAGE",
+        "warning",
+        `useUrl() opened ${written} on the player's computer, which a package cannot open; a system notice says so.`,
+        span,
+      );
+      return [
+        systemSay(
+          {
+            kind: "literal",
+            value: `The page ${written} that the original opened is not available here.`,
+          },
+          span,
+          context,
+        ),
+      ];
+    }
+    addDiagnostic(
       context,
-    ),
-    { kind: "showButton", label: { kind: "literal", value: "Continue" }, timeout: null, span },
+      "SX_OPEN_URL_SCHEME",
+      "warning",
+      "useUrl() named this address without its scheme, which the computer's browser completed; openUrl() opens it with https://.",
+      span,
+    );
+    address = { kind: "literal", value: `https://${written}` };
+  }
+  return [
+    {
+      kind: "expression",
+      expression: { kind: "call", name: "openUrl", positional: [address], named: {} },
+      span,
+    },
   ];
 }
 

@@ -204,13 +204,6 @@
       "diff": "native-sessions.diff"
     },
     {
-      "id": "manual-cornertime",
-      "layer": "source",
-      "category": "b",
-      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
-      "diff": "manual-cornertime.diff"
-    },
-    {
       "id": "tease-nipples-spec",
       "layer": "source",
       "category": "b",
@@ -300,6 +293,42 @@
       "category": "b",
       "reason": "setupAvailability loaded toy.availability, which legacy storage rebuilt from the day keys toy.availability.<day> as a list indexed by day, kept the entries of the last 20 days with eachWithIndex, and saved them back, which replaced all day keys. eachWithIndex on a loaded value does not convert, so the cleanup saved an empty map and removed every day; and the rebuilt list holds an entry for every day since 1970, which is slow to walk. Read the days from 20 days ago to two days ahead directly instead: availability is only ever saved for the day the session runs, which a later session in a time zone behind sees as a day or, across the date line, two days ahead; a day without an entry, or with none above 0, was left out by the legacy test too. Where nothing was stored, the empty save removes nothing.",
       "diff": "availability-cleanup.diff"
+    },
+    {
+      "id": "webcam-cornertime-export",
+      "layer": "source",
+      "category": "b",
+      "reason": "Webcam corner time (owner request 2026-10-13: restore it natively): webCornertime wrote the base64 JSON task with a header and a footer to toy_ct_input.txt through writeCTfile (a File of a computed path), opened it with useFile() so the player could copy it into cornertime.github.io, and deleted the file at the end, none of which a package can do. Build the same text in a variable and show it, without writeCTfile and the delete; an output edit (export-ct-input) shows it with exportText as the file toy_ct_input.txt, where the player copies or downloads it. The task's JSON and Base64, the report's parsing, and the 'Cornertime with webcam' setting and its test convert natively.",
+      "diff": "webcam-cornertime-export.diff"
+    },
+    {
+      "id": "encourage-precedence",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): setupCornertime's encouragement phrases were written [four phrases] + context==\"training\" ? (training phrases) : [\"You should train that each day! Ask me for it!\"]; + binds tighter than == and ?:, so Groovy compared the list plus the context with \"training\", which never held, and the phrases were only the last one. The evident intent is the four common phrases plus the training or the play phrases: the conditional is parenthesized.",
+      "diff": "encourage-precedence.diff"
+    },
+    {
+      "id": "disable-webcam-cornertime",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): after a failed webcam corner time test, the answer yes to \"Do you want to disable the webcam thing altogether and let me give you normal corner time?\" set toys.webcornertime to true, which kept the webcam corner time on, so the player could not leave it this way. The evident intent is to switch it off: the answer sets false.",
+      "diff": "disable-webcam-cornertime.diff"
+    },
+    {
+      "id": "export-ct-input",
+      "layer": "output",
+      "category": "b",
+      "reason": "Webcam corner time (owner request 2026-10-13), with the source patch webcam-cornertime-export: the corner time task the player copies into cornertime.github.io, which legacy wrote to toy_ct_input.txt and opened in the computer's editor, shows with exportText as that file, where the player copies or downloads it. exportText has no legacy form, so this is an output edit of the generated showPopup.",
+      "file": "toy/cornertime.tease",
+      "baseHash": "0f28028c0fc987268a2d9a15ba482e9ff825cc88069d8912107472ed22a5992c",
+      "edits": [
+        {
+          "find": "  showPopup ctinput\n",
+          "replace": "  exportText(ctinput, fileName: \"toy_ct_input.txt\")\n",
+          "count": 1
+        }
+      ]
     }
   ]
 }

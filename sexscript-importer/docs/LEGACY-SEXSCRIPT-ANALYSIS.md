@@ -168,7 +168,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `show(x)` | `say x` | `show` replaced the text area; `show(null)`/`show()` only cleared it and are dropped. |
 | `showButton(label)` | `showButton label` | Legacy default timeout was 30 days. |
 | `showButton(label, n)` / its result | `showButton label, timeout: n s` / `(showButton label, timeout: n s) / 1 s` | Compact timeout form (#531, implemented in #534); the elapsed result is a duration, legacy returned seconds. The timeout names its unit: `timeout: 30 s` for a number, `timeout: t * 1 s` for a value known at runtime (#512). |
-| `showPopup(x)` | `showPopup x` | Accepted, not implemented yet; a used elapsed result is measured with `getAbsoluteDateTime().toSeconds()`. |
+| `showPopup(x)` | `showPopup x` | Native; a used elapsed result is `toInteger(showPopup(x) / 1 s)`. |
 | `getBoolean(text[, yes, no])` | `say text` + `(choose yes: ..., no: ...) == "yes"` | First button means true; default labels Yes/No. |
 | `getSelectedValue(text, [a, b])` | `say text` + `choose 0: a, 1: b` | Numeric values return the zero-based index. A runtime list becomes `{ value, text }` choice objects (PR #515). |
 | `getString` / `getFloat` | `say text` + `askText default: d` / `askNumber default: d` | A null or blank default opens the input without a prefill (#618); legacy showed it. Cancel-to-null is lost. |
@@ -184,7 +184,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `setImage(f)` / `setImage(null)` | `showImage f` / `hideImage` | Byte-array images and video files need manual work. |
 | `playSound(f)` | `playAudio f` | Blocking. `playSound(null)` stopped every sound: `stopAudio`. |
 | `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds: `stopAudio`. |
-| `useUrl(u)` | `openUrl(u)` | Accepted, not implemented yet. |
+| `useUrl(u)` | `openUrl(u)` | Native; an address without its scheme gets `https://`. |
 | `setInfos(...)` | `---` file header | V30 §41, ADR 0023: title, author, and summary become `title`, `author`, and `description`, the legacy catalog tags `keywords`; version, status, color, language, and computed values stay a comment after the header. |
 | returned script name / `return null` | `goto "x.tease"` / `exit` | ADR 0022: paths from the package root, the entry is `main.tease`, a computed name becomes `goto script(name)`, a missing script `exit`; every file ends with a transfer or `exit`. Chaining is not a function call, so no `call`. |
 | `exit()`, `System.exit(n)` | `exit` | Ends the session; the Player stays open. |

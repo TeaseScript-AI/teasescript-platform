@@ -605,13 +605,13 @@ function withTypedTextReads(
         let code: string | null = null;
         const route = (value: IrExpression): IrExpression => {
           const next = mapChildren(value, route);
-          // The text helper's read of a key saved as numbers or booleans (lowered so already) reads as stored text too.
+          // The text helper's read of a key saved as numbers or booleans (lowered so already), also of a computed key,
+          // reads as stored text too.
           const wrapped =
             next.kind === "call" && next.name === textHelper && next.positional.length === 1
               ? next.positional[0]!
               : null;
-          if (wrapped?.kind === "load" && literalKey(wrapped.key) !== null)
-            return storedText(wrapped, collections);
+          if (wrapped?.kind === "load") return storedText(wrapped, collections);
           const key = next.kind === "load" ? literalKey(next.key) : null;
           if (
             next.kind !== "load" ||

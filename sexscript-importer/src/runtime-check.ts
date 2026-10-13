@@ -378,7 +378,13 @@ function interactionAnswer(action: Data, visit: number) {
   if (action.interactionKind === "form") return { kind: "submit" };
   switch (action.interactionKind) {
     case "button":
+    case "popup":
       return { kind: "activate" };
+    // An openUrl opened its address, and an exportText dialog is closed.
+    case "url":
+      return { kind: "opened" };
+    case "export":
+      return { kind: "close" };
     case "text":
       return { kind: "submittedText", submittedText: TEXT_ANSWERS[visit % TEXT_ANSWERS.length] };
     case "number":

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "sorted-rolls",
+      "layer": "source",
+      "category": "b",
+      "reason": "Semantics bridge (coordinator decision 2026-10-13, option b; not a legacy bug): RollScore and showRolls sort the dice they are given with rolledDice = rolledDice.sort(), and ReRoll its RolledDice, before reversing them. Groovy's sort() sorted the caller's list in place, so after RollScore(OpponentRolls, …) the main loop's showRolls(OpponentRolls, …) listed the dice in ascending order; a TeaseScript parameter holds a copy (ADR 0014), so that change cannot reach the caller, and the converter refuses such writes. The main loop sorts OpponentRolls and PlayerRolls itself right after rolling them (both now start as empty lists instead of null, so they are known lists), and the functions sort their own copy with sort(false), which leaves the caller's list as it is; their dice parameters are declared List. The player sees the same dice in the same order and the same scores as in the legacy game.",
+      "diff": "sorted-rolls.diff"
+    }
+  ]
+}
