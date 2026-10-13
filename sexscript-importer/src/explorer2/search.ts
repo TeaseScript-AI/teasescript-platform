@@ -105,6 +105,13 @@ interface Child {
   readonly progress?: true;
   /** An answer child where its parent came closer to a watched condition than any play before (see `watched`). */
   readonly lead?: true;
+  /**
+   * For a decision child whose way other plays took already: the watched way (see `watched`) it is to lead to, from a
+   * state where that way's condition would turn (see `reachGate`).
+   */
+  readonly reach?: number;
+  /** A decision child whose parent was in a state where its watched condition would turn (see `observe`). */
+  readonly ready?: true;
   /** For an answer child, its `instruction|answer|state` key in `answered`, freed again if the child is dropped. */
   readonly key?: string;
   /** For a decision child, its way and the relevant state its parent was in after the target's step. */
@@ -135,6 +142,14 @@ const MAX_WATCHED = 8;
 /** Times a watched condition's lead gives answer children first, at most, and the interactions from it they answer. */
 const MAX_LEAD_ROUNDS = 64;
 const LEAD_STEPS = 2;
+/**
+ * Gates solved toward one watched way from its ready states, and children of that way from such states, at most; and the
+ * candidates a gate gets.
+ */
+const MAX_REACH = 4;
+const REACH_BUDGET = 128;
+/** The decisions before a watched condition kept from a play that came to it. */
+const MAX_REACHER = 256;
 /** What an answer child at a lead has on top of its score: it comes before every other. */
 const LEAD_SCORE = 1e18;
 /** Gates one target's solving adds, at most (see `solve`). */
@@ -435,19 +450,25 @@ export function explore2(
     );
   /** A child's score now: a decision target's gain shrinks as code gets covered, an answer's as its place gets tried. */
   const scoreNow = (child: Child): number =>
-    child.target !== null
-      ? (gain(child.target.instruction, 1 - child.target.way) +
-          (boosts.get(child.target.instruction * 2 + (1 - child.target.way)) ?? 0)) /
-        // The checks a way took so far count against it (squared), so that ways not tried yet get their turn: one that
-        // took a few hundred falls behind any untried one with a few lines behind it.
-        (1 +
-          (checksBySide.get(child.target.instruction * 2 + (1 - child.target.way)) ?? 0) /
-            FIRST_BUDGET) **
-          2
-      : child.place >= 0
-        ? answerScore(child.place, child.answer, child.path.inputs.length - 1) +
-          (child.lead === true ? LEAD_SCORE : 0)
-        : child.score;
+    child.reach !== undefined
+      ? // As a way's: the checks its gates took so far count against it.
+        gain(child.reach >> 1, child.reach & 1) /
+        (1 + (reachChecks.get(child.reach) ?? 0) / FIRST_BUDGET) ** 2
+      : child.ready === true && child.target !== null
+        ? gain(child.target.instruction, 1 - child.target.way)
+        : child.target !== null
+          ? (gain(child.target.instruction, 1 - child.target.way) +
+              (boosts.get(child.target.instruction * 2 + (1 - child.target.way)) ?? 0)) /
+            // The checks a way took so far count against it (squared), so that ways not tried yet get their turn: one that
+            // took a few hundred falls behind any untried one with a few lines behind it.
+            (1 +
+              (checksBySide.get(child.target.instruction * 2 + (1 - child.target.way)) ?? 0) /
+                FIRST_BUDGET) **
+              2
+          : child.place >= 0
+            ? answerScore(child.place, child.answer, child.path.inputs.length - 1) +
+              (child.lead === true ? LEAD_SCORE : 0)
+            : child.score;
 
   /**
    * The instructions no path ran that a way leads to, up to where it meets code that ran, within its function and the
@@ -473,6 +494,150 @@ export function explore2(
         }
     }
     return seen.size;
+  };
+
+  /**
+   * Whether code from `start` on comes to instruction `goal` without passing `avoid`, played or not (into calls and on
+   * after them, as `gain`, and not back through returns).
+   */
+  const leadsTo = (start: number, goal: number, avoid: number): boolean => {
+    if (!Number.isInteger(start) || start === avoid) return false;
+    const seen = new Set([start]);
+    const stack = [start];
+    // The functions it is in without having called them (from `start` out): a return from one of those goes on where
+    // the function's calls do (a helper's decision whose way returns to the condition); a function it called goes on
+    // after that call. A return met before its function was one of those is gone through again once it is.
+    const outer = new Set([functionAt(start)]);
+    const parked = new Map<number, number[]>();
+    while (stack.length > 0 && seen.size < 10_000) {
+      const at = stack.pop()!;
+      if (at === goal) return true;
+      const instruction = instructions[at];
+      const returns = instruction?.kind === "returnValue" || instruction?.kind === "returnVoid";
+      const from = returns ? functionAt(at) : -1;
+      if (returns && !outer.has(from)) {
+        const waiting = parked.get(from) ?? [];
+        waiting.push(at);
+        parked.set(from, waiting);
+      }
+      const after =
+        instruction?.kind === "callFunction"
+          ? [Number(instruction.returnInstruction)]
+          : returns && outer.has(from)
+            ? (callersOf().get(from) ?? [])
+            : [];
+      if (returns)
+        for (const each of after) {
+          const into = functionAt(each);
+          if (outer.has(into)) continue;
+          outer.add(into);
+          stack.push(...(parked.get(into) ?? []));
+          parked.delete(into);
+        }
+      if (LEAVES.has(String(instruction?.kind)) && after.length === 0) continue;
+      for (const following of [
+        ...(LEAVES.has(String(instruction?.kind)) ? [] : (next[at] ?? [])),
+        ...after,
+      ])
+        if (following !== avoid && !seen.has(following)) {
+          seen.add(following);
+          stack.push(following);
+        }
+    }
+    return false;
+  };
+  /** Per function (by ID), where its calls go on after it returns; worked out when first needed. */
+  let callers: Map<number, number[]> | null = null;
+  const callersOf = (): Map<number, number[]> => {
+    if (callers === null) {
+      callers = new Map();
+      for (const each of instructions)
+        if (each.kind === "callFunction" && typeof each.functionId === "number") {
+          const known = callers.get(each.functionId) ?? [];
+          known.push(Number(each.returnInstruction));
+          callers.set(each.functionId, known);
+        }
+    }
+    return callers;
+  };
+  /** The innermost function (by ID) whose body an instruction is in, or -1. */
+  const functionAt = (index: number): number => {
+    let found = -1;
+    let size = Infinity;
+    for (const declared of list(plan.functions)) {
+      const entry = Number(declared.entryInstruction);
+      const end = Number(declared.endInstruction);
+      if (entry <= index && index <= end && end - entry < size) {
+        found = Number(declared.id);
+        size = end - entry;
+      }
+    }
+    return found;
+  };
+  /** Where a decision's way goes on. */
+  const wayStart = (instruction: number, way: number): number =>
+    way === 0 ? instruction + 1 : Number(instructions[instruction]?.target);
+  /** Children queued from ready states per watched way (see `take`). */
+  const readyQueued = new Map<number, number>();
+  /** Gate children queued toward each watched way (see `reachGate`). */
+  const reachQueued = new Map<number, number>();
+  /** The step from which a check's turn counts: a gate's, from it on (it may have taken either way before). */
+  let turnFrom = -Infinity;
+  /** Checks gate children took toward each watched way. */
+  const reachChecks = new Map<number, number>();
+  /** Gate children tried toward each watched way. */
+  const reachTried = new Map<number, number>();
+  /**
+   * A play that came to a state where a watched way's condition would turn (distance 0) but did not come to that
+   * condition after it: of the decisions a play that came to the condition made before it, the last one this play made
+   * the other way from there is a gate, solved from this play (a timed hit that a counter's state needs before the
+   * reward it guards), when only the way the other play took leads on to the condition without coming back to it (not
+   * a helper's decision, whose ways both return).
+   */
+  const reachGate = (
+    played: Played,
+    kept: Played,
+    watching: (typeof watched)[number],
+    step: number,
+  ): void => {
+    const side = watching.side;
+    const queuedSoFar = reachQueued.get(side) ?? 0;
+    if (queuedSoFar >= MAX_REACH) return;
+    const goal = side >> 1;
+    const after = played.decisions.filter((decision) => decision.step > step);
+    if (after.some((decision) => decision.instruction === goal)) return;
+    // The reacher's decisions that only its way leads on from to the condition, last first: worked out once.
+    watching.gates ??= watching.reacher
+      .filter(
+        ({ instruction, way }, at, all) =>
+          all.findLastIndex((each) => each.instruction === instruction) === at &&
+          leadsTo(wayStart(instruction, way), goal, instruction) &&
+          !leadsTo(wayStart(instruction, 1 - way), goal, instruction),
+      )
+      .reverse();
+    let gate: Decision | undefined;
+    for (const { instruction, way } of watching.gates) {
+      gate = after.find((decision) => decision.instruction === instruction && decision.way !== way);
+      if (gate !== undefined) break;
+    }
+    if (gate === undefined) return;
+    reachQueued.set(side, queuedSoFar + 1);
+    const child: Child = {
+      path: played.path,
+      score: 0,
+      target: gate,
+      parent: kept,
+      budget: REACH_BUDGET,
+      tried: 0,
+      place: -1,
+      answer: "",
+      reach: side,
+    };
+    decisionsQueue.push({ ...child, score: scoreNow(child) });
+    if (process.env.SX_V2_DEBUG)
+      process.stderr.write(
+        `reach ${goal}:${side & 1} gate ${gate.instruction}:${1 - gate.way} step ${gate.step}\n`,
+      );
   };
 
   /** Traced replays of plays, by play, with the step each goes up to: the latest ones (see {@link MAX_TRACED}). */
@@ -554,6 +719,41 @@ export function explore2(
         null
       );
     };
+
+  /**
+   * Queues the answers not given at a play's interaction `step` in its relevant state, a child each (first of all, at a
+   * lead: see `watched`).
+   */
+  const queueAnswers = (kept: Played, step: number, lead: boolean): void => {
+    const interaction = kept.interactions[step];
+    if (interaction === undefined) return;
+    const given = kept.inputs[step];
+    for (const option of interaction.options) {
+      if (given !== undefined && sameInput(option, given)) continue;
+      const key = `${interaction.instruction}|${JSON.stringify(option)}|${interaction.state}`;
+      if (answered.has(key)) continue;
+      answered.add(key);
+      // Interactions answered otherwise least often first, and of those, earlier steps first.
+      answersQueue.push({
+        path: {
+          inputs: [...kept.inputs.slice(0, step), option],
+          draws: kept.path.draws,
+          inherited: kept.draws,
+          ...startOf(kept.path),
+        },
+        score:
+          answerScore(interaction.instruction, answerKey(option), step) + (lead ? LEAD_SCORE : 0),
+        target: null,
+        parent: kept,
+        budget: 0,
+        tried: 0,
+        place: interaction.instruction,
+        answer: answerKey(option),
+        key,
+        ...(lead ? { lead: true as const } : {}),
+      });
+    }
+  };
 
   /**
    * Counts a played path and queues its children: `shared`, the interaction up to which the path is its parent's (whose
@@ -673,7 +873,7 @@ export function explore2(
       const resume = played.resumes[step];
       if (resume === undefined) continue;
       resumes[step] = resume;
-      resumesKept += resume.tagged.json.length;
+      resumesKept += resume.taggedChars;
     }
     // What children need of the play: its inputs, draws, interactions, start, and those resume points. Decision children
     // replay it with a trace; answer children take their own coverage and decisions after the step they change.
@@ -714,28 +914,38 @@ export function explore2(
         answer: "",
       });
     for (const lead of leadSteps)
-      if (lead.watched.best === lead.distance) lead.watched.lead = { play: kept, step: lead.step };
+      if (lead.watched.best === lead.distance && lead.distance > 0)
+        lead.watched.lead = { play: kept, step: lead.step };
     recent.push(kept);
     if (recent.length > 64) recent.splice(0, recent.length - 64);
     // Only the latest plays keep their resume points; a child of an older one plays from the start.
     resumeLists.push(resumes);
     while (resumesKept > MAX_RESUME_TEXT && resumeLists.length > 1) {
       const oldest = resumeLists.shift()!;
-      for (const resume of oldest)
-        if (resume !== undefined) resumesKept -= resume.tagged.json.length;
+      for (const resume of oldest) if (resume !== undefined) resumesKept -= resume.taggedChars;
       oldest.length = 0;
     }
+    // Where the play was in a state in which a watched way's condition would turn (see `observe`).
+    const readyFrom = new Map<number, number>();
+    for (const each of [...leadSteps.filter((lead) => lead.distance === 0), ...readyNow])
+      if (!readyFrom.has(each.watched.side)) readyFrom.set(each.watched.side, each.step);
     // Decisions whose other way no path took: a child each, by the code that way leads to.
     for (const decision of played.decisions) {
       if (decision.step <= shared) continue;
       const other = decision.instruction * 2 + (1 - decision.way);
       if (ways.has(other)) continue;
+      // A watched way's condition that came after such a state: its child comes first, whatever its ways cost so far (a
+      // few such children per way).
+      const ready =
+        decision.step > (readyFrom.get(other) ?? Infinity) &&
+        (readyQueued.get(other) ?? 0) < MAX_REACH;
+      if (ready) readyQueued.set(other, (readyQueued.get(other) ?? 0) + 1);
       // A few children per way and relevant state, so that a target comes back from states that arrive later (a
       // stored flag, a counter's value), up to a bound per way.
       const count = queued.get(other) ?? 0;
       const sideState = `${other}|${played.interactions[decision.step]?.state ?? ""}`;
       const here = queuedHere.get(sideState) ?? 0;
-      if (count >= options.maxAttempts * SIDE_STATES * 2 || here >= 2) continue;
+      if (!ready && (count >= options.maxAttempts * SIDE_STATES * 2 || here >= 2)) continue;
       queued.set(other, count + 1);
       queuedHere.set(sideState, here + 1);
       const child: Child = {
@@ -749,6 +959,7 @@ export function explore2(
         answer: "",
         sideState,
         reserved: true,
+        ...(ready ? { ready: true as const } : {}),
       };
       lastChildOf.set(other, child);
       decisionsQueue.push({ ...child, score: scoreNow(child) });
@@ -759,42 +970,23 @@ export function explore2(
     for (const lead of leadSteps)
       if (
         lead.closer &&
+        lead.distance > 0 &&
         lead.watched.best === lead.distance &&
         lead.watched.rounds < MAX_LEAD_ROUNDS
       ) {
         lead.watched.rounds += 1;
         for (let step = lead.step; step < lead.step + LEAD_STEPS; step += 1) leadAt.add(step);
       }
+    // A state where it would turn is no place to answer otherwise or walk from: the way's condition has to come. One
+    // gate per watched way and play, from its first such state.
+    for (const [side, step] of readyFrom) {
+      const watching = watched.find((each) => each.side === side);
+      if (watching !== undefined) reachGate(played, kept, watching, step);
+    }
+    readyNow = [];
     // Answers not given at an interaction in its relevant state: a child each.
-    played.interactions.forEach((interaction, step) => {
-      if (!answers(step)) return;
-      const given = played.inputs[step];
-      for (const option of interaction.options) {
-        if (given !== undefined && sameInput(option, given)) continue;
-        const key = `${interaction.instruction}|${JSON.stringify(option)}|${interaction.state}`;
-        if (answered.has(key)) continue;
-        answered.add(key);
-        // Interactions answered otherwise least often first, and of those, earlier steps first.
-        answersQueue.push({
-          path: {
-            inputs: [...played.inputs.slice(0, step), option],
-            draws: played.path.draws,
-            inherited: played.draws,
-            ...startOf(played.path),
-          },
-          score:
-            answerScore(interaction.instruction, answerKey(option), step) +
-            (leadAt.has(step) ? LEAD_SCORE : 0),
-          target: null,
-          parent: kept,
-          budget: 0,
-          tried: 0,
-          place: interaction.instruction,
-          answer: answerKey(option),
-          key,
-          ...(leadAt.has(step) ? { lead: true as const } : {}),
-        });
-      }
+    played.interactions.forEach((_, step) => {
+      if (answers(step)) queueAnswers(kept, step, leadAt.has(step));
     });
     for (const photo of photos) {
       answered.add(photo.key);
@@ -906,7 +1098,9 @@ export function explore2(
     const shortened = { ...candidate, inputs: candidate.inputs.slice(0, target.step + grown) };
     const checkStarted = performance.now();
     const turned = (decision: Decision) =>
-      decision.instruction === target.instruction && decision.way !== target.way;
+      decision.instruction === target.instruction &&
+      decision.way !== target.way &&
+      decision.step >= turnFrom;
     const check = runner.play(shortened, {
       extend: withPlaced(candidate.placed, goOn(guide)),
       maxSteps: Math.min(options.maxSteps, target.step + grown + past),
@@ -1076,7 +1270,13 @@ export function explore2(
     best: number;
     lead: { readonly play: Played; readonly step: number } | null;
     rounds: number;
+    /** The last decisions a play that came to the condition made before it (see `reachGate`). */
+    reacher: readonly { readonly instruction: number; readonly way: number }[];
+    /** Of those, the gates (see `reachGate`), once worked out. */
+    gates?: readonly { readonly instruction: number; readonly way: number }[];
   }[] = [];
+  /** The first state of the play under way where each watched condition would turn, as watched before. */
+  let readyNow: { watched: (typeof watched)[number]; step: number }[] = [];
   let leadsNow: {
     watched: (typeof watched)[number];
     step: number;
@@ -1084,7 +1284,7 @@ export function explore2(
     /** Whether it was measured before: the first measure is no progress. */
     closer: boolean;
   }[] = [];
-  const watch = (target: Decision): void => {
+  const watch = (target: Decision, parent: Played): void => {
     const side = target.instruction * 2 + (1 - target.way);
     // A way covered since leaves its place to another.
     for (let at = watched.length - 1; at >= 0; at -= 1)
@@ -1093,14 +1293,20 @@ export function explore2(
     const instruction = instructions[target.instruction];
     const condition = instruction?.condition ?? instruction?.expression;
     if (!comparesNumbers(condition)) return;
-    watched.push({
+    const entry: (typeof watched)[number] = {
       side,
       condition,
       wanted: target.way === 1,
       best: Infinity,
       lead: null,
       rounds: 0,
-    });
+      // The play the target comes from came to the condition.
+      reacher: parent.decisions
+        .filter((decision) => decision.order < target.order)
+        .slice(-MAX_REACHER)
+        .map(({ instruction, way }) => ({ instruction, way })),
+    };
+    watched.push(entry);
   };
   const observe = (snapshot: Data, step: number): boolean => {
     let closer = false;
@@ -1108,7 +1314,14 @@ export function explore2(
       if (ways.has(each.side)) continue;
       const found = conditionMeasure(each.condition, each.wanted, snapshot);
       if (!found.values.some((value) => typeof value === "number")) continue;
-      if (found.distance > 0 && found.distance < each.best) {
+      // A state where it would take its other way now, after one before: the play from there has to come to it.
+      if (found.distance === 0 && each.best === 0) {
+        if (!readyNow.some((ready) => ready.watched === each))
+          readyNow.push({ watched: each, step });
+        continue;
+      }
+      // Also where it would take its other way now (distance 0) the first time.
+      if (found.distance < each.best) {
         leadsNow.push({
           watched: each,
           step,
@@ -1134,9 +1347,10 @@ export function explore2(
    * it comes from, how many answers each offers, the stored keys with how many values the saved states hold for each,
    * and the clock; for a loop's condition, also the step.
    */
-  const signatureOf = (parent: Played, target: Decision): string => {
+  const signatureOf = (parent: Played, occurrences: readonly Decision[]): string => {
     const parts = new Set<string>();
-    for (const origin of target.origins) {
+    const target = occurrences[0]!;
+    for (const origin of new Set(occurrences.flatMap((occurrence) => [...occurrence.origins]))) {
       const index = Number(origin.slice(1));
       if (origin.startsWith("i")) {
         const interaction = parent.interactions[index];
@@ -1275,238 +1489,266 @@ export function explore2(
     }
     return false;
   };
+  /**
+   * The occurrences of a target's decision in its step that have origins: the latest first (a counter tested at each
+   * round of a loop has the most behind it at its last test), then the others in order (a helper called more than once
+   * can turn at any of its calls). Without origins, the first occurrence.
+   */
+  const occurrencesOf = (parent: Played, target: Decision): Decision[] => {
+    const occurs = (decision: Decision) =>
+      decision.instruction === target.instruction &&
+      decision.way === target.way &&
+      decision.step === target.step;
+    const found = parent.decisions.filter(
+      (decision) => occurs(decision) && decision.origins.size > 0,
+    );
+    if (found.length > 1) found.unshift(found.pop()!);
+    const first = parent.decisions.find(occurs);
+    return found.length > 0 || first === undefined ? found : [first];
+  };
   /** Typed answers conditions compared with so far, by ask (see `solve`). */
   const typedPool = new Map<number, Set<string>>();
   /** Gates found per decision way: earlier decisions that its failed checks took the other way (see `solve`). */
   const gatesOf = new Map<number, Set<number>>();
   /** Plays an unsolved target's last solve found worth playing (see `solve`). */
   let progress: { path: Path; from: number }[] = [];
+  /**
+   * Solves a way not taken yet at the occurrences of its decision in one step of `parent` (see `occurrencesOf`), each with
+   * what came before it, on one budget of candidates: the first is the target the rest of the search knows the way by.
+   */
   const solve = (
     parent: Played,
-    target: Decision,
+    occurrences: readonly Decision[],
     budget: number,
     skip: number,
     guide: Played,
     fresh: boolean,
   ): { path: Path; from: number } | "more" | null => {
+    const target = occurrences[0]!;
     let reason = "noOrigin";
-    let before: Set<Origin> | null = null;
     progress = [];
     const shortCircuit = shortCircuits(instructions[target.instruction]);
     let more = false;
-    let lastDomains: { origin: Origin; values: Value[] }[] = [];
+    // Per occurrence, the origins and their values its last phase tried (a climb goes on from them).
+    const lastDomains = new Map<Decision, { origin: Origin; values: Value[] }[]>();
     // Candidates so far, over both kinds of origins: the budget counts them all.
     let index = 0;
-    // Earlier decisions of the parent that a failed check took the other way (a candidate that starts a later visit or
-    // changes an answer can turn away before the target): the gates, whose origins a last phase also varies.
-    const parentWays = new Set(
-      parent.decisions
-        .filter((decision) => decision.order < target.order)
-        .map((decision) => decision.instruction * 2 + decision.way),
-    );
-    // Gates found for this target's way before (a later round skips the candidates that found them) and now.
+    // Gates found for this target's way before (a later round skips the candidates that found them) and now: earlier
+    // decisions of the parent that a failed check took the other way (a candidate that starts a later visit or changes an
+    // answer can turn away before the target), whose origins a last phase also varies.
     const side = target.instruction * 2 + (1 - target.way);
     const gateInstructions = gatesOf.get(side) ?? new Set<number>();
     gatesOf.set(side, gateInstructions);
-    const gateOf = (instruction: number) =>
-      parent.decisions.find(
-        (each) =>
-          each.instruction === instruction && each.order < target.order && each.origins.size > 0,
-      );
-    const gates = new Set<Decision>();
-    for (const instruction of gateInstructions) {
-      const gate = gateOf(instruction);
-      if (gate !== undefined) gates.add(gate);
-    }
-    const phases: ("data" | "control" | "gates")[] = [
-      "data",
-      "control",
-      ...(gates.size > 0 ? ["gates" as const] : []),
-    ];
-    phases: for (const phase of phases) {
-      const control = phase !== "data";
-      const of = (decision: Decision) => (control ? decision.origins : decision.dataOrigins);
-      // The dependency-closed prefix: earlier decisions linked to the target (and in the last phase, to the gates)
-      // through shared origins, and the form fields every one of them reads.
-      const origins = new Set<Origin>(of(target));
-      const linked = new Set<Decision>([target]);
-      if (phase === "gates")
-        for (const gate of gates) {
-          linked.add(gate);
-          for (const origin of gate.origins) origins.add(origin);
-        }
-      for (let grown = true; grown;) {
-        grown = false;
-        for (const decision of parent.decisions) {
-          if (decision.order >= target.order) break;
-          if (linked.has(decision) || ![...of(decision)].some((origin) => origins.has(origin)))
-            continue;
-          linked.add(decision);
-          for (const origin of of(decision))
-            if (!origins.has(origin)) {
-              origins.add(origin);
-              grown = true;
-            }
-        }
-      }
-      const fields = new Map<Origin, Set<string>>();
-      for (const decision of linked)
-        for (const [origin, read] of decision.fields)
-          fields.set(origin, new Set([...(fields.get(origin) ?? []), ...read]));
-      if (before !== null && origins.size === before.size) continue;
-      before = origins;
-      // The numbers the conditions compare with: a draw tries them (and one either side) first. With the texts they
-      // compare with, a typed answer may try them too (a text a helper checks character by character, a separator it
-      // looks for), alone and with characters around.
-      const near = new Set<number>();
-      const literals = new Set<string>();
-      for (const decision of linked) {
-        // The condition, and the arguments of the calls just before it whose results it reads (a helper given the text
-        // to look for).
-        const condition = [
-          instructions[decision.instruction]?.condition ??
-            instructions[decision.instruction]?.expression,
-          ...argumentsRead(instructions, decision.instruction),
-        ];
-        for (const value of numbersIn(condition))
-          for (const each of [value - 1, value, value + 1]) {
-            near.add(each);
-            literals.add(String(each));
-          }
-        for (const text of textsIn(condition))
-          if (text !== "")
-            for (const each of [text, `x${text}x`, `xxxxx${text}xxxxx`]) literals.add(each);
-      }
-      // Typed answers the conditions compare with, by the ask they reach: V1's goals of the target's other way and of
-      // the linked decisions either way.
-      const typed = new Map<number, Set<string>>();
-      for (const decision of linked) {
-        const instruction = instructions[decision.instruction];
-        const condition = instruction?.condition ?? instruction?.expression;
-        for (const wanted of [true, false])
-          for (const goal of goalsFor(runner.flow, condition, wanted, decision.instruction))
-            if (goal.source.kind === "ask")
-              for (const candidate of goal.candidates)
-                if (typeof candidate === "string")
-                  typed.set(
-                    goal.source.instruction,
-                    (typed.get(goal.source.instruction) ?? new Set()).add(candidate),
-                  );
-      }
-      // They join those of every condition solved so far, which come after them (and after the literals), as V1 gathers
-      // its directed answers per ask: an answer one condition compares with often passes another's check.
-      for (const [ask, texts] of typed) {
-        const pool = typedPool.get(ask) ?? new Set<string>();
-        for (const text of texts) if (pool.size < MAX_TYPED) pool.add(text);
-        typedPool.set(ask, pool);
-      }
-      // The origins nearest the target first.
-      const position = (origin: Origin) =>
-        origin.startsWith("i")
-          ? Number(origin.slice(1))
-          : origin.startsWith("d")
-            ? (parent.draws[Number(origin.slice(1))]?.step ?? 0) - 0.5
-            : -1;
-      const domains: { origin: Origin; values: Value[] }[] = [];
-      for (const origin of [...origins].sort((left, right) => position(right) - position(left))) {
-        const values = domainOf(
-          origin,
-          parent,
-          fields.get(origin),
-          runtime,
-          saved,
-          () => {
-            candidatesCut += 1;
-          },
-          target.step,
-          typed,
-          near,
-          literals,
-          typedPool,
+    // The origins and their values tried so far: at another occurrence or phase, the same ones make the same candidates.
+    const tried = new Set<string>();
+    phases: for (const phase of ["data", "control", "gates"] as const)
+      for (const occurrence of occurrences) {
+        const control = phase !== "data";
+        const of = (decision: Decision) => (control ? decision.origins : decision.dataOrigins);
+        const parentWays = new Set(
+          parent.decisions
+            .filter((decision) => decision.order < occurrence.order)
+            .map((decision) => decision.instruction * 2 + decision.way),
         );
-        if (values === null) {
-          reason = origin.startsWith("k") ? "stored" : "unknownDomain";
-          continue;
+        const gateOf = (instruction: number) =>
+          parent.decisions.find(
+            (each) =>
+              each.instruction === instruction &&
+              each.order < occurrence.order &&
+              each.origins.size > 0,
+          );
+        const gates = new Set<Decision>();
+        for (const instruction of gateInstructions) {
+          const gate = gateOf(instruction);
+          if (gate !== undefined) gates.add(gate);
         }
-        if (values.length > 0) domains.push({ origin, values });
-      }
-      if (domains.length === 0) continue;
-      lastDomains = domains;
-      reason = "noCandidate";
-      // The fewest origins changed first: one at a time, then pairs, and so on.
-      for (let changed = 1; changed <= domains.length; changed += 1) {
-        for (const assignment of assignments(domains, changed)) {
-          if (index >= budget) {
-            if (process.env.SX_V2_DEBUG)
-              process.stderr.write(
-                `more ${target.instruction}:${1 - target.way} step ${target.step} budget ${budget} domains ${domains.map((domain) => `${domain.origin}=${domain.values.length}`).join(",")}\n`,
-              );
-            if (budget < options.maxCandidates) {
-              more = true;
+        if (phase === "gates" && gates.size === 0) continue;
+        // The dependency-closed prefix: earlier decisions linked to the occurrence (and in the last phase, to the gates)
+        // through shared origins, and the form fields every one of them reads.
+        const origins = new Set<Origin>(of(occurrence));
+        const linked = new Set<Decision>([occurrence]);
+        if (phase === "gates")
+          for (const gate of gates) {
+            linked.add(gate);
+            for (const origin of gate.origins) origins.add(origin);
+          }
+        for (let grown = true; grown;) {
+          grown = false;
+          for (const decision of parent.decisions) {
+            if (decision.order >= occurrence.order) break;
+            if (linked.has(decision) || ![...of(decision)].some((origin) => origins.has(origin)))
+              continue;
+            linked.add(decision);
+            for (const origin of of(decision))
+              if (!origins.has(origin)) {
+                origins.add(origin);
+                grown = true;
+              }
+          }
+        }
+        const fields = new Map<Origin, Set<string>>();
+        for (const decision of linked)
+          for (const [origin, read] of decision.fields)
+            fields.set(origin, new Set([...(fields.get(origin) ?? []), ...read]));
+        // The numbers the conditions compare with: a draw tries them (and one either side) first. With the texts they
+        // compare with, a typed answer may try them too (a text a helper checks character by character, a separator it
+        // looks for), alone and with characters around.
+        const near = new Set<number>();
+        const literals = new Set<string>();
+        for (const decision of linked) {
+          // The condition, and the arguments of the calls just before it whose results it reads (a helper given the text
+          // to look for).
+          const condition = [
+            instructions[decision.instruction]?.condition ??
+              instructions[decision.instruction]?.expression,
+            ...argumentsRead(instructions, decision.instruction),
+          ];
+          for (const value of numbersIn(condition))
+            for (const each of [value - 1, value, value + 1]) {
+              near.add(each);
+              literals.add(String(each));
+            }
+          for (const text of textsIn(condition))
+            if (text !== "")
+              for (const each of [text, `x${text}x`, `xxxxx${text}xxxxx`]) literals.add(each);
+        }
+        // Typed answers the conditions compare with, by the ask they reach: V1's goals of the target's other way and of
+        // the linked decisions either way.
+        const typed = new Map<number, Set<string>>();
+        for (const decision of linked) {
+          const instruction = instructions[decision.instruction];
+          const condition = instruction?.condition ?? instruction?.expression;
+          for (const wanted of [true, false])
+            for (const goal of goalsFor(runner.flow, condition, wanted, decision.instruction))
+              if (goal.source.kind === "ask")
+                for (const candidate of goal.candidates)
+                  if (typeof candidate === "string")
+                    typed.set(
+                      goal.source.instruction,
+                      (typed.get(goal.source.instruction) ?? new Set()).add(candidate),
+                    );
+        }
+        // They join those of every condition solved so far, which come after them (and after the literals), as V1 gathers
+        // its directed answers per ask: an answer one condition compares with often passes another's check.
+        for (const [ask, texts] of typed) {
+          const pool = typedPool.get(ask) ?? new Set<string>();
+          for (const text of texts) if (pool.size < MAX_TYPED) pool.add(text);
+          typedPool.set(ask, pool);
+        }
+        // The origins nearest the target first.
+        const position = (origin: Origin) =>
+          origin.startsWith("i")
+            ? Number(origin.slice(1))
+            : origin.startsWith("d")
+              ? (parent.draws[Number(origin.slice(1))]?.step ?? 0) - 0.5
+              : -1;
+        const domains: { origin: Origin; values: Value[] }[] = [];
+        for (const origin of [...origins].sort((left, right) => position(right) - position(left))) {
+          const values = domainOf(
+            origin,
+            parent,
+            fields.get(origin),
+            runtime,
+            saved,
+            () => {
+              candidatesCut += 1;
+            },
+            target.step,
+            typed,
+            near,
+            literals,
+            typedPool,
+          );
+          if (values === null) {
+            reason = origin.startsWith("k") ? "stored" : "unknownDomain";
+            continue;
+          }
+          if (values.length > 0) domains.push({ origin, values });
+        }
+        if (domains.length === 0) continue;
+        lastDomains.set(occurrence, domains);
+        const key = JSON.stringify(domains);
+        if (tried.has(key)) continue;
+        tried.add(key);
+        reason = "noCandidate";
+        // The fewest origins changed first: one at a time, then pairs, and so on.
+        for (let changed = 1; changed <= domains.length; changed += 1) {
+          for (const assignment of assignments(domains, changed)) {
+            if (index >= budget) {
+              if (process.env.SX_V2_DEBUG)
+                process.stderr.write(
+                  `more ${target.instruction}:${1 - target.way} step ${target.step} budget ${budget} domains ${domains.map((domain) => `${domain.origin}=${domain.values.length}`).join(",")}\n`,
+                );
+              if (budget < options.maxCandidates) {
+                more = true;
+                break phases;
+              }
+              candidatesCut += 1;
+              reason = "candidates";
               break phases;
             }
-            candidatesCut += 1;
-            reason = "candidates";
-            break phases;
+            index += 1;
+            if (index <= skip) continue;
+            if (outOfTime()) return null;
+            // The checks of this way and signature over all its attempts, at most `maxCandidates`.
+            if ((checkedOf.get(checking) ?? 0) >= options.maxCandidates) {
+              candidatesCut += 1;
+              reason = "candidates";
+              break phases;
+            }
+            const checked = checkCandidate(parent, target, assignment, guide);
+            if (checked === null) continue;
+            if (checked.found !== null) return checked.found;
+            const { shortened, from } = checked;
+            // A check that never came to the target: the parent's decisions it took the other way were gates.
+            if (
+              phase !== "gates" &&
+              gates.size < MAX_GATES &&
+              !checked.check.decisions.some(
+                (decision) => decision.instruction === target.instruction,
+              )
+            )
+              for (const decision of checked.check.decisions)
+                if (
+                  !parentWays.has(decision.instruction * 2 + decision.way) &&
+                  parentWays.has(decision.instruction * 2 + (1 - decision.way))
+                ) {
+                  const gate = gateOf(decision.instruction);
+                  if (gate === undefined || gates.has(gate) || gates.size >= MAX_GATES) continue;
+                  gates.add(gate);
+                  gateInstructions.add(decision.instruction);
+                }
+            // `a and b` reads `b` only once `a` holds: a single change of what the condition read that did not turn it may
+            // still make it read more, which a play of it shows.
+            if (
+              shortCircuit &&
+              changed === 1 &&
+              progress.length < PROGRESS_PLAYS &&
+              [...assignment.keys()].every((origin) => of(occurrence).has(origin))
+            )
+              progress.push({ path: shortened, from });
           }
-          index += 1;
-          if (index <= skip) continue;
-          if (outOfTime()) return null;
-          // The checks of this way and signature over all its attempts, at most `maxCandidates`.
-          if ((checkedOf.get(checking) ?? 0) >= options.maxCandidates) {
-            candidatesCut += 1;
-            reason = "candidates";
-            break phases;
-          }
-          const checked = checkCandidate(parent, target, assignment, guide);
-          if (checked === null) continue;
-          if (checked.found !== null) return checked.found;
-          const { shortened, from } = checked;
-          // A check that never came to the target: the parent's decisions it took the other way were gates.
-          if (
-            phase !== "gates" &&
-            gates.size < MAX_GATES &&
-            !checked.check.decisions.some((decision) => decision.instruction === target.instruction)
-          )
-            for (const decision of checked.check.decisions)
-              if (
-                !parentWays.has(decision.instruction * 2 + decision.way) &&
-                parentWays.has(decision.instruction * 2 + (1 - decision.way))
-              ) {
-                const gate = gateOf(decision.instruction);
-                if (gate === undefined || gates.has(gate) || gates.size >= MAX_GATES) continue;
-                gates.add(gate);
-                gateInstructions.add(decision.instruction);
-                if (!phases.includes("gates")) phases.push("gates");
-              }
-          // `a and b` reads `b` only once `a` holds: a single change of what the condition read that did not turn it may
-          // still make it read more, which a play of it shows.
-          if (
-            shortCircuit &&
-            changed === 1 &&
-            progress.length < PROGRESS_PLAYS &&
-            [...assignment.keys()].every((origin) => of(target).has(origin))
-          )
-            progress.push({ path: shortened, from });
         }
       }
-    }
     // The first time a target runs out of single and joint changes with what its condition reads: climb on the distance
     // its condition is from the other way (a counter that must reach a value takes many changes, each one closer).
+    const climbing = occurrences.find(
+      (occurrence) => (lastDomains.get(occurrence)?.length ?? 0) > 0,
+    );
     if (
       skip === 0 &&
       fresh &&
       !climbedFor.has(checking) &&
-      lastDomains.length > 0 &&
+      climbing !== undefined &&
       !outOfTime()
     ) {
       climbedFor.add(checking);
-      const climbed = climb(parent, target, lastDomains, guide);
+      const climbed = climb(parent, climbing, lastDomains.get(climbing)!, guide);
       if (climbed !== null) return climbed;
     }
     // A counter that must reach a value over many steps rarely comes from changes of one play: its condition is watched
     // from the first round on, which leaves it unsolved or wanting more.
-    watch(target);
+    watch(target, parent);
     if (more) return "more";
     unsolved[reason] = (unsolved[reason] ?? 0) + 1;
     reasonOf.set(side, reason);
@@ -1678,7 +1920,35 @@ export function explore2(
     let parent = child.parent;
     // An answer child goes on from where its answer differs; a decision child from where its first change is.
     let resumeAt = child.target === null ? child.path.inputs.length - 1 : -1;
-    if (child.target !== null && child.parent !== null) {
+    if (child.reach !== undefined && child.target !== null && child.parent !== null) {
+      // A gate toward a watched way: solved once from its parent, with a fixed number of candidates.
+      const target = child.target;
+      const tries = reachTried.get(child.reach) ?? 0;
+      if (ways.has(child.reach) || tries >= MAX_REACH) continue;
+      reachTried.set(child.reach, tries + 1);
+      parent = tracedUpTo(child.parent, target.step);
+      const turned = occurrencesOf(parent, target);
+      if (turned.length === 0) {
+        charge(least, childStarted, 0);
+        continue;
+      }
+      checking = `reach|${child.reach}|${target.instruction * 2 + (1 - target.way)}`;
+      const checksBefore = checks;
+      turnFrom = target.step;
+      let found: ReturnType<typeof solve>;
+      try {
+        found = solve(parent, turned, child.budget, 0, child.parent, true);
+      } finally {
+        turnFrom = -Infinity;
+      }
+      reachChecks.set(child.reach, (reachChecks.get(child.reach) ?? 0) + checks - checksBefore);
+      if (found === null || found === "more") {
+        charge(least, childStarted, 0);
+        continue;
+      }
+      path = found.path;
+      resumeAt = found.from;
+    } else if (child.target !== null && child.parent !== null) {
       const target = child.target;
       const side = target.instruction * 2 + (1 - target.way);
       if (ways.has(side)) continue;
@@ -1700,21 +1970,8 @@ export function explore2(
       if (child.progress === true) progressAttempts.set(side, extra + 1);
       // The parent ran without a trace: its replay with origins, up to the target's step, is what the solver reads.
       parent = tracedUpTo(child.parent, target.step);
-      const turned =
-        parent.decisions.find(
-          (decision) =>
-            decision.instruction === target.instruction &&
-            decision.way === target.way &&
-            decision.step === target.step &&
-            decision.origins.size > 0,
-        ) ??
-        parent.decisions.find(
-          (decision) =>
-            decision.instruction === target.instruction &&
-            decision.way === target.way &&
-            decision.step === target.step,
-        );
-      if (turned === undefined) {
+      const turned = occurrencesOf(parent, target);
+      if (turned.length === 0) {
         unsolved.lost = (unsolved.lost ?? 0) + 1;
         attempts.set(side, count + 1);
         charge(least, childStarted, 0);
@@ -2177,8 +2434,12 @@ function withPlaced(
   };
 }
 
-/** An answer as the place it is given at tells answers apart: what it does, whatever random outcomes it fixes. */
+/**
+ * An answer as the place it is given at tells answers apart: what it does, whatever random outcomes it fixes. Waiting is
+ * one answer, whenever its deadline falls (a deadline that moves made every wait look new, and come first).
+ */
 function answerKey(input: ExplorerInput): string {
+  if (input.kind === "wait") return JSON.stringify({ kind: "wait" });
   const { random: _random, ...answer } = input;
   return JSON.stringify(answer);
 }

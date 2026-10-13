@@ -173,6 +173,27 @@ test(
         'let guess = askText "Your guess?"\nif isNumber(guess) == true {\n  say "A number."\n}\nexit\n',
       // Each `and` reads its right side only once its left side holds.
       rare: 'showButton "Roll"\nif chance(1) and chance(1) and chance(1) {\n  say "Rare."\n}\nexit\n',
+      // The last round's reward needs a count that only rounds bring, and a helper's gate that a draw must pass then (a
+      // helper called on both of the gate's ways does not join them).
+      gate:
+        "global function noop(value) {\n}\nglobal function gate(r) {\n  if r != 999 {\n    noop(0)\n    exit\n  }\n}\n" +
+        'let n = 0\nrepeat 8 {\n  let unused = askChoice a: "A", b: "B", c: "C", d: "D", e: "E"\n  let r = 999\n' +
+        '  if n >= 7 {\n    r = randomInteger(0..=1000)\n  }\n  gate(r)\n  noop(0)\n  if n >= 7 {\n    say "Reward"\n  }\n' +
+        "  n += 1\n}\nexit\n",
+      // A helper called three times in one step: the middle call is the one a draw can make it take its other way at.
+      middle:
+        'global function check(n) {\n  if n == 617 {\n    say "Reward"\n  }\n}\nlet a = randomInteger(0..=1)\n' +
+        "let b = randomInteger(0..=1000)\nlet c = randomInteger(0..=1)\ncheck(a + 10000)\ncheck(b)\ncheck(c + 10000)\nexit\n",
+      // A helper called in each of seven rounds: only the last round's call can take its other way.
+      last:
+        'global function check(n) {\n  if n == 617 {\n    say "Reward"\n  }\n}\nlet n = 0\nrepeat 7 {\n' +
+        "  let r = randomInteger(0..=1000)\n  check(r + (6 - n) * 10000)\n  n += 1\n}\nexit\n",
+      // A helper's later call, behind a guard on two toggles on and a third off, is the one that can take its other way.
+      later:
+        'global function check(n) {\n  if n {\n    say "Reward"\n  }\n}\nlet picked = askBooleans("Which toys?", ' +
+        `texts: [${Array.from({ length: 20 }, (_, index) => `"Toy ${index}"`).join(", ")}], ` +
+        `prefill: [${Array.from({ length: 20 }, () => "false").join(", ")}])\n` +
+        "check(picked[0] == (not picked[0]))\nif picked[3] == picked[7] and not picked[5] {\n  check(picked[7])\n}\nexit\n",
     };
     for (const [name, source] of Object.entries(complete))
       for (const seed of [1, 2]) {
