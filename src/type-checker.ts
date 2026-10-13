@@ -6182,6 +6182,29 @@ class TypeChecker {
       case "toAbsoluteDateTime":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
+      case "toJson":
+      case "fromJson":
+      case "toBase64":
+      case "fromBase64": {
+        // The JSON or Base64 text of a value, and what such text holds (V30 §13).
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        if (name === "toBase64" && problems.length === 0)
+          this.#reportUnless(
+            value!,
+            (member) => isScalar(member, "string"),
+            argument!.value,
+            "toBase64(...) encodes text (string)",
+          );
+        // What JSON holds is known only when the script runs; Base64 holds text, or the result is the default.
+        if (name === "fromJson") return UNKNOWN_TYPE;
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        return name === "fromBase64" && fallback !== -1
+          ? union([STRING_TYPE, values[fallback]!])
+          : STRING_TYPE;
+      }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
           this.#reportUnless(
