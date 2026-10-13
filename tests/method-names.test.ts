@@ -72,7 +72,6 @@ test("a method call on a speaker is a compile error", () => {
     ["let other = vera\nother.foo()", "foo", "other.title"],
     ['say as vera "${speaker.foo()}"', "foo", "speaker.title"],
     ["let cast = [vera]\ncast[0].foo()", "foo", "title"],
-    ["function use(x: speaker | string) {\n    x.foo()\n}", "foo", "x.title"],
   ];
   for (const [statements, name, property] of cases) {
     const source = `${VERA}${statements}\nexit`;
@@ -88,6 +87,9 @@ test("a method call on a speaker is a compile error", () => {
       statements,
     );
   }
+  // In a union, the property example would need a check first, so the error only names the method the speaker lacks.
+  const union = `${VERA}function use(x: speaker | string) {\n    x.foo()\n}\nexit`;
+  assert.deepEqual(diagnostics(union), [["TSV043", "A speaker has no method 'foo'.", "foo"]]);
 });
 
 test("a method that some value has compiles on a value of unknown type", () => {

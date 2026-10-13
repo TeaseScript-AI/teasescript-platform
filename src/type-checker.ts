@@ -5759,7 +5759,7 @@ class TypeChecker {
               ? handleMemberMessage(failing.kind, method, "call")
               : failing.kind === "permanentButton"
                 ? `Permanent buttons have no method '${method}'. Use remove().`
-                : failing.kind === "speaker"
+                : failing.kind === "speaker" && all.length === 1
                   ? speakerMethodMessage(method, expressionLabel(callee.object))
                   : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
@@ -9056,7 +9056,10 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
   ["permanentButton", "Permanent button"],
 ]);
 
-/** The message for a method call on a speaker, which has properties but no methods (V30 §37). */
+/**
+ * The message for a method call on a receiver that is a speaker, which has properties but no methods (V30 §37). In a
+ * union, the example property would first need a check that the value is a speaker, so a union gets the plain message.
+ */
 function speakerMethodMessage(method: string, label: string | null): string {
   return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
 }
