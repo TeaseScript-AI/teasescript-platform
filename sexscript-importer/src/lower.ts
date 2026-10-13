@@ -7996,7 +7996,9 @@ function lowerCallStatement(
     case "showPopup":
       return oneArgumentStatement(args, context, node, (message) => popupStatements(message, span));
     case "useUrl":
-      return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
+      return oneArgumentStatement(args, context, node, (url) =>
+        urlStatements(url, span, context, onlyOf(inferType(args[0]!, context.types), STRING)),
+      );
     case "setImage": {
       // A function given an image that it draws into a frame and shows, such as a zoom-in, shows the image itself.
       const given = args.length === 2 ? givenImage(context) : null;
@@ -18664,7 +18666,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "useUrl() must have one argument.",
         );
       // Legacy useUrl returned nothing; the address opens before the statement.
-      context.prelude.push(...urlStatements(args[0]!, node.span, context));
+      context.prelude.push(
+        ...urlStatements(
+          args[0]!,
+          node.span,
+          context,
+          onlyOf(inferType(call.arguments[0]!, context.types), STRING),
+        ),
+      );
       return { kind: "literal", value: null };
     }
     case "getFile": {
@@ -22479,8 +22488,21 @@ function urlStatements(
   url: IrExpression,
   span: SourceSpan | null,
   context: LowerContext,
+  /** Whether the address is proven text, never null. */
+  text: boolean,
 ): IrStatement[] {
   let address = url;
+  if (url.kind !== "literal" && !text) {
+    // openUrl() takes text; legacy failed to open null or another value, as openUrl() fails on one that is no address.
+    addDiagnostic(
+      context,
+      "SX_OPEN_URL_TEXT",
+      "warning",
+      "useUrl() took any value; the address that openUrl() opens is its text, and a value that is no http or https address, such as null, stops the script, where legacy failed to open it.",
+      span,
+    );
+    address = { kind: "template", parts: [{ value: url }] };
+  }
   if (
     url.kind === "literal" &&
     typeof url.value === "string" &&
