@@ -209,7 +209,7 @@ async function main() {
       await exportTextScenario(cdp, origin, profile);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their place beside the timer rail on a short screen, and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();
@@ -2125,6 +2125,36 @@ async function titleBarScenario(cdp, origin) {
     false,
     "The open tool hovers like a closed one",
   );
+
+  // On a short screen the default bar moves its controls left of the timer rail only while the rail is shown: without
+  // a timer they stay where a taller screen has them.
+  const actionsRight = `document.querySelector('.player-top-bar-actions').getBoundingClientRect().right`;
+  await setViewport(cdp, 1347, 900);
+  await open("package=timer-rail");
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`);
+  const edge = await value(cdp, actionsRight);
+  await setViewport(cdp, 1347, 689);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-player-vertical]').dataset.playerVertical === 'constrained'`,
+  );
+  assertEqual(
+    await value(cdp, actionsRight),
+    edge,
+    "The short screen's bar kept room for a timer rail not shown",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!!document.querySelector('.stage-right-rail .timer-display')`);
+  assertEqual(
+    await value(
+      cdp,
+      `${actionsRight} <= document.querySelector('.stage-right-rail').getBoundingClientRect().left`,
+    ),
+    true,
+    "The short screen's bar did not move its controls left of the timer rail",
+  );
+  await setViewport(cdp, 1440, 900);
 
   const full = "A title too long for the title bar of a narrow screen by Author fixture";
   // The bar's tooltip, read once: its content also holds a copy for assistive technology.

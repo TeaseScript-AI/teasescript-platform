@@ -306,8 +306,8 @@ onBeforeUnmount(cancelHide);
   color: var(--theme-media-text-disabled);
 }
 
-/* A keeps the bar visible and moves its controls left of the timer. */
-.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="left"] {
+/* A keeps the bar visible and moves its controls left of the timer rail, only while the rail is shown. */
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]:has(.stage-right-rail) .player-top-bar[data-placement="left"] {
   right: calc(var(--player-timer-rail-width) + var(--player-edge-space));
 }
 
