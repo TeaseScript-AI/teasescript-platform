@@ -85,7 +85,7 @@ implemented in its V30 call form (`let picture = askImage("Add an image")`, and 
 that is `null` when the player skips it; see [Image input](RUNTIME.md#image-input) and
 [V30 §20](specifications/accepted-syntaxes-v30.md#skipping-a-file-input)),
 `askForm` and `askBooleans`, which are asks in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms)),
-`showPopup`, and `openUrl` ([Popups and web addresses](#popups-and-web-addresses));
+`showPopup`, `openUrl`, and `exportText` ([Popups, web addresses, and exported text](#popups-web-addresses-and-exported-text));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `askChoice(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
@@ -156,7 +156,7 @@ instruction without producing a result or binding. See [timer semantics](specifi
 
 `askNumber` trims surrounding whitespace, accepts the ordinary TeaseScript decimal and scientific-number forms on one line, returns a finite number, and records the trimmed submitted text in the transcript rather than reformatting it. Locale decimal commas, thousands separators, units, and natural-language phrases are not accepted by the deterministic first POC.
 
-### Popups and web addresses
+### Popups, web addresses, and exported text
 
 ```tease
 showPopup "Task completed"
@@ -177,6 +177,16 @@ usually at once, and when the browser needs a click from the player first, the P
 never shows the address. `buttonText:` is the button's text, "Open link" by default, with the rules of `showPopup`'s,
 and `alwaysButton: true` shows the button also right after a click, so the player opens the tab with it; either way the
 script goes on once the tab is open ([§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)).
+
+```tease
+exportText(toBase64(toJson(preset)), title: "Your preset", fileName: "preset.txt")
+```
+
+`exportText` takes its text first, without a name, and the optional `title:`, shown text, "Copy or download" by
+default, and `fileName:`, text, "text.txt" by default. It shows the title and the text in a dialog outside the chat
+with Copy, Download, and Close, and waits until the player closes it; nothing enters the transcript, and it gives no
+value ([§31](specifications/accepted-syntaxes-v30.md#export-text)). The text may be as long as any text. A text or file
+name that is not text is compile error `TSV043` for a known type and runtime error `TSR050` otherwise.
 
 ### Compact choices
 
@@ -353,7 +363,8 @@ The current function subset includes:
 Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
 `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and `get` with
 `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
-`toNumber`, `toInteger`, and `toBoolean` with `default:`, the numeric functions `round` (also with `decimals:`),
+`toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
+`toBase64`, and `fromBase64`, the numeric functions `round` (also with `decimals:`),
 `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
 the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
 and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,

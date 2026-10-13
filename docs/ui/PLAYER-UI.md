@@ -925,8 +925,17 @@ The button, by click, Enter, or Space, and Escape close it, not a click beside i
 adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
 panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
-the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup or an `openUrl`
-button waits, the composer shows no hint.
+the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup, an
+`exportText` dialog, or an `openUrl` button waits, the composer shows no hint.
+
+`exportText` opens a dialog like a popup's, named by its title, with the text in a read-only monospace field that wraps
+long lines and scrolls, and the buttons **Copy**, which takes focus, **Download**, and **Close**. Copy writes the whole
+text to the clipboard and confirms it; when the browser refuses or cannot, as Android's clipboard does above about 1 MB,
+Copy tries the browser's older copy of the selected text, and otherwise leaves the text selected with a short hint to
+copy it by hand or use Download. Download saves the text as a UTF-8 file with the script's file name, made only then.
+Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
+script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
+Debug runs, and its return after a block or a reload, are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes
