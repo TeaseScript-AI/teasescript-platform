@@ -1,4 +1,5 @@
 import { normalizeColor, isNormalizedColor } from "./color.js";
+import { canonicalWebUrl } from "./web-url.js";
 
 export type MessageMarkupLineEnding = "" | "\n" | "\r\n";
 
@@ -443,7 +444,7 @@ function validMessageMarkupSpan(value: unknown, textLength: number): value is Me
       typeof value.target !== "string"
     )
       return false;
-    return validUrl(value.target) === value.target;
+    return canonicalWebUrl(value.target) === value.target;
   }
   if (typeof value.value !== "string") return false;
   if (value.kind === "color" || value.kind === "backgroundColor")
@@ -884,7 +885,10 @@ function bareLinkAt(
   while (authorityEnd < candidateEnd && !/[/?#]/u.test(units[authorityEnd]!.character)) {
     authorityEnd += 1;
   }
-  if (authorityEnd < candidateEnd && validUrl(unitsText(units, index, authorityEnd)) === null)
+  if (
+    authorityEnd < candidateEnd &&
+    canonicalWebUrl(unitsText(units, index, authorityEnd)) === null
+  )
     return null;
 
   let targetEnd = candidateEnd;
@@ -904,7 +908,7 @@ function bareLinkAt(
   if (targetEnd === index) return null;
 
   const text = unitsText(units, index, targetEnd);
-  const target = validUrl(text);
+  const target = canonicalWebUrl(text);
   return target === null ? null : { target, text, end: targetEnd };
 }
 
@@ -953,18 +957,7 @@ function validLinkTarget(units: readonly InputUnit[]): string | null {
     )
   )
     return null;
-  return validUrl(unitsText(units, 0, units.length));
-}
-
-function validUrl(text: string): string | null {
-  try {
-    const url = new URL(text);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.host.length === 0)
-      return null;
-    return url.href;
-  } catch {
-    return null;
-  }
+  return canonicalWebUrl(unitsText(units, 0, units.length));
 }
 
 function nextUnescapedIndexes(
