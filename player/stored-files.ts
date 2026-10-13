@@ -1,4 +1,4 @@
-import { Sha256, storedFileKind, type RuntimeFileStoreActionSnapshot } from "../src/index.js";
+import { storedFileKind, type RuntimeFileStoreActionSnapshot } from "../src/index.js";
 import type { CapturedMediaStore } from "./captured-media.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import {
@@ -38,27 +38,24 @@ export async function answerFileStore(
       if (record === null) return { kind: "failed" };
       const data = await record.data.arrayBuffer();
       answers.push(
-        action.operation === "hash" ? await sha256Hex(data) : base64FromBytes(new Uint8Array(data)),
+        action.operation === "hash"
+          ? hexFromBytes(new Uint8Array(await crypto.subtle.digest("SHA-256", data)))
+          : base64FromBytes(new Uint8Array(data)),
       );
     }
     return action.operation === "hash"
       ? { kind: "hashed", hashes: answers }
       : { kind: "read", files: answers };
   } catch {
-    // Such as a file too large for this browser's memory.
+    // Such as a file too large for this browser's memory, or a hash outside a secure context, such as a Player over plain
+    // HTTP on a local network, where the browser has no `crypto.subtle`.
     return { kind: "failed" };
   }
 }
 
-/**
- * The SHA-256 of `data` as 64 lowercase hexadecimal digits: the browser's digest, or outside a secure context, such as
- * a Player over plain HTTP on a local network, where the browser has none, the engine's, which gives the same.
- */
-async function sha256Hex(data: ArrayBuffer): Promise<string> {
-  const subtle = typeof crypto === "undefined" ? undefined : crypto.subtle;
-  if (subtle === undefined) return new Sha256().update(new Uint8Array(data)).hex();
-  const digest = new Uint8Array(await subtle.digest("SHA-256", data));
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+/** A SHA-256 digest as 64 lowercase hexadecimal digits. */
+function hexFromBytes(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {

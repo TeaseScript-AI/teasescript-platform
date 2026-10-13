@@ -210,7 +210,6 @@ export {
   storedFileKind,
   type StoredFileKind,
 } from "./runtime/stored-files.js";
-export { Sha256 } from "./runtime/sha256.js";
 export {
   updateInteraction,
   type InteractionUpdateOutcome,

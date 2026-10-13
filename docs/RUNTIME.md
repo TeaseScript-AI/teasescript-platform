@@ -1521,11 +1521,11 @@ needs the whole text's UTF-8 at once. The result is 64 lowercase hexadecimal dig
 
 `fileFromBase64(text, default:)`, `fileToBase64(file)`, and `hashFile(file)` implement
 [V30 §33](specifications/accepted-syntaxes-v30.md#stored-files) and [§13](specifications/accepted-syntaxes-v30.md#hashes).
-Like `toJson` and `fromJson` without a written
-`files: false`, they are protected core built-ins that lower to a `fileStore` instruction, whose operands are
-temporaries or literals evaluated once in written order; plan validation rejects them as ordinary calls. `default:` is
-required (`TSV020`), a value the compiler knows is not text is `TSV043`, and the result of `fileFromBase64` is text or
-the default's type. The instruction first finds the files it needs:
+Like `toJson` and `fromJson` without a written `files: false`, they are protected core built-ins that lower to a
+`fileStore` instruction, whose operands are temporaries or literals evaluated once in written order; plan validation
+rejects them as ordinary calls. `fileFromBase64` requires `default:` (`TSV020`), and the others take no named arguments
+(`TSV022`). A value the compiler knows is not text is `TSV043`, and the result of `fileFromBase64` is text or the
+default's type. The instruction first finds the files it needs:
 
 - `fileFromBase64` reads text as `fromBase64` does, ignoring spaces and line breaks, with the URL alphabet and without
   padding, or the Base64 data of a `data:<type>;base64,…` URL, whose declared type it ignores. Anything else, also a
@@ -1585,9 +1585,9 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 
 The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
 as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
-stored files' bytes, from durable storage when needed. It hashes their bytes with `crypto.subtle.digest`, or, outside a
-secure context, where the browser has no `crypto.subtle`, with the engine's SHA-256, which gives the same hash. When it
-cannot decode, keep, or read them, it answers `failed`.
+stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
+decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
+`failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
 text that only has the shape of a reference stays text. Its media store resolves a reference only for
 its own kind and the Player asks only for images, so only an image is ever shown, and stored audio and video are not

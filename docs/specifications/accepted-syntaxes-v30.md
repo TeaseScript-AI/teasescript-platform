@@ -1488,7 +1488,7 @@ if hashText(answer) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a2
 
 // A code from a keyholder or another program that hashes the same text.
 let code = askText("The code from your keyholder")
-if code == hashText("week ${week} done") {
+if code == hashText("week 3 done") {
     say "Released."
 }
 

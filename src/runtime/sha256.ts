@@ -20,7 +20,7 @@ const INITIAL_HASH = [
 ] as const;
 
 /** The SHA-256 of bytes given in parts, in order. */
-export class Sha256 {
+class Sha256 {
   readonly #hash = new Int32Array(INITIAL_HASH);
   readonly #schedule = new Int32Array(64);
   /** Bytes of an unfinished block, until it is full. */

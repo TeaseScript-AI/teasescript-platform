@@ -89,7 +89,7 @@ test("the Player keeps files as session media of the kind of their type, and rea
   );
 });
 
-test("the Player hashes a stored file with the browser's digest, or with the engine's outside a secure context", async (context) => {
+test("the Player hashes a stored file with the browser's digest, and fails without one outside a secure context", async (context) => {
   const media = new CapturedMediaStore(null, urls, "files");
   const stored = await answerFileStore(
     request("store", [
@@ -108,14 +108,6 @@ test("the Player hashes a stored file with the browser's digest, or with the eng
     ],
   };
   assert.deepEqual(await answerFileStore(request("hash", [], references), media), hashed);
-  // Browsers offer crypto.subtle only in secure contexts; a Player over plain HTTP on a local network has none.
-  const subtle = Object.getOwnPropertyDescriptor(crypto, "subtle");
-  Object.defineProperty(crypto, "subtle", { configurable: true, value: undefined });
-  context.after(() => {
-    if (subtle) Object.defineProperty(crypto, "subtle", subtle);
-    else Reflect.deleteProperty(crypto, "subtle");
-  });
-  assert.deepEqual(await answerFileStore(request("hash", [], references), media), hashed);
   assert.deepEqual(
     await answerFileStore(
       request("hash", [], ["captured-media:00000000-0000-4000-8000-000000000000:9"]),
@@ -123,6 +115,17 @@ test("the Player hashes a stored file with the browser's digest, or with the eng
     ),
     { kind: "failed" },
   );
+  // Browsers offer crypto.subtle only in secure contexts; a Player over plain HTTP on a local network has none, and
+  // answers that it failed rather than leaving the script waiting.
+  const subtle = Object.getOwnPropertyDescriptor(crypto, "subtle");
+  Object.defineProperty(crypto, "subtle", { configurable: true, value: undefined });
+  context.after(() => {
+    if (subtle) Object.defineProperty(crypto, "subtle", subtle);
+    else Reflect.deleteProperty(crypto, "subtle");
+  });
+  assert.deepEqual(await answerFileStore(request("hash", [], references), media), {
+    kind: "failed",
+  });
 });
 
 test("a stored file of no recognized type is kept and read back from durable storage only with its type", async () => {
