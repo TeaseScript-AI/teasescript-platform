@@ -235,7 +235,8 @@ try {
       },
     }),
   );
-  const url = `http://127.0.0.1:${server.address().port}/player/?dev&scenario=camera`;
+  // Debug off keeps play in the script's own room, whose saved photo the checks read from local storage.
+  const url = `http://127.0.0.1:${server.address().port}/player/?dev&debug=off&scenario=camera`;
   await cli("open", "about:blank", "--config", config);
   const output = await cli(
     "run-code",

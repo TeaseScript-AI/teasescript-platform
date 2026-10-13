@@ -585,7 +585,7 @@ empty composer but not from a Player control, a press on message text, or Space 
 follow that keeps a scrolled-up reader in place while a message arrives and resumes through Return to latest, a press
 held past one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow
 viewport that keeps the first question's input visible. With Chromium's fake camera showing a generated four-color test
-card it also runs the development preview's camera scenario (`/player/?dev&scenario=camera`): granted, the session camera
+card it also runs the development preview's camera scenario (`/player/?dev&debug=off&scenario=camera`): granted, the session camera
 opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
 reference in saved data shows no photo. The camera view scenario (`?scenario=viewfinder`) checks that the script's
