@@ -278,7 +278,7 @@ function effectFree(node: AstNode, closures: ReadonlySet<string>): boolean {
   if (
     node.kind === "methodCall" &&
     (!READING_METHODS.has(constantString(node.method) ?? "") ||
-      closures.has(constantString(node.method) ?? "") ||
+      (closures.has(constantString(node.method) ?? "") && !textOrListResult(asNode(node.object))) ||
       node.implicitThis === true ||
       asNode(node.object) === null ||
       ["this", "main", "super"].includes(variableName(node.object) ?? ""))
@@ -291,6 +291,15 @@ function effectFree(node: AstNode, closures: ReadonlySet<string>): boolean {
       if (isAstNode(child) && !effectFree(child, closures)) return false;
   }
   return true;
+}
+
+/** A reverse() or text-only method's result, text or a list, which no map's closure field is called on. */
+function textOrListResult(node: AstNode | null): boolean {
+  return (
+    node?.kind === "methodCall" &&
+    (constantString(node.method) === "reverse" ||
+      TEXT_ONLY_METHODS.has(constantString(node.method) ?? ""))
+  );
 }
 
 /** A variable, or an element or a field of one at a constant or variable position, which reading does not change. */
