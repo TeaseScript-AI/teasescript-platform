@@ -6,7 +6,7 @@ import { enhancedTranscriptContrast } from "./transcriptContrast";
 
 const props = defineProps<{
   pieces: readonly PlayerMarkupPiece[];
-  backdrop: string;
+  backdrop: string | readonly string[];
   cover: string | null;
   link: string;
   authoredInk: string | null;

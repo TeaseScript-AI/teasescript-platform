@@ -3,7 +3,8 @@ import { createServer as createNetServer } from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { crc32, deflateSync, gunzipSync } from "node:zlib";
+import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
+import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -201,6 +202,7 @@ async function main() {
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await photoColourScenario(cdp, origin, profile);
+      await photoVignetteScenario(cdp, origin);
       await messageUpdatesScenario(cdp, origin);
       await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -2732,6 +2734,144 @@ async function photoColourScenario(cdp, origin, profile) {
     "",
     "The empty Stage's colours are not the theme's",
   );
+}
+
+/**
+ * Photo vignette (`photo-vignette` package): authored prose low at the side of the transcript, under the strongest part
+ * of the vignette around a wide Stage photo, stays readable on the background as painted there, in both modes and both
+ * contrasts. The pixels behind each prose span are read from a screenshot with the transcript hidden, the span's
+ * backing is laid over them, and its ink must meet the authored-colour treatment's own targets on every one.
+ */
+async function photoVignetteScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const spans = `[...document.querySelectorAll('.prose span')].filter((span) => span.textContent.trim() !== '').map((span) => { const box = span.getBoundingClientRect(); const style = getComputedStyle(span); return { text: span.textContent.trim(), box: [box.left, box.top, box.width, box.height], ink: style.color, cover: style.backgroundColor }; })`;
+  const readable = async (label, enhanced) => {
+    const texts = await value(cdp, spans);
+    assertEqual(texts.length >= 2, true, `${label}: the prose is not shown`);
+    await evaluate(
+      cdp,
+      `for (const entry of document.querySelectorAll('.transcript-entry')) entry.style.visibility = 'hidden';`,
+    );
+    await delay(100);
+    const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
+    await evaluate(
+      cdp,
+      `for (const entry of document.querySelectorAll('.transcript-entry')) entry.style.visibility = '';`,
+    );
+    const image = decodePng(Buffer.from(shot.result.data, "base64"));
+    for (const { text, box, ink, cover } of texts) {
+      const [left, top, width, height] = box;
+      const backing = new Color(cover).to("srgb");
+      const alpha = backing.alpha ?? 1;
+      for (let row = 0; row < 3; row += 1)
+        for (let column = 0; column < 6; column += 1) {
+          const x = Math.round(left + 1 + ((width - 2) * column) / 5);
+          const y = Math.round(top + 1 + ((height - 2) * row) / 2);
+          const offset = (y * image.width + x) * image.channels;
+          const painted = [0, 1, 2].map(
+            (channel) =>
+              (backing.coords[channel] ?? 0) * alpha +
+              (image.pixels[offset + channel] / 255) * (1 - alpha),
+          );
+          const background = new Color("srgb", painted);
+          const wcag = Color.contrast(background, ink, "WCAG21");
+          const apca = Math.abs(Color.contrast(background, ink, "APCA"));
+          const passes = enhanced
+            ? wcag >= 7 && apca >= 55
+            : apca >= 55 || (wcag >= 3.5 && apca >= 40);
+          assertEqual(
+            passes,
+            true,
+            `${label}: "${text}" at ${x},${y} on the painted background: WCAG ${wcag.toFixed(2)}, APCA ${apca.toFixed(1)}`,
+          );
+        }
+    }
+  };
+  const settings = async (option) => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-setting="contrast"]')`);
+    const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
+    const before = await value(cdp, secondary);
+    await evaluate(
+      cdp,
+      `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
+    );
+    await waitFor(
+      cdp,
+      `${secondary} !== ${JSON.stringify(before)}`,
+      3_000,
+      `Contrast ${option} was not applied`,
+    );
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  };
+  const switchMode = async (mode) => {
+    await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
+    await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
+  };
+  await navigate(cdp, `${origin}/player/?package=photo-vignette`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.documentElement.hasAttribute('data-photo-colour') && document.querySelectorAll('.prose').length === 2`,
+    8_000,
+    "The wide photo did not colour the Player",
+  );
+  await delay(300);
+  await readable("Light, Standard", false);
+  await switchMode("dark");
+  await readable("Dark, Standard", false);
+  await settings("high");
+  await readable("Dark, High", true);
+  await switchMode("light");
+  await readable("Light, High", true);
+  await settings("standard");
+}
+
+/** The pixels of an 8-bit, non-interlaced RGB or RGBA PNG, such as a DevTools screenshot. */
+function decodePng(buffer) {
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  const data = [];
+  for (let offset = 8; offset < buffer.length;) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const chunk = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = chunk.readUInt32BE(0);
+      height = chunk.readUInt32BE(4);
+      channels = { 2: 3, 6: 4 }[chunk[9]] ?? 0;
+      if (chunk[8] !== 8 || chunk[12] !== 0 || channels === 0) throw new Error("Unsupported PNG");
+    } else if (type === "IDAT") data.push(chunk);
+    else if (type === "IEND") break;
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(data));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= channels ? pixels[y * stride + x - channels] : 0;
+      const up = y > 0 ? pixels[(y - 1) * stride + x] : 0;
+      const upLeft = x >= channels && y > 0 ? pixels[(y - 1) * stride + x - channels] : 0;
+      const estimate = left + up - upLeft;
+      const [toLeft, toUp, toUpLeft] = [left, up, upLeft].map((value) =>
+        Math.abs(estimate - value),
+      );
+      const predictor = [
+        0,
+        left,
+        up,
+        (left + up) >> 1,
+        toLeft <= toUp && toLeft <= toUpLeft ? left : toUp <= toUpLeft ? up : upLeft,
+      ][filter];
+      pixels[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + predictor) & 255;
+    }
+  }
+  return { width, height, channels, pixels };
 }
 
 /**

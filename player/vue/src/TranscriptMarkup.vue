@@ -6,7 +6,7 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  backdrop: string;
+  backdrop: string | readonly string[];
   cover: string | null;
   link: string;
   authoredInk: string | null;

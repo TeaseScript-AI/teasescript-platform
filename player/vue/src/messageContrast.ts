@@ -46,6 +46,20 @@ export function backdropBehind(element: Element | null) {
   return `rgb(${red} ${green} ${blue})`;
 }
 
+/**
+ * The background as its vignette paints it at full strength, where the Stage photo colours the Player (`style.css`
+ * darkens the far edges in dark mode and pales them in light mode), or `null` without one. Text on the background can
+ * sit anywhere between `canvas` and this.
+ */
+export function vignetteEdge(element: Element, canvas: string) {
+  const strength = Number.parseFloat(
+    getComputedStyle(element).getPropertyValue("--photo-vignette"),
+  );
+  if (!(strength > 0)) return null;
+  const [red, green, blue] = paint(resolveColour(element, "var(--photo-edge, black)", "black"));
+  return rgb(paint(canvas, `rgb(${red} ${green} ${blue} / ${strength})`));
+}
+
 function luminance(channels: readonly [number, number, number]) {
   const [red, green, blue] = channels.map((channel) => {
     const value = channel / 255;
@@ -84,13 +98,20 @@ function minimalAmount(score: (amount: number) => number, target: number): numbe
   return Math.ceil(sufficient * 1000) / 1000;
 }
 
+/**
+ * Authored ink, or a backing behind it, that keeps `colour` readable on `backdrop`. Text that can sit on any of several
+ * backdrops, such as a background with and without its vignette, must be readable on each: every check takes the
+ * least readable of them, which also bounds the backdrops between them. The first one decides the direction.
+ */
 export function readabilityFor(
   colour: string,
-  backdrop: string,
+  backdrop: string | readonly string[],
   enhanced = false,
 ): { ink: string; cover: string | null } {
+  const backdrops = typeof backdrop === "string" ? [backdrop] : backdrop;
   const ink = paint(colour);
-  const background = paint(backdrop);
+  const backgrounds = backdrops.map((layer) => paint(layer));
+  const background = backgrounds[0]!;
   const inkLuminance = luminance(ink);
   const backgroundLuminance = luminance(background);
   const originalApca = Color.contrast(rgb(background), rgb(ink), "APCA");
@@ -109,7 +130,7 @@ export function readabilityFor(
       .to("srgb");
     return [byte(adjusted.coords[0]), byte(adjusted.coords[1]), byte(adjusted.coords[2])];
   };
-  const score = (
+  const scoreOn = (
     adjustedInk: readonly [number, number, number],
     adjustedBackground: readonly [number, number, number],
   ) => {
@@ -126,30 +147,30 @@ export function readabilityFor(
           ),
         );
   };
-  const originalWcag = ratio(inkLuminance, backgroundLuminance);
-  if (
-    enhanced
-      ? originalWcag >= ENHANCED_WCAG_TARGET && Math.abs(originalApca) >= STANDARD_APCA_TARGET
-      : Math.abs(originalApca) >= STANDARD_APCA_TARGET ||
-        (originalWcag >= ADAPTIVE_WCAG_TARGET && Math.abs(originalApca) >= MINIMUM_APCA_WITH_WCAG)
-  )
-    return { ink: colour, cover: null };
+  const score = (
+    adjustedInk: readonly [number, number, number],
+    adjustedBackgrounds: readonly (readonly [number, number, number])[],
+  ) => Math.min(...adjustedBackgrounds.map((layer) => scoreOn(adjustedInk, layer)));
+  // Every backdrop with a backing of `amount` over it.
+  const covered = (amount: number) =>
+    backdrops.map((layer) =>
+      paint(layer, `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${amount})`),
+    );
+  const readable = (layer: readonly [number, number, number]) => {
+    const wcag = ratio(inkLuminance, luminance(layer));
+    const apca = Math.abs(Color.contrast(rgb(layer), rgb(ink), "APCA"));
+    return enhanced
+      ? wcag >= ENHANCED_WCAG_TARGET && apca >= STANDARD_APCA_TARGET
+      : apca >= STANDARD_APCA_TARGET ||
+          (wcag >= ADAPTIVE_WCAG_TARGET && apca >= MINIMUM_APCA_WITH_WCAG);
+  };
+  if (backgrounds.every(readable)) return { ink: colour, cover: null };
   const target = enhanced ? 1 + SEARCH_MARGIN / ENHANCED_WCAG_TARGET : 1;
 
-  const cover = minimalAmount(
-    (amount) =>
-      score(
-        ink,
-        paint(backdrop, `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${amount})`),
-      ),
-    target,
-  );
-  const inkAmount = minimalAmount((amount) => score(adjustInk(amount), background), target);
+  const cover = minimalAmount((amount) => score(ink, covered(amount)), target);
+  const inkAmount = minimalAmount((amount) => score(adjustInk(amount), backgrounds), target);
   if (cover !== null && cover <= SUBTLE_COVER_LIMIT) {
-    const coveredBackground = paint(
-      backdrop,
-      `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${cover})`,
-    );
+    const coveredBackground = covered(cover)[0]!;
     const backingChange = Color.deltaE(rgb(background), rgb(coveredBackground), "OK");
     const inkChange =
       inkAmount === null ? Infinity : Color.deltaE(rgb(ink), rgb(adjustInk(inkAmount)), "OK");
@@ -173,14 +194,7 @@ export function readabilityFor(
       }
       const protectedInk = adjustInk(preserved);
       const protectedCover = minimalAmount(
-        (amount) =>
-          score(
-            protectedInk,
-            paint(
-              backdrop,
-              `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${amount})`,
-            ),
-          ),
+        (amount) => score(protectedInk, covered(amount)),
         target,
       );
       if (protectedCover !== null && protectedCover <= MAX_IDENTITY_COVER)
@@ -192,14 +206,7 @@ export function readabilityFor(
     return { ink: rgb(adjustedInk), cover: null };
   }
 
-  const amount = minimalAmount(
-    (value) =>
-      score(
-        adjustInk(value),
-        paint(backdrop, `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${value})`),
-      ),
-    target,
-  );
+  const amount = minimalAmount((value) => score(adjustInk(value), covered(value)), target);
   if (amount === null) throw new Error("No readable treatment exists for this colour pair");
   return {
     ink: rgb(adjustInk(amount)),

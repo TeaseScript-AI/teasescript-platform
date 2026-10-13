@@ -1,0 +1,9 @@
+// Photo colours: authored prose low at the side of the transcript, where the Stage photo's vignette is strong.
+showImage "images/wide.svg"
+repeat 14 {
+    say "Earlier conversation line.", instant
+}
+say prose(color: "#eeeeee", position: "right") "Light prose", instant
+say prose(color: "#292929", position: "right") "Dark prose", instant
+showButton "Done"
+exit

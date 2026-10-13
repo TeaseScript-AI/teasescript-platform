@@ -5,6 +5,8 @@ import { readabilityFor } from "./messageContrast";
 export interface TranscriptPalette {
   readonly surface: string;
   readonly canvas: string;
+  /** The background where a Stage photo's vignette is strongest, or `null` without one. */
+  readonly edge: string | null;
   readonly link: string;
 }
 
@@ -83,8 +85,14 @@ export function resolveAppearance(
     authoredBackground === null
       ? null
       : (authoredText ?? blackOrWhiteInk(authoredColorToOklch(authoredBackground)));
+  // Prose sits on the background, which a Stage photo's vignette makes lighter or darker towards its edges.
   const backdrop =
-    authoredBackground ?? (authored?.kind === "prose" ? palette.canvas : palette.surface);
+    authoredBackground ??
+    (authored?.kind !== "prose"
+      ? palette.surface
+      : palette.edge === null
+        ? palette.canvas
+        : [palette.canvas, palette.edge]);
   const readability =
     authoredBackground === null && authoredText !== null
       ? readabilityFor(authoredText, backdrop, enhancedContrast)
