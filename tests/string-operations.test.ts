@@ -482,7 +482,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "TSR017",
       "The value null has no property 'length'. Check that it is not null first.",
     ],
-    ["say value.nope()\nexit", { value: "abc" }, "TSR016", "Text has no method 'nope'."],
+    ["say value.add(1)\nexit", { value: "abc" }, "TSR016", "Text has no method 'add'."],
     [
       "say value.size\nexit",
       { value: "abc" },
