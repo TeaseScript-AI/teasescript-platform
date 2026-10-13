@@ -785,6 +785,7 @@ say toString(7).padStart(3, "0")          // 007
 | `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
 | `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
 | `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
+| `text.reverse()` | the text with its characters in reverse order, counted as Unicode code points (owner decision, 2026-10-13) |
 | `text.repeat(count)` | the text repeated `count` times |
 | `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged |
 
@@ -1562,6 +1563,7 @@ items.removeLast()
 items.clear()
 items.sort()
 items.shuffle()
+items.reverse()
 items.contains("map")
 items.indexOf("map")
 items.lastIndexOf("map")
@@ -1748,9 +1750,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
-- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set
-  `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error or
-  warning.
+- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
+  Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
+  or warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
   together), all text, all durations, all calendar durations of one family, or all dates, all times, all datetimes, or all
@@ -1761,7 +1763,9 @@ Runtime behavior:
 - `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
   draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
   elements draws nothing.
-- Sets keep their insertion order and have no `sort()` or `shuffle()`; copy a set into a list with `toList()` first.
+- `reverse()` puts a list's elements in reverse order in place (owner decision, 2026-10-13).
+- Sets keep their insertion order and have no `sort()`, `shuffle()`, or `reverse()`; copy a set into a list with
+  `toList()` first.
 - `intersection(other)`, `union(other)`, and `difference(other)` return a new collection of the receiver's kind and
   leave both operands unchanged. `other` may be a list or a set. The result holds each element once, in the receiver's
   order: `intersection` keeps the elements also in `other`, `difference` the elements not in `other`, and `union` all
