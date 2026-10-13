@@ -32,7 +32,9 @@ export function temporalCaptureAt(
   captures: readonly RuntimeTemporalCapture[],
   atMs: number,
 ): RuntimeTemporalCapture {
-  return captures.findLast((capture) => capture.boundaryMs <= atMs) ?? captures[0]!;
+  for (let index = captures.length - 1; index >= 0; index -= 1)
+    if (captures[index]!.boundaryMs <= atMs) return captures[index]!;
+  return captures[0]!;
 }
 
 /**
@@ -44,9 +46,11 @@ export function temporalCaptureShownAt(
   atMs: number,
   eventSequence: number,
 ): RuntimeTemporalCapture | undefined {
-  return captures.findLast(
-    (capture) => capture.boundaryMs <= atMs && capture.sinceEventSequence <= eventSequence,
-  );
+  for (let index = captures.length - 1; index >= 0; index -= 1) {
+    const capture = captures[index]!;
+    if (capture.boundaryMs <= atMs && capture.sinceEventSequence <= eventSequence) return capture;
+  }
+  return undefined;
 }
 
 /**
