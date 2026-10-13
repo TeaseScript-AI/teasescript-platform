@@ -1735,6 +1735,104 @@ test("release does nothing while an instruction runs, as a builtin it calls sees
   assert.equal(released.trace.status().records, 0);
 });
 
+test("release works once an operation that threw has unwound, and does nothing in its host callbacks", () => {
+  const started = (
+    source: string,
+    options: Parameters<typeof createFreshRuntimeSession>[2] = {},
+  ) => {
+    const compiled = compileSource(`let original = 1\n${source}\nexit`);
+    assert.deepEqual(compiled.diagnostics, []);
+    const session = createFreshRuntimeSession(
+      compiled.plan!,
+      { seed: SEED, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+      options,
+    );
+    return { session, trace: new RuntimeDebugContext() };
+  };
+  /** Releases from inside a host callback, which must change nothing. */
+  const refused = (trace: RuntimeDebugContext) => {
+    const before = trace.status();
+    assert.ok(before.records > 0);
+    trace.release(Infinity);
+    assert.deepEqual(trace.status(), before);
+  };
+  const releasable = (trace: RuntimeDebugContext) => {
+    assert.ok(trace.status().records > 0);
+    trace.release(Infinity);
+    assert.equal(trace.status().records, 0);
+  };
+  const failure = new Error("host callback failed");
+  const fail = () => {
+    throw failure;
+  };
+
+  // An instruction observer that throws.
+  const observed = started("let later = original + 1");
+  assert.throws(
+    () =>
+      observed.session.run({ debugTrace: observed.trace, instructionObserver: { after: fail } }),
+    failure,
+  );
+  releasable(observed.trace);
+
+  // A random decision callback, which runs inside an instruction.
+  let decisions = 0;
+  const decided = started("let rolled = randomInteger(1..=6)", {
+    randomControl: {
+      decide: () => {
+        decisions += 1;
+        refused(decided.trace);
+        return { kind: "natural" };
+      },
+    },
+  });
+  decided.session.run({ debugTrace: decided.trace });
+  assert.equal(decisions, 1);
+  releasable(decided.trace);
+  const throwing = started("let rolled = randomInteger(1..=6)", {
+    randomControl: { decide: fail },
+  });
+  assert.throws(() => throwing.session.run({ debugTrace: throwing.trace }));
+  releasable(throwing.trace);
+
+  // A captured-media admission, which runs inside a host operation.
+  for (const source of ["let photo = takePhoto()", "let photo = askImage()"]) {
+    for (const holds of [
+      (trace: RuntimeDebugContext) => {
+        refused(trace);
+        return true;
+      },
+      fail,
+    ]) {
+      const { session, trace } = started(source);
+      session.run({ debugTrace: trace });
+      const action = session.view().foregroundAction!;
+      const media = { kind: "image", reference: "captured-media:test" };
+      const request =
+        action.kind === "capture"
+          ? {
+              actionId: action.actionId,
+              actionKind: "capture",
+              payload: { kind: "captured", media },
+            }
+          : {
+              actionId: action.actionId,
+              actionKind: "interaction",
+              interactionKind: "image",
+              payload: { kind: "image", reference: media.reference },
+            };
+      const complete = () =>
+        session.completeAction(request, {
+          debugTrace: trace,
+          capturedMedia: { holds: () => holds(trace) },
+        });
+      if (holds === fail) assert.throws(complete, failure);
+      else assert.equal(complete().outcome.kind, "completed");
+      releasable(trace);
+    }
+  }
+});
+
 test("paused and resumed draws name the released versions that a trace releasing nothing names", () => {
   const plan = compile(
     [

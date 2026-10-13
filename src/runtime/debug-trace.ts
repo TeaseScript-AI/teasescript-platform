@@ -280,7 +280,8 @@ export class RuntimeDebugContext {
    * Releases the retained records up to ID `upTo`, which the host has read, as the bounds drop records, except that the
    * version index keeps naming them: `variableRecord` and `storageRecord` still give their IDs, and later records still
    * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. Between
-   * operations and in an instruction observer it releases them; while an instruction runs, nothing.
+   * operations, also after one threw, and in an instruction observer it releases them; while an operation otherwise
+   * runs, as in a builtin, nothing.
    */
   public release(upTo: number): void {
     if (typeof upTo !== "number") throw new TypeError("release takes a record ID.");
@@ -321,25 +322,30 @@ export class RuntimeDebugContext {
   }
 }
 
-/** The trace an operation records into, or `null` when it has none or recording stopped. */
-export function openDebugTrace(
+/**
+ * Runs one operation of `snapshot` with the trace it records into, `null` when it has none or recording stopped, and
+ * ends the operation in the trace: with its result, whose snapshot the next operation continues from, or, when it
+ * throws, as far as it got.
+ */
+export function withDebugTrace<R extends { readonly snapshot: RuntimeSnapshot }>(
   context: RuntimeDebugContext | undefined,
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
-): TraceStore | null {
-  if (context === undefined) return null;
+  operate: (trace: TraceStore | null) => R,
+): R {
   if (context === null) throw new TypeError("debugTrace must be a RuntimeDebugContext.");
   // A context of another copy of this module is not this trace; the operation runs untraced rather than failing.
-  const store = stores.get(context);
-  return store !== undefined && store.open(plan, snapshot) ? store : null;
-}
-
-/** Ends an operation: its result snapshot is the one the next operation continues from. */
-export function closeDebugTrace(
-  trace: TraceStore | null,
-  result: { readonly snapshot: RuntimeSnapshot },
-): void {
+  const store = context === undefined ? undefined : stores.get(context);
+  const trace = store !== undefined && store.open(plan, snapshot) ? store : null;
+  let result: R;
+  try {
+    result = operate(trace);
+  } catch (error) {
+    trace?.abandon();
+    throw error;
+  }
   trace?.close(result.snapshot);
+  return result;
 }
 
 /** Causes collected while values are evaluated, deduplicated and capped. */
@@ -555,6 +561,14 @@ export class TraceStore {
     this.#operating = false;
     if (this.#failure !== null) return;
     this.#last = new WeakRef(snapshot);
+    while (this.#stage !== null) this.#endStage(this.#stage);
+  }
+
+  /** Ends an operation that threw: its records stay as far as it got, and the stages it left open end. */
+  abandon(): void {
+    this.#operating = false;
+    this.betweenInstructions = false;
+    if (this.#failure !== null) return;
     while (this.#stage !== null) this.#endStage(this.#stage);
   }
 

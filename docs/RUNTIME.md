@@ -1799,8 +1799,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   retained. The version index keeps naming them, so `variableRecord` and `storageRecord` still give their IDs and
   later records still name them as dependencies: record IDs and dependencies stay those of a trace that releases
   nothing. A released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge
-  toward the accounted bytes while the index names it, until the bounds drop it with its index entries. Called while
-  an instruction runs, such as from a builtin, `release` does nothing.
+  toward the accounted bytes while the index names it, until the bounds drop it with its index entries. `release` works
+  between operations, also after one threw, and in an instruction observer's callbacks; while an operation otherwise
+  runs, as in a builtin, `randomControl.decide`, or `capturedMedia.holds`, it does nothing.
 - **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),

@@ -38,8 +38,7 @@ import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
-  closeDebugTrace,
-  openDebugTrace,
+  withDebugTrace,
   stateKey,
   type RuntimeDebugContext,
   type TraceStore,
@@ -74,10 +73,9 @@ export function completeAction(
   options: ActionCompletionOptions = {},
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const completed = completeCapturedAction(captured, request, options, trace);
-  closeDebugTrace(trace, completed);
-  return completed;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    completeCapturedAction(captured, request, options, trace),
+  );
 }
 
 /** Completes an action of engine-owned plan/state that already passed complete validation. */
@@ -87,10 +85,9 @@ export function completeValidatedAction(
   request: unknown,
   options: ActionCompletionOptions = {},
 ): PendingActionOperationResult<ActionCompletionOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const completed = completeCapturedAction({ plan, snapshot }, request, options, trace);
-  closeDebugTrace(trace, completed);
-  return completed;
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    completeCapturedAction({ plan, snapshot }, request, options, trace),
+  );
 }
 
 function completeCapturedAction(

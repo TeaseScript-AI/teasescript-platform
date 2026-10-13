@@ -8,12 +8,7 @@ import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, isPlainRecord, pendingResult, takeSequence } from "./support.js";
-import {
-  closeDebugTrace,
-  openDebugTrace,
-  type RuntimeDebugContext,
-  type TraceStore,
-} from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
 
 export type ExternalStorageEditOutcome =
   | RandomDrawPendingOutcome
@@ -39,10 +34,9 @@ export function applyExternalStorageEdit(
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ExternalStorageEditOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const applied = applyCapturedStorageEdit(captured.snapshot, edit, trace);
-  closeDebugTrace(trace, applied);
-  return applied;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    applyCapturedStorageEdit(captured.snapshot, edit, trace),
+  );
 }
 
 /** Applies a storage edit to engine-owned plan/state that already passed complete validation. */
@@ -52,10 +46,9 @@ export function applyValidatedStorageEdit(
   edit: unknown,
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ExternalStorageEditOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const applied = applyCapturedStorageEdit(snapshot, edit, trace);
-  closeDebugTrace(trace, applied);
-  return applied;
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    applyCapturedStorageEdit(snapshot, edit, trace),
+  );
 }
 
 function applyCapturedStorageEdit(

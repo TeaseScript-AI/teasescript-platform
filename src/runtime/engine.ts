@@ -98,10 +98,9 @@ import {
 import { activeFunctionFrame, contextRootId } from "./activations.js";
 import {
   bindingKey,
-  closeDebugTrace,
   loopKey,
   stateKey,
-  openDebugTrace,
+  withDebugTrace,
   type DebugDependencies,
   type RuntimeDebugContext,
   type TraceStore,
@@ -275,19 +274,18 @@ export function executeInstruction(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, inputSnapshot);
-  const executed = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "executeInstruction",
-    null,
+  return withDebugTrace(options.debugTrace, captured.plan, inputSnapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "executeInstruction",
+      null,
+    ),
   );
-  closeDebugTrace(trace, executed);
-  return executed;
 }
 
 /** Executes one instruction of engine-owned plan/state that already passed complete validation. */
@@ -301,20 +299,19 @@ export function executeValidatedInstruction(
   > = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const executed = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "executeInstruction",
-    null,
-    options.instructionObserver,
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "executeInstruction",
+      null,
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, executed);
-  return executed;
 }
 
 /** How many instructions an operation executed so far, including one whose due work a draw then paused. */
@@ -485,19 +482,18 @@ export function stepToEvent(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const stepped = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "stepToEvent",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "stepToEvent",
+      instructionBudget(options.instructionBudget),
+    ),
   );
-  closeDebugTrace(trace, stepped);
-  return stepped;
 }
 
 /** Steps engine-owned plan/state that already passed complete validation. */
@@ -508,20 +504,19 @@ export function stepValidatedStateToEvent(
   options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const stepped = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "stepToEvent",
-    instructionBudget(options.instructionBudget),
-    options.instructionObserver,
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "stepToEvent",
+      instructionBudget(options.instructionBudget),
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, stepped);
-  return stepped;
 }
 
 export function run(
@@ -532,19 +527,18 @@ export function run(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const ran = driveRoot(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "run",
-    instructionBudget(options.instructionBudget),
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    driveRoot(
+      captured.plan,
+      captured.snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "run",
+      instructionBudget(options.instructionBudget),
+    ),
   );
-  closeDebugTrace(trace, ran);
-  return ran;
 }
 
 /** Runs engine-owned plan/state that already passed complete validation. */
@@ -555,20 +549,19 @@ export function runValidatedState(
   options: ValidatedRunOptions = {},
 ): RuntimeOperationResult {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const ran = driveRoot(
-    plan,
-    snapshot,
-    capabilities,
-    options,
-    trace,
-    policy,
-    "run",
-    instructionBudget(options.instructionBudget),
-    options.instructionObserver,
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    driveRoot(
+      plan,
+      snapshot,
+      capabilities,
+      options,
+      trace,
+      policy,
+      "run",
+      instructionBudget(options.instructionBudget),
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, ran);
-  return ran;
 }
 
 /**
@@ -710,18 +703,9 @@ export function resumeRandomDraw(
 ): PendingActionOperationResult<RandomDrawResolutionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const policy = randomPolicyFor(captured.plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const resumed = resumeCaptured(
-    captured.plan,
-    captured.snapshot,
-    request,
-    capabilities,
-    options,
-    trace,
-    policy,
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    resumeCaptured(captured.plan, captured.snapshot, request, capabilities, options, trace, policy),
   );
-  closeDebugTrace(trace, resumed);
-  return resumed;
 }
 
 /** Resolves the paused draw of engine-owned plan/state that already passed complete validation. */
@@ -736,19 +720,18 @@ export function resumeValidatedRandomDraw(
   > = {},
 ): PendingActionOperationResult<RandomDrawResolutionOutcome> {
   const policy = randomPolicyFor(plan, options, capabilities);
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const resumed = resumeCaptured(
-    plan,
-    snapshot,
-    request,
-    capabilities,
-    options,
-    trace,
-    policy,
-    options.instructionObserver,
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    resumeCaptured(
+      plan,
+      snapshot,
+      request,
+      capabilities,
+      options,
+      trace,
+      policy,
+      options.instructionObserver,
+    ),
   );
-  closeDebugTrace(trace, resumed);
-  return resumed;
 }
 
 function resumeCaptured(

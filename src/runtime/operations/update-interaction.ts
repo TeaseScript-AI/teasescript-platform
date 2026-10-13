@@ -5,7 +5,7 @@ import type { InstructionPlan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { applyFormUpdate, formStatesEqual } from "../actions/form.js";
 import type { RuntimeSnapshot } from "../state.js";
-import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
   captureExecutableData,
@@ -50,10 +50,9 @@ export function updateInteraction(
 ): PendingActionOperationResult<InteractionUpdateOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   // An edit changes no script value; the trace only follows the session through it.
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const updated = updateInteractionRequest(captured.snapshot, request);
-  closeDebugTrace(trace, updated);
-  return updated;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, () =>
+    updateInteractionRequest(captured.snapshot, request),
+  );
 }
 
 /** Updates an interaction of engine-owned plan/state that already passed complete validation. */
@@ -63,10 +62,9 @@ export function updateValidatedInteraction(
   request: unknown,
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<InteractionUpdateOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const updated = updateInteractionRequest(snapshot, request);
-  closeDebugTrace(trace, updated);
-  return updated;
+  return withDebugTrace(options.debugTrace, plan, snapshot, () =>
+    updateInteractionRequest(snapshot, request),
+  );
 }
 
 function updateInteractionRequest(

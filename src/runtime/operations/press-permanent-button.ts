@@ -15,7 +15,7 @@ import {
   positiveSafeInteger,
   takeSequence,
 } from "./support.js";
-import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 
 export type PermanentButtonPressOutcome =
   | RandomDrawPendingOutcome
@@ -45,10 +45,9 @@ export function pressPermanentButton(
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<PermanentButtonPressOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const pressed = pressCapturedPermanentButton(captured, buttonId);
-  closeDebugTrace(trace, pressed);
-  return pressed;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, () =>
+    pressCapturedPermanentButton(captured, buttonId),
+  );
 }
 
 /** Clicks a permanent button of engine-owned plan/state that already passed complete validation. */
@@ -58,10 +57,9 @@ export function pressValidatedPermanentButton(
   buttonId: unknown,
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<PermanentButtonPressOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const pressed = pressCapturedPermanentButton({ plan, snapshot }, buttonId);
-  closeDebugTrace(trace, pressed);
-  return pressed;
+  return withDebugTrace(options.debugTrace, plan, snapshot, () =>
+    pressCapturedPermanentButton({ plan, snapshot }, buttonId),
+  );
 }
 
 function pressCapturedPermanentButton(
