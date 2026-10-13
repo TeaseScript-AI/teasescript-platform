@@ -408,10 +408,10 @@ export function setCapturedSerializableProperty(
 
 /**
  * The entries of a dict by key, so that finding a key does not compare it with every entry, and a dict literal of n keys
- * is built in work in proportion to n instead of n². A dict builds its index at its first lookup, at most once and in
- * work in proportion to its entries, as making it took: a copy, a restored dict, or one from the host is a new dict. Its
- * entries change only through the functions below, which keep its index exact. The entries stay the dict's value, which
- * checkpoints keep, and nothing reads the order of an index.
+ * is built in work in proportion to n instead of n². A dict builds its index at its first key operation, in work in
+ * proportion to its entries, as making it took: a copy, a restored dict, or one from the host is a new dict. `clear()`
+ * drops it. The entries change only through the functions below, which keep the index exact. They stay the dict's value,
+ * which checkpoints keep, and nothing reads the order of an index.
  */
 const dictIndexes = new WeakMap<
   SerializableRuntimeDict,
