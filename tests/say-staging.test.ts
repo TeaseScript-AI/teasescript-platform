@@ -65,13 +65,16 @@ test("a say whose expressions only read, compute, and draw stages selectively", 
     'say items.random\nsay "${items}"\nsay random()\nsay randomInteger(1..=6)',
     'say person.name.uppercase()\nsay items.join(", ")\nsay items.take(2)\nsay items.contains("a")',
     'say lookup.get("z", default: 0)\nsay lookup.keys\nsay toString(count)\nsay max(count, 5)',
+    // JSON and Base64 without files only read their arguments.
+    'say toJson(lookup, files: false)\nsay "${fromJson(toJson(person, files: false), default: null, files: false)}"',
+    'say toBase64(person.name)\nsay fromBase64("QW5u", default: "")',
     'say (load "k", default: count)',
     // A user function runs in instructions before the say, which reads its result.
     'say "${twice(count)}"',
     'say "x", pause\nsay "x", 2 s\nsay prose(color: tint) "x"',
   ];
   const results = staging(lines);
-  assert.equal(results.length, 30);
+  assert.equal(results.length, 34);
   assert.deepEqual(
     results.flatMap((admitted, index) => (admitted ? [] : [index])),
     [],
@@ -174,6 +177,8 @@ test("selective and deep staging give the same events and states", () => {
       'say "${toString(count)} ${items.take(2).join()} ${person.name.padStart(5, ".")}", pause',
       'say prose(color: tint) "${twice(count)} left"',
       "say lookup",
+      'say "${toJson(lookup, files: false)} ${toBase64(person.name)} ${fromBase64("QW5u", default: "")}"',
+      'say "${fromJson(toJson(items, files: false), default: null, files: false)}"',
       "exit",
     ].join("\n"),
   );

@@ -4,6 +4,8 @@ import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 /**
  * Engine functions that, apart from drawing from the session generator, only read copies of their arguments and the
  * scene clock, and return a new value. A host built-in runs code the engine has not checked, so it is not listed.
+ * `toJson` and `fromJson` are calls only with a written `files: false`; otherwise they may wait for the Player's file
+ * store and run as instructions before the say, which reads their result.
  */
 const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "random",
@@ -21,6 +23,10 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "toTime",
   "toDateTime",
   "toAbsoluteDateTime",
+  "toJson",
+  "fromJson",
+  "toBase64",
+  "fromBase64",
   "round",
   "floor",
   "ceil",
