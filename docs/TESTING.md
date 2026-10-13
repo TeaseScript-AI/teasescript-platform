@@ -598,14 +598,18 @@ the waiting question, which returns; and that a `goto` and `exit` remove the but
 `tests/fixtures/packages/`, it opens packages by URL in the Player, playground, and editor: a valid package starts at
 its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
 with file and line. Its `pictures` package checks `askImage(...)`: only while a request waits does the composer offer
-a paperclip, which opens the native picker, and a drop target; a chosen and a dropped image each answer and reach the
-Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting;
-its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither; and
-its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
-script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
-the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
-paperclip stays; its `picture-skip` package checks that a request written with `allowSkip: true` offers Skip under its
-question beside the camera, which answers `null`, and that one without offers none. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
+a paperclip, which opens the native picker, and a drop target; Upload file opens the picker too, a cancelled picker
+changes nothing, and Use image is greyed with its reason until a chosen image stands on the Stage as the preview, which
+another file replaces; Use image answers with a chosen and with a dropped image, while a text file, two files, or a
+file outside the request's filters are refused and the request keeps waiting; its `picture-race` package checks that a
+file chosen for a request a timer's request replaced becomes the preview of neither; and its `picture-camera` and
+`picture-camera-view` packages check that no camera turns on by itself, that Open camera shows the viewfinder without
+the question on the Stage or in the script's camera window, that Back returns without a photo, that Take photo and the
+Self-timer's countdown each return with a photo of the fake camera's test card as the preview, that only Use image
+answers, that the camera the request opened turns off when the camera step ends, also when a file is given there, that
+a reload at either step comes back at the first step without a photo, and that a busy camera offers Try again while the
+paperclip stays; its `picture-skip` package checks that a request written with `allowSkip: true` offers Skip in its
+first step, which answers `null`, and that one without offers none. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
 the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
 region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
 shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
