@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "Groovy shared the wheel's maps by reference, so the setup loop for (def field: mistress['wheel']) removed the actions whose condition is not met from the stacks the mistress holds; a TeaseScript loop variable holds a copy (ADR 0014), whose change would be lost (SX_PARAMETER_LIST_WRITE). The loop goes over the wheel by position and removes the action where the wheel holds it, so the same actions are left.",
       "diff": "wheel-conditions.diff"
+    },
+    {
+      "id": "last-outfit",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): tease_round strips through the outfits while dress_id < strip_to and ends with dress_id = strip_to, so the next set_mistress_image() reads clothes[strip_to], which is past the list when no \"strip less\" trick lowered strip_to (clothes.size()); Groovy failed there too (null images), reachable since the batch-30 JSON fix (V2 explorer turn 15: TSR016 null.get at trick_or_treat_poker.tease:544). Evident intent: the end of the tease shows the last outfit it strips to, clothes[strip_to - 1] (at least 0).",
+      "diff": "last-outfit.diff"
     }
   ]
 }

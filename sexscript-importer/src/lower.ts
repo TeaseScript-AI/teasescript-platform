@@ -15738,12 +15738,13 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
     const values = lowerArguments(items, context);
     return values === null ? null : { kind: "list", items: values };
   }
-  if (sizes.length !== 1 || items.length > 0) {
+  // A two-dimensional array of sizes given at its creation is a list of rows; other shapes stay manual.
+  if (sizes.length > 2 || items.length > 0) {
     return unsupportedExpression(
       context,
       node,
       "SX_JAVA_ARRAY",
-      "Multi-dimensional Java arrays are not converted automatically.",
+      "Java arrays of more than two dimensions, or with initial values and sizes, are not converted automatically.",
     );
   }
   const elementType = (text(node.elementType) ?? "").replace(/^java\.lang\./u, "");
@@ -15763,10 +15764,15 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
       `A Java ${elementType}[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
     );
   }
-  const size = lowerExpression(sizes[0]!, context);
-  if (size === null) return null;
-  const defaultValue = PRIMITIVE_DEFAULTS.get(elementType) ?? null;
-  return useHelper(context, "array", [size, { kind: "literal", value: defaultValue }]);
+  const lowered = lowerArguments(sizes, context);
+  if (lowered === null) return null;
+  const defaultValue: IrExpression = {
+    kind: "literal",
+    value: PRIMITIVE_DEFAULTS.get(elementType) ?? null,
+  };
+  return lowered.length === 2
+    ? useHelper(context, "arrayRows", [lowered[0]!, lowered[1]!, defaultValue])
+    : useHelper(context, "array", [lowered[0]!, defaultValue]);
 }
 
 function isCurrentDateValue(node: AstNode, context: LowerContext): boolean {

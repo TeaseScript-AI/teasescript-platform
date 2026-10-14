@@ -21,3 +21,7 @@ def review = { key ->
   show("Progress " + parts[0])
 }
 review("mandy.record")
+// A two-dimensional array of sizes given at its creation is a list of rows, whose object slots start as null.
+String[][] board = new String[2][3]
+board[1][2] = "Kneel"
+show("${board[1][2]} ${board[0][0]} ${board.size()}")

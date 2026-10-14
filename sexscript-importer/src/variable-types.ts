@@ -125,6 +125,8 @@ interface Binding {
    * record), which the declaration keeps open.
    */
   open?: boolean;
+  /** The rows of a Java two-dimensional object array whose slots get values of several or unknown types: `list`. */
+  anyRows?: boolean;
 }
 
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
@@ -447,7 +449,8 @@ export function enforceVariableTypes(
             next = { ...next, type: binding.optional ? "integer?" : "integer" };
           }
           const type = bindingType(binding);
-          const written = type === undefined ? null : annotation(type);
+          const written =
+            binding.anyRows === true ? "list" : type === undefined ? null : annotation(type);
           // An unannotated variable widens from integer to number by itself (#504 option B); an optional type and a
           // widened list element type still need an annotation.
           // The compiler narrows an initializer that may be null to its current type, so a variable that keeps such a
@@ -455,6 +458,7 @@ export function enforceVariableTypes(
           const needed =
             binding.optional ||
             binding.union !== undefined ||
+            binding.anyRows === true ||
             // A list literal that mixes types needs its union element type written (ADR 0021 rule 1.3).
             (type !== undefined && hasUnion(type) && statement.value.kind === "list") ||
             binding.initial.kind === "optional" ||
@@ -755,6 +759,17 @@ function analyse(
   const elementWrites = new Map<Binding, TeaseType[]>();
   // Lists that start empty and get a variable whose type allows null, `answers[i] = answer` (storeElement).
   const nullableWrites = new Set<Binding>();
+  // Java object arrays of two dimensions, which start with null in every slot, and the values written to their slots.
+  const nullRows = new Set<Binding>();
+  const rowWrites = new Map<Binding, TeaseType[]>();
+  // A Java object array starts with null in every slot (sexscriptLegacyArray, sexscriptLegacyArrayRows).
+  const noteNullArray = (target: Binding, value: IrExpression): void => {
+    if (value.kind !== "call" || value.local === true) return;
+    const start = value.positional.at(-1);
+    if (start?.kind !== "literal" || start.value !== null) return;
+    if (value.name === "sexscriptLegacyArray") nullableWrites.add(target);
+    if (value.name === "sexscriptLegacyArrayRows") nullRows.add(target);
+  };
   // Lists that get a stored number read without a default, which a missing key gives as null,
   // `ids[i] = sexscriptLegacyLoadInteger(key)` (storeElement).
   const missingReads = new Set<Binding>();
@@ -1249,12 +1264,25 @@ function analyse(
           initial = scalar("integer");
         }
         declared.initial = declared.placeholder ?? initial;
+        noteNullArray(declared, item.value);
         if (fixed !== undefined) store(declared, initial, item);
         scope.names.set(item.name, declared);
         return;
       }
       case "assign": {
         const value = typeOf(item.value, scope);
+        // `rows[i][j] = value` in a Java two-dimensional array (sexscriptLegacyArrayRows).
+        if (
+          item.target.kind === "index" &&
+          item.target.target.kind === "index" &&
+          item.target.target.target.kind === "variable" &&
+          item.operator === "="
+        ) {
+          const rows = scope.resolve(item.target.target.target.name);
+          if (rows !== undefined && nonNull(value).kind !== "unknown")
+            rowWrites.set(rows, [...(rowWrites.get(rows) ?? []), nonNull(value)]);
+          return;
+        }
         if (item.target.kind === "index" && item.target.target.kind === "variable") {
           const list = scope.resolve(item.target.target.name);
           if (list !== undefined && item.operator === "=" && emptySlots(list.declaration?.value))
@@ -1268,6 +1296,7 @@ function analyse(
         if (item.target.kind !== "variable") return;
         const target = scope.resolve(item.target.name);
         if (target === undefined) return;
+        noteNullArray(target, item.value);
         // A value of a type the conversion does not know, such as an element of Groovy's multiple assignment, keeps
         // the variable open.
         if (item.value.kind === "call" && item.value.open === true && target.open !== true)
@@ -1591,6 +1620,28 @@ function analyse(
       const nullable = listOf({ kind: "optional", value: element });
       change(() => (list.union = nullable));
     }
+  }
+  // A Java two-dimensional object array holds null in every slot not yet written: where its slots get values of one
+  // type it holds those or null, `string?[][]`, and otherwise any rows, `list`, so that no first write fixes a type
+  // without null.
+  for (const rows of nullRows) {
+    if (rows.declaration === null || rows.fixed !== undefined || rows.union !== undefined) continue;
+    const written = rowWrites.get(rows) ?? [];
+    const element = written.reduce<TeaseType | null>(
+      (joined, type) =>
+        joined === null
+          ? null
+          : isAssignable(joined, type)
+            ? joined
+            : isAssignable(type, joined)
+              ? type
+              : null,
+      written[0] ?? null,
+    );
+    if (element?.kind === "scalar") {
+      const nullable = listOf(listOf({ kind: "optional", value: element }));
+      change(() => (rows.union = nullable));
+    } else if (rows.anyRows !== true) change(() => (rows.anyRows = true));
   }
   // So does a list written out with elements of one type, `ids = [0, 0, 0]`, where a stored number read without a
   // default writes a missing key's null and the code compares its elements with null (stripordie's player IDs, whose
@@ -2218,6 +2269,7 @@ export function annotation(type: TeaseType): string | null {
       value.element.value.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
     (value.kind === "list" && hasUnion(value) && writableElements(value.element)) ||
+    (value.kind === "list" && value.element.kind === "list" && writableElements(value.element)) ||
     // Any list, object, dict, or range is written by its kind, which an optional one needs: `list | null`.
     (type.kind === "optional" && isKindMember(value));
   return writable ? typeName(type) : null;

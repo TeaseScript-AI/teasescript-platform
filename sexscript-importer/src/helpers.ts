@@ -167,6 +167,7 @@ function withNestedBodies(
  */
 export type HelperName =
   | "array"
+  | "arrayRows"
   | "fixed"
   | "format"
   | "packagePath"
@@ -295,6 +296,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "button",
   "concat",
   "array",
+  "arrayRows",
   "menuOptions",
   "listMax",
   "listMin",
@@ -2347,6 +2349,29 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           letS("items", { kind: "list", items: [] }),
           { kind: "repeat", count: v("size"), body: [add("items", v("value"))], span: null },
+          ret(v("items")),
+        ],
+      ),
+  },
+  // A Java two-dimensional array `new T[rows][columns]`: rows of their own, each of `columns` start values.
+  arrayRows: {
+    name: "sexscriptLegacyArrayRows",
+    build: () =>
+      fn(
+        "sexscriptLegacyArrayRows",
+        ["rows", "columns", "value"],
+        [
+          letS("items", { kind: "list", items: [] }),
+          {
+            kind: "repeat",
+            count: v("rows"),
+            body: [
+              letS("row", { kind: "list", items: [] }),
+              { kind: "repeat", count: v("columns"), body: [add("row", v("value"))], span: null },
+              add("items", v("row")),
+            ],
+            span: null,
+          },
           ret(v("items")),
         ],
       ),

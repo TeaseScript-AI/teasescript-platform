@@ -928,10 +928,14 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       return;
     }
     if (value.kind === "array" && typeof value.elementType === "string") {
-      // Java arrays are typed; object arrays start filled with null.
+      // Java arrays are typed; object arrays start filled with null, and a multi-dimensional one holds arrays.
       const element = castType(value.elementType);
       const primitive = /^[a-z]/u.test(value.elementType);
-      elements.set(name, (elements.get(name) ?? 0) | element | (primitive ? 0 : NULL));
+      const nested = Array.isArray(value.sizes) && value.sizes.length > 1;
+      elements.set(
+        name,
+        (elements.get(name) ?? 0) | (nested ? LIST : element | (primitive ? 0 : NULL)),
+      );
       return;
     }
     const source = variableName(value);
