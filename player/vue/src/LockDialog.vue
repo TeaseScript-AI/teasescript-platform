@@ -207,13 +207,13 @@ function heldKey(event: KeyboardEvent) {
           :error="mismatch ? 'The passwords do not match' : null"
           data-lock-repeat
         />
-        <div class="flex flex-wrap justify-end gap-2">
+        <!-- While busy, the controls look disabled but keep focus, as `aria-disabled` says. -->
+        <div class="flex flex-wrap justify-end gap-2" :class="{ 'opacity-50': busy }">
           <Button
             type="submit"
             class="min-h-11"
             :disabled="!busy && !canLock"
             :aria-disabled="busy ? 'true' : undefined"
-            :class="{ 'opacity-50': busy }"
             data-lock-submit
           >
             {{ busy ? "Locking…" : "Lock" }}
@@ -226,17 +226,18 @@ function heldKey(event: KeyboardEvent) {
         </p>
         <div v-if="dialog.notice === 'unreachable'" class="grid gap-2" data-unlock-unreachable>
           <p class="text-sm">Its time has passed, but the time service could not be reached.</p>
-          <Button
-            type="button"
-            variant="outline"
-            class="min-h-11 justify-self-start"
-            :aria-disabled="busy ? 'true' : undefined"
-            :class="{ 'opacity-50': busy }"
-            data-unlock-retry
-            @click="tryAgain"
-          >
-            {{ busy && started === "retry" ? "Opening…" : "Try again" }}
-          </Button>
+          <div class="justify-self-start" :class="{ 'opacity-50': busy }">
+            <Button
+              type="button"
+              variant="outline"
+              class="min-h-11"
+              :aria-disabled="busy ? 'true' : undefined"
+              data-unlock-retry
+              @click="tryAgain"
+            >
+              {{ busy && started === "retry" ? "Opening…" : "Try again" }}
+            </Button>
+          </div>
         </div>
         <PasswordField
           v-if="dialog.password"
@@ -248,14 +249,13 @@ function heldKey(event: KeyboardEvent) {
           data-unlock-password
         />
         <p v-if="openingByItself" role="status" class="text-sm" data-unlock-opening>Opening…</p>
-        <div class="flex flex-wrap justify-end gap-2">
+        <div class="flex flex-wrap justify-end gap-2" :class="{ 'opacity-50': busy }">
           <Button
             ref="cancelButton"
             type="button"
             variant="outline"
             class="min-h-11"
             :aria-disabled="busy ? 'true' : undefined"
-            :class="{ 'opacity-50': busy }"
             data-unlock-cancel
             @click="cancel"
           >
@@ -266,7 +266,6 @@ function heldKey(event: KeyboardEvent) {
             type="submit"
             class="min-h-11"
             :aria-disabled="busy ? 'true' : undefined"
-            :class="{ 'opacity-50': busy }"
             data-unlock-submit
           >
             {{ busy && started === "unlock" ? "Opening…" : "Unlock" }}
