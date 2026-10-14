@@ -29,6 +29,13 @@ test("the photo colours and swatches are node-vibrant's, and a swatch it would i
       reference.swatches,
       `${reference.photo}: swatches`,
     );
+    // Each swatch covers its pixels' share of all measured pixels.
+    const measured = colours.reduce((total, colour) => total + colour.population, 0);
+    for (const name of SWATCH_NAMES) {
+      const swatch = swatches[name];
+      if (swatch)
+        assert.equal(swatch.share, swatch.population / measured, `${reference.photo}: ${name}`);
+    }
   }
 });
 
