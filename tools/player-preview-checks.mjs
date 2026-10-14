@@ -3222,23 +3222,35 @@ async function runGroup(browserPage, run, url, artifacts) {
       !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
     window.playerChecks = {
       // The elements a judgement involves have settled: no earlier than `minimum` ms after the change being judged (the
-      // wait main used at that point, so a change the Player makes later is judged as before), their boxes unchanged
-      // for five frames in a row; false after `timeout` ms. Motion of anything else does not delay the judgement.
+      // wait main used at that point, so a change the Player makes later is judged as before), with no finite animation
+      // of them, their contents or their ancestors still waiting or running, and their boxes unchanged for five frames
+      // in a row; false after `timeout` ms. Motion of anything else does not delay the judgement.
       settled: (selectors, minimum = 0, timeout = 5000) =>
         new Promise((resolve) => {
           const start = performance.now();
           let [last, still] = [null, 0];
           const giveUp = setTimeout(() => resolve(false), timeout + 200);
-          const frame = () => {
-            const boxes = JSON.stringify(
-              selectors.flatMap((selector) =>
-                [...document.querySelectorAll(selector)].map((element) => {
-                  const box = element.getBoundingClientRect();
-                  return [box.left, box.top, box.width, box.height].map(Math.round);
-                }),
-              ),
+          const animating = (element) => {
+            const animations = element.getAnimations({ subtree: true });
+            for (let up = element.parentElement; up; up = up.parentElement)
+              animations.push(...up.getAnimations());
+            return animations.some(
+              (animation) =>
+                (animation.pending || animation.playState === "running") &&
+                animation.effect?.getComputedTiming().endTime !== Infinity,
             );
-            still = boxes === last ? still + 1 : 0;
+          };
+          const frame = () => {
+            const elements = selectors.flatMap((selector) => [
+              ...document.querySelectorAll(selector),
+            ]);
+            const boxes = JSON.stringify(
+              elements.map((element) => {
+                const box = element.getBoundingClientRect();
+                return [box.left, box.top, box.width, box.height].map(Math.round);
+              }),
+            );
+            still = boxes === last && !elements.some(animating) ? still + 1 : 0;
             last = boxes;
             const waited = performance.now() - start;
             if (waited >= minimum && still >= 5) {
