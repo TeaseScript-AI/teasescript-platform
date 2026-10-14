@@ -101,6 +101,7 @@ function setShare(event: Event) {
         />
         % of the photo
       </label>
+      <p class="text-muted-foreground">Near-white and transparent pixels do not count.</p>
       <div>
         <Button
           variant="outline"
