@@ -1661,10 +1661,11 @@ it.
 The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
 (`TSR059`, as for `fileToBase64`), `password:` and `key:` text, an encrypt call's `password:` also `true` or `false`,
 `publicKey:` a public key, a list of at most 594 of them, `true`, or `false`, and `timeLock:` an `absoluteDateTime`,
-`true`, or `false` (`TSR059`); an encrypt call whose openers are all `false`, or a list of no keys, fails with `TSR059`.
-Its openers written `true`, or each when it writes none, are its `choices`, which the lock dialog asks for; a chosen time
-lock is suggested 7 days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text
-(`TSR059`), and gives the default at once for text that is not Base64, read as `fromBase64` reads it. Otherwise it
+`true`, or `false` (`TSR059`); an encrypt call whose openers are all `false`, or whose `publicKey:` list is empty while
+`password:` and `timeLock:` are `false`, fails with `TSR059`. Its openers written `true`, or each when it writes none,
+are its `choices`, which the lock dialog asks for; a chosen time lock is suggested 7 days after the session clock's
+current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives the default at once for text
+that is not Base64, read as `fromBase64` reads it. Otherwise it
 creates a foreground `lock` action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the
 stored file), the written `password` text or `null`, the written `publicKeys`, each trimmed (encrypt only, else empty),
 the written `key` or `null` (decrypt only), the written time lock's `timeLockMs` (encrypt only), the `choices`, and a
