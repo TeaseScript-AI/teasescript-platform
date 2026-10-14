@@ -15,7 +15,7 @@ let preloadStagePhotos: (sources: readonly string[]) => () => void;
 
 // The page this module runs in, without an image decoder for a worker: downloads, object URLs, images that decode, and
 // a canvas whose pixels are one green, so every photo is measured on the canvas.
-const page = { draws: 0, created: new Set<string>(), revoked: new Set<string>() };
+const page = { draws: 0, created: new Set<string>(), revoked: new Set<string>(), offline: false };
 const saved = {
   fetch: globalThis.fetch,
   createObjectURL: URL.createObjectURL,
@@ -23,7 +23,8 @@ const saved = {
 };
 before(async () => {
   globalThis.fetch = async (input) => {
-    if (String(input).includes("unreachable")) throw new TypeError("Failed to fetch");
+    if (String(input).includes("unreachable") || page.offline)
+      throw new TypeError("Failed to fetch");
     return new Response(new Blob([new Uint8Array(16)], { type: "image/png" }));
   };
   URL.createObjectURL = (blob) => {
@@ -119,6 +120,21 @@ test("a preloaded photo is measured before it shows, and stays while the preload
   again.release();
   release();
   assert.equal(page.revoked.has(url), true);
+});
+
+test("a preloaded photo whose download failed is downloaded again when it shows", async () => {
+  page.offline = true;
+  const release = preloadStagePhotos(["/files/meadow.jpg"]);
+  const missed = prepareStagePhoto("/files/meadow.jpg");
+  assert.equal(await missed.shown, "/files/meadow.jpg", "the Stage loads it itself");
+  assert.equal(await missed.swatches, null);
+  missed.release();
+  page.offline = false;
+  const shown = prepareStagePhoto("/files/meadow.jpg");
+  assert.equal(page.created.has(await shown.shown), true);
+  assert.notEqual(await shown.swatches, null);
+  shown.release();
+  release();
 });
 
 test("the Stage images to load ahead are the script's image paths and its tag queries' candidates", () => {

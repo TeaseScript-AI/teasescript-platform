@@ -13,12 +13,12 @@ export interface StagePhotoRequest {
 }
 
 /**
- * The photo's swatches, `null` when its pixels could not be decoded, or `"unsupported"` when this browser's image
- * decoder does not decode its type here; the page then measures the photo itself.
+ * The photo's swatches, or `null` when this browser's image decoder does not decode it here, as for SVG; the page then
+ * measures the photo itself.
  */
 export interface StagePhotoResponse {
   readonly id: number;
-  readonly swatches: ReturnType<typeof photoSwatches> | null | "unsupported";
+  readonly swatches: ReturnType<typeof photoSwatches> | null;
 }
 
 /** The size a JPEG's frame header declares, or `null` without one. */
@@ -39,9 +39,8 @@ function jpegSize(bytes: Uint8Array): { readonly width: number; readonly height:
 }
 
 async function measure({ blob }: StagePhotoRequest) {
-  if (typeof ImageDecoder === "undefined" || typeof OffscreenCanvas === "undefined")
-    return "unsupported";
-  if (!(await ImageDecoder.isTypeSupported(blob.type).catch(() => false))) return "unsupported";
+  if (typeof ImageDecoder === "undefined" || typeof OffscreenCanvas === "undefined") return null;
+  if (!(await ImageDecoder.isTypeSupported(blob.type).catch(() => false))) return null;
   const data = await blob.arrayBuffer();
   // A JPEG decodes at a reduced size where asked, at least the measuring size but no less than an eighth of each side:
   // Chromium rejects a smaller size.

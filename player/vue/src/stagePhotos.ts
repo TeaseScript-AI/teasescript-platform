@@ -31,6 +31,8 @@ interface Entry {
   readonly download: AbortController;
   /** The download, `null` while the photo waits for the preloader; the bytes, `null` when they could not be fetched. */
   bytes: Promise<Blob | null> | null;
+  /** Whether the download failed, so that the Stage tries it again when it shows the photo. */
+  failed: boolean;
   swatches: Promise<PhotoSwatches | null> | null;
   /** The object URL of the download, once there is one. */
   url: string | null;
@@ -47,6 +49,7 @@ function hold(source: string): Entry {
       shows: 0,
       download: new AbortController(),
       bytes: null,
+      failed: false,
       swatches: null,
       url: null,
       image: null,
@@ -65,14 +68,19 @@ function drop(source: string, entry: Entry) {
   entry.image = null;
 }
 
-/** Starts the download of a photo and the measuring of its colours, unless they have started. */
+/** Starts the download of a photo and the measuring of its colours, unless they have started or succeeded. */
 function load(source: string, entry: Entry, priority: RequestPriority) {
-  if (entry.bytes !== null) return;
+  if (entry.bytes !== null && !entry.failed) return;
+  entry.failed = false;
   // A failed download, such as from another origin that does not share the image, leaves the Stage to load the source.
   const bytes = fetch(source, { signal: entry.download.signal, priority })
     .then((response) => (response.ok ? response.blob() : null))
     .catch(() => null)
-    .then((blob) => (entry.download.signal.aborted ? null : blob));
+    .then((blob) => {
+      if (entry.download.signal.aborted) return null;
+      entry.failed = blob === null;
+      return blob;
+    });
   entry.bytes = bytes;
   const known = measured.get(source);
   entry.swatches =
@@ -80,10 +88,10 @@ function load(source: string, entry: Entry, priority: RequestPriority) {
       ? Promise.resolve(known)
       : bytes.then(async (blob) => {
           if (blob === null) return null;
-          let result: PhotoSwatches | null | "unsupported";
+          let result: PhotoSwatches | null;
           try {
             result = await measureInWorker(blob);
-            if (result === "unsupported") {
+            if (result === null) {
               const { element, decoded } = decode(source, entry, blob);
               await decoded;
               result = measure(element);
@@ -180,7 +188,7 @@ export function preloadStagePhotos(sources: readonly string[]): () => void {
 
 /**
  * The swatches of a decoded photo, measured on a canvas of the page, where the worker's image decoder cannot measure it:
- * for SVG, and in older browsers.
+ * for SVG, in older browsers, and for a file the image decoder does not take as its type says.
  */
 function measure(image: HTMLImageElement): PhotoSwatches | null {
   if (image.naturalWidth === 0 || image.naturalHeight === 0) return null;
@@ -217,14 +225,14 @@ function measureInWorker(blob: Blob) {
       worker.addEventListener("error", () => {
         worker?.terminate();
         worker = null;
-        for (const resolve of requests.values()) resolve("unsupported");
+        for (const resolve of requests.values()) resolve(null);
         requests.clear();
       });
     } catch {
       worker = null;
     }
   }
-  if (worker === null) return Promise.resolve("unsupported" as const);
+  if (worker === null) return Promise.resolve(null);
   const id = nextRequest++;
   worker.postMessage({ id, blob } satisfies StagePhotoRequest);
   return new Promise<StagePhotoResponse["swatches"]>((resolve) => requests.set(id, resolve));
