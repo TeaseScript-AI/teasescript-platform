@@ -415,14 +415,16 @@ function replayData(
 /** Stands in for a value whose category the player did not choose. */
 const LEFT_OUT = "[left out: not chosen]";
 
-/** Stands in for a lock step's text, file, or password, which a readable section never shows (docs/ENCRYPTION.md). */
+/**
+ * Stands in for a lock step's text, file, password, or key, which a readable section never shows (docs/ENCRYPTION.md).
+ */
 const LOCK_LEFT_OUT = "[left out: lock content]";
 
 /**
  * An event as session text. What the player saw stays: messages, their own transcript text, and button labels. Any other
  * event can hold a saved value, an answer, or a storage key (a request's options and default, a settlement's result, a
  * warning about a key), so it keeps its structure only, unless saved values and answers are chosen too. A lock step's
- * request never shows its text, file, or password, only its call, phase, and time lock.
+ * request never shows its text, file, password, or key, only its call, phase, public keys, and time lock.
  */
 function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) {
   if (
@@ -437,6 +439,7 @@ function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) 
         ...event.action,
         value: LOCK_LEFT_OUT,
         password: event.action.password === null ? null : LOCK_LEFT_OUT,
+        key: event.action.key === null ? null : LOCK_LEFT_OUT,
       },
     };
   if (choices.savedValues && choices.answers) return event;

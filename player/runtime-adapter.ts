@@ -1024,12 +1024,15 @@ export interface PlayerRuntimeDebugNow {
     readonly at: PlayerDebugSourceLocation;
     /**
      * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
-     * was written or its password field asks for one, its time lock's moment in epoch milliseconds, or `null`, which the
-     * lock dialog suggests for a chosen time lock, and the openers the player chooses in the lock dialog.
+     * was written or its password field asks for one, how many public keys an encrypt call has, whether a decrypt call
+     * has a key, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
+     * time lock, and the openers the player chooses in the lock dialog.
      */
     readonly lock?: {
       readonly dialog: boolean;
       readonly password: boolean;
+      readonly publicKeys: number;
+      readonly key: boolean;
       readonly timeLockMs: number | null;
       readonly choices: readonly RuntimeLockChoice[];
     };
@@ -1191,6 +1194,8 @@ export function playerRuntimeDebugNow(
                       foreground.phase === "ask" &&
                       (foreground.passwordField === null || foreground.choices.length > 0),
                     password: foreground.password !== null || foreground.passwordField !== null,
+                    publicKeys: foreground.publicKeys.length,
+                    key: foreground.key !== null,
                     timeLockMs: foreground.timeLockMs,
                     choices: foreground.choices,
                   }),

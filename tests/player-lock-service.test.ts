@@ -4,7 +4,7 @@ import test from "node:test";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
-import { loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
+import { loadAge, loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
 import { roundTimeMs } from "../player/encryption/drand.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../player/runtime-adapter.js";
 import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
+import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";
 
 /*
  * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,
@@ -86,6 +87,7 @@ class Harness {
     });
     const services: LockServices = {
       tlock: loadTlock,
+      age: loadAge,
       fetch: relays(() => this.relaysDown),
       nowMs: () => this.nowMs,
     };
@@ -384,6 +386,79 @@ test("a password field whose typed password was lost, as on a reload, asks again
   const values = await player.ended();
   player.stop();
   assert.equal(typeof values.locked, "string");
+});
+
+/** The age file in the armor that the unlock dialog shows the player for their keyholder. */
+function unarmored(armor: string): Uint8Array {
+  return fromBase64(
+    armor
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("-----"))
+      .join(""),
+  );
+}
+
+test("the lock dialog takes keyholders' public keys, and the unlock dialog sends the age file and opens with the key sent back", async () => {
+  const keyholder = x25519Identity();
+  const player = new Harness(
+    [
+      'let locked = encryptText("kept for her")',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal((await player.dialog()).kind, "lock");
+  player.answer({
+    password: null,
+    openAtMs: NOW_MS + 3_600_000,
+    publicKeys: [keyholder.recipient, sshIdentity().recipient],
+  });
+  const unlock = await player.dialog();
+  assert.ok(unlock.kind === "unlock" && unlock.ageText !== null && !unlock.password);
+  // The keyholder opens the age file with their identity and sends back the key it holds.
+  const key = new TextDecoder().decode(openAge(unarmored(unlock.ageText), keyholder)!);
+  player.answer({
+    password: null,
+    openAtMs: null,
+    key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  });
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "unlock" && again.notice, "wrongKey");
+  player.answer({ password: null, openAtMs: null, key });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "kept for her");
+  // The key never reached the state or an event.
+  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  assert.ok(!recorded.includes(key.trim()));
+});
+
+test("publicKey: written in the script locks for the keyholders, and key: opens, while a wrong key gives the default", async () => {
+  const keyholder = sshIdentity();
+  const locking = new Harness(
+    [
+      `let locked = encryptText("written", publicKey: ["${keyholder.recipient}"], openAt: null)`,
+      "exit",
+    ].join("\n"),
+  );
+  const { locked } = await locking.ended();
+  locking.stop();
+  const bytes = fromBase64(String(locked));
+  const read = readLock(bytes)!;
+  assert.deepEqual([read.passwords.length, read.times.length, read.ages.length], [0, 0, 1]);
+  const key = new TextDecoder().decode(openAge(read.ages[0]!, keyholder)!).trim();
+  const opening = new Harness(
+    [
+      `let opened = decryptText("${String(locked)}", key: "${key}", default: "closed")`,
+      `let wrong = decryptText("${String(locked)}", key: "${key.replace(/^./u, key.startsWith("A") ? "B" : "A")}", default: "closed")`,
+      "exit",
+    ].join("\n"),
+  );
+  const values = await opening.ended();
+  opening.stop();
+  assert.deepEqual([values.opened, values.wrong], ["written", "closed"]);
+  // A call that writes its key shows no dialog.
+  assert.ok(opening.dialogs.every((shown) => shown === null));
 });
 
 test("a cancelled unlock dialog gives the default, and a passed time lock out of reach asks only when a password can open it", async () => {
