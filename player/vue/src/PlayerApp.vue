@@ -143,7 +143,8 @@ watch(storedContrast, (value) => {
 // The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, and the
 // photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted.
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
-const photoAccentOption = usePlayerPreference("player-photo-accent", ["photo", "theme"], "theme");
+// A new key: until B became the default, every browser stored the default A on its first load.
+const photoAccentOption = usePlayerPreference("player-photo-accent-v2", ["photo", "theme"], "theme");
 const photoFamily = usePlayerPreference("player-photo-family", PHOTO_FAMILIES, "large-vibrant");
 const photoFamilyShare = usePlayerNumberPreference("player-photo-family-share", { min: 0, max: 100 }, 3);
 // Settings' switch for the A/B tests panel, on unless turned off.

@@ -13,7 +13,7 @@ export function browserStorage(): Storage | undefined {
 
 // Player Settings are browser-local presentation preferences, not canonical runtime state.
 // Stored text is external input, including writes from other tabs: every read maps an
-// unknown value to the default.
+// unknown value to the default. Only a choice is stored, so an untouched preference follows a changed default.
 export function usePlayerPreference<T extends string>(
   key: string,
   allowed: readonly T[],
@@ -22,6 +22,7 @@ export function usePlayerPreference<T extends string>(
   const storage = browserStorage();
   if (!storage) return shallowRef(fallback);
   return useStorage<T>(key, fallback, storage, {
+    writeDefaults: false,
     serializer: {
       read: (raw) => allowed.find((value) => value === raw) ?? fallback,
       write: (value) => value,
@@ -38,6 +39,7 @@ export function usePlayerNumberPreference(
   const storage = browserStorage();
   if (!storage) return shallowRef(fallback);
   return useStorage<number>(key, fallback, storage, {
+    writeDefaults: false,
     serializer: {
       read: (raw) => {
         const value = raw.trim() === "" ? Number.NaN : Number(raw);
