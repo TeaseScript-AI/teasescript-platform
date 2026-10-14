@@ -30,6 +30,26 @@ export function usePlayerPreference<T extends string>(
   });
 }
 
+/**
+ * Moves the choice stored for the former Photo colour transition A/B test, which changed the fade time and the blending
+ * together, to the two tests that replaced it (owner decision 2026-10-14): its B, 0.3 s blended in sRGB, chooses B in
+ * both; its A was their defaults, so it leaves both unchosen.
+ */
+export function migratePhotoTransition(storage: Storage | undefined) {
+  if (!storage) return;
+  try {
+    const stored = storage.getItem("player-photo-transition");
+    if (stored === null) return;
+    if (stored === "srgb") {
+      storage.setItem("player-photo-fade-time", "0.3s");
+      storage.setItem("player-photo-blending", "srgb");
+    }
+    storage.removeItem("player-photo-transition");
+  } catch {
+    // A storage that refuses the write keeps the old choice, so the next load moves it.
+  }
+}
+
 /** A number preference from `min` to `max`; stored text that is no such number reads as the default. */
 export function usePlayerNumberPreference(
   key: string,

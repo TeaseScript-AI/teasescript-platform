@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
 import { PHOTO_FAMILIES, type PhotoFamily } from "../../theme/photo-theme.js";
-import type { PhotoTransition } from "./usePhotoColour";
+import type { PhotoFadeTime } from "./usePhotoColour";
 
 // The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison. Each
 // test's Next option steps to its following option and wraps around, so the variants can be flipped while watching the
@@ -11,7 +11,8 @@ const photoAccent = defineModel<"photo" | "theme">("photoAccent", { required: tr
 const photoFamily = defineModel<PhotoFamily>("photoFamily", { required: true });
 /** The least share of the photo, in percent, that makes a Vibrant swatch large enough. */
 const photoFamilyShare = defineModel<number>("photoFamilyShare", { required: true });
-const photoTransition = defineModel<PhotoTransition>("photoTransition", { required: true });
+const photoFadeTime = defineModel<PhotoFadeTime>("photoFadeTime", { required: true });
+const photoBlending = defineModel<"oklab" | "srgb">("photoBlending", { required: true });
 
 const familyLabels: Readonly<Record<PhotoFamily, string>> = {
   vibrant: "A · Vibrant",
@@ -115,22 +116,43 @@ function setShare(event: Event) {
         </Button>
       </div>
     </fieldset>
-    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-transition">
-      <legend class="font-medium">Photo colour transition</legend>
+    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-fade-time">
+      <legend class="font-medium">Photo colour fade time</legend>
       <label class="flex items-start gap-2">
-        <input v-model="photoTransition" type="radio" name="photo-transition-option" value="oklab" />
-        A · 0.6 s, blended in Oklab
+        <input v-model="photoFadeTime" type="radio" name="photo-fade-time-option" value="0.6s" />
+        A · 0.6 s
       </label>
       <label class="flex items-start gap-2">
-        <input v-model="photoTransition" type="radio" name="photo-transition-option" value="srgb" />
-        B · 0.3 s, blended in sRGB, like Milovana
+        <input v-model="photoFadeTime" type="radio" name="photo-fade-time-option" value="0.3s" />
+        B · 0.3 s, like Milovana
       </label>
       <div>
         <Button
           variant="outline"
           size="sm"
-          aria-label="Next option: Photo colour transition"
-          @click="photoTransition = next(['oklab', 'srgb'] as const, photoTransition)"
+          aria-label="Next option: Photo colour fade time"
+          @click="photoFadeTime = next(['0.6s', '0.3s'] as const, photoFadeTime)"
+        >
+          Next option
+        </Button>
+      </div>
+    </fieldset>
+    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-blending">
+      <legend class="font-medium">Photo colour blending</legend>
+      <label class="flex items-start gap-2">
+        <input v-model="photoBlending" type="radio" name="photo-blending-option" value="oklab" />
+        A · Oklab
+      </label>
+      <label class="flex items-start gap-2">
+        <input v-model="photoBlending" type="radio" name="photo-blending-option" value="srgb" />
+        B · sRGB, like Milovana
+      </label>
+      <div>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-label="Next option: Photo colour blending"
+          @click="photoBlending = next(['oklab', 'srgb'] as const, photoBlending)"
         >
           Next option
         </Button>
