@@ -59,7 +59,6 @@ export function withNativeTime(programs: readonly TimeProgram[]): IrStatement[][
     for (const program of programs)
       analyse(program.statements, program.shared, variables, declared, keyFor);
     for (const record of [...variables.values(), ...keys.values()]) {
-      record.whole = !record.writes.includes("fraction");
       record.time = record.native ? joined(record.writes) : null;
       if (record.time === "mixed") {
         record.native = false;
@@ -107,13 +106,11 @@ interface Variable {
   writes: Kind[];
   /** Whether a write reads a key that may be missing, so that the variable may hold null. */
   nullable?: boolean;
-  /** False once a write of the round before gave a number that may not be whole (a `fraction`). */
-  whole?: boolean;
 }
 
 function signature(variable: Variable): string {
   const time = variable.time;
-  return `${variable.native}:${variable.nullable === true}:${variable.whole !== false}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
+  return `${variable.native}:${variable.nullable === true}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
 }
 
 function timeOf(variable: Variable | undefined): Time | null {
@@ -148,37 +145,21 @@ function isPlaceholder(value: IrExpression): boolean {
 }
 
 /**
- * A whole number written from literals, `3600` or `3 * 24 * 3600`, or a sum or product of whole numbers, a rounding,
- * a length, or a variable or key whose writes so far are whole numbers or times: the only numbers a duration combines
+ * A whole number written from literals, `3600` or `3 * 24 * 3600`: with a duration, the only number a duration combines
  * with, since legacy's whole seconds and a number that may not be whole, `elapsed + frac` or `elapsed * 0.5`, made a
- * number of seconds that the duration's own whole seconds would not. A variable's writes are read optimistically until
- * a round shows one that may not be whole.
+ * number of seconds that the duration's own whole seconds would not. Any other number, also one a variable or a key
+ * holds, keeps legacy's whole-second arithmetic around the duration.
  */
 function wholeConstant(value: IrExpression): boolean {
   const number = constantNumber(value);
   return number !== null && Number.isInteger(number);
 }
 
+/** A whole constant, or a value that holds a duration: what a duration adds or subtracts and stays one. */
 function mayBeWhole(value: IrExpression, scope: Scope): boolean {
   if (wholeConstant(value)) return true;
-  if (value.kind === "literal") return false;
-  const record =
-    value.kind === "variable"
-      ? scope.resolve(value.name)
-      : storedKey(value) !== null
-        ? scope.keys(storedKey(value)!)
-        : undefined;
-  if (record !== undefined) {
-    if (!record.native) return false;
-    const time = timeOf(record);
-    return time === null ? record.whole !== false : time.kind === "duration";
-  }
-  if (value.kind === "call" && value.local !== true && ROUNDINGS.has(value.name)) return true;
-  if (value.kind === "property" && value.name === "length") return true;
-  if (value.kind === "unary" && value.operator === "-") return mayBeWhole(value.value, scope);
-  if (value.kind === "binary" && ["+", "-", "*"].includes(value.operator))
-    return mayBeWhole(value.left, scope) && mayBeWhole(value.right, scope);
-  return false;
+  const kind = kindOf(value, scope);
+  return typeof kind === "object" && kind.kind === "duration";
 }
 
 type KeyFor = (name: string) => Variable | undefined;
@@ -566,7 +547,7 @@ function analyse(
     const fits =
       kind === "null" ||
       (typeof kind === "object" && kind.kind === held.kind && kind.unit === held.unit) ||
-      (kind === "plain" && held.kind === "duration");
+      (kind === "plain" && held.kind === "duration" && wholeConstant(value));
     if (!fits) {
       key!.native = false;
       plain(value, scope);

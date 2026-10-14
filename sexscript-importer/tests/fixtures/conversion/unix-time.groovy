@@ -3,7 +3,8 @@ def timestamp = getTime()
 showButton("Stop")
 def timepassed = getTime() - timestamp
 if (timepassed > 45) show("Good") else if (timepassed < 45) show("Weak")
-// A number added to a moment or a duration counts seconds; multiplied or divided, a duration is its whole seconds.
+// A number added to a moment counts seconds. A variable that adds the time since a moment to a number keeps its
+// seconds, each time since in whole seconds as legacy counted them, and so does a duration multiplied or divided.
 def timewrite = 120
 def starttime = getTime()
 def start = 0

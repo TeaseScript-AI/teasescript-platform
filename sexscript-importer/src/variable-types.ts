@@ -2078,15 +2078,20 @@ function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 
       const indexOf = (node: unknown, target: unknown): boolean =>
         isRecord(node) && node.kind === "index" && node.target === target;
       const length = isRecord(parent) && parent.kind === "property" && parent.name === "length";
-      // Assigned a new array of empty slots; any other array, `rows = other`, may hold other values.
+      // Assigned a new array of the same shape and empty slots; any other array, `rows = other` or `rows = new
+      // int[2][2]`, may hold other values.
+      const fresh = isRecord(parent) && isRecord(parent.value) ? parent.value : null;
+      const start =
+        fresh !== null && Array.isArray(fresh.positional) ? fresh.positional.at(-1) : null;
       const assigned =
         isRecord(parent) &&
         parent.kind === "assign" &&
         parent.target === value &&
-        isRecord(parent.value) &&
-        parent.value.kind === "call" &&
-        (parent.value.name === "sexscriptLegacyArray" ||
-          parent.value.name === "sexscriptLegacyArrayRows");
+        fresh?.kind === "call" &&
+        fresh.name === (depth === 1 ? "sexscriptLegacyArray" : "sexscriptLegacyArrayRows") &&
+        isRecord(start) &&
+        start.kind === "literal" &&
+        start.value === null;
       const slot =
         depth === 1
           ? indexOf(parent, value)
