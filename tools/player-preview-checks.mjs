@@ -1077,14 +1077,12 @@ async function choiceLayoutChecks(page) {
     });
   for (const width of [1440, 700]) {
     await page.setViewportSize({ width, height: 900 });
-    // The conversation lays itself out again for the new width; it is judged once it has come to rest uncovered,
-    // within five seconds.
-    const deadline = Date.now() + 5000;
-    let state = await layout();
-    while (state.overlap.length > 0 && Date.now() < deadline) {
-      await page.waitForTimeout(100);
-      state = await layout();
-    }
+    // The conversation lays itself out again for the new width; it is judged once it has come to rest.
+    check(
+      await page.evaluate(() => playerChecks.atRest()),
+      `${width}px: the conversation did not come to rest`,
+    );
+    const state = await layout();
     check(
       state.overlap.length === 0,
       `${width}px: a choice, the message or the composer is covered: ${JSON.stringify(state)}`,
@@ -1110,7 +1108,9 @@ async function topBarChecks(page) {
   // The controls stay reachable and the title stays readable beside them; with the narrow drawer open (`barShown`
   // false), which covers the bar as a modal sheet, its own toggle stays reachable.
   const visible = async (tools, barShown = true) => {
-    // The title's pill, as drawn; its row around it passes input through to the Stage.
+    // Judged once the bar, or a drawer sliding in, has come to rest after the last change.
+    check(await page.evaluate(() => playerChecks.atRest()), "The top bar did not come to rest");
+    // The title's pill; its row around it passes input through to the Stage.
     const boxes = await Promise.all([
       tools.boundingBox(),
       actions.boundingBox(),
@@ -1118,29 +1118,18 @@ async function topBarChecks(page) {
     ]);
     check(boxes.every(Boolean), "Top controls and title must remain visible");
     // Neither covers the other: every control is uncovered, and no control is drawn over the title's pill, which is
-    // plain text that passes input through to the Stage. A drawer that is still sliding in is waited for.
-    await tools.evaluate((element) => element.setAttribute("data-check-toggle", ""));
-    const clear = await page
-      .waitForFunction(
-        (barShown) => {
-          const controls = [...document.querySelectorAll(".player-top-bar-actions button")];
-          const pill = document.querySelector(".player-top-bar-title > :is(span, button)");
-          return (
-            playerChecks.uncovered(document.querySelector("[data-check-toggle]")) &&
-            (!barShown ||
-              (controls.every(playerChecks.uncovered) &&
-                pill.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-                !controls.some((control) => playerChecks.hides(control, pill))))
-          );
-        },
-        barShown,
-        { timeout: 5000 },
-      )
-      .then(
-        () => true,
-        () => false,
+    // plain text that passes input through to the Stage.
+    const clear = await tools.evaluate((toggle, barShown) => {
+      const controls = [...document.querySelectorAll(".player-top-bar-actions button")];
+      const pill = document.querySelector(".player-top-bar-title > :is(span, button)");
+      return (
+        playerChecks.uncovered(toggle) &&
+        (!barShown ||
+          (controls.every(playerChecks.uncovered) &&
+            pill.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+            !controls.some((control) => playerChecks.hides(control, pill))))
       );
-    await tools.evaluate((element) => element.removeAttribute("data-check-toggle"));
+    }, barShown);
     check(clear, "Title must not collide with controls");
   };
   await visible(hide);
@@ -1376,8 +1365,9 @@ async function contentContainmentChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // What hides the media or the retained reading column, judged by what is drawn: the Stage's image or the conversation's
-  // text running off the window or under the docked sidebar. The narrow layout's drawer slides over the Stage by design.
+  // What hides the media or the retained reading column, judged by hit tests at the Stage's image (inside its box as
+  // fitted) and at the conversation's text lines: running off the window or under the docked sidebar. The narrow
+  // layout's drawer slides over the Stage by design.
   const hidden = `(() => {
     const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
     const docked = dock && !document.querySelector(".tools-drawer") ? dock : null;
@@ -1402,8 +1392,11 @@ async function contentContainmentChecks(page) {
     return problems.join("; ");
   })()`;
   const verify = async (label) => {
-    // Viewport and tool changes re-lay out the Player asynchronously; measure once it has settled.
-    await page.waitForFunction(`${hidden} === ""`, null, { timeout: 5000 }).catch(() => {});
+    // Viewport and tool changes re-lay out the Player asynchronously; it is judged once it has come to rest.
+    check(
+      await page.evaluate(() => playerChecks.atRest()),
+      `${label}: the Player did not come to rest`,
+    );
     const problems = await page.evaluate(hidden);
     check(problems === "", `${label}: ${problems}`);
   };
@@ -1594,9 +1587,9 @@ async function focusIndicatorChecks(page) {
 }
 
 async function backgroundControlPlacementChecks(page) {
-  // What the rail hides, judged by what is drawn (the rail and its controls' wrapper are transparent): the reading
-  // column's text or its timers, and whether a person can reach and press every background control, scrolling the
-  // controls to it.
+  // What the rail hides, judged by hit tests at the reading column's text lines and at its timers, not by the rail's
+  // or its controls' wrapper boxes, which are transparent; and whether a person can reach and press every background
+  // control, scrolling the controls to it.
   const placement = () =>
     page.evaluate(async () => {
       const rail = document.querySelector(".stage-right-rail");
@@ -1640,20 +1633,12 @@ async function backgroundControlPlacementChecks(page) {
         unreachable,
       };
     });
-  // The Player lays itself out again for the new window; it is judged once it has come to rest without a problem,
-  // within five seconds.
+  // The Player lays itself out again for the new window; it is judged once it has come to rest.
   const settle = async (width, height) => {
     await page.setViewportSize({ width, height });
-    const deadline = Date.now() + 5000;
-    let state = await placement();
-    while (
-      (state.coversColumn || state.coversTimer || state.unreachable.length > 0) &&
-      Date.now() < deadline
-    ) {
-      await page.waitForTimeout(100);
-      state = await placement();
-    }
-    return state;
+    if (!(await page.evaluate(() => playerChecks.atRest())))
+      throw new Error(`The Player did not come to rest at ${width}×${height}`);
+    return placement();
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
@@ -1947,13 +1932,9 @@ async function noticeChecks(page) {
           problems.push(`something covers ${control.getAttribute("aria-label")}`);
       return problems;
     });
-  // Judged once the toasts have come to rest without a problem, within five seconds.
-  const deadline = Date.now() + 5000;
-  let blocked = await toastProblems();
-  while (blocked.length > 0 && Date.now() < deadline) {
-    await page.waitForTimeout(100);
-    blocked = await toastProblems();
-  }
+  // Judged once the toasts have come to rest.
+  check(await page.evaluate(() => playerChecks.atRest()), "The toasts did not come to rest");
+  const blocked = await toastProblems();
   check(blocked.length === 0, `Toasts must stay in view beside the top controls: ${blocked}`);
   check(
     (await bell.locator(".player-notification-dot").count()) === 1,
@@ -3123,9 +3104,10 @@ async function runGroup(browserPage, run, url, artifacts) {
       };
     }
   }
-  // A person only presses, types into, focuses or points at what they see: every input on a locator waits until its
-  // element is rendered visibly (not transparent or hidden) before Playwright's own scrolling, stability and hit checks
-  // apply. (A check that a hidden element refuses focus calls `focus()` in the page on purpose.)
+  // A person only presses, types into, focuses or points at what they see and can reach: every input on a locator first
+  // brings its element into view and waits until it is rendered visibly (not transparent or hidden) with its centre in
+  // the window hitting it, not something above it; Playwright's own checks then apply. (A check that a hidden element
+  // refuses focus calls `focus()` in the page on purpose.)
   const locatorPrototype = Object.getPrototypeOf(browserPage.locator("body"));
   if (!locatorPrototype.playerActsOnWhatIsSeen) {
     locatorPrototype.playerActsOnWhatIsSeen = true;
@@ -3144,12 +3126,25 @@ async function runGroup(browserPage, run, url, artifacts) {
       const act = locatorPrototype[name];
       locatorPrototype[name] = async function (...args) {
         const deadline = Date.now() + 5000;
-        const seen = () =>
-          this.evaluate((element) =>
-            element.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
-          );
-        while (!(await seen())) {
-          if (Date.now() > deadline) throw new Error(`A person cannot see ${this} to ${name} it`);
+        const reachable = async () => {
+          await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+          return this.evaluate((element) => {
+            if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+              return false;
+            const box = element.getBoundingClientRect();
+            const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+            return (
+              x >= 0 &&
+              y >= 0 &&
+              x <= innerWidth &&
+              y <= innerHeight &&
+              element.contains(document.elementFromPoint(x, y))
+            );
+          });
+        };
+        while (!(await reachable())) {
+          if (Date.now() > deadline)
+            throw new Error(`A person cannot see and reach ${this} to ${name} it`);
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         return act.apply(this, args);
@@ -3160,11 +3155,12 @@ async function runGroup(browserPage, run, url, artifacts) {
     .context()
     .browser()
     .newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  // What a person sees, wherever it sits, judged by hit-testing what is drawn rather than comparing boxes, which may be
-  // transparent wrappers: `pressable` (rendered visibly, its centre in the window hits it), `uncovered` (also a point
-  // just inside the middle of each edge), `hides(cover, element)` (any of those points hits `cover`), `textPoints` (points
-  // every 8 px along the text lines under a root, as drawn), and `imagePoints` (the same points of an image as drawn inside
-  // its box, letterboxed by `object-fit`).
+  // Whether a person sees and reaches something, wherever it sits, judged by hit tests at its own points rather than by
+  // comparing boxes, which may be transparent wrappers: `pressable` (rendered visibly, its centre in the window hits
+  // it), `uncovered` (also a point just inside the middle of each edge), `hides(cover, element)` (any of those points
+  // hits `cover`), `textPoints` (points every 8 px along the text lines under a root), `imagePoints` (those points of an
+  // image inside its box as `object-fit` fits it), and `atRest`. Hit tests find covers that take input; opaque paint
+  // from a layer that passes input through is left to the scoped visual check.
   await context.addInitScript(() => {
     const around = (box) => {
       const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
@@ -3181,6 +3177,28 @@ async function runGroup(browserPage, run, url, artifacts) {
     const visible = (element) =>
       !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
     window.playerChecks = {
+      // The page is at rest: for a few frames in a row no finite animation or transition runs, also none still waiting
+      // out its delay, within `timeout` ms. Checks judge the state after it, once, so a healthy moment before a motion
+      // that ends badly cannot stand in for the result.
+      atRest: (timeout = 5000) =>
+        new Promise((resolve) => {
+          const deadline = performance.now() + timeout;
+          let quiet = 0;
+          const frame = () => {
+            const moving = document
+              .getAnimations()
+              .some(
+                (animation) =>
+                  (animation.playState === "running" || animation.pending) &&
+                  animation.effect?.getComputedTiming().endTime !== Infinity,
+              );
+            quiet = moving ? 0 : quiet + 1;
+            if (quiet >= 5) resolve(true);
+            else if (performance.now() > deadline) resolve(false);
+            else requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        }),
       pressable: (element) => {
         if (!visible(element)) return false;
         const [centre] = points(element);
