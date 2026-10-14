@@ -1560,7 +1560,7 @@ class TypeChecker {
     const [first, ...later] = names.reverse();
     if (!this.#keepsType(first!)) return;
     const through = this.#storedThrough.get(first!) ?? [];
-    through.push(...later);
+    for (const name of later) through.push(name);
     this.#storedThrough.set(first!, through);
   }
 
@@ -1571,7 +1571,7 @@ class TypeChecker {
       if (this.#unchecked.has(next)) continue;
       this.#unchecked.add(next);
       this.uncheckedMore = true;
-      work.push(...(this.#storedThrough.get(next) ?? []));
+      for (const later of this.#storedThrough.get(next) ?? []) work.push(later);
     }
   }
 
