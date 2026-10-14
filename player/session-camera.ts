@@ -55,9 +55,10 @@ export interface SessionCameraOptions {
  * The session camera: opened once when the session starts, kept open while it runs, and used silently by
  * `takePhoto()`. The player may switch it to another camera. A stream that the browser or the system ended or stopped
  * feeding, as when another app took the camera while the page was in the background, opens again by itself with the
- * same choice of camera, a few times at most; a capture waits for that rather than capturing a dead picture. Any other
- * failure, a refusal, or a camera that cannot be opened again leaves it unavailable for the rest of the session, so
- * later captures answer `null` without opening the camera again or asking for permission again.
+ * same choice of camera, a few times at most; a capture waits for that rather than capturing a dead picture, and starts
+ * it itself when it finds the stream dead first. Any other failure, a refusal, or a camera that cannot be opened again
+ * leaves it unavailable for the rest of the session, so later captures answer `null` without opening the camera again
+ * or asking for permission again.
  */
 export class SessionCamera<Track extends CaptureTrack> {
   readonly #device: CaptureDevice<Track>;
@@ -272,7 +273,8 @@ export class SessionCamera<Track extends CaptureTrack> {
   /** Captures a photo for `takePhoto()`, or reports why the camera is unavailable. */
   async answer(): Promise<PlayerCaptureAnswer> {
     const generation = this.#generation;
-    // A photo never comes from a dead stream: it waits for a switch, or for the camera to open again.
+    // A photo never comes from a dead stream: it waits for a switch, or for the camera to open again, which it starts
+    // itself when nothing noticed earlier that the stream ended or stays muted.
     if (this.#switching !== null) await this.#switching;
     const track = this.#device.track("camera");
     if (track === null || track.readyState === "ended") this.#trouble();
