@@ -64,4 +64,14 @@ let fallbackValue = fromJson("null", default: null)
 // NOTE SX_JSON_VALUE line 31: This value goes where parsed JSON goes, whose keys reads read as a dict's; Groovy kept it as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.
 fallbackValue = fallbackValue otherwise fromJson(toJson({ title: "Fallback" }, files: false), default: null, files: false)
 say prose "${fallbackValue.get("title", default: null)} ${sexscriptLegacyJsonSize(data.get("rolls", default: null))}", instant
+// A missing key read null, which a variable used as a number cannot hold: it keeps its value then, as for a storage
+// read (Groovy failed at `+= 1`); one that is only shown takes the null.
+let rounds = 1
+// NOTE SX_LOAD_KEEPS_VALUE line 36: Groovy stored null in 'rounds' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+rounds = data.get("rounds", default: rounds)
+// NOTE SX_PLUS_OPERAND_TYPE line 37: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+rounds += 1
+let title: string? = ""
+title = data.get("subtitle", default: null)
+say prose "${rounds} ${title}", instant
 exit

@@ -30,3 +30,11 @@ show(data.config.title + " " + inner.size + " " + data.rolls[1])
 def fallback = new groovy.json.JsonSlurper().parseText('null')
 if (fallback == null) fallback = [title: "Fallback"]
 show(fallback.title + " " + data.rolls.size)
+// A missing key read null, which a variable used as a number cannot hold: it keeps its value then, as for a storage
+// read (Groovy failed at `+= 1`); one that is only shown takes the null.
+def rounds = 1
+rounds = data.rounds
+rounds += 1
+def title = ""
+title = data.subtitle
+show("${rounds} ${title}")

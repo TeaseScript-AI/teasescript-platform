@@ -515,6 +515,18 @@ export function enforceVariableTypes(
             result.loadDefaults.push(rewritten);
             return rewritten;
           }
+          // The same for a key read of parsed JSON, `goal = data.get("goal", default: goal)`.
+          if (loadDefaults.has(statement) && statement.value.kind === "methodCall") {
+            const rewritten = {
+              ...statement,
+              value: {
+                ...statement.value,
+                arguments: [statement.value.arguments[0]!, statement.target],
+              },
+            };
+            result.loadDefaults.push(rewritten);
+            return rewritten;
+          }
           // `text = "${text}..."` on a variable that only holds text appends the rest: `text += "..."`.
           const appendedTo = selfAppends.get(statement);
           const appendedType = appendedTo === undefined ? undefined : bindingType(appendedTo);
@@ -959,12 +971,13 @@ function analyse(
         type.kind !== "unknown"
       )
         return change(() => (target.optional = true));
+      // A variable used as a value keeps its value for a missing key instead, as for a storage read.
       if (
         value.kind === "optional" &&
         statement.kind === "assign" &&
         statement.operator === "=" &&
-        statement.value.kind === "load" &&
-        statement.value.defaultValue === undefined &&
+        ((statement.value.kind === "load" && statement.value.defaultValue === undefined) ||
+          jsonGet) &&
         statement.target.kind === "variable" &&
         type !== undefined &&
         type.kind !== "optional"
