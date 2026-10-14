@@ -522,9 +522,11 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
 
 test("a due expiry block interrupts a lock dialog, which asks again afterwards, but waits for a lock step", () => {
   const plan = compileValidPlan(
-    ['timer async 1 s { say "Time is up", instant }', 'let locked = encryptText("x")', "exit"].join(
-      "\n",
-    ),
+    [
+      'timer async 1 s { say "Time is up", instant\n wait 2 s }',
+      'let locked = encryptText("x")',
+      "exit",
+    ].join("\n"),
   );
   let result = run(
     plan,
@@ -532,10 +534,26 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
   );
   const dialog = lockStep(result.snapshot);
   assert.deepEqual([dialog.kind, dialog.phase], ["lock", "ask"]);
-  // The block interrupts the dialog: no lock step waits meanwhile, and once it returns the dialog asks again.
+  // The block interrupts the dialog: while it waits, the dialog is suspended, also through a checkpoint, and a
+  // completion of it is refused.
   result = observeTime(plan, result.snapshot, 1000);
   result = run(plan, result.snapshot);
   assert.ok(result.events.some((event) => event.kind === "say" && event.text === "Time is up"));
+  assert.equal(result.snapshot.foregroundAction?.kind, "delay");
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
+  ).snapshot;
+  assert.equal(
+    completeAction(plan, restored, {
+      actionId: dialog.actionId,
+      actionKind: "lock",
+      payload: { kind: "submitted" },
+    }).outcome.kind,
+    "suspendedAction",
+  );
+  // Once the block returns, the dialog asks again.
+  result = observeTime(plan, restored, 3000);
+  result = run(plan, result.snapshot);
   assert.deepEqual(validateRuntimeSnapshot(result.snapshot, plan).errors, []);
   const again = lockStep(result.snapshot);
   assert.deepEqual([again.actionId, again.phase], [dialog.actionId, "ask"]);
