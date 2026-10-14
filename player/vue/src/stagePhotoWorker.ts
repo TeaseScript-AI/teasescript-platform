@@ -6,10 +6,11 @@ import { photoSwatches } from "../../theme/node-vibrant/swatches.js";
 /** The photo is measured at this longest side, as on the Stage canvas (`stagePhotos.ts`). */
 const MEASURE_SIDE = 128;
 
-/** A photo to measure, by its downloaded bytes. */
+/** A photo to measure, by its downloaded bytes and their media type. */
 export interface StagePhotoRequest {
   readonly id: number;
-  readonly blob: Blob;
+  readonly type: string;
+  readonly data: ArrayBuffer;
 }
 
 /**
@@ -38,14 +39,13 @@ function jpegSize(bytes: Uint8Array): { readonly width: number; readonly height:
   return null;
 }
 
-async function measure({ blob }: StagePhotoRequest) {
+async function measure({ type, data }: StagePhotoRequest) {
   if (typeof ImageDecoder === "undefined" || typeof OffscreenCanvas === "undefined") return null;
-  if (!(await ImageDecoder.isTypeSupported(blob.type).catch(() => false))) return null;
-  const data = await blob.arrayBuffer();
+  if (!(await ImageDecoder.isTypeSupported(type).catch(() => false))) return null;
   // A JPEG decodes at a reduced size where asked, at least the measuring size but no less than an eighth of each side:
   // Chromium rejects a smaller size.
   let reduced = {};
-  const size = blob.type === "image/jpeg" ? jpegSize(new Uint8Array(data)) : null;
+  const size = type === "image/jpeg" ? jpegSize(new Uint8Array(data)) : null;
   if (size !== null && size.width > 0 && size.height > 0) {
     const scale = Math.min(1, MEASURE_SIDE / Math.max(size.width, size.height));
     reduced = {
@@ -53,7 +53,7 @@ async function measure({ blob }: StagePhotoRequest) {
       desiredHeight: Math.max(Math.round(size.height * scale), Math.ceil(size.height / 8)),
     };
   }
-  const decoder = new ImageDecoder({ data, type: blob.type, ...reduced });
+  const decoder = new ImageDecoder({ data, type, ...reduced });
   try {
     const { image } = await decoder.decode();
     try {

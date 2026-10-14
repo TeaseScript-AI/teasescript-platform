@@ -1530,7 +1530,30 @@ async function photoColourScenario(cdp, origin, profile) {
   await readable("Light mode, High contrast");
   await chooseContrast("standard");
   await readable("Light mode");
-  for (const label of ["Back", "Again", "Hide"]) await press(label);
+  // The first photo, shown again, comes from the Player's Cache Storage and brings its colour back.
+  const nextRoles = JSON.stringify(await value(cdp, roles));
+  await press("Back");
+  await waitFor(
+    cdp,
+    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.dataset.stageSource.endsWith('/green.jpg'); })()`,
+    5_000,
+    "The first photo did not show again",
+  );
+  await waitFor(
+    cdp,
+    `JSON.stringify(${roles}) !== ${JSON.stringify(nextRoles)}`,
+    3_000,
+    "The first photo shown again did not bring its colour",
+  );
+  assertEqual(
+    await evaluate(
+      cdp,
+      `return caches.open('teasescript-stage-photos').then((cache) => cache.keys()).then((keys) => keys.map((request) => request.url.split('/').at(-1)).sort().join(' '))`,
+    ),
+    "green.jpg red.svg",
+    "The Player's Cache Storage does not keep the script's photos",
+  );
+  for (const label of ["Again", "Hide"]) await press(label);
   await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
   await readable("The theme's return");
   const returned = await value(cdp, roles);

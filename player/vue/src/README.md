@@ -131,8 +131,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   camera step's status and countdown on the viewfinder, through `Stage.vue`'s `camera` slot or
   `FloatingViewfinder.vue`'s default slot, with the shadcn Alert.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
-  `stagePhotos.ts` downloads a Stage photo once for the Stage and for measuring it, in `stagePhotoWorker.ts` where the
-  browser's image decoder can, and loads the images the script names (`playerRuntimeStageImages`) ahead;
+  `stagePhotos.ts` downloads a Stage photo once into the Player's Cache Storage, for the Stage and for measuring it in
+  `stagePhotoWorker.ts` where the browser's image decoder can, and loads the images the script names
+  (`playerRuntimeStageImages`) ahead;
   `useStagePhoto.ts` shows a new photo together with its colours, which `usePhotoColour.ts` applies and
   `PlayerApp.vue` passes to the theme. See
   [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).

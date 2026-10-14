@@ -1,9 +1,10 @@
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
 import type { StagePhotoRequest, StagePhotoResponse } from "./stagePhotoWorker";
 
-// Stage photos (PLAYER-UI.md "Stage and media presentation"), kept per source: each is downloaded once, and that one
-// download serves both the Stage, as an object URL, and the measuring of its colours. A photo is kept while the Stage
-// shows it or waits for it, or while the preloader holds it to have it ready when the Stage needs it.
+// Stage photos (PLAYER-UI.md "Stage and media presentation"), kept per source. Each is downloaded once into the
+// Player's Cache Storage, from which a later read comes without a new download; one read serves both the Stage, as an
+// object URL, and the measuring of its colours. A photo's swatches are kept while the Stage or the preloader holds the
+// photo; its file stays in memory only while the Stage shows it or waits for it.
 
 /** The photo is measured at this longest side: enough pixels for six swatches, few enough to stay cheap. */
 const MEASURE_SIDE = 128;
@@ -11,11 +12,71 @@ const MEASURE_SIDE = 128;
 const CACHE_SIZE = 32;
 const measured = new Map<string, PhotoSwatches | null>();
 
+/** The Player's Cache Storage of Stage photo files. */
+const PHOTO_CACHE = "teasescript-stage-photos";
+let photoCache: Promise<Cache | null> | undefined;
+
+/**
+ * The Player's cache of Stage photo files, emptied when the page first uses it, so that a later visit downloads files
+ * that changed meanwhile; `null` where the browser offers no Cache Storage, as outside a secure context, or refuses it.
+ */
+function openPhotoCache(): Promise<Cache | null> | null {
+  if (typeof caches === "undefined") return null;
+  photoCache ??= caches
+    .delete(PHOTO_CACHE)
+    .then(() => caches.open(PHOTO_CACHE))
+    .catch(() => null);
+  return photoCache;
+}
+
+/** Whether a source is a web address that Cache Storage keeps, unlike a file in the page's memory. */
+function cacheable(source: string): boolean {
+  return /^https?:$/u.test(new URL(source, document.baseURI).protocol);
+}
+
+// The photos being written into the cache, so a read of one waits for it instead of downloading it again.
+const writing = new Map<string, Promise<unknown>>();
+
+/**
+ * Reads a photo's file: from the Player's cache, downloading it into the cache when it is not there yet, so the file
+ * read is the cache's copy on disk rather than one in memory; `null` when it cannot be fetched. Without the cache, or
+ * when the cache cannot take the file, each read downloads it again.
+ */
+async function read(
+  source: string,
+  signal: AbortSignal,
+  priority: RequestPriority,
+): Promise<Blob | null> {
+  try {
+    const cache = cacheable(source) ? await openPhotoCache() : null;
+    if (cache) {
+      await writing.get(source);
+      const kept = await cache.match(source);
+      if (kept) return await kept.blob();
+      const response = await fetch(source, { signal, priority });
+      if (!response.ok) return null;
+      const written = cache.put(source, response).then(
+        () => true,
+        () => false,
+      );
+      writing.set(source, written);
+      const stored = await written;
+      if (writing.get(source) === written) writing.delete(source);
+      const copy = stored ? await cache.match(source) : undefined;
+      if (copy) return await copy.blob();
+    }
+    const response = await fetch(source, { signal, priority });
+    return response.ok ? await response.blob() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A photo the Stage is about to show, held until `release`. */
 export interface PreparedPhoto {
   /**
-   * The URL for the Stage, once the photo is decoded and shows at once: an object URL of its download, or the source
-   * itself when it is in the page's memory or could not be downloaded; the Stage then loads it and reports what it gets.
+   * The URL for the Stage, once the photo is decoded and shows at once: an object URL of its file, or the source itself
+   * when it is in the page's memory or could not be downloaded; the Stage then loads it and reports what it gets.
    */
   readonly shown: Promise<string>;
   /** The photo's swatches, `null` when its pixels cannot be read. */
@@ -29,12 +90,18 @@ interface Entry {
   holds: number;
   shows: number;
   readonly download: AbortController;
-  /** The download, `null` while the photo waits for the preloader; the bytes, `null` when they could not be fetched. */
+  /**
+   * The photo's file while it is read or the Stage holds it, `null` otherwise; it resolves to `null` when the file could
+   * not be fetched.
+   */
   bytes: Promise<Blob | null> | null;
-  /** Whether the download failed, so that the Stage tries it again when it shows the photo. */
+  /** Whether the file is being read, so that another hold takes this read instead of downloading it again. */
+  reading: boolean;
+  /** Whether the read failed, so that the Stage tries it again when it shows the photo. */
   failed: boolean;
+  /** The photo's swatches once measuring started; `null` before, and again after its file could not be read. */
   swatches: Promise<PhotoSwatches | null> | null;
-  /** The object URL of the download, once there is one. */
+  /** The object URL of the file, while there is one. */
   url: string | null;
   /** The photo decoded for showing, while the Stage needs it, or for measuring it on the page's canvas. */
   image: { readonly element: HTMLImageElement; readonly decoded: Promise<void> } | null;
@@ -49,6 +116,7 @@ function hold(source: string): Entry {
       shows: 0,
       download: new AbortController(),
       bytes: null,
+      reading: false,
       failed: false,
       swatches: null,
       url: null,
@@ -60,52 +128,73 @@ function hold(source: string): Entry {
   return entry;
 }
 
+/** Lets the photo's decoded image and its object URL go. */
+function forgetImage(source: string, entry: Entry) {
+  entry.image = null;
+  if (entry.url !== null && entry.url !== source) URL.revokeObjectURL(entry.url);
+  entry.url = null;
+}
+
+/** Lets the photo's file go once it is read, and its decoded image; the cache keeps the file. */
+function forget(source: string, entry: Entry) {
+  if (!entry.reading) entry.bytes = null;
+  forgetImage(source, entry);
+}
+
 function drop(source: string, entry: Entry) {
   if (--entry.holds > 0) return;
   entries.delete(source);
   entry.download.abort();
-  if (entry.url !== null && entry.url !== source) URL.revokeObjectURL(entry.url);
-  entry.image = null;
+  forget(source, entry);
 }
 
-/** Starts the download of a photo and the measuring of its colours, unless they have started or succeeded. */
+/** Starts the read of a photo's file and the measuring of its colours, unless they have started or succeeded. */
 function load(source: string, entry: Entry, priority: RequestPriority) {
-  if (entry.bytes !== null && !entry.failed) return;
-  entry.failed = false;
-  // A failed download, such as from another origin that does not share the image, leaves the Stage to load the source.
-  const bytes = fetch(source, { signal: entry.download.signal, priority })
-    .then((response) => (response.ok ? response.blob() : null))
-    .catch(() => null)
-    .then((blob) => {
+  if (entry.bytes === null || entry.failed) {
+    entry.failed = false;
+    entry.reading = true;
+    // A failed download, such as from another origin that does not share the image, leaves the Stage to load the source.
+    entry.bytes = read(source, entry.download.signal, priority).then((blob) => {
+      entry.reading = false;
       if (entry.download.signal.aborted) return null;
       entry.failed = blob === null;
+      // Only the Stage keeps the file in memory; the measuring has its own reference while it runs.
+      if (entry.shows === 0) entry.bytes = null;
       return blob;
     });
-  entry.bytes = bytes;
+  }
+  entry.swatches ??= swatchesOf(source, entry, entry.bytes);
+}
+
+/** Measures the photo's swatches from its file, or takes those measured before. */
+function swatchesOf(source: string, entry: Entry, bytes: Promise<Blob | null>) {
   const known = measured.get(source);
-  entry.swatches =
-    known !== undefined
-      ? Promise.resolve(known)
-      : bytes.then(async (blob) => {
-          if (blob === null) return null;
-          let result: PhotoSwatches | null;
-          try {
-            result = await measureInWorker(blob);
-            if (result === null) {
-              // A photo given up while the worker tried it is not decoded for the page's canvas any more.
-              if (entry.download.signal.aborted) return null;
-              const { element, decoded } = decode(source, entry, blob);
-              await decoded;
-              result = measure(element);
-              if (entry.shows === 0) entry.image = null;
-            }
-          } catch {
-            result = null;
-          }
-          measured.set(source, result);
-          if (measured.size > CACHE_SIZE) measured.delete(measured.keys().next().value!);
-          return result;
-        });
+  if (known !== undefined) return Promise.resolve(known);
+  const swatches: Promise<PhotoSwatches | null> = bytes.then(async (blob) => {
+    if (blob === null) {
+      // Measured again once the file can be read, such as when the Stage tries a failed download again.
+      if (entry.swatches === swatches) entry.swatches = null;
+      return null;
+    }
+    let result: PhotoSwatches | null;
+    try {
+      result = await measureInWorker(blob);
+      if (result === null) {
+        // A photo given up while the worker tried it is not decoded for the page's canvas any more.
+        if (entry.download.signal.aborted) return null;
+        const { element, decoded } = decode(source, entry, blob);
+        await decoded;
+        result = measure(element);
+        if (entry.shows === 0) forgetImage(source, entry);
+      }
+    } catch {
+      result = null;
+    }
+    measured.set(source, result);
+    if (measured.size > CACHE_SIZE) measured.delete(measured.keys().next().value!);
+    return result;
+  });
+  return swatches;
 }
 
 /** The photo's image of its URL, decoding: a source in the page's memory, such as a captured photo, as it is. */
@@ -129,7 +218,7 @@ let waiting = 0;
 function preloadNext() {
   while (!preloading && waiting === 0 && queue.length > 0) {
     const { source, entry } = queue.shift()!;
-    if (entries.get(source) !== entry || entry.bytes !== null) continue;
+    if (entries.get(source) !== entry || entry.bytes !== null || entry.swatches !== null) continue;
     load(source, entry, "low");
     preloading = true;
     void Promise.all([entry.bytes, entry.swatches]).then(() => {
@@ -166,17 +255,19 @@ export function prepareStagePhoto(source: string): PreparedPhoto {
       if (!held) return;
       held = false;
       done();
-      if (--entry.shows === 0) entry.image = null;
+      if (--entry.shows === 0) forget(source, entry);
       drop(source, entry);
     },
   };
 }
 
 /**
- * Downloads and measures these photos in the background, one at a time and after any photo the Stage waits for, so a
- * later `prepareStagePhoto` of one finds it ready. Returns a function that gives the photos up again.
+ * Downloads and measures these photos in the background into the Player's cache, one at a time and after any photo the
+ * Stage waits for, so a later `prepareStagePhoto` of one finds its colours ready and its file without a new download.
+ * The cache keeps no other files from then on. Returns a function that gives the photos up again.
  */
 export function preloadStagePhotos(sources: readonly string[]): () => void {
+  void keepOnly(sources).catch(() => {});
   const held = sources.map((source) => ({ source, entry: hold(source) }));
   queue.push(...held);
   preloadNext();
@@ -186,6 +277,14 @@ export function preloadStagePhotos(sources: readonly string[]): () => void {
     released = true;
     for (const { source, entry } of held) drop(source, entry);
   };
+}
+
+/** Removes the files of other photos from the Player's cache, such as those of an earlier script. */
+async function keepOnly(sources: readonly string[]) {
+  const cache = await openPhotoCache();
+  if (!cache) return;
+  const kept = new Set(sources.map((source) => new URL(source, document.baseURI).href));
+  for (const request of await cache.keys()) if (!kept.has(request.url)) void cache.delete(request);
 }
 
 /**
@@ -210,7 +309,7 @@ let worker: Worker | null | undefined;
 let nextRequest = 0;
 const requests = new Map<number, (swatches: StagePhotoResponse["swatches"]) => void>();
 
-function measureInWorker(blob: Blob) {
+async function measureInWorker(blob: Blob): Promise<StagePhotoResponse["swatches"]> {
   if (
     worker === undefined &&
     (typeof ImageDecoder === "undefined" || typeof OffscreenCanvas === "undefined")
@@ -234,8 +333,15 @@ function measureInWorker(blob: Blob) {
       worker = null;
     }
   }
-  if (worker === null) return Promise.resolve(null);
+  if (worker === null) return null;
+  // The worker gets the file's bytes, not the file: a file it held would stay in memory until its next garbage
+  // collection, while the bytes count towards it.
+  const data = await blob.arrayBuffer();
+  if (worker === null) return null;
   const id = nextRequest++;
-  worker.postMessage({ id, blob } satisfies StagePhotoRequest);
-  return new Promise<StagePhotoResponse["swatches"]>((resolve) => requests.set(id, resolve));
+  const answer = new Promise<StagePhotoResponse["swatches"]>((resolve) =>
+    requests.set(id, resolve),
+  );
+  worker.postMessage({ id, type: blob.type, data } satisfies StagePhotoRequest, [data]);
+  return answer;
 }
