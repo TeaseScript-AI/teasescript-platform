@@ -40,6 +40,37 @@ async function cli(...args) {
 // Firefox's fake camera runs through Firefox's real capture pipeline with a generated picture and no permission prompt.
 async function checks(page, url) {
   const context = page.context();
+  // A person only presses or focuses what they see and can reach: each such input first brings its element into view
+  // and waits until it is rendered visibly with its centre hitting it; Playwright's own checks then apply.
+  const locatorPrototype = Object.getPrototypeOf(page.locator("body"));
+  for (const name of ["click", "focus"]) {
+    const act = locatorPrototype[name];
+    locatorPrototype[name] = async function (...args) {
+      const deadline = Date.now() + 5000;
+      const reachable = async () => {
+        await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+        return this.evaluate((element) => {
+          if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+            return false;
+          const box = element.getBoundingClientRect();
+          const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+          return (
+            x >= 0 &&
+            y >= 0 &&
+            x <= innerWidth &&
+            y <= innerHeight &&
+            element.contains(document.elementFromPoint(x, y))
+          );
+        });
+      };
+      while (!(await reachable())) {
+        if (Date.now() > deadline)
+          throw new Error(`A person cannot see and reach ${this} to ${name} it`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return act.apply(this, args);
+    };
+  }
   const decodedPhotos = () =>
     [...document.querySelectorAll("img")].filter(
       (image) => image.src.startsWith("blob:") && image.complete && image.naturalWidth > 0,
