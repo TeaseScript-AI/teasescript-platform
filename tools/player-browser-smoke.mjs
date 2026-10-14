@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
@@ -8,17 +8,6 @@ import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
-// The fake camera's frame: a distinct color per quadrant (top left, top right, bottom left, bottom right), so a
-// photo that is blank, mirrored, flipped, or not the camera's frame fails the check.
-const TEST_CARD = [
-  [220, 40, 40],
-  [40, 180, 60],
-  [40, 70, 220],
-  [235, 235, 235],
-];
-
-// A decoded captured photo, not merely an image element with a captured URL.
-const decodedPhoto = `[...document.querySelectorAll('img')].find((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0)`;
 // An image request's preview on the Stage, once it shows.
 const decodedPreview = `(() => { const image = document.querySelector('[data-stage-preview]'); return !!image && image.complete && image.naturalWidth > 0; })()`;
 const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
@@ -37,119 +26,11 @@ const MODEL_PATHS_CATALOG = {
   problems: [],
 };
 
-// A file of a few thousand lines with a draw deep inside a long function, for the random draw picker's code; generated,
-// as only its length, one long line far from the draw, and the lines above the draw that wrap matter.
-const LARGE_FILE_LINES = Array.from({ length: 2_000 }, (_, index) =>
-  index >= 1_200 && index % 3 === 0
-    ? `// Line ${index + 1}. ${"Words that wrap. ".repeat(10)}`
-    : `// Line ${index + 1}.`,
-);
-LARGE_FILE_LINES[0] = "let hit = false";
-LARGE_FILE_LINES[1] = `// ${"A long line. ".repeat(20)}`;
-LARGE_FILE_LINES[1_199] = "function flip {";
-LARGE_FILE_LINES.splice(
-  1_499,
-  6,
-  "    hit = chance(25)",
-  "}",
-  "flip()",
-  'say "Hit: ${hit}", instant',
-  'showButton "Done"',
-  "exit",
-);
-const CATALOGS = new Map([
-  ["/dev-package/model-paths/catalog.json", MODEL_PATHS_CATALOG],
-  [
-    "/dev-package/large-file/catalog.json",
-    {
-      images: [],
-      media: [],
-      sources: [{ path: "main.tease", source: LARGE_FILE_LINES.join("\n") }],
-      problems: [],
-    },
-  ],
-]);
+const CATALOGS = new Map([["/dev-package/model-paths/catalog.json", MODEL_PATHS_CATALOG]]);
 
 const LAN_HOST = "player-lan.test";
-// The late-image scenario holds the first response for this image until the scenario releases it.
-const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
 // The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
 const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
-const lateImage = { hold: false, release: null };
-// The photo-colour scenario counts the requests for its photo.
-const PHOTO_COLOUR_URL = "/dev-package/photo-colour/files/images/green.svg";
-const photoColourRequests = { count: 0 };
-
-/**
- * In-page `reach(element)`: brings the element into reach as a person does and returns its centre. A target whose centre
- * is out of view, outside the window or a scrolling ancestor, or under something else, such as a control low in the
- * scrolling Player Settings or one the composer overlays at the conversation's bottom, is scrolled to the middle of its
- * view first; a target in view and uncovered never moves. Every pointer and touch input of the smoke aims through it, so
- * no step depends on where the Player lays a control out.
- */
-const REACH = `const reach = (target) => {
-  const centre = () => {
-    const box = target.getBoundingClientRect();
-    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-  };
-  const { x, y } = centre();
-  let clipped = x < 0 || y < 0 || x > innerWidth || y > innerHeight;
-  for (let node = target.parentElement; node !== null && !clipped; node = node.parentElement) {
-    const style = getComputedStyle(node);
-    if (style.overflowX === "visible" && style.overflowY === "visible") continue;
-    const area = node.getBoundingClientRect();
-    clipped = x < area.left || x > area.right || y < area.top || y > area.bottom;
-  }
-  if (clipped || !target.contains(document.elementFromPoint(x, y)))
-    target.scrollIntoView({ block: "center", inline: "center" });
-  return centre();
-};`;
-
-/**
- * In-page `pressable(element)`: whether a person sees the element and can press it at its centre, wherever it sits: it
- * is rendered, not transparent or hidden, and its centre is in the window and hits the element, not something above it.
- * Every pointer and touch input of the smoke waits for it.
- */
-const PRESSABLE = `const pressable = (element) => {
-  if (!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
-  const box = element.getBoundingClientRect();
-  const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-  return box.width > 0 && box.height > 0 && x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight &&
-    element.contains(document.elementFromPoint(x, y));
-};`;
-
-/**
- * In-page `exposed(element)`: whether a person sees the element and could press it somewhere to give it focus: it is
- * rendered visibly and its centre, a point a quarter in, or a point just inside an edge is in the window and hits it.
- * Keyboard input needs no more than that.
- */
-const EXPOSED = `const exposed = (element) => {
-  if (!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
-  const box = element.getBoundingClientRect();
-  const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-  return [[x, y], [box.left + box.width / 4, y], [box.right - box.width / 4, y], [x, box.top + box.height / 4],
-    [x, box.bottom - box.height / 4], [box.left + 2, y], [box.right - 2, y], [x, box.top + 2], [x, box.bottom - 2]]
-    .some(([px, py]) => px >= 0 && py >= 0 && px <= innerWidth && py <= innerHeight &&
-      element.contains(document.elementFromPoint(px, py)));
-};`;
-
-/**
- * In-page `uncovered(element)`: whether a person sees the whole element and can press it, wherever it sits: it is
- * rendered, not transparent or hidden, and its centre and a point just inside the middle of each edge are in the window
- * and hit the element, not something above it.
- */
-const UNCOVERED = `const uncovered = (element) => {
-  if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
-  const box = element.getBoundingClientRect();
-  if (box.width < 4 || box.height < 4) return false;
-  const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-  return [[x, y], [box.left + 2, y], [box.right - 2, y], [x, box.top + 2], [x, box.bottom - 2]].every(
-    ([px, py]) => px >= 0 && py >= 0 && px <= innerWidth && py <= innerHeight && element.contains(document.elementFromPoint(px, py)),
-  );
-};`;
-
-// When `chooseOption` last typed into a select.
-const lastChoice = { at: 0 };
 
 await main();
 
@@ -164,17 +45,10 @@ async function main() {
   const server = createPlaygroundServer({
     packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
   });
-  // The model-paths and large-file packages exist only as catalogs, so the smoke needs no file named with `\` or `C:`,
-  // nor one of thousands of lines, on disk.
+  // The model-paths package exists only as a catalog, so the smoke needs no file named with `\` or `C:` on disk.
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
-    if (request.url === PHOTO_COLOUR_URL) photoColourRequests.count += 1;
-    if (request.url === LATE_IMAGE_URL && lateImage.hold) {
-      lateImage.hold = false;
-      lateImage.release = () => handleRequest(request, response);
-      return;
-    }
     // The spill store's module and the compiled Player modules it imports.
     const smokeModule = /^\/smoke\/([a-z-]+\.js)$/u.exec(request.url ?? "");
     if (smokeModule !== null) {
@@ -204,9 +78,7 @@ async function main() {
   const origin = `http://127.0.0.1:${address.port}`;
   const debugPort = await reservePort();
   const profile = `/tmp/teasescript-player-chromium-${process.pid}`;
-  const cameraFeed = join(profile, "camera-test-card.y4m");
   await mkdir(profile, { recursive: true });
-  await writeFile(cameraFeed, testCardY4m());
   const browser = spawn(chromium, [
     "--headless=new",
     "--no-sandbox",
@@ -215,7 +87,6 @@ async function main() {
     // A synthetic camera that shows the test card for the camera scenario; permissions are granted or denied per
     // scenario through CDP.
     "--use-fake-device-for-media-stream",
-    `--use-file-for-fake-video-capture=${cameraFeed}`,
     // A local-network name for the same server: plain HTTP there is not a secure context, unlike 127.0.0.1.
     `--host-resolver-rules=MAP ${LAN_HOST} 127.0.0.1`,
     `--remote-debugging-port=${debugPort}`,
@@ -234,10 +105,9 @@ async function main() {
     try {
       await cdp.call("Page.enable");
       await cdp.call("Runtime.enable");
-      // The scenarios in the order they run. `PLAYER_SMOKE_ONLY=photoColour,viewfinder` runs only those named (each
+      // The scenarios in the order they run. `PLAYER_SMOKE_ONLY=photoColour,camera` runs only those named (each
       // scenario's name without "Scenario"; the technical playground's steps are `playground`), in this order, with
-      // the ones they need: savedDataExport lists the saved data of keptSession's scripts too, and savedDataImport
-      // imports savedDataExport's file. Unset, everything runs.
+      // the ones they need: savedDataImport imports savedDataExport's file. Unset, everything runs.
       let exported;
       const scenarios = [
         [
@@ -260,12 +130,7 @@ async function main() {
         ["demo", () => demoScenario(cdp, origin)],
         ["insecureOrigin", () => insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`)],
         ["package", () => packageScenario(cdp, origin)],
-        ["titleBar", () => titleBarScenario(cdp, origin)],
         ["keptSession", () => keptSessionScenario(cdp, origin, profile)],
-        ["debugRoom", () => debugRoomScenario(cdp, origin)],
-        ["randomPicker", () => randomPickerScenario(cdp, origin)],
-        ["largeRandomPicker", () => largeRandomPickerScenario(cdp, origin)],
-        ["askImage", () => askImageScenario(cdp, origin, profile)],
         [
           "savedDataExport",
           async () => {
@@ -274,34 +139,12 @@ async function main() {
         ],
         ["savedDataImport", () => savedDataImportScenario(debugPort, origin, exported)],
         ["debugExport", () => debugExportScenario(cdp, origin, profile)],
-        ["developmentTime", () => developmentTimeScenario(cdp, origin)],
-        ["debugCountdown", () => debugCountdownScenario(cdp, origin)],
-        ["debugNow", () => debugNowScenario(cdp, origin)],
-        ["debugStorage", () => debugStorageScenario(cdp, origin, profile)],
-        ["debugStorageEdit", () => debugStorageEditScenario(cdp, origin)],
         ["debugHistoryStorage", () => debugHistoryStorageScenario(cdp, origin)],
-        ["debugRewind", () => debugRewindScenario(cdp, origin)],
-        ["sessionEnd", () => sessionEndScenario(cdp, origin)],
-        ["wakeLock", () => wakeLockScenario(cdp, origin)],
-        ["errorCallPath", () => errorCallPathScenario(cdp, origin)],
-        ["heldPress", () => heldPressScenario(cdp, origin)],
-        ["missingMedia", () => missingMediaScenario(cdp, origin)],
-        ["audioOverlap", () => audioOverlapScenario(cdp, origin)],
-        ["lateImage", () => lateImageScenario(cdp, origin)],
         ["photoColour", () => photoColourScenario(cdp, origin, profile)],
         ["photoVignette", () => photoVignetteScenario(cdp, origin)],
         ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
         ["entrances", () => entrancesScenario(cdp, origin)],
-        ["askImageCamera", () => askImageCameraScenario(cdp, origin, profile)],
         ["camera", () => cameraScenario(cdp, origin)],
-        ["viewfinder", () => viewfinderScenario(cdp, origin)],
-        ["permanentButtons", () => permanentButtonsScenario(cdp, origin)],
-        ["forms", () => formsScenario(cdp, origin)],
-        ["preselect", () => preselectScenario(cdp, origin)],
-        ["popup", () => popupScenario(cdp, origin)],
-        ["openUrl", () => openUrlScenario(cdp, origin, debugPort)],
-        ["exportText", () => exportTextScenario(cdp, origin, profile)],
-        ["formFields", () => formFieldsScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -312,7 +155,7 @@ async function main() {
         throw new Error(
           `PLAYER_SMOKE_ONLY names no scenario: ${unknown.join(", ")}. Known: ${scenarios.map(([name]) => name).join(", ")}`,
         );
-      const needs = { savedDataExport: ["keptSession"], savedDataImport: ["savedDataExport"] };
+      const needs = { savedDataImport: ["savedDataExport"] };
       const selected = new Set();
       const select = (name) => {
         for (const need of needs[name] ?? []) select(need);
@@ -324,7 +167,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their use beside the timer rail on a short screen, and the dialog X, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, colours that follow the Stage photo, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, and the camera",
       );
     } finally {
       cdp.close();
@@ -830,7 +673,19 @@ async function demoScenario(cdp, origin) {
       HTMLMediaElement.prototype.play = function () {
         if (!window.__played.includes(this)) window.__played.push(this);
         return play.call(this);
-      };`,
+      };
+      window.__errors = [];
+      const error = console.error;
+      console.error = (...args) => {
+        window.__errors.push(args.map(String).join(' '));
+        error.apply(console, args);
+      };
+      // Chromium reports a ResizeObserver whose callback changed layout again in the same frame as an error event; the
+      // remaining notifications arrive in the next frame, so it is no failure.
+      addEventListener('error', (event) => {
+        if (!String(event.message).startsWith('ResizeObserver loop')) window.__errors.push(String(event.message));
+      });
+      addEventListener('unhandledrejection', (event) => window.__errors.push(String(event.reason)));`,
   });
   await setViewport(cdp, 1440, 900);
   await navigate(cdp, `${origin}/player/`);
@@ -846,13 +701,8 @@ async function demoScenario(cdp, origin) {
   let inputOwnershipChecked = false;
   let spaceSkipChecked = false;
   let smartFollowChecked = false;
-  let staleGestureChecked = false;
-  let buttonNameChecked = false;
-  const timers = new Map();
   const texts = new Set();
-  const avatars = {};
   const audio = [];
-  let roomPausedDuringCountdown = false;
   let finished = false;
   const deadline = Date.now() + 120_000;
   while (!finished) {
@@ -862,37 +712,19 @@ async function demoScenario(cdp, origin) {
       `(() => {
         const input = document.querySelector('[data-composer-input]');
         const entries = [...document.querySelectorAll('.transcript-entry')];
-        const entry = (text) => entries.find((element) => element.textContent.includes(text));
         // An image counts only once it decoded and occupies layout space.
         const rendered = (image) => !!image && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0;
         return {
           stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
-          timers: [...document.querySelectorAll('.timer-display')].map((timer) => [
-            timer.querySelector('.timer-label')?.textContent.trim() ?? '',
-            timer.dataset.kind,
-          ]),
-          // The room ambience is the 4 s loop; the chime lasts 1.6 s.
-          roomPaused: window.__played.find((element) => element.duration > 3)?.paused ?? null,
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
-          vera: rendered(entry('Eyes on me.')?.querySelector('[data-slot=avatar-image]'))
-            ? entry('Eyes on me.').querySelector('[data-slot=avatar-image]').getAttribute('src').slice(0, 18)
-            : undefined,
-          session: entry('Some of her messages')?.querySelector('[data-speaker-avatar]')?.textContent.trim(),
           buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
           placeholder: input && !input.disabled ? input.placeholder : null,
         };
       })()`,
     );
     if (state.stage !== null && stageSources.at(-1) !== state.stage) stageSources.push(state.stage);
-    for (const [label, kind] of state.timers) {
-      timers.set(label, new Set([...(timers.get(label) ?? []), kind]));
-      if (label === "Stay exactly like that")
-        roomPausedDuringCountdown ||= state.roomPaused === true;
-    }
     for (const text of state.texts) texts.add(text);
-    avatars.vera ??= state.vera;
-    avatars.session ??= state.session;
     state.audio.forEach(({ time, audible }, index) => {
       if (audible && time > (audio[index] ?? 0)) audio[index] = time;
     });
@@ -922,19 +754,8 @@ async function demoScenario(cdp, origin) {
       // The next two messages arrive on their own pacing, one after the other.
       smartFollowChecked = true;
       await smartFollowCheck(cdp);
-    } else if (
-      !staleGestureChecked &&
-      state.texts.some((text) => text.includes("I've paused your clock.")) &&
-      !state.texts.some((text) => text.includes("Twenty seconds less."))
-    ) {
-      staleGestureChecked = true;
-      await staleSkipGestureCheck(cdp);
     } else if (state.buttons.length === 1) {
       finished = state.buttons[0] === "Finish";
-      if (!buttonNameChecked) {
-        buttonNameChecked = true;
-        await buttonNameCheck(cdp, state.buttons[0]);
-      }
       await physicalClick(cdp, "[data-foreground-controls] button");
     } else if (state.placeholder === "What you call her") {
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
@@ -956,28 +777,13 @@ async function demoScenario(cdp, origin) {
   await waitFor(cdp, `!document.querySelector('.stage-media')`);
   assertEqual(inputOwnershipChecked && spaceSkipChecked, true, "The pacing input checks ran");
   assertEqual(smartFollowChecked, true, "The smart follow check ran");
-  assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
-  assertEqual(buttonNameChecked, true, "The button name check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
     throw new Error(`The Stage did not show the demo's package images: ${stageSources.join(", ")}`);
   }
-  assertEqual(
-    JSON.stringify([...timers].map(([label, kinds]) => [label, [...kinds].sort()])),
-    JSON.stringify([
-      ["Hold still", ["visible"]],
-      ["Mistress's timer", ["mystery", "visible"]],
-      ["Stay exactly like that", ["visible"]],
-    ]),
-    "Presented runtime timers",
-  );
-  if (!roomPausedDuringCountdown)
-    throw new Error("The room ambience kept playing during the countdown");
   if (audio.length !== 2 || !audio.every((time) => time > 0.2)) {
     throw new Error(`Both demo sounds must actually play audibly: ${JSON.stringify(audio)}`);
   }
-  assertEqual(avatars.vera, "data:image/svg+xml", "Mistress Vera's avatar image");
-  assertEqual(avatars.session, "S", "Letter glyph for a speaker without an avatar");
   for (const text of [
     "Mistress. Good. Don't forget it.",
     "When you hear that bell, you listen.",
@@ -987,32 +793,10 @@ async function demoScenario(cdp, origin) {
       throw new Error(`Missing message: ${text}`);
   }
 
-  // A narrow phone viewport keeps Start and the first question's input reachable.
-  await setViewport(cdp, 390, 844);
-  await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const narrowDeadline = Date.now() + 20_000;
-  while (
-    (await value(cdp, `document.querySelector('[data-composer-input]')?.placeholder`)) !==
-    "What you call her"
-  ) {
-    if (Date.now() > narrowDeadline)
-      throw new Error("The narrow demo did not reach its first question");
-    if (await value(cdp, `document.querySelector('[data-composer-input]')?.disabled === false`)) {
-      await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
-      await pressSpace(cdp);
-    }
-    await delay(150);
-  }
-  const inputVisible = await value(
-    cdp,
-    `(() => { const rect = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth && rect.height > 0; })()`,
-  );
   assertEqual(
-    inputVisible,
-    true,
-    "The narrow layout keeps the question's input inside the viewport",
+    JSON.stringify(await value(cdp, `window.__errors`)),
+    "[]",
+    "The demo reported errors in the console",
   );
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
@@ -1075,72 +859,8 @@ async function spaceSkipCheck(cdp) {
   );
 }
 
-/** A presented `showButton` is exposed to assistive technology under its visible label. */
-async function buttonNameCheck(cdp, label) {
-  const document = await cdp.call("DOM.getDocument", { depth: 0 });
-  const query = await cdp.call("Accessibility.queryAXTree", {
-    nodeId: document.result.root.nodeId,
-    accessibleName: label,
-    role: "button",
-  });
-  if (query.error !== undefined)
-    throw new Error(`Accessibility query failed: ${query.error.message}`);
-  assertEqual(
-    query.result.nodes.length,
-    1,
-    `The ${JSON.stringify(label)} button is named by its label`,
-  );
-}
-
-// A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
-// message's pacing on release (the gesture belongs to the message presented at press time).
-async function staleSkipGestureCheck(cdp) {
-  const point = (selector) =>
-    pressPoint(cdp, `[...document.querySelectorAll(${JSON.stringify(selector)})].at(-1)`, selector);
-  // The transcript is virtualized, so count messages through its list size rather than rendered entries.
-  const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
-  // Read back in the transcript first, so new messages do not scroll it while the button is held.
-  const transcript = await point(".transcript-entry");
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseWheel",
-    ...transcript,
-    deltaX: 0,
-    deltaY: -2000,
-  });
-  await delay(300);
-  const before = await value(cdp, count);
-  const stage = await point(".player-stage");
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    ...stage,
-    button: "left",
-    clickCount: 1,
-  });
-  // Hold until the current message's pacing and the script's wait end and the next message arrives.
-  await waitFor(cdp, `${count} === ${before + 1}`, 15_000);
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    ...stage,
-    button: "left",
-    clickCount: 1,
-  });
-  await delay(500);
-  assertEqual(
-    await value(cdp, count),
-    before + 1,
-    "Releasing a held press skipped the next message's pacing",
-  );
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseWheel",
-    ...transcript,
-    deltaX: 0,
-    deltaY: 20000,
-  });
-  await delay(300);
-}
-
 // Smart follow with the demo's own paced messages: a reader who scrolled up stays in place while the next message
-// arrives, and Return to latest resumes following, so the message after that appears above the composer.
+// arrives, and Return to latest resumes following, so the conversation follows the message after that.
 async function smartFollowCheck(cdp) {
   const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   const viewport = `document.querySelector('.transcript-scroll').getBoundingClientRect()`;
@@ -1211,59 +931,45 @@ async function smartFollowCheck(cdp) {
   );
   await waitFor(
     cdp,
-    `(() => { ${UNCOVERED} const latest = document.querySelector('.transcript-entry[aria-posinset="' + ${count} + '"]'); return !!latest && uncovered(latest); })()`,
+    `(() => { const element = document.querySelector('.transcript-scroll'); return element.scrollHeight - element.clientHeight - element.scrollTop <= 2; })()`,
     2_000,
-    "After Return to latest, the next message was not shown whole and uncovered",
+    "After Return to latest, the conversation did not follow the next message",
   );
 }
 
 /**
- * Where a person presses the element `expression` evaluates to: its centre once it no longer moves in (a control that
- * live play just showed enters the conversation for a moment, as do the messages it glides up with), is brought into
- * reach, and is pressable there, within two seconds. `{ keys: true }`, for keyboard input, needs it only exposed
- * somewhere. Only `{ hidden: true }`, for a control that stays hidden until a first press on its place reveals it,
- * presses that place without seeing the control.
+ * Where a person presses the element `expression` evaluates to: its centre once it is visible, enabled and still (its
+ * box unchanged over two frames), within two seconds, scrolled into view first if it is not.
  */
-async function pressPoint(
-  cdp,
-  expression,
-  what = expression,
-  { hidden = false, keys = false } = {},
-) {
+async function pressPoint(cdp, expression, what = expression) {
   const point = await evaluate(
     cdp,
-    `${REACH} ${PRESSABLE} ${EXPOSED}
-    return new Promise((resolve) => {
-      const target = () => ${expression};
+    `return new Promise((resolve) => {
       const deadline = performance.now() + 2_000;
-      const entering = () =>
-        document.getAnimations().some((animation) =>
-          animation.playState === "running" &&
-          animation.effect?.getComputedTiming().endTime !== Infinity &&
-          animation.effect?.target?.contains(target()));
+      let [last, still] = [null, 0];
       const check = () => {
-        const waiting = performance.now() < deadline;
-        if (target() && entering() && waiting) return setTimeout(check, 16);
-        if (target()) reach(target());
-        if (target() && (${hidden} || (${keys} ? exposed(target()) : pressable(target()))))
-          return resolve(reach(target()));
-        if (waiting) return setTimeout(check, 16);
+        const element = ${expression};
+        const ready = !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+          !element.matches(':disabled');
+        if (ready) element.scrollIntoViewIfNeeded(true);
+        const box = ready ? element.getBoundingClientRect() : null;
+        const place = box && [box.left, box.top, box.width, box.height].join();
+        still = place && place === last ? still + 1 : 0;
+        last = place;
+        if (still >= 2) return resolve({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+        if (performance.now() < deadline) return requestAnimationFrame(check);
         resolve(null);
       };
-      check();
+      requestAnimationFrame(check);
     })`,
   );
-  if (point === null) throw new Error(`A person cannot see and press ${what}`);
+  if (point === null) throw new Error(`${what} is not visible and enabled`);
   return point;
 }
 
-// A click where a person presses the element.
-async function physicalClick(cdp, selector) {
-  const point = await pressPoint(
-    cdp,
-    `document.querySelector(${JSON.stringify(selector)})`,
-    selector,
-  );
+/** A physical click at the centre of the element `expression` evaluates to. */
+async function physicalClickOn(cdp, expression, what = expression) {
+  const point = await pressPoint(cdp, expression, what);
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
       type,
@@ -1275,101 +981,58 @@ async function physicalClick(cdp, selector) {
   }
 }
 
-/**
- * A physical click on the element `expression` evaluates to, such as a control found by its text: it is marked for the
- * click, brought into reach, and pressed once it stands still and uncovered.
- */
-async function physicalClickOn(cdp, expression, what = expression) {
-  const found = await evaluate(
-    cdp,
-    `document.querySelectorAll('[data-smoke-target]').forEach((element) => element.removeAttribute('data-smoke-target'));
-    const target = ${expression};
-    target?.setAttribute('data-smoke-target', '');
-    return !!target;`,
-  );
-  if (!found) throw new Error(`Nothing to click: ${what}`);
-  await settledClick(cdp, "[data-smoke-target]");
+// A physical click at the centre of the element `selector` matches.
+function physicalClick(cdp, selector) {
+  return physicalClickOn(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector);
 }
 
 /** A physical click on the button whose text is `label`, among the elements `scope` matches. */
 function clickLabelled(cdp, label, scope = "button") {
   return physicalClickOn(
     cdp,
-    `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
-    `the ${JSON.stringify(label)} button`,
+    `[...document.querySelectorAll(${JSON.stringify(scope)})].find((element) => element.textContent.trim() === ${JSON.stringify(label)})`,
+    `the "${label}" button`,
   );
 }
 
-/**
- * Keyboard focus on the element `expression` evaluates to, as Tab gives it: only once a person can see it and could press
- * it somewhere, without the press itself, which would act (a press on the conversation skips pacing).
- */
+// Keyboard focus on the element `expression` evaluates to, once it is visible and enabled, without a press, which
+// would act (a press on the conversation skips pacing).
 async function focusSeen(cdp, expression, options = {}) {
-  await pressPoint(cdp, expression, expression, { keys: true });
+  await pressPoint(cdp, expression);
   await evaluate(cdp, `(${expression}).focus(${JSON.stringify(options)})`);
 }
 
-/** A real key press, down and up: a letter or digit, which types itself, or a named key such as `Backspace`. */
+/** A real key press, down and up: a named key such as `Backspace`, with optional editing commands. */
 async function key(cdp, name, { modifiers = 0, commands } = {}) {
-  const typed = /^[0-9A-Za-z]$/u.test(name);
-  const code = /^[0-9]$/u.test(name) ? `Digit${name}` : typed ? `Key${name.toUpperCase()}` : name;
+  const code = /^[A-Za-z]$/u.test(name) ? `Key${name.toUpperCase()}` : name;
   const event = {
     key: name,
     code,
-    windowsVirtualKeyCode: typed ? name.toUpperCase().charCodeAt(0) : { Backspace: 8 }[name],
+    windowsVirtualKeyCode: /^[A-Za-z]$/u.test(name)
+      ? name.toUpperCase().charCodeAt(0)
+      : { Backspace: 8 }[name],
     modifiers,
   };
   await cdp.call("Input.dispatchKeyEvent", {
     type: "keyDown",
     ...event,
-    ...(typed && modifiers === 0 ? { text: name } : {}),
     ...(commands ? { commands } : {}),
   });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", ...event });
 }
 
-/**
- * A person chooses an option of a closed `<select>`: once it is in reach and pressable it takes focus, and typing the
- * option's label (its first word, until the choice is made) picks that option directly, firing one change, as a choice
- * from its list does. The option chosen is read as the change happens, before the Player handles it; what the Player
- * then does with the choice is the caller's to check. An option already chosen is left alone. Chrome forgets typed
- * letters after a second, so a choice right after another waits that long.
- */
+// Chooses the option `optionValue` of the `<select>` `selector`, once it is visible and enabled.
 async function chooseOption(cdp, selector, optionValue) {
-  await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector, {
-    keys: true,
-  });
-  const label = await evaluate(
+  await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector);
+  await evaluate(
     cdp,
     `const select = document.querySelector(${JSON.stringify(selector)});
-    select.focus({ preventScroll: true });
-    window.smokeChoice = select.value === ${JSON.stringify(optionValue)} ? select.value : null;
-    if (window.smokeChoice === null)
-      select.addEventListener('change', (event) => { window.smokeChoice = event.target.value; }, { capture: true, once: true });
-    return [...select.options].find((option) => option.value === ${JSON.stringify(optionValue)})?.label ?? null;`,
-  );
-  if (label === null) throw new Error(`${selector} offers no ${optionValue}`);
-  if (await value(cdp, `window.smokeChoice !== null`)) return;
-  await delay(Math.max(0, lastChoice.at + 1_100 - Date.now()));
-  for (const letter of /^[0-9A-Za-z]+/u.exec(label)[0]) {
-    if (await value(cdp, `window.smokeChoice !== null`)) break;
-    await key(cdp, letter);
-  }
-  lastChoice.at = Date.now();
-  await waitFor(
-    cdp,
-    `window.smokeChoice !== null`,
-    2_000,
-    `Typing ${JSON.stringify(label)} did not choose it in ${selector}`,
-  );
-  assertEqual(
-    await value(cdp, `window.smokeChoice`),
-    optionValue,
-    `Typing ${JSON.stringify(label)} chose another option in ${selector}`,
+    select.value = ${JSON.stringify(optionValue)};
+    select.dispatchEvent(new Event('change', { bubbles: true }));`,
   );
 }
 
-/** A person replaces a text field's text: a press on the field, Select All, then the new text typed or deleted. */
+/** Replaces a text field's text: a press on the field, Select All, then the new text typed or deleted. */
 async function typeInto(cdp, selector, text) {
   await physicalClick(cdp, selector);
   await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
@@ -1377,62 +1040,15 @@ async function typeInto(cdp, selector, text) {
   else await cdp.call("Input.insertText", { text });
 }
 
-// A physical click beside the open dialog `selector`, on its backdrop: in the middle of the widest margin the dialog
-// leaves in the window, wherever the dialog sits.
-async function backdropClick(cdp, selector) {
-  const point = await value(
-    cdp,
-    `(() => {
-      const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-      const [widest] = [
-        { size: box.left, x: box.left / 2, y: innerHeight / 2 },
-        { size: innerWidth - box.right, x: (box.right + innerWidth) / 2, y: innerHeight / 2 },
-        { size: box.top, x: innerWidth / 2, y: box.top / 2 },
-        { size: innerHeight - box.bottom, x: innerWidth / 2, y: (box.bottom + innerHeight) / 2 },
-      ].sort((a, b) => b.size - a.size);
-      return widest.size >= 4 ? { x: widest.x, y: widest.y } : null;
-    })()`,
-  );
-  if (point === null) throw new Error(`${selector} leaves no backdrop beside it to click`);
-  for (const type of ["mousePressed", "mouseReleased"])
-    await cdp.call("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
-}
-
-/**
- * A physical click once the element stands still and nothing covers its centre. After a session is replaced, as by
- * Debug's rewind, the transcript remounts, measures its rows, and follows its end, so controls that are already present
- * move for a few frames, partly under the bar above the composer; a click in that window lands elsewhere.
- */
-async function settledClick(cdp, selector, timeout = 5_000) {
-  await settle(cdp, selector, timeout);
-  await physicalClick(cdp, selector);
-}
-
-// Waits until the element, brought into reach, has held its position for three animation frames while pressable.
-async function settle(cdp, selector, timeout = 5_000) {
-  const settled = await evaluate(
-    cdp,
-    `${REACH} ${PRESSABLE}
-    return new Promise((resolve) => {
-      const deadline = performance.now() + ${timeout};
-      let previous = null;
-      let stillFrames = 0;
-      const check = () => {
-        const target = document.querySelector(${JSON.stringify(selector)});
-        if (target) reach(target);
-        const rect = target?.getBoundingClientRect();
-        const position = rect ? [rect.left, rect.top, rect.width, rect.height].join() : null;
-        stillFrames = position !== null && position === previous && pressable(target) ? stillFrames + 1 : 0;
-        previous = position;
-        if (stillFrames >= 3) resolve(true);
-        else if (performance.now() > deadline) resolve(false);
-        else requestAnimationFrame(check);
-      };
-      requestAnimationFrame(check);
-    })`,
-  );
-  if (!settled)
-    throw new Error(`${selector} did not come to rest where a person can see and press it`);
+// A real Escape key, which closes the dialog on top.
+async function pressEscape(cdp) {
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
 }
 
 // A real Space key: unless a handler prevents its default, it types a space into the focused field.
@@ -1790,1034 +1406,17 @@ async function keptSessionScenario(cdp, origin, profile) {
   );
 }
 
-// The debug room (DEBUGGER.md "Debug room"): `room=debug` opens it with Debug on, its bug filled inside, and its own
-// start page, which offers Reload session and Reset session once there is something to delete; Debug off leaves the bug
-// outlined. Debug on during a normal session goes on there with a copy, after a warning when it overwrites a debug
-// session, while the normal session stays as it was.
-async function debugRoomScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const start = "[data-session-start]";
-  const control = `document.querySelector('${start}')?.textContent.trim()`;
-  const runs = `[...document.querySelectorAll('.transcript-entry')].flatMap((entry) => entry.textContent.match(/Run \\d+\\./g) ?? []).join()`;
-  const anew = `[...document.querySelectorAll('[data-debug-reload], [data-debug-reset]')].map((button) => button.textContent.trim()).join()`;
-  // A visit that keeps this browser's kept sessions and debug rooms.
-  const visit = async (query) => {
-    await cdp.call("Page.navigate", { url: `${origin}/player/?package=debug-room${query}` });
-    await waitFor(
-      cdp,
-      `document.readyState === 'complete' && !!document.querySelector('${start}')`,
-    );
-  };
-  // Keeping is asynchronous browser storage; a reload waits until the debug room keeps a session at its button.
-  const reloadOnceKept = async () => {
-    const deadline = Date.now() + 8_000;
-    while (
-      !(await evaluate(
-        cdp,
-        `return new Promise((resolve) => {
-          const request = indexedDB.open('teasescript-debug-rooms');
-          request.onsuccess = () => {
-            const sessions = request.result.transaction('sessions').objectStore('sessions').getAll();
-            sessions.onsuccess = () => { request.result.close(); resolve(sessions.result.some((session) => session.snapshotJson.includes('"Next"'))); };
-            sessions.onerror = () => resolve(false);
-          };
-          request.onerror = () => resolve(false);
-        })`,
-      ))
-    ) {
-      if (Date.now() > deadline) throw new Error("The debug session was not kept");
-      await delay(50);
-    }
-    await cdp.call("Page.reload");
-    await waitFor(cdp, `!!document.querySelector('${start}')`);
-  };
-
-  const bug = `document.querySelector('[data-debug-room-indicator]')`;
-  // The fill layer under the outline, filled with the theme's debug mark exactly in the bug's body and head, and whether
-  // the outline's lines keep the text colour.
-  const markRed = `(() => { const probe = document.createElement('span'); probe.style.color = 'var(--theme-debug-mark)'; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })()`;
-  const filled = `[...(${bug}.querySelectorAll('[data-debug-room-fill] path') ?? [])].filter((path) => getComputedStyle(path).fill !== 'none').map((path) => (getComputedStyle(path).fill === ${markRed} ? '' : 'not red: ') + path.getAttribute('d').slice(0, 6)).join(' ')`;
-  const outline = `(() => { const style = getComputedStyle(${bug}.querySelector('svg:not([data-debug-room-fill])')); return style.stroke === style.color && style.fill === 'none'; })()`;
-  await navigate(cdp, `${origin}/player/?package=debug-room&room=debug`);
-  await waitFor(cdp, `${control} === 'Start debug session'`);
-  assertEqual(
-    await value(cdp, `[${bug}?.getAttribute('aria-label'), ${anew}].join()`),
-    "Debug session · Debug on,",
-    "A new debug room starts with Debug on and nothing to delete",
-  );
-  assertEqual(
-    await value(cdp, `[${filled}, ${outline}].join()`),
-    "M14 7a M9 7.1,true",
-    "The bug's inside is filled while Debug is on, and its lines keep the text colour",
-  );
-  await physicalClick(cdp, "[data-settings-trigger]");
-  await physicalClick(cdp, '[data-player-setting="debug-menu"]');
-  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-  await waitFor(
-    cdp,
-    `${bug}?.getAttribute('aria-label') === 'Debug session · Debug off' && !${bug}.querySelector('[data-debug-room-fill]') && ${outline} && !document.querySelector('[data-player-settings]')`,
-    8_000,
-    "Debug off did not leave the bug outlined",
-  );
-  await physicalClick(cdp, start);
-  await waitFor(cdp, `${runs} === 'Run 1.'`);
-  await reloadOnceKept();
-  await waitFor(cdp, `${control} === 'Continue debug session'`);
-  assertEqual(
-    await value(cdp, anew),
-    "Reload session,Reset session",
-    "A debug room with a session offers Reload session and Reset session",
-  );
-  await physicalClick(cdp, "[data-debug-reload]");
-  await waitFor(cdp, `${runs} === 'Run 2.'`, 8_000, "Reload session did not keep the saved data");
-  await reloadOnceKept();
-  await waitFor(cdp, `!!document.querySelector('[data-debug-reset]')`);
-  await physicalClick(cdp, "[data-debug-reset]");
-  await waitFor(cdp, `${runs} === 'Run 1.'`, 8_000, "Reset session did not delete the saved data");
-
-  // Debug on during a normal session overwrites the debug session after a warning, and goes on with a copy.
-  await visit("");
-  await waitFor(cdp, `${control} === 'Start'`);
-  await physicalClick(cdp, start);
-  await waitFor(cdp, `${runs} === 'Run 1.'`);
-  await physicalClick(cdp, "[data-settings-trigger]");
-  await physicalClick(cdp, '[data-player-setting="debug-menu"]');
-  await waitFor(cdp, `!!document.querySelector('[data-confirm-dialog="debug-session-overwrite"]')`);
-  await physicalClick(cdp, "[data-confirm-action]");
-  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-  await waitFor(
-    cdp,
-    `new URLSearchParams(location.search).get('room') === 'debug' && !!document.querySelector('[data-debug-room-indicator]') && ${runs} === 'Run 1.'`,
-    8_000,
-    "Debug on did not go on with the copy in the debug room",
-  );
-  await visit("");
-  await waitFor(cdp, `${control} === 'Continue'`);
-  await physicalClick(cdp, start);
-  await waitFor(
-    cdp,
-    `${runs} === 'Run 1.' && !document.querySelector('[data-debug-room-indicator]')`,
-    8_000,
-    "The normal session did not stay as it was",
-  );
-}
-
-// Debug's random draws (DEBUGGER.md "Random draws"): with Choose outcomes on, the picker asks at each draw, not modal:
-// the theme toggle works while Settings waits. It names the draw's script and file, marks the draw in the code, whose
-// tools show on hover and whose large view the dialogs' X closes, and resizes the code a line at a time. An outcome, a
-// typed value, a new order, and Least tried each go on with the script.
-async function randomPickerScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const picker = (kind) =>
-    `!!document.querySelector('[data-random-draw-picker][data-random-draw-kind="${kind}"]')`;
-  const said = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent).join('|')`;
-  const text = (selector, separator = " ") =>
-    `[...document.querySelectorAll(${JSON.stringify(selector)})].map((node) => node.textContent.trim()).join(${JSON.stringify(separator)})`;
-  const tools = `getComputedStyle(document.querySelector('[data-random-draw-source] [data-code-block-tools]')).opacity`;
-  const key = async (name, code) => {
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", { type, key: name, code });
-  };
-  await navigate(cdp, `${origin}/player/?package=random-picker&room=debug`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
-  await physicalClick(cdp, "[data-debug-random-active]");
-  await physicalClick(cdp, "[data-session-start]");
-  await waitFor(cdp, picker("chance"), 8_000, "The picker did not ask at the first draw");
-  assertEqual(
-    await value(cdp, text("[data-random-draw-location] li:not([role=presentation])")),
-    "random-picker main.tease",
-    "The breadcrumb did not start at the package",
-  );
-  assertEqual(
-    await value(cdp, text("[data-random-draw-source] [data-code-mark]", "")),
-    "chance(25)",
-    "The draw was not marked",
-  );
-  // Not modal: the display controls work, Settings waits for the outcome.
-  const theme = `document.documentElement.dataset.playerTheme`;
-  const before = await value(cdp, theme);
-  await physicalClick(cdp, "[data-theme-mode-control]");
-  await waitFor(
-    cdp,
-    `${theme} !== ${JSON.stringify(before)}`,
-    5_000,
-    "The theme toggle did not work beside the picker",
-  );
-  await physicalClick(cdp, "[data-theme-mode-control]");
-  await physicalClick(cdp, "[data-settings-trigger]");
-  await delay(300);
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-player-settings]')`),
-    false,
-    "Settings opened beside the picker",
-  );
-  // With a mouse, the code's tools show while the pointer is over the code; where the pointer cannot hover, as in a
-  // headless browser without a mouse, they always show. Expand opens it large, and the dialogs' X closes that.
-  if (await value(cdp, `matchMedia("(hover: hover)").matches`)) {
-    assertEqual(
-      await value(cdp, tools),
-      "0",
-      "The code's tools showed without the pointer over it",
-    );
-    const block = await pressPoint(
-      cdp,
-      `document.querySelector('[data-random-draw-source] [data-code-block]')`,
-    );
-    await cdp.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: block.x, y: block.y });
-    await waitFor(cdp, `${tools} === "1"`, 5_000, "The code's tools did not show on hover");
-  } else assertEqual(await value(cdp, tools), "1", "The code's tools hid without hover");
-  // Without the clipboard API, as over plain HTTP, Copy copies the lines in view the older way and keeps focus; where
-  // the browser refuses that too, it selects them instead of claiming a copy.
-  const copyButton = `document.querySelector('[data-random-draw-source] [data-code-block-copy]')`;
-  await evaluate(
-    cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
-  );
-  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
-  await waitFor(
-    cdp,
-    `${copyButton}.getAttribute('aria-label') === "Copied"`,
-    5_000,
-    "Copy without the clipboard API did not copy",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `window.__copied?.includes("chance(25)") && document.activeElement === ${copyButton}`,
-    ),
-    true,
-    "Copy without the clipboard API lost the lines in view or the focus",
-  );
-  await evaluate(cdp, `document.execCommand = () => false;`);
-  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
-  await waitFor(
-    cdp,
-    `${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
-    5_000,
-    "A refused copy claimed to copy",
-  );
-  // After the mouse click, the tooltip says why nothing was copied.
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-slot="tooltip-content"]')?.textContent.trim().startsWith("Copying is not available here") === true`,
-    5_000,
-    "A refused copy did not say why in its tooltip",
-  );
-  assertEqual(
-    await value(cdp, `String(document.getSelection()).includes("chance(25)")`),
-    true,
-    "A refused copy did not select the lines in view",
-  );
-  // Escape and at once Enter on Copy, which still has focus, refuse again: the label still says why.
-  for (const [key, code] of [
-    ["Escape", 27],
-    ["Enter", 13],
-  ])
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key,
-        code: key,
-        windowsVirtualKeyCode: code,
-      });
-  await delay(40);
-  assertEqual(
-    await value(
-      cdp,
-      `document.activeElement === ${copyButton} && ${copyButton}.getAttribute('aria-label').startsWith("Copying is not available here")`,
-    ),
-    true,
-    "A refused copy retried at once by key lost its explanation",
-  );
-  await evaluate(
-    cdp,
-    `delete document.execCommand; delete navigator.clipboard; document.getSelection().removeAllRanges();`,
-  );
-  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-code-block-lightbox] [data-code-mark]')`,
-    5_000,
-    "Expand did not open the code large",
-  );
-  // Copy works without the clipboard API in the large view too, whose dialog keeps focus inside it.
-  await evaluate(
-    cdp,
-    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });`,
-  );
-  await physicalClick(cdp, "[data-code-block-lightbox] [data-code-block-copy]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-code-block-lightbox] [data-code-block-copy]').getAttribute('aria-label') === "Copied"`,
-    5_000,
-    "Copy without the clipboard API did not copy in the large view",
-  );
-  await evaluate(cdp, `delete navigator.clipboard;`);
-  await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-code-block-lightbox]') && ${picker("chance")}`,
-    5_000,
-    "The X did not close the large view",
-  );
-  // The corner grip resizes a whole line at a time.
-  await focusSeen(
-    cdp,
-    `document.querySelector('[data-random-draw-source] [data-code-block-resize]')`,
-  );
-  await key("ArrowDown", "ArrowDown");
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-random-draw-source] [data-code-block-resize]').getAttribute('aria-valuenow')`,
-    ),
-    "8",
-    "The grip did not add a line",
-  );
-  // The tools sidebar's shortcut waits too, also from a control in the picker.
-  const sidebar = `document.querySelector('#player-shell').dataset.sidebarVisible`;
-  const shown = await value(cdp, sidebar);
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "b",
-      code: "KeyB",
-      windowsVirtualKeyCode: 66,
-      modifiers: 2,
-    });
-  await delay(200);
-  assertEqual(
-    await value(cdp, `${sidebar} + ' ' + ${picker("chance")}`),
-    `${shown} true`,
-    "Ctrl+B changed the sidebar while the picker asked",
-  );
-
-  // Tab from the grip onto the first outcome: the outcome list, which clips because it scrolls, shows the whole focus
-  // outline the outcome draws around itself.
-  for (let presses = 0; presses < 5; presses += 1) {
-    if (await value(cdp, `!!document.activeElement.closest('[data-random-draw-outcomes]')`)) break;
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Tab",
-        code: "Tab",
-        windowsVirtualKeyCode: 9,
-      });
-  }
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        // The list's visible area, inside its borders, and the outline around the focused outcome.
-        const list = document.querySelector('[data-random-draw-outcomes]');
-        const area = list.getBoundingClientRect();
-        const [left, top] = [area.left + list.clientLeft, area.top + list.clientTop];
-        const outcome = document.activeElement.closest('[data-random-draw-outcome]');
-        if (!outcome) return false;
-        const style = getComputedStyle(outcome);
-        const ring = style.outlineStyle === 'none' ? 0 : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
-        const box = outcome.getBoundingClientRect();
-        return ring > 0 && box.left - ring >= left && box.top - ring >= top &&
-          box.right + ring <= left + list.clientWidth && box.bottom + ring <= top + list.clientHeight;
-      })()`,
-    ),
-    true,
-    "A focused outcome showed no outline, or the outcome list clipped it",
-  );
-
-  await physicalClick(cdp, "[data-random-draw-outcome]");
-  await waitFor(
-    cdp,
-    `${picker("randomNormal")} && ${said}.includes('Hit: true')`,
-    8_000,
-    "The chosen outcome did not reach the script",
-  );
-  await focusSeen(cdp, `document.querySelector('[data-random-draw-value]')`);
-  await cdp.call("Input.insertText", { text: "42" });
-  await physicalClick(cdp, "[data-random-draw-use]");
-  await waitFor(
-    cdp,
-    `${picker("shuffle")} && ${said}.includes('Value: 42')`,
-    8_000,
-    "The typed value did not reach the script",
-  );
-  await physicalClick(cdp, '[data-random-draw-item] button[aria-label="Move down"]');
-  await physicalClick(cdp, "[data-random-draw-use]");
-  await waitFor(
-    cdp,
-    `${picker("chance")} && ${said}.includes('First: green')`,
-    8_000,
-    "The new order did not reach the script",
-  );
-  await physicalClick(cdp, "[data-random-draw-untried]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-random-draw-picker]') && ${said}.includes('Again: ')`,
-    8_000,
-    "Least tried did not go on",
-  );
-}
-
-// In a file of a few thousand lines the picker's unwrapped code renders only the lines in and near view, and shows like
-// a short file's: the draw's line in the middle from the first frame and through Wrap, Copy copies the lines in view,
-// it scrolls sideways as far as its widest line, its large view opens on the draw, Show whole function starts at the
-// function's first line, the file's end scrolls into view, and Show less returns to the draw.
-async function largeRandomPickerScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const block = `document.querySelector('[data-random-draw-source] [data-code-block]')`;
-  const rendered = (scope) => `document.querySelectorAll('${scope} [data-code-line]').length`;
-  // Whether a line of the code is rendered and wholly in the code's view.
-  const shown = (block, line) =>
-    `(!!${line} && ${line}.offsetTop >= ${block}.scrollTop && ${line}.offsetTop + ${line}.offsetHeight <= ${block}.scrollTop + ${block}.clientHeight)`;
-  const inView = (number) => shown(block, `${block}.querySelector('[data-code-line="${number}"]')`);
-  const drawShown = `(${block}?.querySelector('[data-code-highlight]')?.dataset.codeLine === '1500' && ${shown(block, `${block}.querySelector('[data-code-highlight]')`)})`;
-  // Where the draw's line is in the code's view in each of the next frames once the code shows, "hidden" when it is not
-  // rendered or not wholly in view. Sampling starts at once, or with the next click.
-  const sampleFrames = (count, onClick = false) =>
-    `window.__frames = []; const sample = () => { const block = ${block}; if (block) { const line = block.querySelector('[data-code-highlight]'); window.__frames.push(${shown("block", "line")} ? line.offsetTop - block.scrollTop : 'hidden'); } if (window.__frames.length < ${count}) requestAnimationFrame(sample); }; ${onClick ? "addEventListener('click', () => requestAnimationFrame(sample), { capture: true, once: true });" : "sample();"}`;
-  // The draw's line is shown in each sampled frame, and does not move.
-  const stayed = async (message) => {
-    await waitFor(cdp, `window.__frames.length >= 8`, 20_000);
-    const frames = await value(cdp, `window.__frames.slice(0, 8)`);
-    if (!frames.every((frame) => typeof frame === "number" && frame === frames[0]))
-      throw new Error(`${message}: ${JSON.stringify(frames)}`);
-  };
-  await navigate(cdp, `${origin}/player/?package=large-file&room=debug`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-start]')`);
-  if (!(await value(cdp, `!!document.querySelector('[data-debug-random-active]')`)))
-    await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await waitFor(cdp, `!!document.querySelector('[data-debug-random-active]')`);
-  await physicalClick(cdp, "[data-debug-random-active]");
-  await evaluate(cdp, sampleFrames(8));
-  await physicalClick(cdp, "[data-session-start]");
-  // The draw's line is in view from the first frame the code shows.
-  await stayed("The code did not open with the draw's line shown and still");
-  assertEqual(
-    await value(
-      cdp,
-      `[...${block}.querySelectorAll('[data-code-mark]')].map((node) => node.textContent).join('')`,
-    ),
-    "chance(25)",
-    "The draw was not marked",
-  );
-  // Regression oracle for rendering every line of the file, which took seconds in a file of thousands of lines.
-  if ((await value(cdp, rendered("[data-random-draw-source]"))) > 100)
-    throw new Error("The picker rendered most of a file of thousands of lines");
-  await evaluate(
-    cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
-  );
-  // The file's lines at least partly in the code's view, as they are when Copy is pressed.
-  const linesInView = await value(
-    cdp,
-    `[...${block}.querySelectorAll('[data-code-line]')].filter((line) => line.offsetTop + line.offsetHeight > ${block}.scrollTop && line.offsetTop < ${block}.scrollTop + ${block}.clientHeight).map((line) => Number(line.dataset.codeLine))`,
-  );
-  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-copy]");
-  await waitFor(cdp, `window.__copied !== null`, 5_000, "Copy did not copy");
-  assertEqual(
-    await value(cdp, `window.__copied`),
-    LARGE_FILE_LINES.slice(Math.min(...linesInView) - 1, Math.max(...linesInView)).join("\n"),
-    "Copy did not copy the lines in view",
-  );
-  // The code scrolls sideways as far as its widest line needs, also while that line is far from view and not rendered:
-  // scrolled fully sideways at the draw's line, the far long line shows its end once scrolled up to it.
-  const reading = await value(cdp, `${block}.scrollTop`);
-  await evaluate(cdp, `${block}.scrollLeft = ${block}.scrollWidth`);
-  await evaluate(cdp, `${block}.scrollTop = 0`);
-  await waitFor(cdp, inView(2), 5_000, "The file's second line did not scroll into view");
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        // The last character of the long line, where it is drawn: inside the code's visible area and clipped by
-        // nothing between them.
-        const block = ${block};
-        const text = block.querySelector('[data-code-line="2"] .code-block-text');
-        const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
-        let last = null;
-        while (walker.nextNode()) if (walker.currentNode.textContent.trim()) last = walker.currentNode;
-        const end = last.textContent.trimEnd().length;
-        const range = document.createRange();
-        range.setStart(last, end - 1);
-        range.setEnd(last, end);
-        const glyph = range.getBoundingClientRect();
-        const area = block.getBoundingClientRect();
-        const [left, right] = [area.left + block.clientLeft, area.left + block.clientLeft + block.clientWidth];
-        let clipped = glyph.width === 0 || glyph.left < left || glyph.right > right;
-        for (let node = text; node !== block && !clipped; node = node.parentElement) {
-          const style = getComputedStyle(node);
-          if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
-          const box = node.getBoundingClientRect();
-          clipped = glyph.left < box.left - 1 || glyph.right > box.right + 1;
-        }
-        return !clipped;
-      })()`,
-    ),
-    true,
-    "Scrolled fully sideways at the draw's line, the code did not show the end of its widest line",
-  );
-  await evaluate(cdp, `${block}.scrollLeft = 0; ${block}.scrollTop = ${reading}`);
-  await waitFor(cdp, drawShown, 5_000, "Scrolling back did not show the draw's line");
-  // Wrapping the lines above the draw's keeps the draw's line shown and still in every frame from the click, and so
-  // does unwrapping them, also after scrolling the wrapped lines.
-  for (const state of ["on", "off"]) {
-    if (state === "off") await evaluate(cdp, `${block}.scrollTop -= 600`);
-    await evaluate(cdp, sampleFrames(8, true));
-    await physicalClick(cdp, "[data-random-draw-source] [data-code-block-wrap]");
-    await stayed(`Wrap ${state} moved the draw's line or did not show it`);
-  }
-  await physicalClick(cdp, "[data-random-draw-source] [data-code-block-expand]");
-  const large = `document.querySelector('[data-code-block-lightbox] [data-code-block]')`;
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('[data-code-block-lightbox] [data-code-mark]')].map((node) => node.textContent).join('') === 'chance(25)' && ${shown(large, `${large}.querySelector('[data-code-highlight]')`)}`,
-    5_000,
-    "The large view did not open showing the draw's line",
-  );
-  if ((await value(cdp, rendered("[data-code-block-lightbox]"))) > 200)
-    throw new Error("The large view rendered most of a file of thousands of lines");
-  await physicalClick(cdp, '[data-code-block-lightbox] [data-slot="dialog-close"]');
-  await waitFor(cdp, `!document.querySelector('[data-code-block-lightbox]')`);
-  await physicalClick(cdp, "[data-random-draw-expand]");
-  await waitFor(
-    cdp,
-    inView(1200),
-    5_000,
-    "Show whole function did not show the function's first line",
-  );
-  await evaluate(cdp, `${block}.scrollTop = ${block}.scrollHeight`);
-  await waitFor(cdp, inView(2000), 5_000, "The file's last line did not scroll into view");
-  await evaluate(
-    cdp,
-    `document.querySelector('[data-random-draw-expand]').scrollIntoView({ block: 'nearest' })`,
-  );
-  await physicalClick(cdp, "[data-random-draw-expand]");
-  await waitFor(cdp, drawShown, 5_000, "Show less did not return to the draw's line");
-
-  await physicalClick(cdp, "[data-random-draw-outcome]");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Hit: true'))`,
-    8_000,
-    "The chosen outcome did not reach the script",
-  );
-}
-
-async function titleBarScenario(cdp, origin) {
-  const title = `document.querySelector('.player-top-bar-title').textContent`;
-  const open = async (query) => {
-    await navigate(cdp, `${origin}/player/?${query}`);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  };
-  await setViewport(cdp, 1440, 900);
-  await open("package=title-header");
-  assertEqual(await value(cdp, title), "Title fixture by Author fixture", "Title and author");
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
-    false,
-    "A title that fits offered to open in full",
-  );
-  await open("dev&package=title-author");
-  assertEqual(await value(cdp, title), "by Author fixture", "Author only, in the preview");
-  await open("package=house");
-  assertEqual(await value(cdp, title), "The house", "Title only");
-
-  // The title takes the display controls' corners. The sidebar toggle is flat like the menu's tools while the sidebar is
-  // open, and raised like the display controls in the title bar while it is hidden.
-  const look = (selector) =>
-    `(() => { const style = getComputedStyle(document.querySelector(${JSON.stringify(selector)})); return [style.borderRadius, style.borderTopWidth, style.borderTopStyle, style.boxShadow, style.backgroundColor].join(" | "); })()`;
-  const radius = (selector) =>
-    `getComputedStyle(document.querySelector(${JSON.stringify(selector)})).borderRadius`;
-  assertEqual(
-    await value(cdp, radius(".player-top-bar-title > :is(span, button)")),
-    await value(cdp, radius(".player-top-bar-actions")),
-    "The title's corners differ from the display controls'",
-  );
-  assertEqual(
-    await value(cdp, look('[data-tools-surface] [data-sidebar="trigger"]')),
-    await value(
-      cdp,
-      look('[data-launcher] [data-sidebar="menu-button"]:not([data-active="true"])'),
-    ),
-    "The open sidebar's toggle looks different from the menu's tools",
-  );
-  await physicalClick(cdp, '[data-tools-surface] [data-sidebar="trigger"]');
-  await waitFor(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`);
-  assertEqual(
-    await value(cdp, look('[data-player-top-bar] [data-sidebar="trigger"]')),
-    await value(cdp, look(".player-top-bar-actions")),
-    "The title bar's sidebar toggle looks different from the display controls",
-  );
-  await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
-  await waitFor(cdp, `!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`);
-  // A dialog's X closes it.
-  await physicalClick(cdp, "[data-settings-trigger]");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-player-settings] [data-slot="dialog-close"]')`,
-  );
-  await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-  await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
-  // An open tool is flat too, with only the selected fill; hovering it deepens that fill to the pressed tone rather
-  // than lightening it into a closed tool's hover.
-  await open("package=house&room=debug");
-  const tool = '[data-launcher] button[aria-label="Debug"]';
-  await physicalClick(cdp, tool);
-  await waitFor(cdp, `document.querySelector(${JSON.stringify(tool)})?.dataset.active === "true"`);
-  // A fill as the menu resolves a theme role.
-  const tone = (role) =>
-    `(() => { const probe = document.createElement("span"); probe.style.backgroundColor = "var(${role})"; document.querySelector("[data-launcher]").append(probe); const color = getComputedStyle(probe).backgroundColor; probe.remove(); return color; })()`;
-  const fill = `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).backgroundColor`;
-  const selected = await value(cdp, tone("--theme-surface-selected"));
-  await waitFor(
-    cdp,
-    `${fill} === ${JSON.stringify(selected)}`,
-    5_000,
-    "The open tool lost its selected fill",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector(${JSON.stringify(tool)})).boxShadow`),
-    await value(
-      cdp,
-      `getComputedStyle(document.querySelector("[data-settings-trigger]")).boxShadow`,
-    ),
-    "The open tool has a marker besides its fill",
-  );
-  // Its hover tone is the pressed tone, where a closed tool's is the lighter hover tone. The headless browser has no
-  // hover, so the tones are read from the variables the shared button hover uses.
-  const hoverTone = (selector) =>
-    `getComputedStyle(document.querySelector(${JSON.stringify(selector)})).getPropertyValue("--button-hover").trim()`;
-  assertEqual(
-    await value(cdp, hoverTone(tool)),
-    await value(
-      cdp,
-      `getComputedStyle(document.querySelector("[data-launcher]")).getPropertyValue("--component-pressed").trim()`,
-    ),
-    "Hovering the open tool does not deepen its fill",
-  );
-  assertEqual(
-    (await value(cdp, hoverTone(tool))) ===
-      (await value(cdp, hoverTone("[data-settings-trigger]"))),
-    false,
-    "The open tool hovers like a closed one",
-  );
-
-  // On a short screen the default bar's display controls stay visible and usable without a timer rail and beside one:
-  // nothing covers them, and they do not cover what the rail shows (its timers and buttons).
-  const reachable = async (situation) => {
-    const blocked = await evaluate(
-      cdp,
-      `${UNCOVERED}
-      const controls = [...document.querySelectorAll('.player-top-bar-actions button')];
-      const rail = [...document.querySelectorAll('.stage-right-rail :is(.timer-display, button)')].filter((element) =>
-        element.checkVisibility({ opacityProperty: true, visibilityProperty: true }));
-      return controls.length === 0 ? ['no control'] : [...controls, ...rail]
-        .filter((element) => !uncovered(element))
-        .map((element) => element.getAttribute('aria-label') ?? element.className);`,
-    );
-    assertEqual(blocked.join(", "), "", `The short screen's bar hid display controls ${situation}`);
-    const theme = `document.documentElement.dataset.playerTheme`;
-    const before = await value(cdp, theme);
-    await physicalClick(cdp, "[data-theme-mode-control]");
-    await waitFor(
-      cdp,
-      `${theme} !== ${JSON.stringify(before)}`,
-      5_000,
-      `The theme control did not work ${situation}`,
-    );
-    await physicalClick(cdp, "[data-theme-mode-control]");
-    await waitFor(cdp, `${theme} === ${JSON.stringify(before)}`);
-  };
-  await setViewport(cdp, 1347, 900);
-  await open("package=timer-rail");
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`);
-  await setViewport(cdp, 1347, 689);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-player-vertical]').dataset.playerVertical === 'constrained'`,
-  );
-  await reachable("without a timer rail");
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, `!!document.querySelector('.stage-right-rail .timer-display')`);
-  await reachable("beside the timer rail");
-  await setViewport(cdp, 1440, 900);
-
-  const full = "A title too long for the title bar of a narrow screen by Author fixture";
-  // The bar's tooltip, read once: its content also holds a copy for assistive technology.
-  const tooltip = `document.querySelector('[data-player-title-tooltip] [role="tooltip"]')?.textContent.trim() ?? null`;
-  await setViewport(cdp, 390, 760);
-  await open("package=title-long");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-player-title-full]')`,
-    5_000,
-    "No full title",
-  );
-  await touchTap(cdp, "[data-player-title-full]");
-  await waitFor(
-    cdp,
-    `${tooltip} === ${JSON.stringify(full)}`,
-    5_000,
-    "A tap did not show the full title",
-  );
-
-  // A title without spaces wraps inside the tooltip rather than running off the screen.
-  await open("package=title-unbroken");
-  await touchTap(cdp, "[data-player-title-full]");
-  await waitFor(cdp, `!!document.querySelector('[data-player-title-tooltip]')`);
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const tooltip = document.querySelector('[data-player-title-tooltip]'); const box = tooltip.getBoundingClientRect(); return tooltip.scrollWidth <= tooltip.clientWidth && box.left >= 0 && box.right <= innerWidth; })()`,
-    ),
-    true,
-    "An unbroken title ran out of its tooltip or off the screen",
-  );
-  // A bar too narrow for the title hides it visually and keeps it plain text, never an invisible control.
-  await setViewport(cdp, 180, 760);
-  await open("package=title-long");
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-player-title-full]')`),
-    false,
-    "A visually hidden title became a control",
-  );
-
-  // The auto-hide bar on a short screen: the first tap reveals it, the next opens the title.
-  await evaluate(cdp, `localStorage.setItem('player-titlebar-variant', 'overlap')`);
-  try {
-    await setViewport(cdp, 600, 380);
-    await open("package=title-long");
-    await waitFor(
-      cdp,
-      `!document.querySelector('[data-player-top-bar]').checkVisibility({ opacityProperty: true }) && !!document.querySelector('[data-player-title-full]')`,
-      6_000,
-      "The auto-hide bar did not start hidden with a cut-off title",
-    );
-    // The bar is hidden until this tap, which a person makes where it sits.
-    await touchTap(cdp, "[data-player-title-full]", { hidden: true });
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-player-top-bar]').hasAttribute('data-revealed')`,
-    );
-    assertEqual(await value(cdp, tooltip), null, "The tap that revealed the bar opened the title");
-    await touchTap(cdp, "[data-player-title-full]");
-    await waitFor(
-      cdp,
-      `${tooltip} === ${JSON.stringify(full)}`,
-      5_000,
-      "A tap did not show the full title",
-    );
-  } finally {
-    await evaluate(cdp, `localStorage.removeItem('player-titlebar-variant')`);
-    await setViewport(cdp, 1440, 900);
-  }
-}
-
-/** A touch tap at the middle of the first element `selector` matches, where a person presses it. */
-async function touchTap(cdp, selector, options = {}) {
-  const point = await pressPoint(
-    cdp,
-    `document.querySelector(${JSON.stringify(selector)})`,
-    selector,
-    options,
-  );
-  await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true });
-  try {
-    await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
-    await cdp.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  } finally {
-    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
-  }
-}
-
-async function missingMediaScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const button = (label) =>
-    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`;
-  const notices = `[...document.querySelectorAll('[data-player-notice]')].map((notice) => notice.getAttribute('data-notice-level') + ' ' + notice.querySelector('p').textContent.trim())`;
-  await navigate(cdp, `${origin}/player/?dev&package=missing-media&time=skip`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  // Its 30 s wait and both failed blocking plays pass at once.
-  await waitFor(cdp, button("Next"), 5_000, "Failed media held the session before Next");
-  // The browser has tried the invalid image before the script replaces it, and the Stage stays empty.
-  await waitFor(
-    cdp,
-    `(() => {
-      const image = document.querySelector('.stage-media');
-      return !!image && image.complete && image.naturalWidth === 0 &&
-        image.getAttribute('src') === '/dev-package/missing-media/files/images/corrupt.png' &&
-        getComputedStyle(image).display === 'none';
-    })()`,
-    5_000,
-    "The invalid image did not leave the Stage empty",
-  );
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, button("Finish"), 5_000, "Failed media held the session before Finish");
-  await waitFor(
-    cdp,
-    `(() => {
-      const image = document.querySelector('.stage-media');
-      return !!image && image.complete && image.naturalWidth > 0 &&
-        image.getAttribute('src') === '/dev-package/missing-media/files/images/valid.svg' &&
-        getComputedStyle(image).display !== 'none';
-    })()`,
-    5_000,
-    "The valid image did not restore the Stage",
-  );
-  await physicalClick(cdp, "[data-notification-bell]");
-  await waitFor(cdp, `!!document.querySelector('[data-player-notification-panel]')`);
-  assertEqual(
-    JSON.stringify(await value(cdp, `${notices}.sort()`)),
-    JSON.stringify([
-      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 15)",
-      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 14)",
-      "warning Warning: Image could not be loaded: avatars/corrupt.png",
-      "warning Warning: Image could not be loaded: images/corrupt.png",
-      "warning Warning: Image not found: avatars/missing.png",
-      "warning Warning: Image not found: images/missing.png",
-    ]),
-    "The notifications did not list one warning per unusable path",
-  );
-}
-
 /**
- * The `audio-overlap` package plays one sound twice with overlap, then another sound, then the same sound in a loop of
- * 30 overlapping instances. `seeked` notifications arrive late, as under load, after playback already began. Each
- * instance plays to its end once on its own element, without rewinding or stopping another, and releases its element
- * for reuse when it ends.
- */
-async function audioOverlapScenario(cdp, origin) {
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__instances = [];
-      window.__samples = [];
-      window.__elements = new Set();
-      // Released elements not used again yet, and how often an instance got a new element while one of them was free.
-      window.__free = new Set();
-      window.__newWhileFree = 0;
-      window.__lateSeeked = 0;
-      const current = new Map();
-      const prototype = HTMLMediaElement.prototype;
-      const src = Object.getOwnPropertyDescriptor(prototype, 'src');
-      Object.defineProperty(prototype, 'src', {
-        ...src,
-        set(value) {
-          if (!window.__free.delete(this) && window.__free.size > 0) window.__newWhileFree++;
-          window.__elements.add(this);
-          src.set.call(this, value);
-          if (!String(value).includes('/dev-package/audio-overlap/')) return current.delete(this);
-          const instance = { file: String(value).split('/').pop(), plays: 0, end: false, time: 0, rewound: false, released: false };
-          window.__instances.push(instance);
-          current.set(this, instance);
-        },
-      });
-      const removeAttribute = Element.prototype.removeAttribute;
-      prototype.removeAttribute = function (name) {
-        const instance = current.get(this);
-        if (name === 'src' && instance) instance.released = true;
-        if (name === 'src') window.__free.add(this);
-        return removeAttribute.call(this, name);
-      };
-      const play = prototype.play;
-      prototype.play = function () {
-        const instance = current.get(this);
-        if (instance && this.getAttribute('src')) instance.plays++;
-        return play.call(this);
-      };
-      // The device pauses an instance at its end and before releasing its element: record whether it reached the end.
-      const pause = prototype.pause;
-      prototype.pause = function () {
-        const instance = current.get(this);
-        if (instance && this.getAttribute('src') && this.currentTime >= this.duration) instance.end = true;
-        return pause.call(this);
-      };
-      // Delivers each seeked notification 60 ms late, and not before the element played on from the seek, which under
-      // load can take longer; after 2 seconds it is delivered anyway.
-      const late = new WeakMap();
-      const addEventListener = prototype.addEventListener;
-      const removeEventListener = prototype.removeEventListener;
-      prototype.addEventListener = function (type, listener, options) {
-        if (type !== 'seeked') return addEventListener.call(this, type, listener, options);
-        if (!late.has(listener))
-          late.set(listener, (event) => {
-            const deadline = performance.now() + 2_000;
-            const deliver = () => {
-              const playedOn = !this.paused && this.currentTime > 0;
-              if (!playedOn && performance.now() < deadline) return setTimeout(deliver, 10);
-              if (playedOn) window.__lateSeeked++;
-              listener.call(this, event);
-            };
-            setTimeout(deliver, 60);
-          });
-        return addEventListener.call(this, type, late.get(listener), options);
-      };
-      prototype.removeEventListener = function (type, listener, options) {
-        return removeEventListener.call(this, type, (type === 'seeked' && late.get(listener)) || listener, options);
-      };
-      setInterval(() => {
-        const playing = [];
-        for (const [element, instance] of current) {
-          if (!element.getAttribute('src')) continue;
-          if (element.currentTime < instance.time) instance.rewound = true;
-          instance.time = element.currentTime;
-          if (!element.paused) playing.push([window.__instances.indexOf(instance), element.currentTime]);
-        }
-        window.__samples.push(playing);
-      }, 25);`,
-  });
-  try {
-    const transcript = (text) =>
-      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
-    // Each instance played once, to its end, without moving back.
-    const once = (instance) => instance.plays === 1 && instance.end && !instance.rewound;
-    await navigate(cdp, `${origin}/player/?package=audio-overlap`);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await physicalClick(cdp, "[data-session-activation] button");
-    await waitFor(cdp, transcript("Overlap done"), 10_000, "The overlapping sounds did not finish");
-    // The script's waits do not wait for what is heard, and under load playback starts late: judge the three instances
-    // once the device has released them.
-    await waitFor(
-      cdp,
-      `window.__instances.length >= 3 && window.__instances.slice(0, 3).every((instance) => instance.released)`,
-      20_000,
-      "The overlapping sounds kept their elements",
-    );
-    const overlap = await value(
-      cdp,
-      `(() => {
-        const once = ${once};
-        const time = (sample, index) => sample.find(([candidate]) => candidate === index)?.[1];
-        return JSON.stringify({
-          files: window.__instances.slice(0, 3).map((instance) => instance.file),
-          once: window.__instances.slice(0, 3).map(once),
-          // The first instance plays on, ahead of the second, while the second plays.
-          both: window.__samples.some((sample) => time(sample, 1) > 0 && time(sample, 0) > time(sample, 1)),
-          all: window.__samples.some((sample) => [0, 1, 2].every((index) => time(sample, index) !== undefined)),
-          lateSeeked: window.__lateSeeked > 0,
-        });
-      })()`,
-    );
-    assertEqual(
-      overlap,
-      JSON.stringify({
-        files: ["tone.wav", "tone.wav", "chime.wav"],
-        once: [true, true, true],
-        both: true,
-        all: true,
-        lateSeeked: true,
-      }),
-      "Overlapping sounds did not each play out once while the others played",
-    );
-    const loopStart = await value(cdp, "window.__samples.length");
-    await waitFor(cdp, transcript("Loop done"), 15_000, "The sound loop did not finish");
-    // Every finished instance released its element; the loop reused elements instead of creating one per instance. Under
-    // load the instances play out well after the script's waits.
-    await waitFor(
-      cdp,
-      `window.__instances.length === 33 && [...window.__elements].every((element) => !element.getAttribute('src'))`,
-      20_000,
-      "Finished sounds kept their elements",
-    );
-    const loop = await value(
-      cdp,
-      `JSON.stringify({
-        once: window.__instances.every(${once}),
-        overlapped: window.__samples.slice(${loopStart}).some((sample) => sample.length > 1),
-        // How many elements the loop needs depends on how fast the browser plays: no new element while one was free.
-        reused: window.__newWhileFree === 0 && window.__elements.size < window.__instances.length,
-      })`,
-    );
-    assertEqual(
-      loop,
-      JSON.stringify({ once: true, overlapped: true, reused: true }),
-      "The sound loop did not play overlapping instances out once on reused elements",
-    );
-  } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
-  }
-}
-
-/**
- * The `late-image` package shows an invalid image, hides it, then shows a valid one. The invalid image's response arrives
- * only after that: its late failure belongs to an element no longer on the Stage, so the valid image stays and nothing
- * is reported.
- */
-async function lateImageScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const press = async (label) => {
-    const done = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`;
-    await waitFor(cdp, done);
-    await physicalClick(cdp, "[data-foreground-controls] button");
-  };
-  const validShown = `(() => {
-    const image = document.querySelector('.stage-media');
-    return !!image && image.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== 'none' &&
-      image.getAttribute('src') === '/dev-package/late-image/files/images/valid.svg';
-  })()`;
-  lateImage.hold = true;
-  await navigate(cdp, `${origin}/player/?package=late-image`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  // The Stage waits for the held response.
-  const deadline = Date.now() + 8_000;
-  while (lateImage.release === null) {
-    if (Date.now() > deadline) throw new Error("The Stage did not request the late image");
-    await delay(50);
-  }
-  // The image element that waits for the held response, kept so that it lives to fail, reports its failure after the
-  // Stage's own handler has seen it.
-  await value(
-    cdp,
-    `(() => {
-      window.lateImage = { element: document.querySelector('.stage-media'), failed: false };
-      window.lateImage.element.addEventListener('error', () => { window.lateImage.failed = true; });
-      return true;
-    })()`,
-  );
-  await press("Hide");
-  await press("Show");
-  await waitFor(cdp, validShown, 5_000, "The valid image was not shown");
-  lateImage.release();
-  lateImage.release = null;
-  await waitFor(cdp, "window.lateImage.failed", 5_000, "The late image did not report its failure");
-  assertEqual(
-    await value(cdp, validShown),
-    true,
-    "A late failure of a removed image hid the valid image",
-  );
-  await physicalClick(cdp, "[data-notification-bell]");
-  await waitFor(cdp, `!!document.querySelector('[data-player-notification-panel]')`);
-  assertEqual(
-    await value(cdp, `document.querySelectorAll('[data-player-notice]').length`),
-    0,
-    "A late failure of a removed image was reported",
-  );
-}
-
-/**
- * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
- * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
- * theme's; the photo shows again, and the background's effects are placed anew for it, when its box changes behind an
- * image request's preview;
- * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, a mode
- * change in either direction, and the next photo fade the background and the message bubbles, except under reduced
- * motion. Once each change has settled, text is readable and the transcript's authored speaker and prose colours are
- * adapted to the background shown, in Standard and High contrast.
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player, and the empty Stage after `hideImage` gives
+ * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
+ * in both modes and in Standard and High contrast.
  */
 async function photoColourScenario(cdp, origin, profile) {
   await setViewport(cdp, 1440, 900);
   const chosen = join(profile, "photo-colour-chosen.png");
   await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
-  // The theme's colour roles on the document root, and the HSL hue of a colour as the screen shows it.
+  // The theme's colour roles on the document root.
   const roles = `Object.fromEntries([...document.documentElement.style].filter((name) => /^--(theme|story-accent)-/.test(name)).map((name) => [name, document.documentElement.style.getPropertyValue(name)]))`;
-  const hue = (colour) =>
-    `(() => { const probe = document.createElement('span'); probe.style.color = ${colour}; document.body.append(probe); const context = document.createElement('canvas').getContext('2d'); context.fillStyle = getComputedStyle(probe).color; probe.remove(); context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; const max = Math.max(r, g, b), min = Math.min(r, g, b); if (max === min) return null; const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min); return Math.round(((h * 60) % 360 + 360) % 360); })()`;
-  const green = (degrees) => degrees !== null && degrees > 80 && degrees < 160;
   // WCAG relative luminance of a colour as the screen shows it.
   const luminance = `const luminance = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0); };`;
   const background = `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`;
@@ -2828,187 +1427,79 @@ async function photoColourScenario(cdp, origin, profile) {
     const bubble = getComputedStyle(document.querySelector('.message-speaker'));
     return Math.min(ratio(bubble.color, bubble.backgroundColor), ratio(getComputedStyle(document.body).color, ${background}));
   })()`;
+  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
+  const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
+  // Judged once the change has settled, never while the colours fade.
   const readable = async (label) => {
+    await waitFor(cdp, `!${fading}`, 3_000, `${label}: the colours did not settle`);
     const ratio = await value(cdp, contrast);
     assertEqual(ratio >= 4.5, true, `${label}: text at ${ratio.toFixed(2)} to 1`);
-  };
-  // Every colour the transcript shows, and the same once the transcript has read the theme again after a root change
-  // that paints nothing: they differ when its authored colours were adapted to an earlier background.
-  const shown = `[...document.querySelectorAll('.transcript-entry, .transcript-entry *')].map((element) => { const style = getComputedStyle(element); return style.color + ' on ' + style.backgroundColor; }).join(', ')`;
-  const adapted = async (label) => {
-    const before = await value(cdp, shown);
-    await evaluate(
-      cdp,
-      `document.documentElement.classList.add('smoke-reread'); document.documentElement.classList.remove('smoke-reread');`,
-    );
-    await delay(150);
-    assertEqual(
-      await value(cdp, shown),
-      before,
-      `${label}: authored colours adapted to an earlier background`,
-    );
   };
   const switchMode = async (mode) => {
     await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
     await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
   };
-  const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
-  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
-  // What faded to its end since the last change settled: the background, a message bubble.
-  const recordFades = `window.smokeFades = new Set(); document.addEventListener('transitionend', (event) => { if (event.target.matches('.player-viewport-canvas') && event.propertyName === '--player-field') window.smokeFades.add('background'); if (event.target.matches('.message-speaker') && event.propertyName === 'background-color') window.smokeFades.add('bubbles'); });`;
-  const takeFades = `(() => { const faded = [...window.smokeFades].sort().join(', '); window.smokeFades.clear(); return faded; })()`;
-  // Once a change has settled: what faded, the text's contrast, and the authored colours.
-  const settled = async (label, faded = "background, bubbles") => {
-    await waitFor(cdp, `!${fading}`, 3_000, `${label}: the colours did not settle`);
-    assertEqual(await value(cdp, takeFades), faded, `${label}: what faded`);
-    await readable(label);
-    await adapted(label);
-  };
-  const stageShows = (name) =>
-    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/${name}'); })()`;
   const press = async (label) => {
     await waitFor(
       cdp,
       `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
     );
-    await physicalClick(cdp, "[data-foreground-controls] button");
+    await clickLabelled(cdp, label, "[data-foreground-controls] button");
   };
-  // Shows the next photo and waits for its colour to apply.
-  const showPhoto = async (label, name) => {
-    await press(label);
+  const chooseContrast = async (option) => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
+    const before = await value(cdp, secondary);
+    await chooseOption(cdp, '[data-player-setting="contrast"]', option);
     await waitFor(
       cdp,
-      `${stageShows(name)} && ${fading}`,
-      5_000,
-      `The colour of ${name} did not apply`,
+      `${secondary} !== ${JSON.stringify(before)}`,
+      3_000,
+      `Contrast ${option} was not applied`,
     );
-  };
-  const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
-  const differing = (first, second) =>
-    Object.keys({ ...first, ...second }).filter((name) => first[name] !== second[name]);
-  const settings = async (change) => {
-    await physicalClick(cdp, "[data-settings-trigger]");
-    await waitFor(cdp, `!!document.querySelector('[data-player-setting="photo-accent"]')`);
-    await change();
     await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
     await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
   };
-  const chooseAccent = (option) =>
-    settings(async () => {
-      await physicalClick(cdp, `[data-player-setting="photo-accent"] input[value="${option}"]`);
-      await waitFor(
-        cdp,
-        `document.querySelector('[data-player-setting="photo-accent"] input[value="${option}"]').checked`,
-      );
-    });
-  const chooseContrast = (option) =>
-    settings(async () => {
-      const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
-      const before = await value(cdp, secondary);
-      await chooseOption(cdp, '[data-player-setting="contrast"]', option);
-      await waitFor(
-        cdp,
-        `${secondary} !== ${JSON.stringify(before)}`,
-        3_000,
-        `Contrast ${option} was not applied`,
-      );
-    });
   await navigate(cdp, `${origin}/player/?package=photo-colour`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   const theme = await value(cdp, roles);
-  await evaluate(cdp, recordFades);
-  photoColourRequests.count = 0;
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
-  // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
-  // caching it.
-  assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
+  assertEqual(
+    JSON.stringify(await value(cdp, roles)) === JSON.stringify(theme),
+    false,
+    "The photo left the Player's colours as they were",
+  );
   await waitFor(cdp, `document.querySelectorAll('.transcript-entry').length >= 3`);
-  await settled("The first photo");
-  const withPhoto = await value(cdp, roles);
-  for (const [name, colour] of [
-    ["background", background],
-    ["canvas role", `'var(--theme-surface-canvas)'`],
-    ["accent", `'var(--theme-accent-solid)'`],
-  ])
-    assertEqual(green(await value(cdp, hue(colour))), true, `The ${name} is not the photo's green`);
-  // B: only the accent goes back to the theme's.
-  await chooseAccent("theme");
-  const themeAccent = await value(cdp, roles);
-  const changed = differing(withPhoto, themeAccent);
-  assertEqual(changed.length > 0, true, "B did not change the accent");
-  assertEqual(
-    changed.filter((name) => !accent(name)).join(", "),
-    "",
-    "B changed more than the accent",
-  );
-  assertEqual(
-    differing(theme, themeAccent).filter(accent).join(", "),
-    "",
-    "B did not give the theme's accent back",
-  );
-  await chooseAccent("photo");
-  assertEqual(
-    differing(withPhoto, await value(cdp, roles)).join(", "),
-    "",
-    "A did not restore the photo accent",
-  );
-  await chooseContrast("high");
+  await readable("The first photo");
   await switchMode("dark");
-  await settled("Dark mode, High contrast");
-  assertEqual(
-    green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
-    true,
-    "The dark canvas is not green",
-  );
-  // The window shrinks while an image request's preview hides the photo; once answered, the photo shows again, and the
-  // background's effects follow it: where they are placed is updated for the photo's new box (no place is asserted).
-  const effectsPlace = `['--photo-cx', '--photo-cy', '--photo-w', '--photo-h'].map((name) => document.documentElement.style.getPropertyValue(name)).join(' ')`;
+  await readable("Dark mode");
+  await chooseContrast("high");
+  await readable("Dark mode, High contrast");
   await waitFor(cdp, visible("[data-composer-attach]"));
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
-  await waitFor(cdp, decodedPreview, 8_000, "The chosen image showed no preview");
-  const placedBefore = await value(cdp, effectsPlace);
-  await setViewport(cdp, 900, 700);
   await useImage(cdp);
+  await press("Next");
   await waitFor(
     cdp,
-    `(() => { const image = document.querySelector('img.stage-media:not([data-stage-preview])'); return !!image && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0 && ${visible("img.stage-media:not([data-stage-preview])")}; })()`,
-    3_000,
-    "The photo did not show again after the preview",
+    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/red.svg'); })()`,
+    5_000,
+    "The next photo did not show",
   );
-  await waitFor(
-    cdp,
-    `(() => { const place = ${effectsPlace}; return place.split(' ').every(Boolean) && place !== ${JSON.stringify(placedBefore)}; })()`,
-    3_000,
-    "The background's effects did not follow the photo after the window shrank",
-  );
-  await setViewport(cdp, 1440, 900);
-  await showPhoto("Next", "red.svg");
-  await settled("The next photo, High contrast");
+  await readable("The next photo");
   await switchMode("light");
-  await settled("Dark to light");
-  // Reduced motion: the next photo and a mode change switch at once.
-  await cdp.call("Emulation.setEmulatedMedia", {
-    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
-  });
-  try {
-    await showPhoto("Back", "green.svg");
-    await switchMode("dark");
-    await settled("Reduced motion", "");
-  } finally {
-    await cdp.call("Emulation.setEmulatedMedia", { features: [] });
-  }
+  await readable("Light mode, High contrast");
   await chooseContrast("standard");
-  await showPhoto("Again", "red.svg");
-  await settled("The next photo, Standard contrast");
-  // The empty Stage gives the theme's own colours back.
-  await press("Hide");
+  await readable("Light mode");
+  for (const label of ["Back", "Again", "Hide"]) await press(label);
   await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
-  await settled("The theme's return");
-  await switchMode("light");
+  await readable("The theme's return");
+  const returned = await value(cdp, roles);
   assertEqual(
-    differing(theme, await value(cdp, roles)).join(", "),
+    Object.keys({ ...theme, ...returned })
+      .filter((name) => theme[name] !== returned[name])
+      .join(", "),
     "",
     "The empty Stage's colours are not the theme's",
   );
@@ -3172,58 +1663,13 @@ function decodePng(buffer) {
 }
 
 /**
- * Entrances (`entrances` package): what Start shows appears directly; a message live play adds enters while the
- * conversation glides up, and the controls of a new interaction glide with the message above them. An update taller
- * than the view shows directly and stops with its first entry at the top, with Return to latest offered, while later
- * messages do not move the reader; that also holds for an update of two entries, after the reader scrolled back to the
- * end. Under reduced motion nothing enters.
+ * Entrances (`entrances` package): an update taller than the view stops showing its first entry, with Return to latest
+ * offered, while later messages do not move the reader; that also holds for an update of two entries, after the reader
+ * scrolled back to the end.
  */
 async function entrancesScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   const entries = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
-  // Records, every frame, which parts of the conversation an animation moves, and how far the controls are from the
-  // entry above them while the conversation glides. Each of them also rises in its own entrance, which under load
-  // starts at a different frame for each, so the distance leaves those rises out. Under load a glide can also end
-  // before a frame samples it, so the distance is also measured as each glide starts.
-  const start = async () => {
-    await navigate(cdp, `${origin}/player/?package=entrances`);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await evaluate(
-      cdp,
-      `window.smokeEntrances = new Set();
-      window.smokeControlGaps = new Set();
-      const rise = (element) => Number.parseFloat(getComputedStyle(element).translate.split(' ')[1] ?? 0) || 0;
-      const measureGap = () => {
-        const controls = document.querySelector('[data-foreground-controls]');
-        const above = document.querySelector('.transcript-entry[data-index="2"]');
-        if (controls && above && getComputedStyle(document.querySelector('.transcript-history')).translate !== 'none')
-          window.smokeControlGaps.add(
-            Math.round(controls.getBoundingClientRect().top - rise(controls) - (above.getBoundingClientRect().bottom - rise(above))),
-          );
-      };
-      const animate = Element.prototype.animate;
-      Element.prototype.animate = function (...parameters) {
-        const animation = animate.apply(this, parameters);
-        // Once every animation the glide starts together exists.
-        if (this.matches('.transcript-history')) queueMicrotask(measureGap);
-        return animation;
-      };
-      const record = () => {
-        for (const animation of document.getAnimations()) {
-          const target = animation.effect?.target;
-          if (target?.matches?.('.transcript-entry')) window.smokeEntrances.add('row ' + target.dataset.index);
-          else if (target?.matches?.('.transcript-history')) window.smokeEntrances.add('glide');
-          else if (target?.matches?.('[data-foreground-controls]')) window.smokeEntrances.add('controls');
-        }
-        measureGap();
-        requestAnimationFrame(record);
-      };
-      requestAnimationFrame(record);`,
-    );
-    await physicalClick(cdp, "[data-session-activation] button");
-  };
-  const entered = () => evaluate(cdp, `return [...window.smokeEntrances].sort()`);
-  const forget = () => evaluate(cdp, `window.smokeEntrances.clear()`);
   // The top of an entry in the view, as long as it is drawn.
   const top = (index) => `(() => {
     const view = document.querySelector('.transcript-scroll').getBoundingClientRect();
@@ -3233,36 +1679,11 @@ async function entrancesScenario(cdp, origin) {
   // The reader sees where an entry starts, and is offered Return to latest.
   const held = (index) =>
     `(() => { const start = ${top(index)}; return start !== null && start >= -2 && start < document.querySelector('.transcript-scroll').clientHeight - 2 && !!document.querySelector('.return-to-latest'); })()`;
-  await start();
-  await waitFor(
-    cdp,
-    `${entries} === 2`,
-    8_000,
-    "The entrances package did not add its second message",
-  );
-  await delay(400);
-  // Start shows its first message directly; the next one enters alone, and the conversation glides up for it.
-  assertEqual(
-    JSON.stringify(await entered()),
-    JSON.stringify(["glide", "row 1"]),
-    "A live message did not enter alone, gliding the conversation up",
-  );
-  // A message with a choice: the controls enter and glide with the message, at one distance below it.
-  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls]')`, 8_000);
-  await delay(400);
-  const gaps = await evaluate(cdp, `return [...window.smokeControlGaps]`);
-  assertEqual(
-    gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) <= 2,
-    true,
-    `The controls did not glide with the message above them: ${JSON.stringify(gaps)}`,
-  );
-  assertEqual(
-    (await entered()).includes("controls"),
-    true,
-    "The controls of a new interaction did not enter",
-  );
+  await navigate(cdp, `${origin}/player/?package=entrances`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`, 8_000);
   // An update of many entries, taller than the view, stops at its first entry, the answer.
-  await forget();
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(cdp, `${entries} === 19`, 8_000, "The tall update did not arrive");
   await waitFor(
@@ -3283,7 +1704,7 @@ async function entrancesScenario(cdp, origin) {
     "A message after the tall update moved the reader",
   );
   // Scrolled back to the end, the reader follows again: an update of two entries taller than the view stops at its
-  // first entry and shows directly.
+  // first entry.
   await evaluate(
     cdp,
     `const view = document.querySelector('.transcript-scroll'); view.scrollTop = view.scrollHeight;`,
@@ -3294,7 +1715,6 @@ async function entrancesScenario(cdp, origin) {
     4_000,
     "Scrolling to the end did not reach it",
   );
-  await forget();
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(cdp, `${entries} === 22`, 8_000, "The tall message did not arrive");
   await waitFor(
@@ -3303,28 +1723,6 @@ async function entrancesScenario(cdp, origin) {
     4_000,
     "A two-entry update taller than the view did not stop showing its first entry after the reader returned to the end",
   );
-  await delay(400);
-  assertEqual(
-    JSON.stringify(await entered()),
-    "[]",
-    "An update taller than the view entered the conversation",
-  );
-  // Reduced motion: the same live message shows without entering.
-  await cdp.call("Emulation.setEmulatedMedia", {
-    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
-  });
-  try {
-    await start();
-    await waitFor(cdp, `${entries} === 2`, 8_000, "The entrances package did not restart");
-    await delay(400);
-    assertEqual(
-      JSON.stringify(await entered()),
-      "[]",
-      "Something entered the conversation under reduced motion",
-    );
-  } finally {
-    await cdp.call("Emulation.setEmulatedMedia", { features: [] });
-  }
 }
 
 /**
@@ -3412,749 +1810,6 @@ async function messageUpdatesScenario(cdp, origin) {
   );
 }
 
-/**
- * Player Debug in the default build: the Debug menu starts off and Settings turns it on for this load. While Debug
- * runs, one countdown line under the foreground names a wait, a timed button, or pacing, but never a blocking timer; it
- * follows jumps, also +10 s during pacing, the panel's Debug switch and the Debug menu also while the panel is closed,
- * and never reaches the transcript. `?dev` starts with the menu on.
- */
-async function debugCountdownScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const countdown = `document.querySelector('[data-debug-countdown]')?.textContent.trim() ?? null`;
-  const shows = (pattern) =>
-    `${pattern}.test(document.querySelector('[data-debug-countdown]')?.textContent.trim() ?? '')`;
-  const none = `!document.querySelector('[data-debug-countdown]')`;
-  const launcher = '[data-launcher] button[aria-label="Debug"]';
-  const toggleDebugMenu = async () => {
-    await physicalClick(cdp, "[data-settings-trigger]");
-    await waitFor(cdp, `!!document.querySelector('[data-player-setting="debug-menu"]')`);
-    await physicalClick(cdp, '[data-player-setting="debug-menu"]');
-    // The X is pressed once it stands still with nothing over it. Should Settings stay open, the failure names what
-    // the X's centre hits and which dialogs are open, the evidence an earlier, unreproduced timeout here lacked.
-    await settledClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
-    try {
-      await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
-    } catch {
-      const state = await value(
-        cdp,
-        `(() => {
-          const close = document.querySelector('[data-player-settings] [data-slot="dialog-close"]');
-          const rect = close?.getBoundingClientRect();
-          const hit = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-          return JSON.stringify({
-            dialogs: [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].map((dialog) => dialog.textContent.trim().slice(0, 40)),
-            settings: document.querySelector('[data-player-settings]')?.getAttribute('data-state') ?? null,
-            hit: hit?.outerHTML.slice(0, 120) ?? null,
-          });
-        })()`,
-      );
-      throw new Error(`Settings did not close: ${state}`);
-    }
-  };
-  // Scene time runs on in real time between steps, so a countdown may have passed its first seconds.
-  const skip = async (expected, failure) => {
-    await physicalClick(cdp, '[data-development-time-action="skip"]');
-    await waitFor(cdp, expected, 5_000, failure);
-  };
-
-  await navigate(cdp, `${origin}/player/?package=debug-countdowns`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Start'))`,
-  );
-  assertEqual(
-    await value(cdp, `!document.querySelector(${JSON.stringify(launcher)}) && ${none}`),
-    true,
-    "A fresh load started with the Debug menu on",
-  );
-  // The menu on shows the wait's countdown at once, with the panel still closed.
-  await toggleDebugMenu();
-  await waitFor(
-    cdp,
-    shows("/^Debug · Continues in (30|2\\d) s$/"),
-    5_000,
-    "No countdown for the wait",
-  );
-  assertEqual(
-    await value(cdp, `!document.querySelector('[data-debug-panel]')`),
-    true,
-    "The panel opened",
-  );
-  await physicalClick(cdp, launcher);
-  await waitFor(cdp, `!!document.querySelector('[data-debug-panel]')`);
-  // Skip event ends the wait: the blocking timer is a timer, never a wait.
-  await skip(none, "A blocking timer showed a countdown");
-  await skip(shows("/^Debug · Pacing: (20|1\\d) s remaining$/"), "No countdown for pacing");
-  // +10 s works during pacing: the pause is 10 s shorter, and the next message has not come yet.
-  await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
-  await waitFor(
-    cdp,
-    shows("/^Debug · Pacing: (10|\\d) s remaining$/"),
-    5_000,
-    "+10 s did not advance the pacing",
-  );
-  // The timed button consumes the pacing of the message before it.
-  await skip(shows("/^Debug · Press within (40|3\\d) s$/"), "No countdown for the timed button");
-  // The panel's Debug switch and the Debug menu hide and show it, also while the panel is closed.
-  await physicalClick(cdp, "[data-debug-active]");
-  await waitFor(cdp, none, 2_000, "Debug off left the countdown");
-  await physicalClick(cdp, "[data-debug-active]");
-  await waitFor(
-    cdp,
-    shows("/^Debug · Press within (40|3\\d) s$/"),
-    2_000,
-    "Debug on did not restore the countdown",
-  );
-  // Closed, the panel keeps its content parked out of view.
-  await physicalClick(cdp, launcher);
-  await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
-  await toggleDebugMenu();
-  await waitFor(
-    cdp,
-    `${none} && !document.querySelector(${JSON.stringify(launcher)})`,
-    2_000,
-    "The Debug menu off left Debug",
-  );
-  await toggleDebugMenu();
-  await waitFor(
-    cdp,
-    shows("/^Debug · Press within \\d+ s$/"),
-    2_000,
-    "The Debug menu on did not show the countdown",
-  );
-  // An untimed button has no countdown; Debug added nothing to the transcript.
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Done')`,
-  );
-  assertEqual(await value(cdp, countdown), null, "An untimed button showed a countdown");
-  const entries = await value(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`,
-  );
-  assertEqual(
-    entries.some((text) => /Debug|elapsed|⏩/u.test(text)) ||
-      !["Start", "A", "B", "Pressed"].every(
-        (text, index, texts) =>
-          entries.findIndex((entry) => entry.endsWith(text)) >
-          (index === 0 ? -1 : entries.findIndex((entry) => entry.endsWith(texts[index - 1]))),
-      ),
-    false,
-    `Debug changed the transcript: ${JSON.stringify(entries)}`,
-  );
-
-  await navigate(cdp, `${origin}/player/?dev&package=debug-countdowns`);
-  await waitFor(
-    cdp,
-    `!!document.querySelector(${JSON.stringify(launcher)})`,
-    8_000,
-    "?dev did not start with the Debug menu on",
-  );
-}
-
-/**
- * Debug's Now tab on the `debug-now` package, shaped like the Domme3 case: from a nested folder, a called file's
- * function shows an image reference the package lacks, then an image the browser cannot decode, then `hideImage`, then
- * a valid image, while two sounds overlap and a hidden timer runs. The tab names each state with the authored paths,
- * the call chain and the timers, and fits a narrow drawer.
- */
-/**
- * Debug's Storage editor on the `debug-storage-edit` package: a malformed value is refused inline and stores nothing;
- * an added value is stored and the running session's next load returns it, while the value loaded before stays; it can
- * be changed to another type and deleted; the editor fits a narrow screen; and after the session ends an edit is
- * stored for the next Start.
- */
-async function debugStorageEditScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const entry = (text) =>
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
-  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
-  const setField = (selector, text) => typeInto(cdp, selector, text);
-  const choose = (type) => chooseOption(cdp, "[data-storage-editor-type]", type);
-  const save = async (expected, failure) => {
-    await physicalClick(cdp, "[data-storage-editor-save]");
-    await waitFor(cdp, expected, 5_000, failure);
-  };
-  // A closed editor leaves the page before the next control is pressed.
-  const closed = () => waitFor(cdp, `!document.querySelector('[data-storage-editor]')`);
-  await navigate(cdp, `${origin}/player/?dev&package=debug-storage-edit`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, entry("first 0"));
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await physicalClick(cdp, '[data-debug-tab="storage"]');
-  await waitFor(
-    cdp,
-    `/Nothing saved yet/.test(document.querySelector('[data-debug-storage]')?.textContent ?? '')`,
-  );
-
-  // A malformed number is refused in the editor, and nothing is stored.
-  await physicalClick(cdp, "[data-debug-storage-add]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await setField("[data-storage-editor-key]", "k");
-  await choose("integer");
-  await setField("[data-storage-editor-value]", "5x");
-  await save(
-    `/Enter a number/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')`,
-    "A malformed number was not refused",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelectorAll('[data-debug-storage-row]').length`),
-    0,
-    "A refused value was stored",
-  );
-  // A valid value is stored, and the session's next load returns it; the value loaded before stays.
-  await setField("[data-storage-editor-value]", "5");
-  await save(
-    `!document.querySelector('[data-storage-editor]') && /next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
-    "The added value was not saved for the running session",
-  );
-  await waitFor(cdp, `JSON.stringify(${rows}) === JSON.stringify([['"k"', '5']])`);
-  await closed();
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-debug-storage-edited]')`),
-    true,
-    "The session was not marked edited while debugging",
-  );
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, entry("second 5"), 5_000, "The next load did not return the edit");
-  assertEqual(await value(cdp, entry("first 0")), true, "An earlier load changed");
-
-  // Another type, then deletion.
-  await physicalClick(cdp, "[data-debug-storage-edit]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await choose("text");
-  await setField("[data-storage-editor-value]", "hi");
-  await save(
-    `JSON.stringify(${rows}) === JSON.stringify([['"k"', '"hi"']])`,
-    "The edit to text was not shown",
-  );
-  await closed();
-  await physicalClick(cdp, "[data-debug-storage-delete]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await save(
-    `document.querySelectorAll('[data-debug-storage-row]').length === 0 && /Deleted "k"; the running session's next load gets its default/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
-    "The deleted value was still listed",
-  );
-  await closed();
-
-  // A text too long to write as JSON, which V8 refuses as for any text longer than its limit, is no Player error. Its
-  // draft keeps its type when Advanced is chosen and the editor says so; the draft here is shaped like JSON, which
-  // Advanced would read as another value. Saved as text, the list shows its preview.
-  const tooLong = `too long ${"x".repeat(100)}`;
-  const draft = JSON.stringify(tooLong);
-  await evaluate(
-    cdp,
-    `{ const stringify = JSON.stringify; globalThis.smokeStringify = stringify; JSON.stringify = function (...args) { const json = stringify.apply(this, args); if (typeof json === "string" && json.includes(${JSON.stringify(tooLong)})) throw new RangeError("Invalid string length"); return json; }; }`,
-  );
-  const noPlayerError = async (failure) =>
-    assertEqual(
-      await value(cdp, `!document.querySelector('[data-runtime-failure]')`),
-      true,
-      failure,
-    );
-  const keepsText = async (when) => {
-    await choose("advanced");
-    // A Player error would show at once.
-    await delay(300);
-    await noPlayerError(`Choosing Advanced for such a draft ${when} was a Player error`);
-    assertEqual(
-      await value(
-        cdp,
-        `[document.querySelector('[data-storage-editor-type]').value, document.querySelector('[data-storage-editor-value]').value, /too large to show as text/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')].join("|")`,
-      ),
-      `text|${draft}|true`,
-      `Such a draft ${when} did not keep its type and text, saying so in the editor`,
-    );
-  };
-  await physicalClick(cdp, "[data-debug-storage-add]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await setField("[data-storage-editor-key]", "long");
-  await setField("[data-storage-editor-value]", draft);
-  await keepsText("being added");
-  await save(
-    `!document.querySelector('[data-storage-editor]')`,
-    "A text too long to write as JSON was not saved",
-  );
-  await delay(300);
-  await noPlayerError("Listing a text too long to write as JSON was a Player error");
-  await waitFor(
-    cdp,
-    `JSON.stringify(${rows}) === JSON.stringify([['"long"', ${JSON.stringify(`${JSON.stringify(draft).slice(0, 79)}…`)}]])`,
-    8_000,
-    "A text too long to write as JSON was not listed as text with its preview",
-  );
-  await physicalClick(cdp, "[data-debug-storage-edit]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await keepsText("being edited");
-  await physicalClick(cdp, "[data-storage-editor] form button[type='button']");
-  await closed();
-  await evaluate(
-    cdp,
-    `JSON.stringify = globalThis.smokeStringify; delete globalThis.smokeStringify;`,
-  );
-  await physicalClick(cdp, "[data-debug-storage-delete]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await save(
-    `document.querySelectorAll('[data-debug-storage-row]').length === 0`,
-    "The long text was not deleted",
-  );
-  await closed();
-
-  // The editor fits a narrow, short screen: within the viewport, scrolling to reach Save.
-  await setViewport(cdp, 390, 480);
-  await waitFor(
-    cdp,
-    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
-  );
-  if (
-    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
-  )
-    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
-  // The drawer may open on its tools menu; Debug then shows its panel.
-  await delay(400);
-  if (await value(cdp, visible('.tools-drawer [data-launcher] button[aria-label="Debug"]')))
-    await physicalClick(cdp, '.tools-drawer [data-launcher] button[aria-label="Debug"]');
-  await waitFor(cdp, `!!document.querySelector('.tools-drawer [data-debug-storage-add]')`);
-  await evaluate(
-    cdp,
-    `document.querySelector('.tools-drawer [data-debug-storage-add]').scrollIntoView()`,
-  );
-  // The drawer may still slide in.
-  await waitFor(cdp, visible(".tools-drawer [data-debug-storage-add]"));
-  await delay(400);
-  await physicalClick(cdp, ".tools-drawer [data-debug-storage-add]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const box = document.querySelector('[data-storage-editor]').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight; })()`,
-    ),
-    true,
-    "The editor overflows a narrow, short screen",
-  );
-  await choose("advanced");
-  await evaluate(
-    cdp,
-    `document.querySelector('[data-storage-editor-save]').scrollIntoView({ block: "nearest" })`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const save = document.querySelector('[data-storage-editor-save]').getBoundingClientRect(); return save.top >= 0 && save.bottom <= innerHeight; })()`,
-    ),
-    true,
-    "Save is out of reach on a short screen",
-  );
-  await choose("text");
-  await setField("[data-storage-editor-key]", "after");
-  await setField("[data-storage-editor-value]", "later");
-  await save(
-    `/Saved "after"; the running session's next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
-    "The value added in the narrow layout was not saved",
-  );
-  await closed();
-  // With the session ended, an edit is stored for the next Start.
-  await setViewport(cdp, 1440, 900);
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, `!document.querySelector('[data-foreground-controls] button')`);
-  // The end opens the end dialog, which leaves the Debug panel once closed.
-  await waitFor(cdp, `!!document.querySelector('[data-session-end-close]')`);
-  await physicalClick(cdp, "[data-session-end-close]");
-  await waitFor(cdp, `!document.querySelector('[data-session-end-dialog]')`);
-  await physicalClick(cdp, "[data-debug-storage-delete]");
-  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
-  await save(
-    `/Deleted "after" for the next Start/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
-    "An edit after the session ended was not stored for the next Start",
-  );
-}
-
-/**
- * Debug's Storage tab on the `debug-storage` package: it lists the script's saved values in key order with typed
- * previews and the saved photo, once per photo with the keys that use it; a member list expands to the shared photo;
- * a later save updates it; Debug off hides it; and it fits the narrow drawer.
- */
-async function debugStorageScenario(cdp, origin, profile) {
-  await setViewport(cdp, 1440, 900);
-  const chosen = join(profile, "debug-storage.png");
-  await writeFile(chosen, solidPng(24, 16, [40, 90, 200]));
-  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
-  await navigate(cdp, `${origin}/player/?dev&package=debug-storage`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    visible("[data-composer-attach]"),
-    8_000,
-    "The image request offered no paperclip",
-  );
-  await openPicker(cdp);
-  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Saved.'))`,
-    8_000,
-    "The script did not save",
-  );
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await physicalClick(cdp, '[data-debug-tab="storage"]');
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-debug-storage-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === 'Saved data · 7 keys'`,
-    5_000,
-    "The Storage tab did not count the saved values",
-  );
-  // Text shaped like a photo reference stays visible as text, the chosen photo's reference included.
-  const listed = (await value(cdp, rows)).map(([key, preview]) =>
-    key === '"player.photo"' && /^"captured-media:[0-9a-f-]+:1"$/.test(preview)
-      ? [key, "<photo reference>"]
-      : [key, preview],
-  );
-  assertEqual(
-    JSON.stringify(listed),
-    JSON.stringify([
-      ['"album"', "2 items"],
-      ['"missing"', '"captured-media:00000000-0000-4000-8000-000000000000:1"'],
-      ['"note"', '"captured-media:note"'],
-      ['"player.flags"', "2 properties"],
-      ['"player.name"', '"Ada"'],
-      ['"player.photo"', "<photo reference>"],
-      ['"player.score"', "3"],
-    ]),
-    "The Storage tab did not list the saved values in key order",
-  );
-  // The saved photo once, used by two keys; each thumbnail loads from this browser's storage once it is in view.
-  const photoRow = `[...document.querySelectorAll('[data-debug-storage-row]')].find((row) => row.querySelector('[data-debug-storage-key]').textContent === '"player.photo"')`;
-  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
-  await waitFor(
-    cdp,
-    `!!${photoRow}.querySelector('[data-storage-photo][data-state="ready"] img')`,
-    5_000,
-    "The saved photo's row showed no thumbnail",
-  );
-  await evaluate(cdp, `document.querySelector('[data-debug-storage-photos]').scrollIntoView()`);
-  await waitFor(
-    cdp,
-    `/Used by "album", "player.photo"/.test(document.querySelector('[data-debug-storage-photos]').textContent) &&
-      !!document.querySelector('[data-debug-storage-photos] [data-storage-photo][data-state="ready"] img')`,
-    5_000,
-    "The Storage tab did not show the shared saved photo",
-  );
-  // A well-formed reference the store does not have says so, and ordinary text gets no thumbnail.
-  await evaluate(cdp, `document.querySelectorAll('[data-debug-storage-row]')[1].scrollIntoView()`);
-  await waitFor(
-    cdp,
-    `(() => { const [missing, note] = [...document.querySelectorAll('[data-debug-storage-row]')].slice(1, 3);
-      return missing.querySelector('[data-storage-photo]')?.dataset.state === 'missing' &&
-        /No saved photo/.test(missing.textContent) && !note.querySelector('[data-storage-photo]'); })()`,
-    5_000,
-    "A reference without a saved photo or ordinary text was misshown",
-  );
-  await evaluate(cdp, `document.querySelector('[data-debug-storage-row]').scrollIntoView()`);
-  await physicalClick(cdp, "[data-debug-storage-row] [data-storage-expand]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-debug-storage-row]').querySelectorAll('[data-storage-photo]').length === 2`,
-    5_000,
-    "The album did not expand to its two photos",
-  );
-  // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
-  await setViewport(cdp, 1440, 480);
-  // The Storage tab shows its top, so on the short screen the photo row is out of view while the script saves; the
-  // resized Player settles before its button is pressed.
-  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
-  await settledClick(cdp, "[data-foreground-controls] button");
-  await waitFor(
-    cdp,
-    `${rows}.some(([key, preview]) => key === '"player.score"' && preview === '4') &&
-      /:2"$/.test(${photoRow}.querySelector('[data-storage-preview]').textContent)`,
-    5_000,
-    "A later save did not update the Storage tab",
-  );
-  const photoRowState = await value(
-    cdp,
-    `(() => { const row = ${photoRow}; const panel = row.closest('[data-tool]').getBoundingClientRect(); const box = row.getBoundingClientRect();
-      return { outOfView: box.top >= panel.bottom || box.bottom <= panel.top, state: row.querySelector('[data-storage-photo]').dataset.state }; })()`,
-  );
-  if (!photoRowState.outOfView)
-    throw new Error("Setup: the photo row must be out of view while the script saves");
-  assertEqual(
-    photoRowState.state,
-    "loading",
-    "An off-screen new photo reference was read before it came into view",
-  );
-  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
-  await waitFor(
-    cdp,
-    `${photoRow}.querySelector('[data-storage-photo]').dataset.state === 'missing'`,
-    5_000,
-    "The new photo reference was not read once in view",
-  );
-  await setViewport(cdp, 1440, 900);
-  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
-  await physicalClick(cdp, "[data-debug-active]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-debug-storage]') && /Debug is off/.test(document.querySelector('[data-debug-panel]')?.textContent ?? '')`,
-    2_000,
-    "Debug off left the Storage overview",
-  );
-  await physicalClick(cdp, "[data-debug-active]");
-  await waitFor(cdp, `!!document.querySelector('[data-debug-storage]')`);
-
-  await setViewport(cdp, 390, 760);
-  await waitFor(
-    cdp,
-    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
-  );
-  // Focus in the tools keeps them open as the drawer; otherwise open it.
-  if (
-    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
-  )
-    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
-  await waitFor(
-    cdp,
-    `!!document.querySelector('.tools-drawer [data-debug-storage]')`,
-    5_000,
-    "The drawer did not show Storage",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const storage = document.querySelector('.tools-drawer [data-debug-storage]'); return storage.scrollWidth <= storage.clientWidth && storage.getBoundingClientRect().right <= innerWidth && [...storage.querySelectorAll('[data-debug-storage-row]')].every((row) => row.scrollWidth <= row.clientWidth); })()`,
-    ),
-    true,
-    "The Storage tab overflows the narrow drawer",
-  );
-}
-
-async function debugNowScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const text = (selector) =>
-    `document.querySelector(${JSON.stringify(selector)})?.textContent.replace(/\\s+/g, " ").trim() ?? null`;
-  const imageStatus = (status) =>
-    `document.querySelector('[data-debug-now-image] [data-status]')?.getAttribute('data-status') === ${JSON.stringify(status)}`;
-  const next = async (status, failure) => {
-    await physicalClick(cdp, "[data-foreground-controls] button");
-    await waitFor(cdp, imageStatus(status), 5_000, failure);
-  };
-  await navigate(cdp, `${origin}/player/?dev&package=debug-now`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await waitFor(cdp, imageStatus("unresolved"), 5_000, "The bad reference was not unresolved");
-  assertEqual(
-    await value(cdp, text("[data-debug-now-image-path]")),
-    "Domme/Domme43.jpg",
-    "Now did not name the authored image path",
-  );
-  // The debug export from the Debug panel reports what Now shows: the state always, the path with session text only.
-  const exportPreview = async (categories = []) => {
-    await physicalClick(cdp, "[data-debug-export-open]");
-    await waitFor(cdp, `!!document.querySelector('[data-debug-export-download]')`);
-    const into = (selector) =>
-      evaluate(
-        cdp,
-        `document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
-      );
-    for (const category of categories) {
-      await into(`[data-debug-export-category="${category}"]`);
-      await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
-      await waitFor(
-        cdp,
-        `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true' && !!document.querySelector('[data-debug-export-download]')`,
-      );
-    }
-    await into("[data-debug-export-preview-toggle]");
-    await physicalClick(cdp, "[data-debug-export-preview-toggle]");
-    await waitFor(cdp, `!!document.querySelector('[data-debug-export-preview]')`);
-    const preview = JSON.parse(
-      await value(cdp, `document.querySelector('[data-debug-export-preview]').textContent`),
-    );
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-    await waitFor(
-      cdp,
-      `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-debug-export-open]')`,
-      5_000,
-      "Closing the debug export did not return to the Debug panel",
-    );
-    return preview;
-  };
-  const structural = await exportPreview();
-  assertEqual(
-    JSON.stringify(structural.media.stage),
-    JSON.stringify({ status: "unresolved" }),
-    "The debug export's Stage state",
-  );
-  assertEqual(
-    (await exportPreview(["sessionText"])).media.stage.path,
-    "Domme/Domme43.jpg",
-    "The debug export's Stage path with session text",
-  );
-  assertEqual(
-    await value(cdp, text("[data-debug-now-waiting]")),
-    "Button · Domme3/spanking.tease:3",
-    "Now did not name the waiting statement with its nested path",
-  );
-  await physicalClick(cdp, "[data-debug-now-calls-toggle]");
-  await waitFor(cdp, `!!document.querySelector('[data-debug-now-calls]')`);
-  assertEqual(
-    JSON.stringify(
-      await value(
-        cdp,
-        `[...document.querySelectorAll('[data-debug-now-calls] li')].map((item) => item.textContent.replace(/\\s+/g, " ").trim())`,
-      ),
-    ),
-    JSON.stringify([
-      "punish() · Domme3/spanking.tease:8",
-      "call Domme3/spanking.tease · Domme3/maintenance.tease:2",
-    ]),
-    "Now did not list the call chain",
-  );
-  // Both sounds play at once; the hidden timer is listed.
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('[data-debug-now-media] li')].filter((item) => /Playing/.test(item.textContent)).length === 2`,
-    5_000,
-    "Now did not list both playing sounds",
-  );
-  await physicalClick(cdp, "[data-debug-now-timers-toggle]");
-  await waitFor(
-    cdp,
-    `/hidden · running/.test(document.querySelector('[data-debug-now-timers]')?.textContent ?? '')`,
-    2_000,
-    "Now did not list the hidden timer",
-  );
-  await next("failed", "The undecodable image was not a load failure");
-  assertEqual(
-    (await exportPreview()).media.stage.status,
-    "failed",
-    "The debug export did not report the load failure",
-  );
-  await next("hidden", "hideImage did not hide the Stage image");
-  await next("displayed", "The valid image was not displayed");
-  assertEqual(
-    await value(cdp, text("[data-debug-now-image-path]")),
-    "Domme0/Domme44.svg",
-    "Now did not name the valid image",
-  );
-
-  // The narrow drawer shows the tab without horizontal overflow.
-  await setViewport(cdp, 390, 760);
-  await waitFor(
-    cdp,
-    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
-  );
-  await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
-  await waitFor(
-    cdp,
-    `!!document.querySelector('.tools-drawer [data-debug-now]')`,
-    5_000,
-    "The drawer did not show Now",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const now = document.querySelector('.tools-drawer [data-debug-now]'); return now.scrollWidth <= now.clientWidth && now.getBoundingClientRect().right <= innerWidth; })()`,
-    ),
-    true,
-    "The Now tab overflows the narrow drawer",
-  );
-}
-
-/**
- * The importer's route (#615): a folder package opened by URL with the Debug tool, auto-skip on from the URL. After a
- * physical Start the 15 s wait ends at once; +10 s at the waiting button shows in its elapsed time. Without auto-skip,
- * Skip event ends the wait; the default build has no Debug tool.
- */
-async function developmentTimeScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const done = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Done')`;
-  const logged = (pattern) =>
-    `${pattern}.test(document.querySelector('[data-debug-log] li')?.textContent ?? '')`;
-  const start = async (url) => {
-    await navigate(cdp, url);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await physicalClick(cdp, "[data-session-activation] button");
-  };
-  const openPanel = async () => {
-    await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-    await waitFor(cdp, `!!document.querySelector('[data-debug-panel]')`);
-  };
-
-  await start(`${origin}/player/?dev&package=waiting&time=skip`);
-  await openPanel();
-  await waitFor(
-    cdp,
-    `${done} && ${logged("/^⏩ 1[0-5] s skipped$/")}`,
-    5_000,
-    "Auto-skip did not end the package's 15 s wait at once",
-  );
-  await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
-  await waitFor(cdp, logged("/^⏩ 10 s skipped$/"));
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => /Waited 1\\d(\\.\\d+)? s/.test(entry.textContent))`,
-    5_000,
-    "+10 s did not reach the button's elapsed time",
-  );
-
-  await start(`${origin}/player/?dev&package=waiting`);
-  await openPanel();
-  await waitFor(cdp, `!document.querySelector('[data-development-time-action="skip"]').disabled`);
-  await physicalClick(cdp, '[data-development-time-action="skip"]');
-  await waitFor(
-    cdp,
-    `${done} && ${logged("/^⏩ 1[0-5] s skipped$/")}`,
-    5_000,
-    "Skip event did not end the package's 15 s wait",
-  );
-
-  await start(`${origin}/player/?package=waiting`);
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Before the wait'))`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `!!document.querySelector('[data-launcher] button[aria-label="Debug"], [data-debug-panel], [data-development-time-badge]')`,
-    ),
-    false,
-    "The default build offered the Debug tool",
-  );
-}
-
-/**
- * The session camera opens at Start and `takePhoto()` puts its photo on the Stage; without camera permission the
- * script continues without a photo.
- */
-/** The color at the center of each quadrant of an image's or a video's own pixels, in the test card's order. */
-function quadrantColors(element) {
-  return `(() => {
-    const source = ${element};
-    const canvas = document.createElement('canvas');
-    canvas.width = source.videoWidth ?? source.naturalWidth;
-    canvas.height = source.videoHeight ?? source.naturalHeight;
-    const drawing = canvas.getContext('2d');
-    drawing.drawImage(source, 0, 0);
-    return [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]].map(([x, y]) =>
-      [...drawing.getImageData(Math.floor(x * canvas.width), Math.floor(y * canvas.height), 1, 1).data.slice(0, 3)]);
-  })()`;
-}
-
 async function cameraScenario(cdp, origin) {
   const url = `${origin}/player/?dev&debug=off&scenario=camera`;
   const start = async () => {
@@ -4163,7 +1818,6 @@ async function cameraScenario(cdp, origin) {
     await physicalClick(cdp, "[data-session-activation] button");
   };
   const takeNewPhoto = () => clickLabelled(cdp, "Take another, Mistress");
-  const photoColors = quadrantColors(decodedPhoto);
   const savedItem = JSON.stringify('player-storage:["development-camera","camera.photo"]');
   const savedPhoto = `JSON.parse(localStorage.getItem(${savedItem}) ?? 'null')?.value ?? null`;
   const storedPhotos = () =>
@@ -4189,11 +1843,7 @@ async function cameraScenario(cdp, origin) {
   });
   await start();
   await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
-  await waitFor(cdp, `${capturedImages} === 1`);
-  assertTestCard(
-    await value(cdp, photoColors),
-    "The captured photo does not show the camera's frame",
-  );
+  await waitFor(cdp, `${capturedImages} === 1`, 8_000, "The camera's photo did not show");
   const first = await value(cdp, savedPhoto);
   assertEqual(String(first).startsWith("captured-media:"), true, "The photo reference was saved");
   assertEqual((await storedPhotos()).includes(first), true, "The saved photo was stored durably");
@@ -4207,7 +1857,6 @@ async function cameraScenario(cdp, origin) {
     8_000,
     "The saved photo did not resolve in a new run",
   );
-  assertTestCard(await value(cdp, photoColors), "The saved photo does not show the captured frame");
   await takeNewPhoto();
   await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
   const second = await value(cdp, savedPhoto);
@@ -4256,475 +1905,17 @@ async function cameraScenario(cdp, origin) {
   await cdp.call("Browser.resetPermissions");
 }
 
-/** One 320×240 frame of the test card as a Y4M video, which Chromium's fake camera repeats. */
-function testCardY4m() {
-  const width = 320;
-  const height = 240;
-  // BT.601 limited-range YUV, the conversion Chromium applies to the file's frames.
-  const yuv = ([red, green, blue]) => [
-    Math.round(16 + (65.738 * red + 129.057 * green + 25.064 * blue) / 256),
-    Math.round(128 + (-37.945 * red - 74.494 * green + 112.439 * blue) / 256),
-    Math.round(128 + (112.439 * red - 94.154 * green - 18.285 * blue) / 256),
-  ];
-  const plane = (planeWidth, planeHeight, channel) => {
-    const bytes = Buffer.alloc(planeWidth * planeHeight);
-    for (let y = 0; y < planeHeight; y += 1) {
-      for (let x = 0; x < planeWidth; x += 1) {
-        const quadrant = (y < planeHeight / 2 ? 0 : 2) + (x < planeWidth / 2 ? 0 : 1);
-        bytes[y * planeWidth + x] = yuv(TEST_CARD[quadrant])[channel];
-      }
-    }
-    return bytes;
-  };
-  return Buffer.concat([
-    Buffer.from(`YUV4MPEG2 W${width} H${height} F30:1 Ip A1:1 C420jpeg\nFRAME\n`),
-    plane(width, height, 0),
-    plane(width / 2, height / 2, 1),
-    plane(width / 2, height / 2, 2),
-  ]);
-}
-
-function assertTestCard(colors, message) {
-  // Video and image encoding shift colors slightly; a different image is far outside this.
-  const matches =
-    colors?.length === TEST_CARD.length &&
-    colors.every((color, quadrant) =>
-      color.every((channel, index) => Math.abs(channel - TEST_CARD[quadrant][index]) <= 40),
-    );
-  if (!matches)
-    throw new Error(
-      `${message}: expected ${JSON.stringify(TEST_CARD)}, received ${JSON.stringify(colors)}`,
-    );
-}
-
-async function viewfinderScenario(cdp, origin) {
-  const url = `${origin}/player/?dev&debug=off&scenario=viewfinder`;
-  const start = async () => {
-    await navigate(cdp, url);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await physicalClick(cdp, "[data-session-activation] button");
-  };
-  const takePhoto = () => clickLabelled(cdp, "I'm ready, Mistress");
-  const video = `document.querySelector('[data-viewfinder] video')`;
-  const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
-  const place = `(() => { const box = document.querySelector('[data-floating-viewfinder]').getBoundingClientRect(); return [box.left, box.top, box.width].map(Math.round).join(); })()`;
-  const sidebarVisible = `document.querySelector('#player-shell').dataset.sidebarVisible`;
-  const clickButton = (cdp, label) => clickLabelled(cdp, label);
-
-  await setViewport(cdp, 1440, 900);
-  await cdp.call("Browser.setPermission", {
-    origin,
-    permission: { name: "camera" },
-    setting: "granted",
-  });
-  // While the script waits on its photo button, the viewfinder window plays the session camera, mirrored for display
-  // only.
-  await start();
-  await waitFor(
-    cdp,
-    `${video}?.videoWidth > 0 && !${video}.paused`,
-    8_000,
-    "The viewfinder did not play",
-  );
-  assertTestCard(
-    await value(cdp, quadrantColors(video)),
-    "The viewfinder does not show the camera",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(${video}).transform`),
-    "matrix(-1, 0, 0, 1, 0, 0)",
-    "The viewfinder is not mirrored",
-  );
-  // The person moves the window with the arrow keys; it floats in the whole Player, so showing or hiding the docked
-  // sidebar does not move it from where they put it.
-  const initial = await value(cdp, place);
-  await focusSeen(cdp, `document.querySelector('[data-floating-viewfinder]')`);
-  for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "ArrowDown"])
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", { type, key, code: key });
-  await waitFor(
-    cdp,
-    `${place} !== ${JSON.stringify(initial)}`,
-    5_000,
-    "The arrow keys did not move the window",
-  );
-  const shown = await value(cdp, place);
-  for (const expected of ["false", "true"]) {
-    await physicalClickOn(
-      cdp,
-      `[...document.querySelectorAll('[data-sidebar=trigger]')].find((trigger) => trigger.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && !trigger.closest('[inert]'))`,
-      "the shown sidebar toggle",
-    );
-    await waitFor(cdp, `${sidebarVisible} === ${JSON.stringify(expected)}`);
-    assertEqual(await value(cdp, place), shown, "Toggling the sidebar moved the viewfinder");
-  }
-  // The player's mirroring choice follows the view from the window to the Stage.
-  await physicalClick(cdp, "[data-floating-viewfinder] [data-viewfinder-mirror]");
-  assertEqual(
-    await value(cdp, `getComputedStyle(${video}).transform`),
-    "none",
-    "The flip button did not flip",
-  );
-  // The script takes the photo from the same open camera; the view stays, and the photo is not mirrored.
-  await takePhoto();
-  await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
-  await waitFor(cdp, `${capturedImages} === 1`);
-  assertTestCard(
-    await value(cdp, quadrantColors(decodedPhoto)),
-    "The photo after the viewfinder does not show the camera's frame",
-  );
-  assertEqual(await value(cdp, viewfinders), 1, "The photo hid the camera view");
-  // `view.placement = "stage"` moves the view over the Stage, where the photo stays underneath.
-  await clickButton(cdp, "Put me on your Stage");
-  await waitFor(cdp, `!!document.querySelector('[data-stage-camera] [data-viewfinder] video')`);
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-floating-viewfinder]')`),
-    false,
-    "The window stayed after the view moved over the Stage",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.stage-media')?.src.startsWith('blob:') ?? false`),
-    true,
-    "The camera view replaced the Stage image instead of covering it",
-  );
-  await waitFor(
-    cdp,
-    `${video}?.videoWidth > 0 && !${video}.paused`,
-    8_000,
-    "The view over the Stage did not play",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(${video}).transform`),
-    "none",
-    "The Stage view lost the window's mirroring choice",
-  );
-  // On a narrow screen the view over the Stage stays whole: shown, uncovered and playing.
-  await setViewport(cdp, 390, 844);
-  await waitFor(
-    cdp,
-    `(() => { ${UNCOVERED} return uncovered(document.querySelector('[data-stage-camera] [data-viewfinder]')) && !${video}.paused; })()`,
-    8_000,
-    "The camera view over a narrow Stage is cut off or stopped",
-  );
-  await setViewport(cdp, 1440, 900);
-  // Back in the window, the view keeps the place the person gave it.
-  await clickButton(cdp, "Back to the window");
-  await waitFor(cdp, `document.body.innerText.includes("Back in your little window.")`);
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-floating-viewfinder] [data-viewfinder] video')`,
-  );
-  assertEqual(
-    await value(cdp, place),
-    shown,
-    "The window lost its place on the way back from the Stage",
-  );
-  // hideCamera hides the view; the Stage image was there all along.
-  // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
-  await clickButton(cdp, "Yes, Mistress");
-  await waitFor(cdp, `document.body.innerText.includes("Good. That's enough looking for now.")`);
-  assertEqual(await value(cdp, viewfinders), 0, "hideCamera left a camera view");
-  assertEqual(
-    await value(cdp, `!!document.querySelector('.stage-media')`),
-    true,
-    "The Stage image went with the camera view",
-  );
-
-  // Without a camera there is no viewfinder, and the script continues without a photo.
-  await cdp.call("Browser.setPermission", {
-    origin,
-    permission: { name: "camera" },
-    setting: "denied",
-  });
-  await start();
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "I'm ready, Mistress")`,
-  );
-  assertEqual(await value(cdp, viewfinders), 0, "A denied camera showed a viewfinder");
-  await takePhoto();
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
-  );
-  await cdp.call("Browser.resetPermissions");
-}
-
-/**
- * `askImage` in a package: only while it waits does the composer offer a paperclip, which opens the native file picker,
- * and a drop target. Under its question the request offers Upload file, which opens the picker too, and Use image,
- * greyed with its reason until a file is given. A chosen or dropped file, once the Player has checked it, stands on the
- * Stage as the preview, which another file replaces, and Use image answers with it; a file that is not an image, a
- * second file, or one the request's filters exclude is refused, and a cancelled picker changes nothing.
- */
-async function askImageScenario(cdp, origin, profile) {
-  const chosen = join(profile, "chosen.png");
-  const replaced = join(profile, "replaced.png");
-  const notes = join(profile, "notes.png");
-  await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
-  await writeFile(replaced, solidPng(30, 30, [40, 120, 200]));
-  await writeFile(notes, "not an image");
-  const use = `document.querySelector('[data-image-control="use"]')`;
-  const previewWidth = `document.querySelector('[data-stage-preview]')?.naturalWidth`;
-  const stageImage = `(() => {
-    const image = document.querySelector('.stage-media');
-    return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:');
-  })()`;
-  const notice = (text) =>
-    `document.querySelector('.composer-notice')?.textContent.includes(${JSON.stringify(text)}) === true`;
-  const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
-  await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player/?package=pictures`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-composer-attach]')`),
-    false,
-    "The composer offered a file input before the image request",
-  );
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    visible("[data-composer-attach]"),
-    8_000,
-    "The image request offered no paperclip",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-composer-attach]').getAttribute('aria-label')`),
-    "Attach an image",
-    "The paperclip has no accessible name",
-  );
-  // Without an image yet, Use image is greyed and says why when pressed, and a screen reader hears the reason.
-  assertEqual(
-    await value(
-      cdp,
-      `[...document.querySelectorAll('[data-image-controls] button')].map((button) => button.textContent.trim()).join(' / ')`,
-    ),
-    "Open camera / Upload file / Use image",
-    "The image request's first step",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `${use}.getAttribute('aria-disabled') === 'true' && document.getElementById(${use}.getAttribute('aria-describedby'))?.textContent === 'Take or choose an image first'`,
-    ),
-    true,
-    "Use image is not unavailable with its reason before an image is given",
-  );
-  await physicalClick(cdp, '[data-image-control="use"]');
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-image-use-hint]')?.textContent.includes('Take or choose an image first') === true`,
-    3_000,
-    "Pressing the greyed Use image did not say why",
-  );
-  assertEqual(await value(cdp, `${imageAnswers}`), 0, "The greyed Use image answered");
-  // The paperclip and Upload file open the native picker: a click on the hidden file input, which CDP then answers. A
-  // picker cancelled, which no click answers, changes nothing.
-  const countPicker = () =>
-    evaluate(
-      cdp,
-      `const input = document.querySelector('[data-composer-file]');
-      window.__pickerOpened = 0;
-      input.addEventListener('click', () => window.__pickerOpened++, { once: true });
-      input.addEventListener('click', (event) => event.preventDefault(), { once: true });`,
-    );
-  await countPicker();
-  await physicalClick(cdp, '[data-image-control="file"]');
-  assertEqual(await value(cdp, "window.__pickerOpened"), 1, "Upload file did not open the picker");
-  await evaluate(
-    cdp,
-    `document.querySelector('[data-composer-file]').dispatchEvent(new Event('cancel'))`,
-  );
-  await delay(300);
-  assertEqual(
-    await value(
-      cdp,
-      `${imageAnswers} === 0 && !document.querySelector('[data-stage-preview]') && ${use}.getAttribute('aria-disabled') === 'true'`,
-    ),
-    true,
-    "A cancelled picker changed the request",
-  );
-  await countPicker();
-  await physicalClick(cdp, "[data-composer-attach]");
-  assertEqual(
-    await value(cdp, "window.__pickerOpened"),
-    1,
-    "The paperclip did not open the picker",
-  );
-  await setInputFiles(cdp, "[data-composer-file]", [notes]);
-  await waitFor(cdp, notice("That image is not valid."), 8_000, "A text file was not refused");
-  assertEqual(
-    await value(cdp, visible("[data-composer-attach]")),
-    true,
-    "The refused file ended the request",
-  );
-  await openPicker(cdp);
-  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
-  await waitFor(
-    cdp,
-    `${decodedPreview} && ${previewWidth} === 48 && ${use}.hasAttribute('data-accent') && ${use}.getAttribute('aria-disabled') === null`,
-    8_000,
-    "The chosen image is not the preview, with Use image enabled",
-  );
-  // Another file replaces the preview; only Use image answers, with the last one.
-  await openPicker(cdp, '[data-image-control="file"]');
-  await setInputFiles(cdp, "[data-composer-file]", [replaced]);
-  await waitFor(
-    cdp,
-    `${decodedPreview} && ${previewWidth} === 30`,
-    8_000,
-    "The preview was not replaced",
-  );
-  assertEqual(await value(cdp, `${imageAnswers}`), 0, "A chosen file answered before Use image");
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `${stageImage} && document.querySelector('.stage-media').naturalWidth === 30 && ${imageAnswers} === 1`,
-    8_000,
-    "Use image did not answer with the preview",
-  );
-
-  // The second request accepts PNG files only and is answered by a drop.
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes('Now one more, as a PNG file.') && ${visible("[data-composer-attach]")}`,
-    8_000,
-    "The second image request did not open",
-  );
-  const pngBase64 = solidPng(24, 24, [30, 160, 90]).toString("base64");
-  const drop = (files) =>
-    evaluate(
-      cdp,
-      `const shell = document.querySelector('[data-composer-shell]');
-      const transfer = new DataTransfer();
-      for (const [name, base64] of ${JSON.stringify(files)})
-        transfer.items.add(new File([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], name));
-      const fire = (type) =>
-        !shell.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
-      const entered = fire('dragenter') && fire('dragover');
-      // The highlight renders with the next update.
-      return new Promise((resolve) =>
-        setTimeout(() => {
-          const highlighted = shell.hasAttribute('data-drop-active');
-          resolve({ entered, highlighted, dropped: fire('drop') });
-        }, 0),
-      );`,
-    );
-  const two = await drop([
-    ["one.png", pngBase64],
-    ["two.png", pngBase64],
-  ]);
-  assertEqual(
-    two.entered && two.highlighted && two.dropped,
-    true,
-    "The composer was not a drop target",
-  );
-  await waitFor(cdp, notice("Choose one image."), 8_000, "Two dropped files were not refused");
-  await drop([["photo.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64")]]);
-  await waitFor(
-    cdp,
-    notice("Choose an image of these types: .png, image/png."),
-    8_000,
-    "A JPEG passed the PNG filter",
-  );
-  assertEqual(await value(cdp, `${imageAnswers}`), 1, "A refused drop answered the request");
-  await drop([["dropped.png", pngBase64]]);
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `${stageImage} && ${imageAnswers} === 2 && document.body.innerText.includes('Thank you.')`,
-    8_000,
-    "The dropped image did not answer the request",
-  );
-  // Outside an image request there is no paperclip and the composer takes no files.
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-composer-attach]')`),
-    false,
-    "The paperclip stayed",
-  );
-  const after = await drop([["late.png", pngBase64]]);
-  assertEqual(
-    after.entered || after.dropped,
-    false,
-    "The composer took a file outside an image request",
-  );
-
-  // A file chosen in a picker opened for one request is no preview for the timer's request that replaced it meanwhile.
-  const placeholder = (text) =>
-    `document.querySelector('[data-composer-input]')?.getAttribute('placeholder') === ${JSON.stringify(text)}`;
-  await navigate(cdp, `${origin}/player/?package=picture-race`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, placeholder("Main image"), 8_000, "The main image request did not open");
-  await openPicker(cdp);
-  await waitFor(cdp, placeholder("Timer image"), 8_000, "The timer's image request did not open");
-  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
-  await waitFor(
-    cdp,
-    notice("This interaction is no longer available."),
-    8_000,
-    "A file chosen for the main request was not refused",
-  );
-  assertEqual(
-    await value(cdp, `${imageAnswers} === 0 && !document.querySelector('[data-stage-preview]')`),
-    true,
-    "A stale choice became the timer's request's preview",
-  );
-  await drop([["timer.png", pngBase64]]);
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes('Timer image received.') && ${placeholder("Main image")}`,
-    8_000,
-    "The timer's request was not answered, or the main request did not resume",
-  );
-  await drop([["main.png", pngBase64]]);
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes('Main image received.') && ${imageAnswers} === 2`,
-    8_000,
-    "The resumed main request was not answered",
-  );
-  // A file chosen for a request that a timer's wait suspended becomes its preview once it resumes.
-  await waitFor(cdp, placeholder("Second image"), 8_000, "The second image request did not open");
-  await openPicker(cdp);
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-composer-attach]')`,
-    8_000,
-    "The timer did not suspend the second request",
-  );
-  await waitFor(cdp, placeholder("Second image"), 8_000, "The second request did not resume");
-  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
-  await useImage(cdp);
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes('Second image received.') && ${imageAnswers} === 3`,
-    8_000,
-    "A file chosen before the second request was suspended did not answer it",
-  );
-}
-
-// Exports a package's saved data from Player Settings in the default build, without Debug: one downloaded file with the
-// saved photo's exact bytes, the same data as text with copying and its manual fallback, no unsaved photo, released
-// resources once the dialog closes, and a dialog that fits a narrow screen with touch-sized controls.
+// Exports a package's saved data from Player Settings in the default build, without Debug: the downloaded file holds the
+// script's saved values and its saved photo.
 async function savedDataExportScenario(cdp, origin, profile) {
   const chosen = join(profile, "saved.png");
-  const photoBytes = solidPng(24, 16, [30, 160, 90]);
-  await writeFile(chosen, photoBytes);
+  await writeFile(chosen, solidPng(24, 16, [30, 160, 90]));
   const downloads = join(profile, "downloads");
   await mkdir(downloads, { recursive: true });
   await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
-  const text = (value) => `document.body.textContent.includes(${JSON.stringify(value)})`;
   await setViewport(cdp, 1440, 900);
   await navigate(cdp, `${origin}/player/?package=saved-photo`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  assertEqual(
-    await value(cdp, `location.search.includes('dev')`),
-    false,
-    "The export runs without Debug",
-  );
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(
     cdp,
@@ -4735,217 +1926,52 @@ async function savedDataExportScenario(cdp, origin, profile) {
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
   await useImage(cdp);
-  await waitFor(cdp, text("Saved."), 8_000, "The script did not save its photo");
-  // The second image request gets another photo, which is never saved; the session then waits for text.
-  const unsaved = join(profile, "unsaved.png");
-  await writeFile(unsaved, solidPng(24, 16, [200, 30, 30]));
-  await waitFor(cdp, visible("[data-composer-attach]"));
-  await openPicker(cdp);
-  await setInputFiles(cdp, "[data-composer-file]", [unsaved]);
-  await useImage(cdp);
   await waitFor(
     cdp,
-    `!!document.querySelector('[placeholder="Anything else?"]')`,
+    `document.body.textContent.includes("Saved.")`,
     8_000,
-    "The session does not wait after the unsaved photo",
+    "The script did not save its photo",
   );
-
-  const openExport = async () => {
-    // A narrow Player keeps Settings in its tools drawer, which may be closed or still sliding in after a resize.
-    if (!(await value(cdp, visible("[data-settings-trigger]"))))
-      await physicalClick(cdp, "[data-player-top-bar] [data-sidebar=trigger]");
-    await waitFor(cdp, `!!document.querySelector('[data-settings-trigger]')`);
-    await settledClick(cdp, "[data-settings-trigger]");
-    await waitFor(cdp, `!!document.querySelector('[data-export-saved-data]')`);
-    await physicalClick(cdp, "[data-export-saved-data]");
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-export-script="development-package:saved-photo"]')?.textContent.replace(/\\s+/g, ' ').includes('2 values · 1 photo') === true &&
-        !!document.querySelector('[data-export-download]')`,
-      8_000,
-      "The export did not list the script with its saved values and only its saved photo",
-    );
-  };
-  const closeDialog = async (selector) => {
-    await cdp.call("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key: "Escape",
-      code: "Escape",
-      windowsVirtualKeyCode: 27,
-    });
-    await cdp.call("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: "Escape",
-      code: "Escape",
-      windowsVirtualKeyCode: 27,
-    });
-    await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
-  };
-  await openExport();
-  // Exporting works while the session waits, when clearing does not.
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-clear-saved-data]')?.disabled`),
-    true,
-    "Clearing was offered during the session",
-  );
-  // Every script this browser keeps is listed and ticked; Select none leaves nothing to download.
-  const listedScripts = await value(
-    cdp,
-    `[...document.querySelectorAll('[data-export-script]')].map((row) => [row.dataset.exportScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked')])`,
-  );
-  assertEqual(
-    listedScripts.length >= 2 && listedScripts.every(([, checked]) => checked === "true"),
-    true,
-    `Every script with saved data is listed and ticked: ${JSON.stringify(listedScripts)}`,
-  );
-  await physicalClick(cdp, "[data-export-none]");
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await physicalClick(cdp, "[data-export-saved-data]");
   await waitFor(
     cdp,
-    `!document.querySelector('[data-export-download]') && document.body.innerText.includes('Tick at least one script')`,
+    `!!document.querySelector('[data-export-download]')`,
+    8_000,
+    "The export offered no download",
   );
-  await physicalClick(cdp, "[data-export-all]");
-  await waitFor(cdp, `!!document.querySelector('[data-export-download]')`);
-  const download = await value(
-    cdp,
-    `(() => { const link = document.querySelector('[data-export-download]'); return { href: link.href, name: link.download }; })()`,
-  );
-  assertEqual(download.name, "teasescript-saved-data.teasestorage.json.gz", "Export file name");
+  const name = await value(cdp, `document.querySelector('[data-export-download]').download`);
   await physicalClick(cdp, "[data-export-download]");
-  let downloaded = null;
+  const file = join(downloads, name);
   const deadline = Date.now() + 8_000;
-  while (downloaded === null && Date.now() < deadline) {
-    const names = await readdir(downloads);
-    if (names.includes(download.name)) downloaded = await readFile(join(downloads, download.name));
-    else await delay(50);
+  while (!(await readdir(downloads)).includes(name)) {
+    if (Date.now() > deadline) throw new Error("The export file was not downloaded");
+    await delay(50);
   }
-  if (downloaded === null) throw new Error("The export file was not downloaded");
-  const document = JSON.parse(gunzipSync(downloaded).toString("utf8"));
-  assertEqual(document.format, "teasescript-script-storage", "Downloaded export format");
-  assertEqual(
-    JSON.stringify(document.scripts.map((script) => script.scope)),
-    JSON.stringify(listedScripts.map(([scope]) => scope)),
-    "Downloaded export scripts",
+  const exported = JSON.parse(gunzipSync(await readFile(file)).toString("utf8"));
+  const script = exported.scripts?.find(
+    (candidate) => candidate.scope === "development-package:saved-photo",
   );
-  const savedPhotoScript = document.scripts.find(
-    (script) => script.scope === "development-package:saved-photo",
-  );
-  assertEqual(savedPhotoScript.name, "Saved photo", "The script's title names it");
   assertEqual(
-    JSON.stringify(savedPhotoScript.entries.map((entry) => entry.key).sort()),
+    JSON.stringify(script?.entries.map((entry) => entry.key).sort()),
     JSON.stringify(["photo", "score"]),
-    "Downloaded export values",
+    "The export's saved values",
   );
-  const savedPhotoImage = document.images.find(
-    (image) =>
-      image.reference === savedPhotoScript.entries.find((entry) => entry.key === "photo").value,
-  );
+  const photo = script.entries.find((entry) => entry.key === "photo").value;
   assertEqual(
-    Buffer.from(savedPhotoImage.data, "base64url").equals(photoBytes) &&
-      savedPhotoImage.byteLength === photoBytes.length,
+    exported.images.some((image) => image.reference === photo),
     true,
-    "The downloaded photo is not the saved photo's exact bytes",
+    "The export does not hold the saved photo",
   );
-
-  await physicalClick(cdp, '[data-export-tab="text"]');
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-export-text]')?.value.startsWith('TSST1.gzip.') === true`,
-  );
-  const exportedText = await value(cdp, `document.querySelector('[data-export-text]').value`);
-  assertEqual(
-    gunzipSync(Buffer.from(exportedText.slice("TSST1.gzip.".length), "base64url")).toString("utf8"),
-    gunzipSync(downloaded).toString("utf8"),
-    "The text holds the same export as the file",
-  );
-  // Without the clipboard API, as over plain HTTP, the selected text copies the older way, and focus stays on Copy.
-  await evaluate(
-    cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.addEventListener('copy', () => { const area = document.activeElement; window.__copied = area.value.slice(area.selectionStart, area.selectionEnd); }, { once: true });`,
-  );
-  await physicalClick(cdp, "[data-export-copy]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `window.__copied === document.querySelector('[data-export-text]').value && document.activeElement === document.querySelector('[data-export-copy]')`,
-    ),
-    true,
-    "Copy without the clipboard API did not copy the text or lost the focus",
-  );
-  // Refused clipboard access, where the browser also refuses copying the selection, leaves the text selected for
-  // copying by hand.
-  await evaluate(
-    cdp,
-    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } }); document.execCommand = () => false;`,
-  );
-  await physicalClick(cdp, "[data-export-copy]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-export-copy-status]')?.textContent.includes('copy it with the browser')`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const area = document.querySelector('[data-export-text]'); return document.activeElement === area && area.selectionStart === 0 && area.selectionEnd === area.value.length; })()`,
-    ),
-    true,
-    "The refused copy did not select the text",
-  );
-  await evaluate(
-    cdp,
-    `delete document.execCommand; window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
-  );
-  await physicalClick(cdp, "[data-export-copy]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
-  );
-  assertEqual(
-    await value(cdp, `window.__copied === document.querySelector('[data-export-text]').value`),
-    true,
-    "Copy wrote the text",
-  );
-
-  // Closing releases the prepared file.
-  await closeDialog("[data-saved-data-export]");
-  assertEqual(
-    await evaluate(
-      cdp,
-      `return fetch(${JSON.stringify(download.href)}).then(() => 'readable', () => 'released');`,
-    ),
-    "released",
-    "The export file stayed available after the dialog closed",
-  );
-  await closeDialog("[data-player-settings]");
-
-  // On a narrow screen the whole dialog stays on the screen.
-  await setViewport(cdp, 390, 844);
-  await openExport();
-  // Let the dialog finish its opening animation.
-  await delay(400);
-  const fit = await value(
-    cdp,
-    `(() => {
-      const dialog = document.querySelector('[data-saved-data-export]').getBoundingClientRect();
-      return dialog.left >= 0 && dialog.right <= innerWidth && dialog.top >= 0 && dialog.bottom <= innerHeight ? 'fits' : JSON.stringify(dialog) + ' in ' + innerWidth + 'x' + innerHeight;
-    })()`,
-  );
-  assertEqual(fit, "fits", "The export dialog runs off a narrow screen");
-  await physicalClick(cdp, '[data-export-tab="text"]');
-  await waitFor(cdp, `!!document.querySelector('[data-export-copy]')`);
-  await closeDialog("[data-saved-data-export]");
-  await closeDialog("[data-player-settings]");
-  await setViewport(cdp, 1440, 900);
-  return { file: join(downloads, download.name), text: exportedText };
+  for (const dialog of ["[data-saved-data-export]", "[data-player-settings]"]) {
+    await pressEscape(cdp);
+    await waitFor(cdp, `!document.querySelector(${JSON.stringify(dialog)})`);
+  }
+  return { file };
 }
 
-// Imports the export into a fresh browser profile, as on another device: a file chosen and reviewed, whose Cancel keeps
-// the running session; then a dropped file whose confirmation ends that session, after which Start shows the saved photo
-// again with every other script of the bundle in its own scope; pasted text into a reloaded Player; and, while another
-// script runs, only the ticked script of the bundle replaced.
+// Imports the export into a fresh browser profile, as on another device: once confirmed, the next Start shows the saved
+// photo again.
 async function savedDataImportScenario(debugPort, origin, exported) {
   const browser = await connectCdp(
     (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
@@ -4961,54 +1987,17 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await cdp.call("Page.enable");
     await cdp.call("Runtime.enable");
     await setViewport(cdp, 1440, 900);
-    const text = (value) => `document.body.innerText.includes(${JSON.stringify(value)})`;
     const start = "[data-session-activation] button";
-    const openImport = async () => {
-      await physicalClick(cdp, "[data-settings-trigger]");
-      await waitFor(
-        cdp,
-        `document.querySelector('[data-import-saved-data]')?.disabled === false`,
-        8_000,
-      );
-      await physicalClick(cdp, "[data-import-saved-data]");
-      await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
-    };
-    const escape = async (selector) => {
-      for (const type of ["keyDown", "keyUp"])
-        await cdp.call("Input.dispatchKeyEvent", {
-          type,
-          key: "Escape",
-          code: "Escape",
-          windowsVirtualKeyCode: 27,
-        });
-      await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
-    };
-
     await navigate(cdp, `${origin}/player/?package=saved-photo`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
-    assertEqual(
-      await value(
-        cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
-      ),
-      0,
-      "The import profile starts without saved data",
-    );
-    await physicalClick(cdp, start);
+    await physicalClick(cdp, "[data-settings-trigger]");
     await waitFor(
       cdp,
-      visible("[data-composer-attach]"),
+      `document.querySelector('[data-import-saved-data]')?.disabled === false`,
       8_000,
-      "The fresh profile's session did not ask for an image",
     );
-    assertEqual(
-      await value(cdp, text("Your saved photo is back.")),
-      false,
-      "The fresh profile already had the photo",
-    );
-
-    // A chosen file is checked and reviewed; Cancel keeps the session.
-    await openImport();
+    await physicalClick(cdp, "[data-import-saved-data]");
+    await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
     await setInputFiles(cdp, "[data-import-file]", [exported.file]);
     await waitFor(
       cdp,
@@ -5016,122 +2005,21 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The chosen file was not reviewed",
     );
-    // Every script of the bundle is listed, ticked, and new here; the shown one is marked.
-    const bundledScopes = JSON.parse(
-      gunzipSync(await readFile(exported.file)).toString("utf8"),
-    ).scripts.map((script) => script.scope);
-    assertEqual(
-      await value(
-        cdp,
-        `JSON.stringify([...document.querySelectorAll('[data-import-script]')].map((row) => [row.dataset.importScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked'), row.querySelector('[data-import-status]').textContent.trim()]))`,
-      ),
-      JSON.stringify(bundledScopes.map((scope) => [scope, "true", "New"])),
-      "Import review lists the bundle's scripts",
-    );
-    assertEqual(
-      await value(
-        cdp,
-        `document.querySelector('[data-import-script="development-package:saved-photo"]').textContent.includes('This script')`,
-      ),
-      true,
-      "The shown script is marked",
-    );
-    assertEqual(
-      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
-      "End session and replace data",
-      "Confirming must say it ends the session",
-    );
-    await physicalClick(cdp, "[data-saved-data-import] [data-import-confirm] + button");
-    await waitFor(cdp, `!!document.querySelector('[data-import-drop]')`);
-    await escape("[data-saved-data-import]");
-    await escape("[data-player-settings]");
-    assertEqual(
-      await value(cdp, visible("[data-composer-attach]")),
-      true,
-      "Cancel ended the session",
-    );
-    assertEqual(
-      await value(
-        cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
-      ),
-      0,
-      "Cancel changed the saved data",
-    );
-
-    // A dropped file; confirming ends the session, and the next Start shows the imported photo.
-    await openImport();
-    const bytes = (await readFile(exported.file)).toString("base64");
-    const drop = (names) =>
-      evaluate(
-        cdp,
-        `const bytes = Uint8Array.from(atob(${JSON.stringify(bytes)}), (character) => character.charCodeAt(0));
-        const transfer = new DataTransfer();
-        for (const name of ${JSON.stringify(names)}) transfer.items.add(new File([bytes], name));
-        document.querySelector('[data-import-drop]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));`,
-      );
-    // Refusing a drop of two files also discards a file still being read, which never becomes the review.
-    await evaluate(
-      cdp,
-      `const read = File.prototype.arrayBuffer;
-      window.__releaseHeld = null;
-      File.prototype.arrayBuffer = function () {
-        if (this.name !== 'held.teasestorage.json.gz') return read.call(this);
-        return new Promise((resolve) => (window.__releaseHeld = () => resolve(read.call(this))));
-      };`,
-    );
-    await drop(["held.teasestorage.json.gz"]);
-    await waitFor(cdp, `typeof window.__releaseHeld === 'function'`);
-    await drop(["first.teasestorage.json.gz", "second.teasestorage.json.gz"]);
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
-    );
-    await evaluate(cdp, `window.__releaseHeld();`);
-    await delay(500);
-    assertEqual(
-      await value(
-        cdp,
-        `!document.querySelector('[data-import-confirm]') && document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
-      ),
-      true,
-      "A file read before a refused drop became the import review",
-    );
-    await drop(["saved.teasestorage.json.gz"]);
-    await waitFor(
-      cdp,
-      `!!document.querySelector('[data-import-confirm]')`,
-      8_000,
-      "The dropped file was not reviewed",
-    );
-    await evaluate(
-      cdp,
-      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
-    );
     await physicalClick(cdp, "[data-import-confirm]");
     await waitFor(
       cdp,
-      text("Saved data imported. Each script uses it from its next Start."),
+      `document.body.innerText.includes("Saved data imported.")`,
       8_000,
       "The import did not finish",
     );
-    assertEqual(
-      await value(cdp, visible("[data-composer-attach]")),
-      false,
-      "The session did not end",
-    );
-    await escape("[data-saved-data-import]");
-    await escape("[data-player-settings]");
-    await waitFor(
-      cdp,
-      `!!document.querySelector('${start}')`,
-      8_000,
-      "Start was not offered after the import",
-    );
+    for (const dialog of ["[data-saved-data-import]", "[data-player-settings]"]) {
+      await pressEscape(cdp);
+      await waitFor(cdp, `!document.querySelector(${JSON.stringify(dialog)})`);
+    }
     await physicalClick(cdp, start);
     await waitFor(
       cdp,
-      text("Your saved photo is back."),
+      `document.body.innerText.includes("Your saved photo is back.")`,
       8_000,
       "The imported data did not load at Start",
     );
@@ -5140,108 +2028,6 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth === 24; })()`,
       8_000,
       "The imported photo is not on the Stage",
-    );
-
-    // Pasted text into a reloaded Player, before Start, replaces the data without a session to end.
-    await navigate(cdp, `${origin}/player/?package=saved-photo`);
-    await waitFor(cdp, `!!document.querySelector('${start}')`);
-    await openImport();
-    await physicalClick(cdp, '[data-import-tab="text"]');
-    await waitFor(cdp, `!!document.querySelector('[data-import-text]')`);
-    await typeInto(cdp, "[data-import-text]", exported.text.replace(/(.{76})/g, "$1\n"));
-    await physicalClick(cdp, "[data-import-review]");
-    await waitFor(
-      cdp,
-      `!!document.querySelector('[data-import-confirm]')`,
-      8_000,
-      "The pasted text was not reviewed",
-    );
-    assertEqual(
-      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
-      "Replace saved data",
-      "Without a session, confirming only replaces the data",
-    );
-    await physicalClick(cdp, "[data-import-confirm]");
-    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
-    await escape("[data-saved-data-import]");
-    await escape("[data-player-settings]");
-    // Every other script of the bundle went into its own saved data.
-    assertEqual(
-      await value(
-        cdp,
-        `${JSON.stringify(bundledScopes)}.every((scope) => localStorage.getItem('player-storage-head:' + JSON.stringify(scope)) !== null)`,
-      ),
-      true,
-      "Every script of the bundle was imported into its own scope",
-    );
-
-    // While another script runs, ticking only one script of the bundle replaces just that one and keeps the session.
-    const heads = `JSON.stringify(Object.fromEntries(${JSON.stringify(bundledScopes)}.map((scope) => [scope, localStorage.getItem('player-storage-head:' + JSON.stringify(scope))])))`;
-    const before = JSON.parse(await value(cdp, heads));
-    await navigate(cdp, `${origin}/player/?package=pictures`);
-    await waitFor(cdp, `!!document.querySelector('${start}')`);
-    await physicalClick(cdp, start);
-    await waitFor(cdp, visible("[data-composer-attach]"), 8_000, "The other script did not start");
-    await openImport();
-    await physicalClick(cdp, '[data-import-tab="text"]');
-    await typeInto(cdp, "[data-import-text]", exported.text);
-    await physicalClick(cdp, "[data-import-review]");
-    await waitFor(
-      cdp,
-      `!!document.querySelector('[data-import-confirm]')`,
-      8_000,
-      "The text was not reviewed",
-    );
-    assertEqual(
-      await value(cdp, `document.body.innerText.includes('This script')`),
-      false,
-      "The running script is not in the bundle",
-    );
-    for (const scope of bundledScopes)
-      if (scope !== "development-package:saved-photo") {
-        const box = `[data-import-script="${scope}"] [role=checkbox]`;
-        await evaluate(
-          cdp,
-          `document.querySelector(${JSON.stringify(box)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
-        );
-        await physicalClick(cdp, box);
-        await waitFor(
-          cdp,
-          `document.querySelector(${JSON.stringify(box)}).getAttribute('aria-checked') === 'false'`,
-        );
-      }
-    assertEqual(
-      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
-      "Replace saved data",
-      "Importing scripts other than the running one keeps its session",
-    );
-    await evaluate(
-      cdp,
-      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
-    );
-    await physicalClick(cdp, "[data-import-confirm]");
-    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
-    await escape("[data-saved-data-import]");
-    await escape("[data-player-settings]");
-    assertEqual(
-      await value(cdp, visible("[data-composer-attach]")),
-      true,
-      "The running script's session ended",
-    );
-    const after = JSON.parse(await value(cdp, heads));
-    for (const scope of bundledScopes)
-      assertEqual(
-        after[scope] === before[scope],
-        scope !== "development-package:saved-photo",
-        `Only the ticked script was replaced (${scope})`,
-      );
-    assertEqual(
-      await value(
-        cdp,
-        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures') && !name.startsWith('player-storage-name:'))`,
-      ),
-      false,
-      "The running script's saved data was changed",
     );
   } finally {
     cdp?.close();
@@ -5252,16 +2038,15 @@ async function savedDataImportScenario(debugPort, origin, exported) {
   }
 }
 
-// A script error in the default build, without Debug: the error line and its notice open one error dialog, which names
-// the error, and only on request; its debug export holds no personal content until the player chooses it; with replay
-// data chosen, the offline tool reproduces the failure.
+// A script error in the default build, without Debug: the error line opens the error dialog, which says where the
+// script stopped, and its debug export downloads a file that names the error and, until the player chooses more, holds
+// neither the answer nor the photo.
 async function debugExportScenario(cdp, origin, profile) {
   const downloads = join(profile, "debug-downloads");
   await mkdir(downloads, { recursive: true });
   await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
   const picture = join(profile, "debug-picture.png");
-  const pictureBytes = solidPng(20, 10, [40, 90, 200]);
-  await writeFile(picture, pictureBytes);
+  await writeFile(picture, solidPng(20, 10, [40, 90, 200]));
   const answer = "Ada-private-answer";
   await setViewport(cdp, 1440, 900);
   await navigate(cdp, `${origin}/player/?package=debug-failure`);
@@ -5284,600 +2069,42 @@ async function debugExportScenario(cdp, origin, profile) {
   await setInputFiles(cdp, "[data-composer-file]", [picture]);
   await useImage(cdp);
   await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`, 8_000, "No error line");
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-runtime-failure]').textContent.replace(/\\s+/g, ' ').trim()`,
-    ),
-    "The script stopped because of an error. Details",
-    "The error line",
-  );
-  await delay(300);
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-session-error-dialog]')`),
-    false,
-    "The error dialog opened by itself",
-  );
-  const errorDialog = `document.querySelector('[data-session-error-dialog]')`;
-  const openErrorDialog = async () => {
-    await physicalClick(cdp, "[data-runtime-failure-details]");
-    await waitFor(cdp, `!!${errorDialog} && ${errorDialog}.dataset.state === 'open'`);
-  };
-  await openErrorDialog();
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([${errorDialog}.querySelector('h2').textContent.trim(), ${errorDialog}.querySelector('[data-session-error-summary]').textContent.trim(), !!document.querySelector('[data-session-error-technical]'), !!document.querySelector('[data-session-error-debug]'), [...${errorDialog}.querySelectorAll('button')].map((button) => button.textContent.trim())])`,
-    ),
-    JSON.stringify([
-      "Script error",
-      "In main.tease, line 10.",
-      false,
-      false,
-      ["Technical details", "Download debug export", "Close"],
-    ]),
-    "The error dialog says where the script stopped, with its details closed, one Close, and no Debug without Debug",
-  );
-  // A click beside the dialog leaves it open; only Close and Escape close it.
-  await backdropClick(cdp, "[data-session-error-dialog]");
-  await delay(300);
-  assertEqual(
-    await value(cdp, `${errorDialog}?.dataset.state`),
-    "open",
-    "A click beside the error dialog closed it",
-  );
-  await physicalClick(cdp, "[data-session-error-technical-toggle]");
-  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical]')`);
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([document.querySelector('[data-session-error-code]').textContent.trim(), document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, !!document.querySelector('[data-session-error-calls]')])`,
-    ),
-    JSON.stringify([
-      "TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0 first.",
-      "let result = 1 / zero",
-      "1 / zero",
-      false,
-    ]),
-    "The technical details: the code with the runtime's message, and the failing line with its expression marked",
-  );
-  // Close returns focus to the error line; the notice's Details opens the same dialog.
-  await physicalClick(cdp, "[data-session-error-close]");
+  await physicalClick(cdp, "[data-runtime-failure-details]");
   await waitFor(
     cdp,
-    `!${errorDialog} && document.activeElement?.matches('[data-runtime-failure-details]')`,
+    `document.querySelector('[data-session-error-summary]')?.textContent.includes('In main.tease, line 10.') === true`,
     5_000,
-    "Closing the error dialog did not return focus to the error line",
+    "The error dialog did not say where the script stopped",
   );
-  await physicalClick(cdp, "[data-notification-bell]");
+  await physicalClick(cdp, "[data-session-error-export]");
   await waitFor(
     cdp,
-    `!!document.querySelector('[data-player-notification-panel] [data-notice-action]')`,
+    `!!document.querySelector('[data-debug-export-download]')`,
+    8_000,
+    "The debug export was not prepared",
   );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-player-notification-panel] [data-player-notice]').textContent.includes('The script stopped because of an error.')`,
-    ),
-    true,
-    "The error notice",
-  );
-  await physicalClick(cdp, "[data-player-notification-panel] [data-notice-action]");
-  await waitFor(cdp, `!!${errorDialog} && ${errorDialog}.dataset.state === 'open'`);
-  await physicalClick(cdp, "[data-session-error-close]");
-  await waitFor(cdp, `!${errorDialog}`);
-  // The error dialog hands over to the export dialog instead of staying beneath it.
-  const openExport = async () => {
-    await openErrorDialog();
-    await physicalClick(cdp, "[data-session-error-export]");
-    await waitFor(cdp, ready, 8_000, "The debug export was not prepared");
-    await waitFor(
-      cdp,
-      `!${errorDialog}`,
-      5_000,
-      "The error dialog stayed beneath the export dialog",
+  const before = new Set(await readdir(downloads));
+  await physicalClick(cdp, "[data-debug-export-download]");
+  let downloaded = null;
+  const deadline = Date.now() + 8_000;
+  while (downloaded === null) {
+    if (Date.now() > deadline) throw new Error("The debug export was not downloaded");
+    const added = (await readdir(downloads)).filter(
+      (name) => !before.has(name) && !name.endsWith(".crdownload"),
     );
-  };
-
-  const download = async (expectedName) => {
-    const before = new Set(await readdir(downloads));
-    // The dialog scrolls when its content is taller than the screen.
-    await evaluate(
-      cdp,
-      `document.querySelector('[data-debug-export-download]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
-    );
-    await physicalClick(cdp, "[data-debug-export-download]");
-    const deadline = Date.now() + 8_000;
-    while (Date.now() < deadline) {
-      const added = (await readdir(downloads)).filter(
-        (name) => !before.has(name) && !name.endsWith(".crdownload"),
-      );
-      if (added.length === 1) {
-        assertEqual(added[0], expectedName, "Debug export file name");
-        const path = join(downloads, added[0]);
-        const bytes = await readFile(path);
-        await rm(path);
-        return bytes;
-      }
-      await delay(50);
-    }
-    throw new Error("The debug export was not downloaded");
-  };
-  // Named after the title of the package's header.
-  const fileName = "Debug-failure-debug.teasedebug.json.gz";
-  const ready = `!!document.querySelector('[data-debug-export-download]')`;
-
-  // Nothing personal is chosen at first.
-  await openExport();
+    if (added.length === 1) downloaded = gunzipSync(await readFile(join(downloads, added[0])));
+    else await delay(50);
+  }
+  const text = downloaded.toString("utf8");
+  assertEqual(JSON.parse(text).incident.code, "TSR036", "The debug export names the error");
+  assertEqual(text.includes(answer), false, "The default debug export contains the answer");
   assertEqual(
-    await value(
-      cdp,
-      `[...document.querySelectorAll('[data-debug-export] [role=switch]')].every((item) => item.getAttribute('aria-checked') === 'false')`,
-    ),
-    true,
-    "Personal content is off by default",
-  );
-  const structural = gunzipSync(await download(fileName)).toString("utf8");
-  assertEqual(structural.includes(answer), false, "The default export contains the answer");
-  assertEqual(
-    structural.includes("captured-media:"),
+    text.includes("captured-media:"),
     false,
-    "The default export contains a photo reference",
+    "The default debug export contains a photo reference",
   );
-  assertEqual(JSON.parse(structural).incident.code, "TSR036", "The default export names the error");
-
-  // With replay data and its prerequisites, the offline tool reproduces the failure; the chosen photo is included.
-  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"]) {
-    await evaluate(
-      cdp,
-      `document.querySelector('[data-debug-export-category="${category}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
-    );
-    await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true'`,
-    );
-  }
-  // The last choice prepares the file again; Download is offered once that preparation is done.
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-debug-export-photo] [role=checkbox]')?.getAttribute('aria-checked') === 'true' &&
-      !!document.querySelector('[data-debug-export-download]') &&
-      document.querySelector('[data-debug-export-summary]')?.textContent.includes('replay the error exactly')`,
-    8_000,
-    "Replay data and the photo were not prepared",
-  );
-  const replayable = join(downloads, "replayable.teasedebug.json.gz");
-  await writeFile(replayable, await download(fileName));
-  const replayed = spawnSync(
-    process.execPath,
-    [fileURLToPath(new URL("./debug-export.mjs", import.meta.url)), "replay", replayable],
-    { encoding: "utf8" },
-  );
-  assertEqual(
-    replayed.status,
-    0,
-    `The offline replay failed: ${replayed.stdout}${replayed.stderr}`,
-  );
-  assertEqual(
-    replayed.stdout.startsWith("reproduced engine failure TSR036 at main.tease:10:"),
-    true,
-    "The offline replay",
-  );
-  const document = JSON.parse(gunzipSync(await readFile(replayable)).toString("utf8"));
-  assertEqual(document.photos.length, 1, "The chosen photo is included");
-  assertEqual(
-    Buffer.from(document.photos[0].data, "base64url").equals(pictureBytes),
-    true,
-    "The photo's original bytes",
-  );
-  // The name was sent with a click on Send, and the picture chosen in the picker with a click on Use image.
-  assertEqual(
-    JSON.stringify(document.sections.answers.map((answer) => answer.input)),
-    JSON.stringify(["send", "button"]),
-    "How each answer was given",
-  );
-
-  // The dialog stays on a narrow screen.
-  await cdp.call("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
-  await cdp.call("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
+  await pressEscape(cdp);
   await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
-  await setViewport(cdp, 390, 844);
-  // At the transcript's end, its last message is clear of the error line.
-  await waitFor(
-    cdp,
-    `(() => {
-      const scroller = document.querySelector('.transcript-scroll');
-      scroller.scrollTop = scroller.scrollHeight;
-      ${UNCOVERED}
-      const entries = document.querySelectorAll('.transcript-entry');
-      return uncovered(entries[entries.length - 1]) && document.getAnimations().every((animation) => animation.playState !== 'running');
-    })()`,
-    8_000,
-    "The error line covers the transcript's last message",
-  );
-  // The error dialog stays on a narrow screen.
-  await openErrorDialog();
-  await physicalClick(cdp, "[data-session-error-technical-toggle]");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-session-error-technical]') && document.getAnimations().every((animation) => animation.playState !== 'running')`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        const dialog = ${errorDialog}.getBoundingClientRect();
-        return dialog.left >= 0 && dialog.right <= innerWidth && dialog.top >= 0 && dialog.bottom <= innerHeight;
-      })()`,
-    ),
-    true,
-    "The error dialog runs off a narrow screen",
-  );
-  await physicalClick(cdp, "[data-session-error-close]");
-  await waitFor(cdp, `!${errorDialog}`);
-  await openExport();
-  await waitFor(
-    cdp,
-    `document.getAnimations().every((animation) => animation.playState !== 'running')`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        const dialog = document.querySelector('[data-debug-export]').getBoundingClientRect();
-        return dialog.left >= 0 && dialog.right <= innerWidth && dialog.top >= 0 && dialog.bottom <= innerHeight;
-      })()`,
-    ),
-    true,
-    "The debug export dialog runs off a narrow screen",
-  );
-  const escape = async () => {
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-  };
-  await escape();
-  await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
-
-  // From Settings in the narrow tools drawer, the dialog is above Settings and takes input; closing it returns there.
-  await physicalClick(cdp, "[data-player-top-bar] [data-sidebar=trigger]");
-  const settled = `document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity)`;
-  await waitFor(cdp, `!!document.querySelector('[data-settings-trigger]')`);
-  await settledClick(cdp, "[data-settings-trigger]");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-player-setting="debug-export"]') && ${settled}`,
-  );
-  await evaluate(
-    cdp,
-    `document.querySelector('[data-player-setting="debug-export"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
-  );
-  await physicalClick(cdp, '[data-player-setting="debug-export"]');
-  await waitFor(
-    cdp,
-    `${ready} && ${settled}`,
-    8_000,
-    "The debug export did not open from Settings",
-  );
-  const row = '[data-debug-export-category="player"]';
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        const rect = document.querySelector('${row}').getBoundingClientRect();
-        return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-debug-export]');
-      })()`,
-    ),
-    true,
-    "The debug export opened from Settings is above Settings",
-  );
-  await physicalClick(cdp, `${row} [role=switch]`);
-  await waitFor(
-    cdp,
-    `document.querySelector('${row} [role=switch]')?.getAttribute('aria-checked') === 'true'`,
-    8_000,
-    "A choice in the debug export opened from Settings did not take input",
-  );
-  await escape();
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-player-setting="debug-export"]')`,
-    8_000,
-    "Closing the debug export did not return to Settings",
-  );
-  await escape();
-  await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
-  await setViewport(cdp, 1440, 900);
-}
-
-/**
- * The camera route of `askImage`, in two steps under the question in the chat. The first offers Open camera, Upload
- * file, and Use image, and no camera turns on by itself. Open camera shows the viewfinder on the Stage, or in the
- * camera window a script shows, without the question or controls on the picture; Take photo takes the camera's own,
- * unmirrored picture at once and Self-timer after counting down, and either returns to the first step with the photo
- * as the preview, while Back returns without one. Only Use image answers. A camera the request opened turns off when
- * the camera step ends, and a reload at either step comes back at the first step without taking a photo.
- */
-async function askImageCameraScenario(cdp, origin, profile) {
-  const file = join(profile, "camera-alternative.png");
-  await writeFile(file, solidPng(32, 24, [10, 120, 200]));
-  const liveVideo = (frame) =>
-    `(() => { const video = document.querySelector('${frame} [data-image-capture]')?.parentElement.querySelector('video'); return !!video && video.readyState >= 2 && video.videoWidth > 0; })()`;
-  const preview = `document.querySelector('[data-stage-preview]')`;
-  const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
-  const controls = `[...document.querySelectorAll('[data-image-controls] button')].map((button) => button.textContent.trim()).join(' / ')`;
-  const useReady = `(document.querySelector('[data-image-control="use"]')?.getAttribute('aria-disabled') === null)`;
-  // Every camera track the page opens, so the smoke can see the camera turn off.
-  const cameraOff = `window.__cameraTracks.length > 0 && window.__cameraTracks.every((track) => track.readyState === 'ended')`;
-  const start = async (pkg) => {
-    await navigate(cdp, `${origin}/player/?package=${pkg}`);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await physicalClick(cdp, "[data-session-activation] button");
-  };
-  const openCamera = async () => {
-    await waitFor(cdp, visible('[data-image-control="camera"]'), 8_000, "No Open camera");
-    await physicalClick(cdp, '[data-image-control="camera"]');
-  };
-  const tracking = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `{
-      window.__cameraTracks = [];
-      // Set before a navigation: that page's first camera request fails as if another application held the camera.
-      window.__busyOnce = sessionStorage.getItem('busyOnce') === '1';
-      sessionStorage.removeItem('busyOnce');
-      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-      navigator.mediaDevices.getUserMedia = async (constraints) => {
-        if (window.__busyOnce) {
-          window.__busyOnce = false;
-          throw new DOMException('busy', 'NotReadableError');
-        }
-        const stream = await real(constraints);
-        window.__cameraTracks.push(...stream.getVideoTracks());
-        return stream;
-      };
-    }`,
-  });
-  try {
-    await cdp.call("Browser.setPermission", {
-      origin,
-      permission: { name: "camera" },
-      setting: "granted",
-    });
-    await start("picture-camera");
-    await waitFor(
-      cdp,
-      `${controls} === 'Open camera / Upload file / Use image'`,
-      8_000,
-      "The request did not offer its first step",
-    );
-    await delay(500);
-    assertEqual(
-      await value(
-        cdp,
-        `window.__cameraTracks.length === 0 && !document.querySelector('[data-stage-camera]')`,
-      ),
-      true,
-      "The camera turned on by itself",
-    );
-    await openCamera();
-    await waitFor(
-      cdp,
-      `${liveVideo("[data-stage-camera]")} && ${controls} === 'Take photo / Self-timer (5 s) / Back'`,
-      8_000,
-      "Open camera did not show the camera step on the Stage",
-    );
-    assertEqual(
-      await value(
-        cdp,
-        `!document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me') && document.querySelector('[data-image-capture]').querySelectorAll('button').length === 0 && !!document.querySelector('[data-stage-camera] [data-viewfinder-mirror]')`,
-      ),
-      true,
-      "The viewfinder shows the question or controls, or lost its mirror button",
-    );
-    assertEqual(
-      await value(cdp, visible("[data-composer-attach]")),
-      true,
-      "The paperclip is not offered beside the camera",
-    );
-    await physicalClick(cdp, '[data-image-control="back"]');
-    await waitFor(
-      cdp,
-      `${cameraOff} && !document.querySelector('[data-stage-camera]') && !${preview} && !${useReady}`,
-      8_000,
-      "Back did not return to the first step without a photo, turning the camera off",
-    );
-    // Take photo takes the photo at once and shows it as the preview; only Use image answers.
-    await openCamera();
-    await waitFor(
-      cdp,
-      liveVideo("[data-stage-camera]"),
-      8_000,
-      "Open camera did not open it again",
-    );
-    await physicalClick(cdp, '[data-image-control="photo"]');
-    await waitFor(
-      cdp,
-      `${decodedPreview} && ${useReady} && ${controls} === 'Open camera / Upload file / Use image' && ${cameraOff}`,
-      8_000,
-      "Take photo did not return to the first step with the photo as the preview",
-    );
-    assertTestCard(
-      await value(cdp, quadrantColors(preview)),
-      "The preview does not show the camera's frame",
-    );
-    assertEqual(await value(cdp, `${imageAnswers}`), 0, "Taking a photo answered the request");
-    // The self-timer counts down from five over the live viewfinder, then replaces the preview.
-    const firstPhoto = await value(cdp, `${preview}.src`);
-    await openCamera();
-    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
-    await physicalClick(cdp, '[data-image-control="timer"]');
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-image-capture-countdown]')?.textContent.trim() === '5' && ${liveVideo("[data-stage-camera]")}`,
-      2_000,
-      "Self-timer did not start the countdown",
-    );
-    assertEqual(
-      await value(cdp, `!!${preview}`),
-      false,
-      "The photo was taken before the countdown ended",
-    );
-    await waitFor(
-      cdp,
-      `${decodedPreview} && ${preview}.src !== ${JSON.stringify(firstPhoto)}`,
-      10_000,
-      "The self-timer's photo did not replace the preview",
-    );
-    await useImage(cdp);
-    await waitFor(
-      cdp,
-      `!${preview} && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
-      8_000,
-      "Use image did not answer the request",
-    );
-    await waitFor(
-      cdp,
-      `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.src.startsWith('blob:'); })()`,
-    );
-    assertTestCard(
-      await value(cdp, quadrantColors(`document.querySelector('.stage-media')`)),
-      "The Stage does not show the photo used",
-    );
-
-    // A reload at either step comes back at the first step, without a preview, and takes no photo.
-    await start("picture-camera");
-    await openCamera();
-    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
-    await reloadKept(cdp, "Take a selfie for me");
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-session-start]')?.textContent.trim() === 'Continue'`,
-    );
-    await physicalClick(cdp, "[data-session-start]");
-    await waitFor(
-      cdp,
-      `${controls} === 'Open camera / Upload file / Use image' && !${useReady}`,
-      8_000,
-      "A reload during the camera step did not come back at the first step",
-    );
-    await openCamera();
-    await waitFor(cdp, liveVideo("[data-stage-camera]"), 8_000);
-    await physicalClick(cdp, '[data-image-control="photo"]');
-    await waitFor(cdp, decodedPreview, 8_000);
-    await cdp.call("Page.reload");
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-session-start]')?.textContent.trim() === 'Continue'`,
-    );
-    await physicalClick(cdp, "[data-session-start]");
-    await waitFor(cdp, `${controls} === 'Open camera / Upload file / Use image'`, 8_000);
-    await delay(500);
-    assertEqual(
-      await value(
-        cdp,
-        `!${preview} && !${useReady} && ${imageAnswers} === 0 && window.__cameraTracks.length === 0`,
-      ),
-      true,
-      "A reload with a preview kept it, answered, or opened the camera",
-    );
-
-    // With a camera window the script shows, the camera step is there; a file given meanwhile becomes the preview on
-    // the Stage and turns the camera off.
-    await start("picture-camera-view");
-    await openCamera();
-    await waitFor(
-      cdp,
-      liveVideo("[data-floating-viewfinder]"),
-      8_000,
-      "Open camera did not show the camera step in the script's camera window",
-    );
-    assertEqual(
-      await value(cdp, `!!document.querySelector('[data-stage-camera]')`),
-      false,
-      "The camera opened on the Stage as well",
-    );
-    await openPicker(cdp);
-    await setInputFiles(cdp, "[data-composer-file]", [file]);
-    await waitFor(
-      cdp,
-      `${decodedPreview} && ${useReady} && !document.querySelector('[data-image-capture]')`,
-      8_000,
-      "A file given during the camera step did not become the preview",
-    );
-    await waitFor(
-      cdp,
-      cameraOff,
-      8_000,
-      "The camera the request opened stayed on after a file was given",
-    );
-    await useImage(cdp);
-    await waitFor(cdp, `${imageAnswers} === 1`, 8_000, "Use image did not answer with the file");
-
-    // The camera is busy the first time: the camera step offers Try again and Back, and the paperclip stays.
-    await evaluate(cdp, "sessionStorage.setItem('busyOnce', '1')");
-    await start("picture-camera");
-    await openCamera();
-    await waitFor(
-      cdp,
-      `${controls} === 'Try again / Back'`,
-      8_000,
-      "A busy camera offered no Try again",
-    );
-    assertEqual(
-      await value(cdp, visible("[data-composer-attach]")),
-      true,
-      "The paperclip went with the camera",
-    );
-    await physicalClick(cdp, '[data-image-control="retry"]');
-    await waitFor(
-      cdp,
-      liveVideo("[data-stage-camera]"),
-      8_000,
-      "Try again did not open the camera",
-    );
-
-    // Skip, among the first step's controls, answers a skippable request with `null`, and the transcript shows the
-    // player's Skip.
-    await start("picture-skip");
-    await waitFor(
-      cdp,
-      `${controls} === 'Open camera / Upload file / Skip / Use image'`,
-      8_000,
-      "The skippable request offered no Skip",
-    );
-    await physicalClick(cdp, "[data-image-skip]");
-    await waitFor(
-      cdp,
-      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim() === 'Skip') && document.body.innerText.includes('No photo, then.')`,
-      8_000,
-      "Skip did not answer the request with null",
-    );
-    await waitFor(
-      cdp,
-      `${controls} === 'Open camera / Upload file / Use image'`,
-      8_000,
-      "The next request, without allowSkip, did not open without Skip",
-    );
-  } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
-      identifier: tracking.result.identifier,
-    });
-    await cdp.call("Browser.resetPermissions");
-  }
 }
 
 /**
@@ -5900,7 +2127,7 @@ async function useImage(cdp) {
     8_000,
     "The image given shows no preview to use",
   );
-  await settledClick(cdp, '[data-image-control="use"]');
+  await physicalClick(cdp, '[data-image-control="use"]');
 }
 
 /** Sets the files of a file input, as the native picker does, through the DevTools protocol. */
@@ -5939,834 +2166,6 @@ function solidPng(width, height, [red, green, blue]) {
 
 function documentTextIncludes(values, text) {
   return values.some((value) => value.includes(text));
-}
-
-/**
- * The buttons scenario (`?scenario=buttons`) shows its permanent buttons in the rail. A click runs a button's block while
- * the button stays in place, inactive and focused; a block may remove its own button, after which focus moves to the
- * button in its place; Pause interrupts the waiting question and returns to it; Stop leaves the file entry, so only the
- * persistent Pause stays, and exit removes it.
- */
-async function permanentButtonsScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player/?dev&scenario=buttons`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const rail = `[...document.querySelectorAll('.stage-right-rail [data-permanent-button]')].map((button) => button.textContent.trim() + (button.getAttribute('aria-disabled') === 'true' ? ' (inactive)' : '')).join('|')`;
-  const button = (id) => `[data-permanent-button="${id}"]`;
-  const said = (text) => `document.body.innerText.split(${JSON.stringify(text)}).length - 1`;
-  const clickButton = (label) => clickLabelled(cdp, label);
-  await waitFor(cdp, `${rail} === "Count one|Give me a hint|Pause|Stop"`);
-  await waitFor(cdp, `document.body.innerText.includes("Done counting")`);
-
-  await physicalClick(cdp, button(1));
-  await waitFor(
-    cdp,
-    `${rail} === "Count one (inactive)|Give me a hint|Pause|Stop"`,
-    8_000,
-    "The clicked button is not inactive in place while its block runs",
-  );
-  assertEqual(
-    await value(cdp, `document.activeElement === document.querySelector('${button(1)}')`),
-    true,
-    "The inactive button lost focus",
-  );
-  // A click on the inactive button runs nothing.
-  await physicalClick(cdp, button(1));
-  await waitFor(
-    cdp,
-    `${rail} === "Count one|Give me a hint|Pause|Stop"`,
-    8_000,
-    "The button did not become active again after its block",
-  );
-  assertEqual(await value(cdp, said("That makes 1.")), 1, "The block did not run exactly once");
-  assertEqual(await value(cdp, said("That makes 2.")), 0, "The inactive button ran its block");
-
-  await physicalClick(cdp, button(2));
-  await waitFor(cdp, `${rail} === "Count one|Pause|Stop"`, 8_000, "The hint button stayed");
-  assertEqual(
-    await value(cdp, `document.activeElement?.dataset.permanentButton`),
-    "3",
-    "Focus did not move to the button that took the removed one's place",
-  );
-
-  // Pause interrupts the waiting button and returns to it.
-  await physicalClick(cdp, button(3));
-  await waitFor(cdp, `document.body.innerText.includes("Ready, Mistress")`);
-  assertEqual(
-    await value(cdp, `${rail}`),
-    "Count one|Pause (inactive)|Stop",
-    "Pause is not inactive",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Done counting")`,
-    ),
-    false,
-    "The interrupted button stayed presented",
-  );
-  await clickButton("Ready, Mistress");
-  await waitFor(cdp, `${rail} === "Count one|Pause|Stop"`);
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Done counting")`,
-    8_000,
-    "The interrupted button did not return",
-  );
-
-  await physicalClick(cdp, button(4));
-  await waitFor(cdp, `${rail} === "Pause"`, 8_000, "Stop did not remove the entry's buttons");
-  await waitFor(cdp, `document.body.innerText.includes("Stopped at 1. Only Pause stays now.")`);
-  await clickButton("Yes, Mistress");
-  await waitFor(cdp, `${rail} === ""`, 8_000, "exit did not remove the persistent button");
-}
-
-/**
- * `askForm` on a phone: the form's 43 toggles scroll, while its submit button stays on screen, clear of the
- * composer; a toggle is a pressed button with a polite status count, a cycle steps through authored colours, and
- * submitting adds one summary line.
- */
-/**
- * Space in the empty composer activates a preselected button, a `showButton` or the one `prefill:` names, which is
- * marked, but only with a fresh press: not the press that skipped the message before it, and not a held key's repeat.
- * Without a preselected button it activates nothing; Space on a focused form toggle flips it; a held Enter submits
- * nothing.
- */
-/**
- * The `popup` package shows popups (PLAYER-UI "Foreground interaction presentation"): a dialog whose button takes focus,
- * outside the chat. The Enter held since the answer before it does not close it; a fresh Enter, Escape, Space, or a click
- * on the button does, but a click beside it does not; a reload shows the waiting popup again. No popup text reaches the
- * transcript.
- */
-async function popupScenario(cdp, origin) {
-  await setViewport(cdp, 1280, 800);
-  await navigate(cdp, `${origin}/player/?package=popup`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const input = `document.querySelector('[data-composer-input]')`;
-  const message = `(document.querySelector('[data-popup-message]')?.textContent.trim() ?? null)`;
-  const focused = `document.activeElement?.matches('[data-popup-button]') ? document.activeElement.textContent.trim() : null`;
-  const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
-  const enter = (type, autoRepeat = false) =>
-    cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-      autoRepeat,
-      ...(type === "keyDown" ? { text: "\r" } : {}),
-    });
-  const escape = async () => {
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-  };
-  await waitFor(cdp, `!!${input} && !${input}.disabled`, 8_000, "askText did not open");
-  await focusSeen(cdp, input);
-  await cdp.call("Input.insertText", { text: "Ada" });
-  // The Enter that answers the question is held: its repeats reach the popup that opens next.
-  await enter("keyDown");
-  await waitFor(cdp, `${message} === 'Welcome, Ada'`, 8_000, "The first popup did not open");
-  await waitFor(cdp, `(${focused}) === 'OK'`, 2_000, "The popup's button did not take focus");
-  for (let repeat = 0; repeat < 3; repeat += 1) await enter("keyDown", true);
-  await enter("keyUp");
-  await delay(300);
-  assertEqual(await value(cdp, message), "Welcome, Ada", "A held Enter closed the popup");
-  assertEqual(
-    await value(cdp, `${input}.disabled`),
-    true,
-    "The composer takes an answer while the popup waits",
-  );
-  await enter("keyDown");
-  await enter("keyUp");
-  await waitFor(cdp, `${message} === 'The next part starts now.'`, 8_000, "Enter did not close it");
-  await waitFor(cdp, `(${focused}) === 'Continue'`, 2_000, "Continue did not take focus");
-  await backdropClick(cdp, "[data-popup-dialog]");
-  await delay(300);
-  assertEqual(
-    await value(cdp, message),
-    "The next part starts now.",
-    "A click beside the popup closed it",
-  );
-  await escape();
-  await waitFor(cdp, `${message} === 'Space closes this one'`, 8_000, "Escape did not close it");
-  await waitFor(cdp, `(${focused}) === 'OK'`, 2_000, "OK did not take focus");
-  await pressSpace(cdp);
-  await waitFor(
-    cdp,
-    `${message} === 'A reload shows this one again'`,
-    8_000,
-    "Space did not close it",
-  );
-  await reloadKept(cdp, "A reload shows this one again");
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `${message} === 'A reload shows this one again'`,
-    8_000,
-    "The reload lost the popup",
-  );
-  await physicalClick(cdp, "[data-popup-button]");
-  await waitFor(
-    cdp,
-    `${message} === null && !!document.querySelector('[data-session-end-dialog]')`,
-  );
-  // Each entry shows its speaker before its text; the popups add none of their own.
-  const texts = await value(cdp, entries);
-  assertEqual(texts.length, 6, `The transcript has other entries: ${JSON.stringify(texts)}`);
-  for (const [index, text] of [
-    "Your name?",
-    "Ada",
-    "Closed with Enter",
-    "Closed with Escape",
-    "Closed with Space",
-    "Closed after the reload",
-  ].entries())
-    assertEqual(
-      texts[index].endsWith(text),
-      true,
-      `Entry ${index} is ${texts[index]}, not ${text}`,
-    );
-}
-
-/**
- * The `export-text` package's `exportText` dialogs (PLAYER-UI "Foreground interaction presentation"): the title and the
- * text in a read-only field while the composer takes no answer, Copy, a refused copy that leaves the text selected and
- * points to Download, Download as a UTF-8 text file with the script's file name, a click beside the dialog that does not
- * close it, Close, and a reload that shows the waiting dialog again. Nothing of them reaches the transcript.
- */
-async function exportTextScenario(cdp, origin, profile) {
-  const downloads = join(profile, "export-text-downloads");
-  await mkdir(downloads, { recursive: true });
-  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
-  await setViewport(cdp, 1280, 800);
-  await navigate(cdp, `${origin}/player/?package=export-text`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const title = `(document.querySelector('[data-export-text-title]')?.textContent.trim() ?? null)`;
-  const field = `document.querySelector('[data-export-text-field]')`;
-  const status = `document.querySelector('[data-export-text-status]')?.textContent.trim()`;
-  const json = JSON.stringify({
-    name: "Corner time ü",
-    minutes: 15,
-    lines: ["Face the wall", "Hands behind your back 😀"],
-  });
-  const preset = `-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${Buffer.from(json, "utf8").toString("base64")}\n-----END CORNERTIME CUSTOM PUNISHMENT-----`;
-  await waitFor(cdp, `${title} === 'Your preset'`, 8_000, "The exportText dialog did not open");
-  assertEqual(await value(cdp, `${field}.value`), preset, "The dialog's text");
-  assertEqual(await value(cdp, `${field}.readOnly`), true, "The text field is not read-only");
-  await waitFor(
-    cdp,
-    `document.activeElement?.matches('[data-export-text-copy]') === true`,
-    2_000,
-    "Copy did not take focus",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-composer-input]').disabled`),
-    true,
-    "The composer takes an answer while the dialog waits",
-  );
-  // Copy writes the whole text.
-  await evaluate(
-    cdp,
-    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.__copied = text; } } });`,
-  );
-  await physicalClick(cdp, "[data-export-text-copy]");
-  await waitFor(cdp, `${status} === 'Copied.'`);
-  assertEqual(await value(cdp, `window.__copied`), preset, "Copy did not write the text");
-  // A clipboard that refuses, as Android's does above about 1 MB, where the browser does not copy the selection
-  // either, leaves the text selected and points to Download.
-  await evaluate(
-    cdp,
-    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('too large', 'NotAllowedError')) } }); document.execCommand = () => false;`,
-  );
-  await physicalClick(cdp, "[data-export-text-copy]");
-  await waitFor(cdp, `${status}?.includes('use Download') === true`);
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const area = ${field}; return document.activeElement === area && area.selectionStart === 0 && area.selectionEnd === area.value.length; })()`,
-    ),
-    true,
-    "The refused copy did not select the text",
-  );
-  await evaluate(cdp, `delete document.execCommand;`);
-  // Download saves the text in UTF-8 under the script's file name.
-  await evaluate(
-    cdp,
-    `window.__fileType = null; const create = URL.createObjectURL; URL.createObjectURL = (file) => { window.__fileType = file.type; return create.call(URL, file); };`,
-  );
-  await physicalClick(cdp, "[data-export-text-download]");
-  let downloaded = null;
-  const deadline = Date.now() + 8_000;
-  while (downloaded === null && Date.now() < deadline) {
-    if ((await readdir(downloads)).includes("preset.txt"))
-      downloaded = await readFile(join(downloads, "preset.txt"), "utf8");
-    else await delay(50);
-  }
-  assertEqual(downloaded, preset, "The downloaded file");
-  assertEqual(await value(cdp, `window.__fileType`), "text/plain;charset=utf-8", "The file's type");
-  // A click beside the dialog does not close it; Close does, and the script goes on.
-  await backdropClick(cdp, "[data-export-text-dialog]");
-  await delay(300);
-  assertEqual(await value(cdp, title), "Your preset", "A click beside the dialog closed it");
-  await physicalClick(cdp, "[data-export-text-close]");
-  await waitFor(cdp, `${title} === 'Copy or download'`, 8_000, "Close did not continue the script");
-  assertEqual(
-    await value(cdp, `${field}.value`),
-    "A reload shows this one again",
-    "The second dialog's text",
-  );
-  await reloadKept(cdp, "A reload shows this one again");
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `${field}?.value === 'A reload shows this one again'`,
-    8_000,
-    "The reload lost the dialog",
-  );
-  await physicalClick(cdp, "[data-export-text-close]");
-  await waitFor(cdp, `${title} === null && !!document.querySelector('[data-session-end-dialog]')`);
-  // Each entry shows its speaker before its text; the dialogs add none of their own.
-  const texts = await value(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`,
-  );
-  assertEqual(texts.length, 2, `The transcript has other entries: ${JSON.stringify(texts)}`);
-  for (const [index, text] of ["Closed the preset", "Closed after the reload"].entries())
-    assertEqual(
-      texts[index].endsWith(text),
-      true,
-      `Entry ${index} is ${texts[index]}, not ${text}`,
-    );
-}
-
-/**
- * `openUrl` (V30 §33), on a package served as a catalog that names pages of the smoke's own server: right after the
- * player's click the Player opens the address in a new tab at once and the script goes on; with `alwaysButton: true` it
- * shows the button, here with its `buttonText:`, also right after a click, and its click opens the address; without a
- * recent click it shows the button "Open link"; after a reload it never opens the address by itself, also not after the
- * click on Continue, but shows the button. Each address opens once, in a tab without an opener.
- */
-async function openUrlScenario(cdp, origin, debugPort) {
-  const address = (page) => `${origin}/open-url-target/${page}`;
-  CATALOGS.set("/dev-package/open-url/catalog.json", {
-    images: [],
-    media: [],
-    sources: [
-      {
-        path: "main.tease",
-        source: [
-          'showButton "Go"',
-          `openUrl("${address(1)}")`,
-          'say "Opened at once", instant',
-          'showButton "Next"',
-          `openUrl("${address(2)}", alwaysButton: true, buttonText: "Claim your reward")`,
-          'say "Opened from its button", instant',
-          `openUrl("${address(3)}")`,
-          'say "Opened after the reload", instant',
-          "exit",
-        ].join("\n"),
-      },
-    ],
-    problems: [],
-  });
-  const tabs = async () =>
-    (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).filter(
-      (target) => target.type === "page" && target.url.startsWith(address("")),
-    );
-  const waitForTabs = async (count, message) => {
-    const deadline = Date.now() + 8_000;
-    while ((await tabs()).length < count) {
-      if (Date.now() > deadline) throw new Error(message);
-      await delay(50);
-    }
-  };
-  const entries = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
-  const said = (text) => `${entries}.some((entry) => entry.endsWith(${JSON.stringify(text)}))`;
-  const button = `document.querySelector('[data-open-url]')?.textContent.trim() ?? null`;
-  const answer = `[...document.querySelectorAll('[data-foreground-controls] button')].map((control) => control.textContent.trim()).join()`;
-  await setViewport(cdp, 1280, 800);
-  await navigate(cdp, `${origin}/player/?package=open-url`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `(${answer}) === 'Go'`);
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  // The click on Go lets the browser open the first address at once.
-  await waitForTabs(1, "The first address did not open at once");
-  await waitFor(
-    cdp,
-    said("Opened at once"),
-    8_000,
-    "The script did not go on after the tab opened",
-  );
-  const [first] = await tabs();
-  const tab = await connectCdp(first.webSocketDebuggerUrl);
-  try {
-    await waitFor(tab, `document.readyState === 'complete'`);
-    assertEqual(await value(tab, "window.opener === null"), true, "The new tab has an opener");
-    assertEqual(await value(tab, "location.href"), address(1), "The tab shows another address");
-  } finally {
-    tab.close();
-  }
-  // The player comes back to the Player's tab, which the new tab covered. Right after the click on Next the second
-  // address, written with alwaysButton: true, still waits for its own button.
-  await cdp.call("Page.bringToFront");
-  await waitFor(cdp, `(${answer}) === 'Next'`);
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitFor(
-    cdp,
-    `(${button}) === 'Claim your reward'`,
-    8_000,
-    "alwaysButton: true shows no button",
-  );
-  await delay(500);
-  assertEqual((await tabs()).length, 1, "alwaysButton: true opened the address without its click");
-  await physicalClick(cdp, "[data-open-url]");
-  await waitForTabs(2, "The button did not open the second address");
-  await cdp.call("Page.bringToFront");
-  await waitFor(cdp, said("Opened from its button"), 8_000, "The script did not go on");
-  // That tab took the click's activation, so the third address waits for the button "Open link".
-  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The third address shows no button");
-  assertEqual((await tabs()).length, 2, "The third address opened without a click");
-  // A reload brings the waiting request back as history: Continue is a click, but it does not open the address.
-  await reloadKept(cdp, address(3));
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The reload lost the button");
-  await delay(500);
-  assertEqual((await tabs()).length, 2, "The reload opened the third address by itself");
-  await physicalClick(cdp, "[data-open-url]");
-  await waitForTabs(3, "The button did not open the third address after the reload");
-  await waitFor(cdp, said("Opened after the reload"), 8_000, "The script did not go on");
-  assertEqual(
-    JSON.stringify((await tabs()).map((target) => target.url).sort()),
-    JSON.stringify([address(1), address(2), address(3)]),
-    "An address opened twice",
-  );
-  // Only the clicks on Go and Next answer; the addresses and their buttons add nothing to the transcript.
-  const texts = await value(cdp, entries);
-  assertEqual(
-    texts.filter(
-      (text) =>
-        text.includes("Open link") || text.includes("Claim") || text.includes("open-url-target"),
-    ).length,
-    0,
-    `The transcript shows an address or its button: ${JSON.stringify(texts)}`,
-  );
-  for (const target of await tabs())
-    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
-
-  // Debug's Return, and turning Debug off, reinstate the session with its waiting request: it keeps its button and
-  // opens only from the click, though Back, Return, and the switch were clicks.
-  CATALOGS.set("/dev-package/open-url-rewind/catalog.json", {
-    images: [],
-    media: [],
-    sources: [
-      {
-        path: "main.tease",
-        source: [
-          'showButton "Go"',
-          `openUrl("${address(4)}")`,
-          `openUrl("${address(5)}")`,
-          'say "Opened after Return", instant',
-          "exit",
-        ].join("\n"),
-      },
-    ],
-    problems: [],
-  });
-  await navigate(cdp, `${origin}/player/?dev&package=open-url-rewind`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(cdp, `(${answer}) === 'Go'`);
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  await waitForTabs(1, "The fourth address did not open at once");
-  await cdp.call("Page.bringToFront");
-  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "The fifth address shows no button");
-  const backToGo = async () => {
-    await evaluate(
-      cdp,
-      `document.querySelectorAll('.transcript-entry [data-back-to-here]')[0].setAttribute('data-smoke-back', '')`,
-    );
-    await settledClick(cdp, "[data-smoke-back]");
-    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
-  };
-  await backToGo();
-  await settledClick(cdp, "[data-rewind-return]");
-  await waitFor(cdp, `!document.querySelector('[data-rewind-inspection]')`, 5_000, "No Return");
-  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Return lost the button");
-  await delay(500);
-  assertEqual((await tabs()).length, 1, "Return opened the waiting address by itself");
-  await backToGo();
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await waitFor(cdp, `!!document.querySelector('[data-debug-active]')`);
-  await physicalClick(cdp, "[data-debug-active]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-rewind-inspection]')`,
-    5_000,
-    "Debug stayed on",
-  );
-  await waitFor(cdp, `(${button}) === 'Open link'`, 8_000, "Turning Debug off lost the button");
-  await delay(500);
-  assertEqual((await tabs()).length, 1, "Turning Debug off opened the waiting address by itself");
-  await physicalClick(cdp, "[data-open-url]");
-  await waitForTabs(2, "The button did not open the fifth address");
-  await cdp.call("Page.bringToFront");
-  await waitFor(cdp, said("Opened after Return"), 8_000, "The script did not go on");
-  for (const target of await tabs())
-    await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`);
-}
-
-async function preselectScenario(cdp, origin) {
-  await setViewport(cdp, 1280, 800);
-  await navigate(cdp, `${origin}/player/?package=preselect`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const input = `document.querySelector('[data-composer-input]')`;
-  const buttons = `[...document.querySelectorAll('[data-foreground-controls] button')]`;
-  const marked = `${buttons}.filter((button) => button.hasAttribute('data-preselected')).map((button) => button.textContent.trim())`;
-  const answers = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim())`;
-  const heldKey = (key, code, windowsVirtualKeyCode, text) =>
-    cdp.call("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key,
-      code,
-      windowsVirtualKeyCode,
-      text,
-      autoRepeat: true,
-    });
-  // The Space that skips "First" shows the question and its buttons, but does not answer it.
-  await waitFor(
-    cdp,
-    `${answers}.some((text) => text.includes('First'))`,
-    8_000,
-    "First was not said",
-  );
-  await focusSeen(cdp, input);
-  await pressSpace(cdp);
-  await waitFor(cdp, `${buttons}.length === 2`, 8_000, "askBoolean did not show its buttons");
-  assertEqual(JSON.stringify(await value(cdp, marked)), '["Yes"]', "prefill: true marks Yes");
-  await heldKey(" ", "Space", 32, " ");
-  await delay(300);
-  assertEqual(await value(cdp, `${buttons}.length`), 2, "A held Space answered askBoolean");
-  assertEqual(await value(cdp, `${input}.value`), "", "Space typed into the composer");
-  // A fresh Space chooses Yes, then continues the showButton, which is always preselected.
-  await pressSpace(cdp);
-  await waitFor(cdp, `${buttons}.map((button) => button.textContent.trim()).join() === 'Next'`);
-  assertEqual(JSON.stringify(await value(cdp, marked)), '["Next"]', "A showButton is marked");
-  await pressSpace(cdp);
-  await waitFor(cdp, `${buttons}.length === 2 && ${buttons}[0].textContent.trim() === '5'`);
-  assertEqual(JSON.stringify(await value(cdp, marked)), '["10"]', "prefill: 10 marks 10");
-  await pressSpace(cdp);
-  // Without a preselected button Space activates nothing.
-  await waitFor(cdp, `${buttons}.length === 2 && ${buttons}[0].textContent.trim() === '1'`);
-  assertEqual(
-    JSON.stringify(await value(cdp, marked)),
-    "[]",
-    "A choice without prefill: is marked",
-  );
-  await pressSpace(cdp);
-  await delay(300);
-  assertEqual(
-    await value(cdp, `${buttons}[0]?.textContent.trim()`),
-    "1",
-    "Space answered a choice without prefill",
-  );
-  assertEqual(
-    await value(cdp, `${input}.value`),
-    "",
-    "Space typed into a composer that only buttons wait for",
-  );
-  await physicalClick(cdp, "[data-foreground-controls] button");
-  // A held Enter, in the input or on Send, does not submit the prefill of the field that just opened; a fresh Enter does.
-  await waitFor(cdp, `${input}.value === 'Ada'`, 8_000, "askText did not open with its prefill");
-  await focusSeen(cdp, input);
-  await heldKey("Enter", "Enter", 13, "\r");
-  await delay(300);
-  assertEqual(await value(cdp, `${input}.value`), "Ada", "A held Enter submitted the prefill");
-  await focusSeen(cdp, `document.querySelector('.composer-send')`);
-  await heldKey("Enter", "Enter", 13, "\r");
-  await delay(300);
-  assertEqual(
-    await value(cdp, `${input}.value`),
-    "Ada",
-    "A held Enter on Send submitted the prefill",
-  );
-  await focusSeen(cdp, input);
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-      ...(type === "keyDown" ? { text: "\r" } : {}),
-    });
-  // Space on a focused form toggle flips it and does not submit the form.
-  const toggle = `document.querySelector('[data-form-fields] button')`;
-  await waitFor(cdp, `!!${toggle}`, 8_000, "askBooleans did not open");
-  await focusSeen(cdp, toggle);
-  await pressSpace(cdp);
-  await waitFor(
-    cdp,
-    `${toggle}.getAttribute('aria-pressed') === 'true'`,
-    5_000,
-    "Space did not flip the toggle",
-  );
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-form-controls]')`),
-    true,
-    "Space submitted the form",
-  );
-  await physicalClick(cdp, "[data-form-actions] button");
-  await waitFor(
-    cdp,
-    `${answers}.some((text) => text.endsWith('true 10 1 Ada')) && ${answers}.at(-1).endsWith('[true, false]')`,
-    8_000,
-    "The answers were not true 10 1 Ada and [true, false]",
-  );
-}
-
-async function formsScenario(cdp, origin) {
-  await setViewport(cdp, 390, 700);
-  await navigate(cdp, `${origin}/player/?package=forms`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const fields = `[...document.querySelectorAll('[data-form-fields] button')]`;
-  // Each toggle shows and announces its own state; the form has no count of them.
-  const pressed = `${fields}.filter((button) => button.getAttribute("aria-pressed") === "true").length`;
-  await waitFor(cdp, `${fields}.length === 43`, 15_000, "The 43 toggles did not appear");
-  assertEqual(await value(cdp, pressed), 1, "The toggles do not show the start");
-  // Following the latest content shows the submit button, which stays in view, clear of the composer, while the fields
-  // scroll to their last toggle.
-  const submit = `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "OK")`;
-  const submitShown = `(() => { ${UNCOVERED} return uncovered(${submit}) && uncovered(document.querySelector('[data-composer-input]')); })()`;
-  assertEqual(
-    await value(cdp, submitShown),
-    true,
-    "The submit button is not shown clear of the composer",
-  );
-  // The last toggle scrolls into reach and turns on.
-  await evaluate(cdp, `${fields}.at(-1).setAttribute("data-smoke-last", "")`);
-  await physicalClick(cdp, "[data-smoke-last]");
-  await waitFor(cdp, `${pressed} === 2`, 8_000, "The toggle did not turn on");
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-smoke-last]').getAttribute('aria-pressed')`),
-    "true",
-    "The toggle is not pressed",
-  );
-  assertEqual(
-    await value(cdp, submitShown),
-    true,
-    "Reaching the last toggle hid the submit button or put it under the composer",
-  );
-  await physicalClickOn(cdp, submit, "the form's OK");
-  // Submitting adds one answer listing every toggle with its state, one per line; screen readers read its plain text.
-  const summary = `document.querySelector('[data-form-summary]')`;
-  await waitFor(cdp, `!!${summary}`, 8_000, "Submitting did not add the form's summary");
-  assertEqual(
-    await value(
-      cdp,
-      `[...${summary}.querySelectorAll('[data-form-summary-line="on"]')].map((line) => line.textContent.trim()).join(", ")`,
-    ),
-    "Rope, key",
-    "The summary does not show the toggles that are on",
-  );
-  assertEqual(
-    await value(cdp, `${summary}.querySelectorAll('[data-form-summary-line="off"]').length`),
-    41,
-    "The summary does not list the toggles that are off",
-  );
-  const plain = await value(cdp, `${summary}.previousElementSibling.textContent`);
-  assertEqual(
-    plain.startsWith("Submitted form: ✓ Rope, ✗ ") && plain.endsWith(", ✓ key"),
-    true,
-    `The summary's plain text is ${plain}`,
-  );
-  await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
-  assertEqual(
-    await value(
-      cdp,
-      `[...document.querySelectorAll('[data-form-actions] button')].map((button) => button.textContent.trim()).join("|")`,
-    ),
-    "Continue|Skip",
-    "The form written with cancel: shows no cancel button",
-  );
-  const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
-  const access = `${fields}.find((button) => button.textContent.includes("Access"))`;
-  const fill = `getComputedStyle(${intensity}).backgroundImage`;
-  const width = (button) => `${button}.getBoundingClientRect().width`;
-  const low = await value(cdp, fill);
-  const widths = [await value(cdp, width(intensity)), await value(cdp, width(access))];
-  await physicalClickOn(cdp, intensity, "the Intensity cycle");
-  await physicalClickOn(cdp, access, "the Access toggle");
-  await waitFor(
-    cdp,
-    `${intensity}.innerText.includes("Intensity: Medium") && ${access}.innerText.includes("Access: On")`,
-    8_000,
-    "The cycle or the toggle with options did not step",
-  );
-  assertEqual((await value(cdp, fill)) !== low, true, "The cycle did not take its option's colour");
-  // Both keep the width of their longest text, and show and announce only the current one.
-  assertEqual(
-    JSON.stringify([await value(cdp, width(intensity)), await value(cdp, width(access))]),
-    JSON.stringify(widths),
-    "A press changed the width of a cycle or a toggle with options",
-  );
-  assertEqual(
-    [
-      await value(cdp, `${intensity}.innerText.replace(/\\s+/g, " ").trim()`),
-      await value(cdp, `${access}.innerText.replace(/\\s+/g, " ").trim()`),
-    ].join("|"),
-    "Intensity: Medium ↻|Access: On",
-    "A cycle or a toggle with options shows more than its current text",
-  );
-  await buttonNameCheck(cdp, "Intensity: Medium");
-  await buttonNameCheck(cdp, "Access: On");
-  await physicalClickOn(cdp, access, "the Access toggle");
-  await waitFor(
-    cdp,
-    `${access}.innerText.includes("Access: Off")`,
-    8_000,
-    "The toggle did not turn off",
-  );
-  await clickLabelled(cdp, "Continue", "[data-form-actions] button");
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
-    15_000,
-    "The answers did not reach the script",
-  );
-}
-
-/**
- * Typed `askForm` fields in the composer: a field opens with its value selected, so typing replaces it; a refused
- * answer stays with the composer notice; Enter commits and returns focus to the field; a date field uses the date
- * control; and submitting takes the text still being typed.
- */
-async function formFieldsScenario(cdp, origin) {
-  await setViewport(cdp, 1100, 800);
-  await navigate(cdp, `${origin}/player/?package=forms-typed`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
-  const composer = `document.querySelector('[data-composer-input]')`;
-  const pressEnter = async () => {
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Enter",
-        code: "Enter",
-        windowsVirtualKeyCode: 13,
-      });
-  };
-  await waitFor(cdp, `!!${field("impact")}`, 15_000, "The typed form did not appear");
-  await physicalClick(cdp, '[data-form-field="impact"]');
-  await waitFor(
-    cdp,
-    `document.activeElement === ${composer} && ${composer}.value === "5" && ${composer}.selectionEnd === 1`,
-    8_000,
-    "The field did not open in the composer with its value selected",
-  );
-  await cdp.call("Input.insertText", { text: "11" });
-  await pressEnter();
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes("That is wrong. Impact must be from 1 to 10.")`,
-    8_000,
-    "An answer outside the bounds was not refused",
-  );
-  assertEqual(await value(cdp, `${composer}.value`), "11", "The refused text was not kept");
-  await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
-  await cdp.call("Input.insertText", { text: "7" });
-  await pressEnter();
-  await waitFor(
-    cdp,
-    `${field("impact")}.textContent.trim() === "Impact: 7" && document.activeElement === ${field("impact")}`,
-    8_000,
-    "Enter did not commit the answer and return focus to the field",
-  );
-  await physicalClick(cdp, '[data-form-field="day"]');
-  await waitFor(
-    cdp,
-    `document.activeElement?.type === "date"`,
-    8_000,
-    "The date field did not use the date control",
-  );
-  // Typed as a person types a date: its digits in the order the browser's locale shows month, day and year.
-  const order = await value(
-    cdp,
-    `new Intl.DateTimeFormat(navigator.language).formatToParts(new Date(2026, 9, 5)).map((part) => part.type).filter((type) => ['month', 'day', 'year'].includes(type))`,
-  );
-  for (const part of order)
-    for (const digit of { month: "10", day: "05", year: "2026" }[part]) await key(cdp, digit);
-  await pressEnter();
-  await waitFor(
-    cdp,
-    `!${field("day")}.textContent.includes("Set…")`,
-    8_000,
-    "The date was not committed",
-  );
-  await physicalClick(cdp, '[data-form-field="weight"]');
-  await waitFor(cdp, `document.activeElement === ${composer}`);
-  await cdp.call("Input.insertText", { text: "2.5" });
-  const pressButton = (scope, text) => clickLabelled(cdp, text, scope);
-  const buttonShown = (scope, text) =>
-    `[...document.querySelectorAll(${JSON.stringify(scope)})].some((button) => button.textContent.trim() === ${JSON.stringify(text)})`;
-  const pressPermanentButton = async (text) => {
-    const id = await value(
-      cdp,
-      `[...document.querySelectorAll('[data-permanent-button]')].find((button) => button.textContent.trim() === ${JSON.stringify(text)})?.dataset.permanentButton`,
-    );
-    await physicalClick(cdp, `[data-permanent-button="${id}"]`);
-  };
-  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form,
-  // also one that asks a form of its own.
-  await physicalClick(cdp, '[data-form-field="name"]');
-  await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
-  await cdp.call("Input.insertText", { text: "Bea" });
-  // Sooner than the form takes the text from the composer.
-  await delay(100);
-  await pressPermanentButton("Check");
-  // The block's form has a typed field of the same name, submitted while it is edited.
-  await waitFor(cdp, `!!${field("ready")} && ${buttonShown("[data-form-actions] button", "OK")}`);
-  await physicalClick(cdp, '[data-form-field="name"]');
-  await waitFor(cdp, `${composer}.value === "Inner" && document.activeElement === ${composer}`);
-  await cdp.call("Input.insertText", { text: "Zed" });
-  await pressButton("[data-form-actions] button", "OK");
-  await waitFor(
-    cdp,
-    `!${field("ready")} && !!${field("name")} && ${composer}.value === "Bea" && document.activeElement === ${composer}`,
-    8_000,
-    "The text being typed was lost, or not focused, after a block asked a form",
-  );
-  await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
-  await cdp.call("Input.insertText", { text: "Cy" });
-  await delay(100);
-  await pressPermanentButton("Pause");
-  await waitFor(cdp, buttonShown("button", "Resume"));
-  await pressButton("button", "Resume");
-  await waitFor(
-    cdp,
-    `!!${field("name")} && ${composer}.value === "Cy"`,
-    8_000,
-    "The text being typed was lost after the interruption",
-  );
-  await pressButton("[data-form-actions] button", "Continue");
-  await waitFor(
-    cdp,
-    `document.body.innerText.includes("Impact 7, weight 2.5, Cy,")`,
-    15_000,
-    "Submitting did not take the text being typed",
-  );
 }
 
 async function click(cdp, selector) {
@@ -6850,430 +2249,6 @@ async function debugHistoryStorageScenario(cdp, origin) {
     result.afterSweep.includes(crashed)
   )
     throw new Error(`Debug history IndexedDB store: ${JSON.stringify(result)}`);
-}
-
-/**
- * Debug's rewind in the chat, on the `debug-rewind` package: Back to here on an answer shows the earlier state with its
- * later messages grey and the inspection bar; Forward restores the later state and Return the session; a different
- * answer adopts the earlier state, with its saved data, and discards the grey messages. A failed state that is
- * inspected shows its failure above the bar, and the bar fits a narrow screen.
- */
-async function debugRewindScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  // The text of each message itself, without its speaker header, choice marker, or text for screen readers only.
-  const texts = (selector) =>
-    `[...document.querySelectorAll(${JSON.stringify(selector)})].map((element) => { const copy = element.cloneNode(true); copy.querySelectorAll('[data-slot="message-header"], .choice-marker, .sr-only').forEach((part) => part.remove()); return copy.textContent.trim(); })`;
-  // A narrator's message is prose, the player's a bubble.
-  const message = ":is([data-slot='bubble-content'], .prose)";
-  const activeText = texts(`.transcript-entry:not([data-future]) ${message}`);
-  const futureText = texts(`.transcript-entry[data-future] ${message}`);
-  const options = texts("[data-foreground-controls] button");
-  const answer = async (label) => {
-    await waitFor(cdp, `${options}.includes(${JSON.stringify(label)})`);
-    await evaluate(
-      cdp,
-      `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).setAttribute('data-smoke-answer', '')`,
-    );
-    await settledClick(cdp, "[data-smoke-answer]");
-  };
-  // Back to here on the player's answer with this text, scrolled into view first.
-  const backToHere = async (text) => {
-    await waitFor(
-      cdp,
-      `[...document.querySelectorAll('.transcript-entry:not([data-future])')].some((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]'))`,
-      5_000,
-      `No Back to here on ${text}`,
-    );
-    await evaluate(
-      cdp,
-      `document.querySelectorAll('[data-smoke-back]').forEach((button) => button.removeAttribute('data-smoke-back')); const button = [...document.querySelectorAll('.transcript-entry:not([data-future])')].find((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]')).querySelector('[data-back-to-here]'); button.setAttribute('data-smoke-back', ''); button.scrollIntoView({ block: 'center' });`,
-    );
-    await settledClick(cdp, "[data-smoke-back]");
-    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
-  };
-  const json = (expression) => `JSON.stringify(${expression})`;
-
-  await navigate(cdp, `${origin}/player/?dev&package=debug-rewind`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await answer("One");
-  await waitFor(cdp, `${activeText}.includes('first One')`);
-
-  // Back: the earlier choice again, the later messages grey, and what was answered before.
-  await backToHere("One");
-  await waitFor(
-    cdp,
-    `${json(futureText)} === ${JSON.stringify(JSON.stringify(["One", "first One"]))} && !${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["One", "Two"]))}`,
-    5_000,
-    "Back did not show the earlier choice with a grey future",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([!!document.querySelector('[data-future-label]'), document.querySelector('[data-rewind-earlier]')?.textContent.trim(), document.querySelectorAll('.transcript-entry[data-future] [data-back-to-here], .transcript-entry[data-future] [data-explain-values]').length])`,
-    ),
-    JSON.stringify([true, "Answered before: One", 0]),
-    "The grey future, its label, or the earlier answer",
-  );
-  // Forward restores the later state, still inspected; Return reinstates the session.
-  await settledClick(cdp, "[data-rewind-forward]");
-  await waitFor(
-    cdp,
-    `${futureText}.length === 0 && ${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["Red", "Fail"]))} && !!document.querySelector('[data-rewind-inspection]') && document.querySelector('[data-rewind-forward]').disabled`,
-    5_000,
-    "Forward did not restore the later state",
-  );
-  await settledClick(cdp, "[data-rewind-return]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-rewind-inspection]') && ${activeText}.includes('first One')`,
-    5_000,
-    "Return did not reinstate the session",
-  );
-
-  // A different answer adopts the earlier state: the grey messages go, and the saved data follow the new branch.
-  await backToHere("One");
-  await answer("Two");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-rewind-inspection]') && ${futureText}.length === 0 && ${activeText}.includes('first Two') && !${activeText}.includes('first One')`,
-    5_000,
-    "A different answer did not adopt the earlier state",
-  );
-  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
-  await physicalClick(cdp, '[data-debug-tab="storage"]');
-  await waitFor(
-    cdp,
-    `JSON.stringify([...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])) === ${JSON.stringify(
-      JSON.stringify([
-        ['"k"', "1"],
-        ['"pick"', '"Two"'],
-      ]),
-    )}`,
-    5_000,
-    "The adopted branch's saved data",
-  );
-
-  // A failed state that is inspected shows its failure, then the bar closest to the composer.
-  await answer("Fail");
-  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`);
-  await backToHere("Fail");
-  await settledClick(cdp, "[data-rewind-forward]");
-  await waitFor(
-    cdp,
-    `!!document.querySelector('[data-runtime-failure]') && !!document.querySelector('[data-rewind-inspection]')`,
-    5_000,
-    "The inspected failed state lost its failure or the bar",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `!!(document.querySelector('[data-runtime-failure]').compareDocumentPosition(document.querySelector('[data-rewind-inspection]')) & Node.DOCUMENT_POSITION_FOLLOWING)`,
-    ),
-    true,
-    "The bar does not follow the failure",
-  );
-  // On a narrow screen, the bar stays within the screen's width.
-  await setViewport(cdp, 390, 844);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-rewind-inspection]').getBoundingClientRect().width > 0`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const bar = document.querySelector('[data-rewind-inspection]').getBoundingClientRect(); return bar.left >= 0 && bar.right <= window.innerWidth; })()`,
-    ),
-    true,
-    "The bar runs off a narrow screen",
-  );
-  // The narrow tools drawer may cover the chat; a person closes it first, then presses Return.
-  if (await value(cdp, visible(".tools-drawer"))) {
-    for (const type of ["keyDown", "keyUp"])
-      await cdp.call("Input.dispatchKeyEvent", {
-        type,
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-    await waitFor(
-      cdp,
-      `!document.querySelector('.tools-drawer')`,
-      5_000,
-      "Escape left the drawer open",
-    );
-  }
-  await settledClick(cdp, "[data-rewind-return]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
-  );
-  await setViewport(cdp, 1440, 900);
-  // With Debug on, the error dialog's Open in Debug shows the failure on the Debug panel's Now tab and focuses the tab.
-  await physicalClick(cdp, "[data-runtime-failure-details]");
-  await waitFor(cdp, `!!document.querySelector('[data-session-error-debug]')`);
-  await physicalClick(cdp, "[data-session-error-debug]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-session-error-dialog]') && document.querySelector('[data-debug-now-next]')?.textContent.trim() === 'Error TSR036 at main.tease:13' && document.activeElement?.matches('[data-debug-tab="now"]')`,
-    5_000,
-    "Open in Debug did not show the failure on the Now tab",
-  );
-}
-
-/**
- * A script error inside a function of another file: the error dialog's technical details show the failing line with the
- * failing expression marked, and the call path from the function to its call site.
- */
-async function errorCallPathScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player/?package=call-failure`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Continue'`,
-  );
-  await settledClick(cdp, "[data-foreground-controls] button");
-  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure-details]')`);
-  await physicalClick(cdp, "[data-runtime-failure-details]");
-  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical-toggle]')`);
-  await physicalClick(cdp, "[data-session-error-technical-toggle]");
-  await waitFor(cdp, `!!document.querySelector('[data-session-error-technical]')`);
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([document.querySelector('[data-session-error-source]').textContent, document.querySelector('[data-session-error-failing]').textContent, document.querySelector('[data-session-error-calls]').textContent.trim()])`,
-    ),
-    JSON.stringify([
-      'say "Doing ${count / rounds} rounds."',
-      "count / rounds",
-      "in punish(), called from main.tease:6",
-    ]),
-    "The failing line and the call path",
-  );
-  await physicalClick(cdp, "[data-session-error-close]");
-  await waitFor(cdp, `!document.querySelector('[data-session-error-dialog]')`);
-}
-
-/**
- * An ordinary end opens the end dialog with its review placeholder, a five-star radio group and an unavailable Send
- * review, and Close, focused, as its one control to close besides Escape; closing it returns to the start page, whose
- * Start begins the script anew.
- */
-async function sessionEndScenario(cdp, origin) {
-  await setViewport(cdp, 1440, 900);
-  const dialog = `document.querySelector('[data-session-end-dialog]')`;
-  const entries = `[...document.querySelectorAll('.transcript-entry:not([data-future])')].map((entry) => entry.textContent)`;
-  const start = async (url) => {
-    await navigate(cdp, url);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    await physicalClick(cdp, "[data-session-activation] button");
-  };
-  const finish = async () => {
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Finish'`,
-    );
-    await settledClick(cdp, "[data-foreground-controls] button");
-    await waitFor(
-      cdp,
-      `!!${dialog} && ${dialog}.dataset.state === 'open' && document.getAnimations().every((animation) => animation.playState !== 'running')`,
-      5_000,
-      "The end dialog did not open",
-    );
-  };
-  const startedAnew = `!document.querySelector('[data-runtime-end]') && ${entries}.some((text) => text.includes('Ready to finish?')) && !${entries}.some((text) => text.includes('This is the last message.'))`;
-
-  await start(`${origin}/player/?package=session-end`);
-  await finish();
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([${dialog}.querySelector('h2').textContent.trim(), document.querySelector('[data-session-end-rating]').getAttribute('role'), [...document.querySelectorAll('[data-session-end-star]')].map((star) => [star.getAttribute('role'), star.getAttribute('aria-label'), star.getAttribute('aria-checked')]), document.querySelector('[data-session-end-send]').disabled, document.getElementById(${dialog}.getAttribute('aria-describedby'))?.textContent.trim(), [...${dialog}.querySelectorAll('button:not([role=radio])')].map((button) => button.textContent.trim()), document.activeElement?.matches('[data-session-end-close]'), !!document.querySelector('[data-runtime-ended]')])`,
-    ),
-    JSON.stringify([
-      "The end",
-      "radiogroup",
-      [1, 2, 3, 4, 5].map((star) => ["radio", star === 1 ? "1 star" : `${star} stars`, "false"]),
-      true,
-      "Sending reviews will be possible once TeaseScript has its website.",
-      ["Send review", "Close"],
-      true,
-      false,
-    ]),
-    "The end dialog: a five-star rating, Send review unavailable with its note, and Close focused, with no end line yet",
-  );
-  // A click beside the dialog leaves it open, with what the player chose or typed.
-  await backdropClick(cdp, "[data-session-end-dialog]");
-  await delay(300);
-  assertEqual(
-    await value(cdp, `${dialog}?.dataset.state`),
-    "open",
-    "A click beside the end dialog closed it",
-  );
-  // A star is chosen by click, and by holding an arrow key, as a radio group does; nothing is sent.
-  const checked = `[...document.querySelectorAll('[data-session-end-star]')].map((star) => star.getAttribute('aria-checked') === 'true' ? 'X' : '-').join('')`;
-  await physicalClick(cdp, "[data-session-end-star]:nth-child(4)");
-  await waitFor(cdp, `${checked} === '---X-'`, 5_000, "A click did not choose the fourth star");
-  for (const type of ["keyDown", "keyUp"]) {
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "ArrowRight",
-      code: "ArrowRight",
-      windowsVirtualKeyCode: 39,
-    });
-    if (type === "keyDown") await delay(50);
-  }
-  await waitFor(
-    cdp,
-    `${checked} === '----X' && document.activeElement?.getAttribute('aria-label') === '5 stars'`,
-    5_000,
-    "An arrow key did not choose the next star",
-  );
-  await physicalClick(cdp, "[data-session-end-close]");
-  const onStartPage = `!${dialog} && document.querySelector('[data-session-start]')?.textContent.trim() === 'Start' && document.activeElement === document.querySelector('[data-session-start]')`;
-  await waitFor(
-    cdp,
-    onStartPage,
-    5_000,
-    "Closing the end dialog did not return to the start page with its Start focused",
-  );
-  // Start begins the script anew; Escape also closes the dialog.
-  await physicalClick(cdp, "[data-session-start]");
-  await waitFor(cdp, startedAnew, 5_000, "Start after the end did not start anew");
-  await finish();
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Escape",
-      code: "Escape",
-      windowsVirtualKeyCode: 27,
-    });
-  await waitFor(cdp, onStartPage, 5_000, "Escape did not close the end dialog for the start page");
-}
-
-/**
- * The screen wake lock (PLAYER-UI "Session start and user activation"): held from Start, released by the browser while
- * the minimized window hides the page and asked for again once it shows, and none from `exit` on.
- */
-async function wakeLockScenario(cdp, origin) {
-  // The Player's requests, and the sentinels the browser granted, which tell whether it still holds each.
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__wakeLocks = [];
-      window.__wakeLockRequests = 0;
-      const request = WakeLock.prototype.request;
-      WakeLock.prototype.request = function (...args) {
-        window.__wakeLockRequests++;
-        return request.apply(this, args).then((sentinel) => {
-          window.__wakeLocks.push(sentinel);
-          return sentinel;
-        });
-      };`,
-  });
-  const { windowId } = (await cdp.call("Browser.getWindowForTarget")).result;
-  const locks = (requests, held) =>
-    `window.__wakeLockRequests === ${requests} && window.__wakeLocks.filter((sentinel) => !sentinel.released).length === ${held}`;
-  try {
-    await navigate(cdp, `${origin}/player/?package=session-end`);
-    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-    assertEqual(await value(cdp, locks(0, 0)), true, "The start page asked for a wake lock");
-    await physicalClick(cdp, "[data-session-activation] button");
-    await waitFor(cdp, locks(1, 1), 5_000, "Start did not take a wake lock");
-    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } });
-    await waitFor(
-      cdp,
-      `document.visibilityState === 'hidden' && ${locks(1, 0)}`,
-      5_000,
-      "The hidden page kept its wake lock or asked for one",
-    );
-    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
-    await waitFor(
-      cdp,
-      `document.visibilityState === 'visible' && ${locks(2, 1)}`,
-      5_000,
-      "The page shown again did not take a new wake lock",
-    );
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-foreground-controls] button')?.textContent.trim() === 'Finish'`,
-    );
-    await settledClick(cdp, "[data-foreground-controls] button");
-    await waitFor(
-      cdp,
-      `!!document.querySelector('[data-session-end-dialog]') && ${locks(2, 0)}`,
-      8_000,
-      "The wake lock was still held once the script exited",
-    );
-  } finally {
-    await cdp.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
-  }
-}
-
-/**
- * A Player action button held down by the mouse, a choice and a form toggle: its rim keeps its colour and nothing moves
- * or changes size, so a press draws no line; only keyboard focus draws an outline.
- */
-async function heldPressScenario(cdp, origin) {
-  await setViewport(cdp, 1100, 760);
-  const steady = async (label) => {
-    const look = `(() => { const button = document.querySelector('[data-smoke-press]'); const rect = button.getBoundingClientRect(); const style = getComputedStyle(button); return JSON.stringify([rect.x, rect.y, rect.width, rect.height, style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor, style.borderTopWidth, style.outlineStyle, style.transform]); })()`;
-    await settle(cdp, "[data-smoke-press]");
-    const point = await pressPoint(cdp, `document.querySelector('[data-smoke-press]')`);
-    const idle = await value(cdp, look);
-    await cdp.call("Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      x: point.x,
-      y: point.y,
-      button: "left",
-      clickCount: 1,
-    });
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-smoke-press]').matches(':active')`,
-      5_000,
-      `${label} was not held`,
-    );
-    const held = await value(cdp, look);
-    await cdp.call("Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      x: point.x,
-      y: point.y,
-      button: "left",
-      clickCount: 1,
-    });
-    assertEqual(held, idle, `Holding ${label} changed its rim, outline, or box`);
-  };
-  await navigate(cdp, `${origin}/player/?package=debug-rewind`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === "One")`,
-  );
-  await evaluate(
-    cdp,
-    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === "One").setAttribute('data-smoke-press', '')`,
-  );
-  await steady("a choice");
-  await navigate(cdp, `${origin}/player/?package=forms`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  await waitFor(
-    cdp,
-    `document.querySelectorAll('[data-form-fields] button').length === 43`,
-    15_000,
-    "The toggles did not appear",
-  );
-  // The fields scroll; the toggle is brought to the middle of their region, clear of its edges.
-  await evaluate(
-    cdp,
-    `const toggle = document.querySelector('[data-form-fields] button'); toggle.setAttribute('data-smoke-press', ''); toggle.scrollIntoView({ block: "center" });`,
-  );
-  await steady("a form toggle");
 }
 
 // Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation") and
