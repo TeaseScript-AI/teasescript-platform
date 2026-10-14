@@ -18,9 +18,10 @@ A lock encrypts its content once and gives each way to open it, an opener, its o
    being empty, which WebKit's PBKDF2 refuses, so an empty password locks in every browser. AES-256-GCM seals K under
    the KEK with a zero nonce, which is safe because the fresh salt makes the KEK seal only this one key.
 3. **Public key opener:** K is sealed in one standard age v1 file (https://age-encryption.org/v1) for all the lock's
-   keyholders: an X25519 stanza for each `age1…` recipient, and an `ssh-ed25519` stanza for each OpenSSH Ed25519 key,
-   as the `age` tool writes them. Its content is K in standard Base64 and a line feed, 45 bytes, so a keyholder's
-   `age -d` prints the key to send back ([Keyholders](#keyholders)).
+   public keys: an X25519 stanza for each `age1…` recipient, and an `ssh-ed25519` stanza for each OpenSSH Ed25519 key,
+   as the `age` tool writes them. Its content is K in standard Base64 and a line feed, 45 bytes, so `age -d` with a
+   matching private key prints the unlock key to send back
+   ([Opening with the private key](#opening-with-the-private-key)).
 4. **Time opener:** K is sealed with drand's tlock to the round of the moment: identity-based encryption on BLS12-381
    for the quicknet chain (`bls-unchained-g1-rfc9380`, chain hash `52db9ba7…e971`, a round every 3 s since
    2023-08-23T15:09:27Z). The identity is the SHA-256 of the round as 8 bytes; only the round's beacon signature, which
@@ -30,8 +31,8 @@ A lock encrypts its content once and gives each way to open it, an opener, its o
 5. AES-256-GCM seals the content under K with the nonce; its additional data is every byte of the lock before the nonce,
    so a lock whose openers were changed, removed, or added opens nothing.
 
-To open, an opener gives K back: the password's KEK opens its sealed K; a keyholder's private key opens the age file,
-outside the Player, and the player gives the Player the key it held; the round's beacon signature opens the time
+To open, an opener gives K back: the password's KEK opens its sealed K; a matching private key opens the age file,
+outside the Player, and the player gives the Player the unlock key it held; the round's beacon signature opens the time
 ciphertext, whose own check rejects a wrong signature. K then opens the content, and the tag check rejects a changed
 lock. A wrong password or key, a changed lock, and a wrong round all end in "not opened", which the script sees as the
 call's default.
@@ -52,7 +53,7 @@ nonce (12) | AES-256-GCM(K, nonce, content, additional data = every byte before 
 | --- | --- | --- |
 | 1 password | iterations (uint32 BE) \| salt (16) \| sealed K (48) | 71 |
 | 2 time | round (uint64 BE) \| tlock ciphertext of K (160) | 171 |
-| 3 public key | an age v1 file for all its keyholders | 150, and 98 per `age1…` key, 110 per `ssh-ed25519` key |
+| 3 public key | an age v1 file for all its public keys | 150, and 98 per `age1…` key, 110 per `ssh-ed25519` key |
 
 An opener's body holds at most 65,535 bytes, so a lock holds at most 594 public keys, as many OpenSSH keys as fit, which
 the engine enforces for any keys. A lock has 34 bytes besides its openers and content: 6 of header, the nonce, and the
@@ -72,24 +73,26 @@ not verify. It asks for a round only once the device clock says it is out; a rel
 not out yet, which is told apart from relays out of reach. A round's signature stays valid for ever, so a time lock
 opens also long after its moment.
 
-### Keyholders
+### Opening with the private key
 
-A keyholder needs only the `age` tool and their own key; nothing of TeaseScript. Once, they make an age identity and
-give the player its public key, or give their OpenSSH Ed25519 public key (`~/.ssh/id_ed25519.pub`):
+The owner of the private key, a keyholder for example, needs only the `age` tool and their own key; nothing of
+TeaseScript. Once, they make an age identity and give the player its public key, or give their OpenSSH Ed25519 public
+key (`~/.ssh/id_ed25519.pub`):
 
 ```sh
 age-keygen -o key.txt          # prints "Public key: age1…", which they give the player
 ```
 
-For each lock, the player copies or downloads the age file from the Player's unlock dialog and sends it to the
-keyholder, who opens it with the key that matches and sends back the 44 characters it prints:
+For each lock, the player copies or downloads the unlock request (`unlock-request.age`) from the Player's unlock dialog
+and sends it to the owner of the private key, who opens it with the key that matches and sends back the unlock key, the
+44 characters it prints:
 
 ```sh
-age -d -i key.txt for-keyholder.age
-age -d -i ~/.ssh/id_ed25519 for-keyholder.age
+age -d -i key.txt unlock-request.age
+age -d -i ~/.ssh/id_ed25519 unlock-request.age
 ```
 
-The player pastes them into the dialog, or a script passes them as `key:`. The key opens this one lock, and nothing
+The player pastes the unlock key into the dialog, or a script passes it as `key:`. It opens this one lock, and nothing
 else: each lock has its own.
 
 ### Code and dependencies
@@ -152,8 +155,8 @@ Player goes offline later.
   from the session's clock; only when drand is reachable while locking does a clock that is behind move the moment
   later.
 - **Offline locking** works once the time lock's code is loaded, which a script's session does at its start.
-- **A keyholder learns the lock's key.** The key they send back opens that lock for whoever reads it, as a password
-  would; sending it through a chat that others read gives it to them too. A public key the player pastes may belong to
+- **The owner of the private key learns the lock's key.** The unlock key they send back opens that lock for whoever
+  reads it, as a password would; sending it through a chat that others read gives it to them too. A public key the player pastes may belong to
   someone else than they think; the Player cannot tell.
 - **AES-GCM is not key-committing.** Whoever makes a lock could give its openers different keys that open different
   content; that protects nothing anyone else locked, so it is no weakness here.
