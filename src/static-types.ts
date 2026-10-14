@@ -585,22 +585,37 @@ export function coversType(outer: StaticType, inner: StaticType): boolean {
 }
 
 function includes(outer: StaticType, inner: StaticType): boolean {
-  return runCompileTask(includesTask(outer, inner));
+  return runCompileTask(includesTask(outer, inner, false));
 }
 
-function* includesTask(outerType: StaticType, innerType: StaticType): CompileTask<boolean> {
+/**
+ * Whether every value of `inner` is also a value of `outer` once each slot of `inner` that no value decided yet, such
+ * as the elements of `[]`, takes the type that `outer` has there, as in a list literal (V30 §16).
+ */
+function includesOnceDecided(outer: StaticType, inner: StaticType): boolean {
+  return runCompileTask(includesTask(outer, inner, true));
+}
+
+function* includesTask(
+  outerType: StaticType,
+  innerType: StaticType,
+  undecidedFits: boolean,
+): CompileTask<boolean> {
   const outer = resolved(outerType);
   const inner = resolved(innerType);
   if (outer.kind === "unknown" || inner.kind === "never") return true;
+  // A slot that held null or a value the compiler cannot know would change the type it joins.
+  if (undecidedFits && inner.kind === "open")
+    return inner.heldUnknown === undefined && !inner.sawNull;
   if (outer.kind === "open" || inner.kind === "open" || inner.kind === "unknown") return false;
   if (inner.kind === "union") {
     for (const member of inner.members)
-      if (!(yield* compileChild(includesTask(outer, member)))) return false;
+      if (!(yield* compileChild(includesTask(outer, member, undecidedFits)))) return false;
     return true;
   }
   if (outer.kind === "union") {
     for (const member of outer.members)
-      if (yield* compileChild(includesTask(member, inner))) return true;
+      if (yield* compileChild(includesTask(member, inner, undecidedFits))) return true;
     return false;
   }
   switch (outer.kind) {
@@ -616,7 +631,7 @@ function* includesTask(outerType: StaticType, innerType: StaticType): CompileTas
     case "dict":
       return (
         inner.kind === outer.kind &&
-        (yield* compileChild(includesTask(outer.element, inner.element)))
+        (yield* compileChild(includesTask(outer.element, inner.element, undecidedFits)))
       );
     case "object":
       return inner.kind === "object" && outer.properties === null;
@@ -1736,6 +1751,9 @@ function* joinValuesTask(
   const plainRight = plainType(right);
   if (includes(plainLeft, plainRight) || includes(plainRight, plainLeft))
     return union([left, right]);
+  // A union keeps its members, so `[]` joins `integer[] | string` as a value of its `integer[]` member.
+  if (left.kind === "union" && includesOnceDecided(left, right)) return left;
+  if (right.kind === "union" && includesOnceDecided(right, left)) return right;
   return undefined;
 }
 
