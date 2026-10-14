@@ -1174,6 +1174,12 @@ class TypeChecker {
   /** The custom properties of each declared speaker by its name, in the order a session sets the speakers up. */
   readonly #speakerProperties = new Map<string, PropertyTable>();
 
+  /**
+   * A table without properties whose sources are the tables of {@link #speakerProperties}, which a read from a speaker
+   * that the compiler cannot tell apart reads, so the end of the check visits each speaker's table once for all of them.
+   */
+  readonly #anySpeaker = new PropertyTable();
+
   /** The fallbacks of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
 
@@ -1551,6 +1557,7 @@ class TypeChecker {
     this.#declared.set(declaration, custom);
     this.#project.declare(declaration.name.name, { kind: "speaker", custom });
     this.#speakerProperties.set(declaration.name.name, properties);
+    (this.#anySpeaker.sources ??= new Set()).add(properties);
     for (const property of declaration.properties) {
       const name = property.name.name;
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
@@ -1610,15 +1617,13 @@ class TypeChecker {
     if (resolved(receiver).kind !== "speaker" || !this.#keepsType(name) || SPEAKER_TERMS.has(name))
       return;
     const speaker = this.#speakerName(read.object, scope);
-    const own = speaker === undefined ? undefined : this.#speakerProperties.get(speaker);
-    if (speaker !== undefined && own === undefined) return;
-    const all = own === undefined ? [...this.#speakerProperties.values()] : [own];
-    const tables = all.filter((properties) => !properties.has(name));
+    const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
+    if (own === undefined) return;
     const example = speaker ?? this.#speakerProperties.keys().next().value ?? "name";
     this.#noteMissingIn(
       read,
       name,
-      tables.length < all.length ? null : tables,
+      own.has(name) ? null : [own],
       read.property.span,
       (properties) => {
         // A store that the compiler cannot check may give any speaker a property too.
