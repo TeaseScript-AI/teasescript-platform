@@ -87,6 +87,7 @@ test("Java regular expressions as RE2 patterns", () => {
     ["a{600}b{600}", "counted repetitions of more than 1000 copies"],
     ["(a)".repeat(101), "more than 100 groups"],
     ["a".repeat(1001), "a pattern longer than 1000 characters"],
+    [".".repeat(35), "a regex longer than 1000 characters once converted"],
   ])
     assert.deepEqual(javaRegex(pattern!, "find"), { reason }, pattern);
 });

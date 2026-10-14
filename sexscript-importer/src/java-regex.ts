@@ -28,8 +28,8 @@ const SPACES = String.raw`\t\n\x0B\f\r `;
 const MAX_REPEAT = 1000;
 /**
  * Bounds well inside TeaseScript's regex limits (docs/RESOURCE-LIMITS.md: 10,000 pattern characters and program
- * instructions, 100 capturing groups): the pattern's length, its groups, and the copies its counted repetitions make
- * together.
+ * instructions, 100 capturing groups): the length of the pattern and of its conversion, its groups, and the copies its
+ * counted repetitions make together.
  */
 const MAX_LENGTH = 1000;
 const MAX_GROUPS = 100;
@@ -200,6 +200,9 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   if (depth !== 0) return fail("an unbalanced parenthesis");
   // RE2 has no empty literal.
   const pattern = out.length === 0 ? "(?:)" : out.join("");
+  // Also the length the expansions of `.`, `\s`, and `$` give.
+  if (pattern.length > MAX_LENGTH)
+    return fail(`a regex longer than ${MAX_LENGTH} characters once converted`);
   return { pattern, flags: `${insensitive ? "i" : ""}${dotAll ? "s" : ""}` };
 
   // A character class after its `[`: single characters, escaped punctuation, `\d \w \s`, and ranges of two single
