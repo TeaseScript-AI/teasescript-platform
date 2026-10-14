@@ -42,8 +42,8 @@ const password = ref("");
 const repeated = ref("");
 const passwordField = ref<InstanceType<typeof PasswordField> | null>(null);
 const cancelButton = ref<InstanceType<typeof Button> | null>(null);
-/** Which control started the work the dialog is busy with: Try again, or else Lock or Unlock. */
-const retrying = ref(false);
+/** Which button of the unlock dialog started the work it is busy with, or `null` when it opens by itself. */
+const started = ref<"unlock" | "retry" | null>(null);
 
 /** A moment as the `datetime-local` field shows it, in this browser's time zone, to the minute. */
 function localText(moment: number): string {
@@ -92,7 +92,7 @@ const shownMoments = computed(() => {
 });
 /** Busy without a button of the dialog having started it, as when a time lock opens by itself. */
 const openingByItself = computed(
-  () => props.busy && props.dialog.kind === "unlock" && !props.dialog.password && !retrying.value,
+  () => props.busy && props.dialog.kind === "unlock" && started.value === null,
 );
 
 function lock() {
@@ -100,7 +100,6 @@ function lock() {
   // Checked at this moment too, as the clock may have passed the chosen moment since the last tick.
   now.value = Date.now();
   if (!future.value) return;
-  retrying.value = false;
   emit("submit", {
     password: password.value === "" ? null : password.value,
     openAtMs: chosenMs.value,
@@ -109,12 +108,12 @@ function lock() {
 // An empty password is a password too: a script may lock with `password: ""`.
 function unlock() {
   if (props.busy) return;
-  retrying.value = false;
+  started.value = "unlock";
   emit("submit", { password: password.value, openAtMs: null });
 }
 function tryAgain() {
   if (props.busy) return;
-  retrying.value = true;
+  started.value = "retry";
   emit("submit", { password: null, openAtMs: null });
 }
 function cancel() {
@@ -236,7 +235,7 @@ function heldKey(event: KeyboardEvent) {
             data-unlock-retry
             @click="tryAgain"
           >
-            {{ busy && retrying ? "Opening…" : "Try again" }}
+            {{ busy && started === "retry" ? "Opening…" : "Try again" }}
           </Button>
         </div>
         <PasswordField
@@ -270,7 +269,7 @@ function heldKey(event: KeyboardEvent) {
             :class="{ 'opacity-50': busy }"
             data-unlock-submit
           >
-            {{ busy && !retrying ? "Opening…" : "Unlock" }}
+            {{ busy && started === "unlock" ? "Opening…" : "Unlock" }}
           </Button>
         </div>
       </form>
