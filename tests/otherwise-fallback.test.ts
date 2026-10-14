@@ -349,6 +349,29 @@ test("a read of a place that held only values of unknown type is of unknown type
     assert.deepEqual(outcome(loop("5")), [["4"], null]);
     assert.deepEqual(outcome(loop("null")), [["-1"], null]);
   }
+  // An element that a method removes, where another element took null, is such a value too: a typed place or parameter
+  // checks it when the script runs.
+  const removed: [(value: string) => string, string][] = [
+    [
+      (value) =>
+        `${HIDE}let items = []\nitems.add(hide(${value}))\nitems.add(null)\nlet kept: integer = items.removeFirst()\nsay kept\nexit`,
+      "5",
+    ],
+    [
+      (value) =>
+        `${HIDE}function twice(n: integer) {\n    return n * 2\n}\nlet items = []\nitems.add(hide(${value}))\nitems.add(null)\nsay twice(items.removeFirst())\nexit`,
+      "10",
+    ],
+    [
+      (value) =>
+        `${HIDE}let d = dict{}\nd["a"] = hide(${value})\nd["b"] = null\nlet kept: integer = d.remove("a")\nsay kept\nexit`,
+      "5",
+    ],
+  ];
+  for (const [script, said] of removed) {
+    assert.deepEqual(outcome(script("5")), [[said], null], script("5"));
+    assert.equal(outcome(script('"t"'))[1]?.[0], "TSR058", script('"t"'));
+  }
   // A store that decides the elements later still decides them for the loop, which checks them when they are added.
   assert.deepEqual(
     diagnostics(
