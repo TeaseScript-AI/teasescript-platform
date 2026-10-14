@@ -48,8 +48,8 @@ nonce (12) | AES-256-GCM(K, nonce, content, additional data = every byte before 
 | 1 password | iterations (uint32 BE) \| salt (16) \| sealed K (48) | 71 |
 | 2 time | round (uint64 BE) \| tlock ciphertext of K (160) | 171 |
 
-A lock has 34 bytes besides its openers and content: 6 of header, the nonce, and the 16-byte tag. The default lock, a
-time lock only, adds 205 bytes to the content; with a password, 276. `encryptText` gives the bytes as standard Base64,
+A lock has 34 bytes besides its openers and content: 6 of header, the nonce, and the 16-byte tag. A time lock only adds
+205 bytes to the content, a password only 105, and both 276. `encryptText` gives the bytes as standard Base64,
 4/3 of their length. A reader skips an opener of a kind it does not know and refuses a lock with two openers of one
 kind, as no lock is made so. A lock asking for more than 10,000,000 PBKDF2 iterations is not tried, so a made-up lock
 cannot keep the Player busy.
@@ -93,7 +93,7 @@ that locking still works when the Player goes offline later.
   network, the store, or the password ([`RUNTIME.md`](RUNTIME.md#locks)).
 - K, a KEK, a password typed in a Player dialog, and the beacon never reach the engine, so no snapshot, checkpoint,
   save, event, recorded call, Debug view, or debug export holds them. Debug shows a lock step's call, phase, whether a
-  password was written, and its time lock's moment.
+  password was written, its time lock's moment, and the openers the player sets in the lock dialog.
 - A password, text, or file the script passes is a script value: like any value it is in the state while the script
   holds it, and so in a debug export's replay data, which the player chooses. A decrypt call's result is recorded as its
   answer and is in the replay data too. Readable sections of a debug export never show a lock step's text or password.
@@ -106,8 +106,9 @@ that locking still works when the Player goes offline later.
 - **The time lock depends on drand.** Relay failover helps an outage; if the network stops before a round, opening waits
   until the same chain recovers, and the loss of its signing threshold would strand a time-only lock. A threshold of
   colluding drand operators could release a round early.
-- **The device clock.** The moment of `openAt: getAbsoluteDateTime() + …` and of the default time lock comes from the
-  session's clock; only when drand is reachable while locking does a clock that is behind move the moment later.
+- **The device clock.** The moment of `timeLock: getAbsoluteDateTime() + …` and the lock dialog's suggested moment come
+  from the session's clock; only when drand is reachable while locking does a clock that is behind move the moment
+  later.
 - **Offline locking** works once the time lock's code is loaded, which a script's session does at its start.
 - **AES-GCM is not key-committing.** Whoever makes a lock could give its openers different keys that open different
   content; that protects nothing anyone else locked, so it is no weakness here.

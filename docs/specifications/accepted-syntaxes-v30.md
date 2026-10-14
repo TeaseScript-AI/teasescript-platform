@@ -1549,8 +1549,8 @@ random generator is deterministic.
 **Status:** Accepted (Owner decisions, 2026-10-13 and 2026-10-14)
 
 ```text
-encryptText(text, password: text, openAt: moment)
-encryptFile(file, password: text, openAt: moment)
+encryptText(text, password: text, timeLock: moment)
+encryptFile(file, password: text, timeLock: moment)
 decryptText(text, password: text, default: value)
 decryptFile(file, password: text, default: value)
 ```
@@ -1562,26 +1562,29 @@ with AES-256-GCM under a new random key, and each way to open the lock, an opene
 one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
 
 - `password:` opens with exactly the text it is given.
-- `openAt:`, a moment (`absoluteDateTime`), is a time lock: from that moment anyone can open the lock with it, also long
-  after, and before it the time lock opens nothing, while another opener may. The Player fetches the drand network's
-  proof of that moment to open it. A moment in the past opens at once.
+- `timeLock:`, a moment (`absoluteDateTime`), is a time lock, a lock that cannot open before a set time: from that
+  moment anyone can open the lock with it, also long after, and before it the time lock opens nothing, while another
+  opener may. The Player fetches the drand network's proof of that moment to open it. A moment in the past opens at
+  once. When the Player can reach the drand network while it locks and the device's clock is behind drand's time, the
+  moment moves later by as much.
 
-Every lock has a time lock 7 days ahead, as `openAt: getAbsoluteDateTime() + 7 days`, unless the call gives `openAt:` or
-the player moves or removes it in the lock dialog below. `openAt: null` removes it: **without a time lock, a lost
-password means that the content never opens.** A call with `openAt: null` and no `password:` is an error, at compile
-time where the null is written. When the Player can reach the drand network while it locks and the device's clock is
-behind drand's time, the moment moves later by as much.
+Each of these options also takes `true` or `false`. A value is used as given, without asking; `true` lets the player
+set that opener in the Player's lock dialog, and `false` leaves it out, so `timeLock: false` gives no time lock at all.
+A call without any of them lets the player set each, as if each were `true`. A call that gives one of them must give
+each, or it does not compile. A call whose options are all `false` has no way to open: an error at compile time where
+they are written, or when the call runs. **Without a time lock, a lost password means that the content never opens.**
 
 ```text
-let locked = encryptFile(photo)                                              // the Player asks the player
-let locked = encryptFile(photo, password: "corner")                         // also opens by itself in 7 days
-let locked = encryptFile(photo, openAt: getAbsoluteDateTime() + 3 days)      // a time lock only
-let locked = encryptText(confession, password: "corner", openAt: null)       // only the password opens it
+let locked = encryptFile(photo)                                                  // the player chooses
+let locked = encryptFile(photo, password: "corner", timeLock: false)             // only the password opens it
+let locked = encryptFile(photo, password: false, timeLock: getAbsoluteDateTime() + 3 days)   // a time lock only
+let locked = encryptFile(photo, password: true, timeLock: friday)                // the player sets a password
 ```
 
-A call with neither `password:` nor `openAt:` lets the player choose: the Player asks how to lock, with a moment 7 days
-ahead, which the player may move to another moment in the future or remove, and an optional password, typed twice.
-Without the moment it locks only with a password, and warns that a forgotten password means the content never opens.
+The lock dialog shows only the openers that are `true`. Its time lock is suggested 7 days ahead, and the player may move
+it to another moment in the future or switch it off; its password is typed twice. It locks once the lock has an opener,
+also one the call gives, and while only a password would open the lock, it warns that a forgotten password means the
+content never opens.
 
 `decryptText` and `decryptFile` need their `default:`, which may be any value, also `null`; a call without one is a
 compile error. A wrong password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a

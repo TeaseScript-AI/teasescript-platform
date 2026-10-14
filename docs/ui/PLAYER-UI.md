@@ -998,13 +998,17 @@ script go on; a click beside it does not, and nothing enters the transcript. Its
 Debug runs, and its return after a block or a reload, are a popup's.
 
 A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that must ask the player opens a dialog like a
-popup's, with nothing in the transcript. **Lock**, for an encrypt call that wrote no opener, has the checked box **Opens
-by itself at** with a date-and-time field prefilled 7 days ahead, **Password (optional)**, which takes focus, and, once a
-password is typed, **Repeat password**, which says "The passwords do not match" under it as soon as it differs from the
-password. Unchecking the box hides the field, which keeps its moment for when the box is checked again, and says under
-it "Without a time, this only opens with the password. If the password is forgotten, it never opens.", or "Set a time
-or a password." while no password is typed. Its **Lock** button, the only way out, works once the two passwords match
-and a moment or a password opens the lock, and refuses a moment that is not in the future with "Choose a moment in the
+popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, says "Choose
+one or more ways this can be opened again." ("Choose how this can be opened again." for one) and shows only those
+openers, each with a line that says what it does: the checked box **Time lock**, "Opens by itself after the time you
+set.", with a date-and-time field prefilled 7 days ahead; and **Password (optional)**, "Opens with a password you
+choose.", which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**,
+which says "The passwords do not match" under it as soon as it differs from the password. Where the password is the only
+opener there can be, its label has no "(optional)". Unchecking the box hides the field, which keeps its moment for when
+the box is checked again. A line above **Lock** says "Without a time, this only opens with the password. If the password
+is forgotten, it never opens." while no time lock would open the lock, or what can be set, such as "Set a time or a
+password.", while nothing would. Its **Lock** button, the only way out, works once the two passwords match and the lock
+has an opener, also one the call gives, and refuses a moment that is not in the future with "Choose a moment in the
 future." under the field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time
 lock in the player's locale, a **Password** field where a password opens it, which takes focus, **Unlock**, which tries
 the password as typed, also an empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape,

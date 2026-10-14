@@ -1643,24 +1643,26 @@ playground answers each file store as `failed`.
 `encryptText`, `encryptFile`, `decryptText`, and `decryptFile` implement [V30
 §13](specifications/accepted-syntaxes-v30.md#encryption); the scheme, format, and drand relays are in
 [`ENCRYPTION.md`](ENCRYPTION.md). They are protected core built-ins that lower to a `lock` instruction, whose operands,
-the value, `password:`, `openAt:` (encrypt only), and the required `default:` (decrypt only, `TSV020`), are temporaries
+the value, `password:`, `timeLock:` (encrypt only), and the required `default:` (decrypt only, `TSV020`), are temporaries
 or literals evaluated once in written order; another named argument is `TSV022`, a value the compiler knows is of the
-wrong type `TSV043`, `openAt: null` without `password:` `TSV043`, and plan validation rejects them as ordinary calls.
+wrong type `TSV043`, an encrypt call that gives one of its openers but not each `TSV020`, one that writes each as
+`false` `TSV043`, and plan validation rejects them as ordinary calls, and an encrypt instruction with one opener only.
 They are not allowed in a parameter default, as they may ask the player. A decrypt call gives text or the default's
 type.
 
 The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
-(`TSR059`, as for `fileToBase64`), `password:` text, and `openAt:` an `absoluteDateTime` or `null` (`TSR059`); an
-encrypt call with `openAt: null` and no `password:` fails with `TSR059`. Without `openAt:` the time lock's moment is 7
-days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives
+(`TSR059`, as for `fileToBase64`), `password:` text, for an encrypt call also `true` or `false`, and `timeLock:` an
+`absoluteDateTime`, `true`, or `false` (`TSR059`); an encrypt call whose openers are all `false` fails with `TSR059`. Its
+openers written `true`, or each when it writes none, are its `choices`, which the lock dialog asks for; a chosen time lock
+is suggested 7 days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives
 the default at once for text that is not Base64, read as `fromBase64` reads it. Otherwise it creates a foreground `lock`
 action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the stored file), the written
-`password` or `null`, the time lock's `openAtMs` (encrypt only), and a `phase`, and waits with the instruction itself as
-its continuation:
+`password` text or `null`, the written time lock's `timeLockMs` (encrypt only), the `choices`, and a `phase`, and waits
+with the instruction itself as its continuation:
 
 - `work`: the Player locks or opens with what it has. Nothing interrupts it: a due block runs once it settles.
-- `ask`: the Player's dialog asks the player first. An encrypt call that writes neither `password:` nor `openAt:` starts
-  here, with `openAtMs` the moment the dialog suggests; a decrypt call without `password:` comes here when its `work`
+- `ask`: the Player's dialog asks the player first. An encrypt call with `choices` starts here, with `timeLockMs` the
+  moment the dialog suggests for a chosen time lock; a decrypt call without `password:` comes here when its `work`
   step answers `ask`, with an optional `notice`. Like an interaction, a due expiry block interrupts it, also through a
   late time observation, and once the block returns the dialog asks again: the step's `resumes` counts these returns,
   so the Player shows the dialog anew, without what was typed, also after a block that returned at once.
@@ -1687,7 +1689,8 @@ longer has, as after a reload. The completion retains the settlement, with its `
 `lastSettlement`, and hands the answer off, a list of the outcome and its text, file, or notice. The instruction then
 runs again with it, before any block: it gives the lock or the opened text or file (`TSR084` for a text too long), the
 default for `notOpened` or `cancelled`, fails with `TSR085` for `unreadable` and `TSR086` for `failed`, or waits again
-in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the dialog. The player's typed
+in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the dialog, which locks with the
+call's own openers and, for its `choices`, what the player gave. The player's typed
 password stays in the Player and never reaches the engine; the engine records only each step's outcome and result, so a
 restore or a replay of recorded completions needs neither the network, the store, nor a secret.
 
