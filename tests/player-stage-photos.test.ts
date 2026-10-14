@@ -13,9 +13,19 @@ interface PreparedPhoto {
 let prepareStagePhoto: (source: string) => PreparedPhoto;
 let preloadStagePhotos: (sources: readonly string[]) => () => void;
 
-// The page this module runs in, without an image decoder for a worker: downloads, object URLs, images that decode, and
-// a canvas whose pixels are one green, so every photo is measured on the canvas.
-const page = { draws: 0, created: new Set<string>(), revoked: new Set<string>(), offline: false };
+// The page this module runs in: downloads, object URLs, images that decode, a canvas whose pixels are one green, and a
+// worker that answers each photo with `page.worker`; by default it cannot measure it, as for SVG, so the page does.
+type WorkerAnswer = (swatches: PhotoSwatches | null) => void;
+const cannotMeasure = (_request: unknown, answer: WorkerAnswer): void => {
+  setTimeout(() => answer(null));
+};
+const page = {
+  draws: 0,
+  created: new Set<string>(),
+  revoked: new Set<string>(),
+  offline: false,
+  worker: cannotMeasure,
+};
 const saved = {
   fetch: globalThis.fetch,
   createObjectURL: URL.createObjectURL,
@@ -37,6 +47,17 @@ before(async () => {
     saved.revokeObjectURL(url);
   };
   Object.assign(globalThis, {
+    ImageDecoder: class {},
+    OffscreenCanvas: class {},
+    Worker: class {
+      #listener: (event: { data: unknown }) => void = () => {};
+      addEventListener(kind: string, listener: (event: { data: unknown }) => void) {
+        if (kind === "message") this.#listener = listener;
+      }
+      postMessage(request: { readonly id: number }) {
+        page.worker(request, (swatches) => this.#listener({ data: { id: request.id, swatches } }));
+      }
+    },
     Image: class {
       src = "";
       naturalWidth = 4;
@@ -66,8 +87,8 @@ before(async () => {
 });
 after(() => {
   globalThis.fetch = saved.fetch;
-  Reflect.deleteProperty(globalThis, "Image");
-  Reflect.deleteProperty(globalThis, "document");
+  for (const name of ["ImageDecoder", "OffscreenCanvas", "Worker", "Image", "document"])
+    Reflect.deleteProperty(globalThis, name);
   URL.createObjectURL = saved.createObjectURL;
   URL.revokeObjectURL = saved.revokeObjectURL;
 });
@@ -135,6 +156,24 @@ test("a preloaded photo whose download failed is downloaded again when it shows"
   assert.notEqual(await shown.swatches, null);
   shown.release();
   release();
+});
+
+test("a photo given up while the worker tries it gets no object URL", async () => {
+  let answer!: () => void;
+  const asked = new Promise<void>((resolve) => {
+    page.worker = (_request, reply) => {
+      answer = () => reply(null);
+      resolve();
+    };
+  });
+  const created = page.created.size;
+  const release = preloadStagePhotos(["/files/given-up.svg"]);
+  await asked;
+  release();
+  answer();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  page.worker = cannotMeasure;
+  assert.equal(page.created.size, created);
 });
 
 test("the Stage images to load ahead are the script's image paths and its tag queries' candidates", () => {

@@ -92,6 +92,8 @@ function load(source: string, entry: Entry, priority: RequestPriority) {
           try {
             result = await measureInWorker(blob);
             if (result === null) {
+              // A photo given up while the worker tried it is not decoded for the page's canvas any more.
+              if (entry.download.signal.aborted) return null;
               const { element, decoded } = decode(source, entry, blob);
               await decoded;
               result = measure(element);
