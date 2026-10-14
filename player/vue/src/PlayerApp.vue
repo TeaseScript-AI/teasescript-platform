@@ -50,6 +50,7 @@ import { useMessageUpdateAnnouncements } from "./useMessageUpdateAnnouncements";
 import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
+import { usePhotoColour } from "./usePhotoColour";
 
 // Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
 // overlay only through these props and slots; production builds do not import it.
@@ -118,10 +119,9 @@ provide(
 );
 provide(speakerAvatarSource, props.player.resolveAsset);
 provide(speakerAvatarFailure, props.player.avatarFailed);
-usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
 // Player Settings persist in this browser. Contrast is part of the theme intent; the
-// title-bar A/B defaults to A.
+// title-bar and photo-accent A/B tests default to A.
 const storedContrast = usePlayerPreference("player-contrast", ["standard", "high"], "standard");
 const contrast = computed({
   get: () => themeIntent.value.contrast,
@@ -134,6 +134,7 @@ watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
+const photoAccentOption = usePlayerPreference("player-photo-accent", ["photo", "theme"], "photo");
 function toggleThemeMode() {
   themeIntent.value = {
     ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],
@@ -400,15 +401,41 @@ const runtimeStageMedia = computed(() =>
 const stageMedia = computed(() => props.media ?? runtimeStageMedia.value);
 
 const stage = ref<InstanceType<typeof Stage> | null>(null);
+const stageElement = computed(() => stage.value?.$el as HTMLElement | undefined);
 const stageHeight = ref(0);
 const mediaAspect = ref(0);
-// PlayerComposition owns Stage height. Its measurement positions the ambient fade and
-// determines the contained image width; neither feeds back into the Stage track.
-useResizeObserver(
-  computed(() => stage.value?.$el as HTMLElement | undefined),
-  ([entry]) => {
-    if (entry) stageHeight.value = entry.contentRect.height;
-  },
+// PlayerComposition owns Stage height. Its measurement determines the contained image
+// width; it does not feed back into the Stage track.
+useResizeObserver(stageElement, ([entry]) => {
+  if (entry) stageHeight.value = entry.contentRect.height;
+});
+
+// Photo colours (PLAYER-UI "Stage and media presentation"): the photo the Stage shows colours the
+// Player; while a new image loads, the previous photo's colour stays. Without a photo, also after an
+// image failed, the theme's colours apply. Whether the accent follows the photo is an A/B test.
+const photoSource = ref<string | null>(null);
+watch(stageMedia, (media) => {
+  if (!media) photoSource.value = null;
+});
+function stageImageLoaded(src: string | null) {
+  props.player.stageImageLoad(src);
+  if (src !== null) photoSource.value = src;
+}
+function stageImageFailed(src: string | null) {
+  props.player.stageImageFailure(src);
+  if (src !== null) photoSource.value = null;
+}
+const photoColours = usePhotoColour(
+  photoSource,
+  computed(() => themeIntent.value.mode),
+  { canvas: computed(() => toolsShell.value?.$el as HTMLElement | undefined), stage: stageElement },
+);
+usePlayerTheme(
+  computed(() => {
+    const accent = photoAccentOption.value === "photo" ? photoColours.value?.accent : null;
+    return accent ? { ...themeIntent.value, accentSeed: accent } : themeIntent.value;
+  }),
+  computed(() => photoColours.value?.surfaces ?? null),
 );
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
@@ -443,6 +470,7 @@ async function toggleFullscreen() {
     :debug-export="{ available: debugExport.available.value, open: openDebugExport }"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
+    v-model:photo-accent-option="photoAccentOption"
     :debug-menu="debug.menu.value"
     @update:debug-menu="setDebugMenu"
   >
@@ -510,8 +538,8 @@ async function toggleFullscreen() {
             :camera="stageCamera"
             :preview="imagePreview"
             @media-aspect="mediaAspect = $event"
-            @media-load="player.stageImageLoad"
-            @media-failure="player.stageImageFailure"
+            @media-load="stageImageLoaded"
+            @media-failure="stageImageFailed"
           >
             <template v-if="capture && !captureInWindow" #camera>
               <ImageCapture :view="capture" />

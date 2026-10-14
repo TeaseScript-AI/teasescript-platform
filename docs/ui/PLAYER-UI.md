@@ -111,8 +111,9 @@ surrounding Player geometry to change.
 - **Component surface:** tool panels, composer, and ordinary Standard controls.
 - **Media-control surface:** translucent title/global controls and timer material over the stage.
 - **Stage surface:** the structural primary-content region; media may use its available rectangle.
-- **Content identity:** speaker, authored control, theme, and media-derived colours remain distinct from unrelated
-  application chrome roles.
+- **Content identity:** speaker, authored control, and theme colours remain distinct from unrelated application chrome
+  roles; the Stage photo's colours colour the whole Player
+  ([Stage and media presentation](#stage-and-media-presentation)).
 
 The tools framework sits beside the primary stage/conversation composition on comfortable layouts and becomes an
 overlay drawer when constrained. Title/global controls and the timer/background rail overlay the stage. Foreground
@@ -272,6 +273,8 @@ available in every build to every user. It currently offers:
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
 - **Title bar on short screens · A/B test:** variant A or B above;
+- **Photo accent · A/B test:** A, the accent follows the photo (default), or B, the theme's accent
+  ([Stage and media presentation](#stage-and-media-presentation));
 - **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)); on
   in the normal room, play goes on in the [debug room](../DEBUGGER.md#debug-room).
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
@@ -589,25 +592,37 @@ video also name the file and line of the play that started them. A video that do
 video playback itself is missing; captured photos, chosen images, and stored files are no package files and are never
 reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
 and video are not played ([stored files](../RUNTIME.md#stored-files)). An
-authored Stage image has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage
-rendering are not yet implemented in the Player; the development preview's Stage media picker can override the Stage
-for layout comparison.
+authored Stage image has no alternative text yet. Explicit transitions and custom stage rendering are not yet
+implemented in the Player; the development preview's Stage media picker can override the Stage for layout comparison.
 
 Standard image/video-like presentation:
 
 - defaults to `contain`, keeping the complete media visible within the allocated stage;
 - centers media within the stage unless an accepted media capability explicitly positions it otherwise;
-- uses a restrained media-derived ambience/vignette in otherwise unused stage area by default where that effect is
-  available, while allowing an accepted author/media capability to provide an explicit stage/background presentation;
-- shares one continuous background field with the transcript beneath it. The media-derived ambience covers the stage,
-  continues across the stage/transcript boundary, and fades out before the foreground lane and composer, so the scene
-  colour reads as one surface rather than meeting a hard seam. The field stays inside the middle content column, so
-  tool panels and Player controls retain their own materials. Stage and transcript remain
-  separate regions with separate content and scrolling ownership;
-- clips the vignette to the stage and keeps decorative effects pointer-neutral;
+- places the Stage and the transcript in one background: a single layer behind both, in which the media and the chat
+  both sit. The background has no separate Stage or chat colour and no fade that marks where the Stage ends.
+  Media-derived colour and decorative effects, such as a glow or vignette, belong to that one background, centred on
+  or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. An accepted
+  author/media capability may still provide an explicit stage/background presentation. Tool panels and Player
+  controls keep their own materials. Stage and transcript remain separate regions with separate content and
+  scrolling ownership;
 - uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
   scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
+
+The Stage image colours the whole Player: the photo decides the hue and colourfulness, from its Vibrant-family colour
+for the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast.
+The background, message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in
+colour around the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent
+A/B test's A, the default, the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue
+too; B keeps the theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
+same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a new image loads,
+and when the browser does not let the Player read an image's pixels, the previous photo's colour stays; a camera view or
+an image request's preview over the Stage does not change it. The Player follows a new photo once it has shown briefly
+and reuses recent image measurements. From one photo's colour to the next in the same mode it fades the background and
+message bubbles, which keep their lightness; the first photo's colour, the theme's return, and a mode change switch at
+once, together with the text on them. Reduced motion removes the fade. The colours are measured as node-vibrant measures
+its swatches (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
 without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed
@@ -696,15 +711,17 @@ The runtime adapter supplies resolved message presentation according to the
 contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
 to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
-When an authored foreground sits on a Player-generated bubble or prose surface, the Player measures it against
-that surface unless an inline authored background encloses it. It leaves readable pairs alone using APCA or a
-WCAG ratio backed by a minimum APCA score; neither is a universal readability guarantee. For other pairs it compares a
-subtle local backing with an ink lightness change by colour difference, and can combine both when gamut mapping would
-wash out the authored colour. It retains the ink's original light/dark direction. Inline coloured text on a
-Player-generated surface follows the same rule. When an author supplies the bubble or prose background, authored text
-remains unchanged, including inline colours and high-contrast mode. Without an authored foreground, the Player chooses
-default black or white ink for that background. Authored text inside an inline background (including inherited message
-colour) also remains unchanged. Compile-time feedback for a poorly contrasting authored pair is tracked in #434.
+When an authored foreground sits on a Player-generated bubble or prose surface, the Player measures it against that
+surface unless an inline authored background encloses it; prose on a Stage photo's background is measured against both
+the background and its vignette at full strength, and inline code with the fill it lays under its text. It leaves
+readable pairs alone using APCA or a WCAG ratio backed by a minimum APCA score; neither is a universal readability
+guarantee. For other pairs it compares a subtle local backing with an ink lightness change by colour difference, and can
+combine both when gamut mapping would wash out the authored colour. It retains the ink's original light/dark direction.
+Inline coloured text on a Player-generated surface follows the same rule. When an author supplies the bubble or prose
+background, authored text remains unchanged, including inline colours and high-contrast mode. Without an authored
+foreground, the Player chooses default black or white ink for that background. Authored text inside an inline background
+(including inherited message colour) also remains unchanged. Compile-time feedback for a poorly contrasting authored
+pair is tracked in #434.
 The High contrast setting in [Player Settings](#player-settings) gives one-sided colours stronger treatment.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
@@ -1185,15 +1202,19 @@ The Standard Player generates its semantic colour roles from a theme intent (`pl
 them before components consume them. The defaults are a warm light theme (surface hue `70°`, `50%` tint, maximum
 surface chroma `8.5`, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
 intent, blue accent `#2255EE`). Switching light/dark applies that mode's default palette and keeps the contrast
-choice. Generated values and contrast targets remain provisional and are tuned through `Visual Lab`.
+choice. A Stage photo's colours replace the surface intent while it shows
+([Stage and media presentation](#stage-and-media-presentation)). Generated values and contrast targets remain
+provisional and are tuned through `Visual Lab`.
 
 The palette follows the project-owned Radix-inspired twelve-step role-band convention described in the shared UI guide;
 there is no Radix runtime or CSS dependency.
 
 ## Theme and customization boundary
 
-The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills,
-media ambience, or technical masks. The Player/theme accent remains theme-owned; local control colour never changes it.
+The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills, or
+technical masks; the Stage photo's colours feed it ([Stage and media presentation](#stage-and-media-presentation)). The
+Player/theme accent remains theme-owned; local control colour never changes it, and only the Stage photo does, under
+the Photo accent A/B test's A.
 
 Standard Player theme precedence is: explicit user-selected theme, package/developer-selected default, then platform
 default. A package may select a default but cannot force it against a user override.

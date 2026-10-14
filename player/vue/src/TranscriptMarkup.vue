@@ -6,7 +6,7 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  backdrop: string;
+  backdrop: string | readonly string[];
   cover: string | null;
   link: string;
   authoredInk: string | null;
@@ -141,6 +141,7 @@ blockquote {
 :deep(.markup-code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
+  /* The readability treatment counts this fill (`CODE_TINT` in TranscriptLine.vue). */
   background: color-mix(in oklab, currentColor 8%, transparent);
   border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
   border-radius: 0.3em;

@@ -5,6 +5,8 @@ import { defineConfig } from "vite";
 const modules = [
   "player/runtime-adapter.ts",
   "player/saved-data.ts",
+  "player/theme/palette.ts",
+  "player/theme/photo-theme.ts",
   "player/vue/src/randomDrawPresentation.ts",
   "player/vue/src/transcriptPresentation.ts",
   "player/vue/src/useDebugRandom.ts",
@@ -12,19 +14,23 @@ const modules = [
   "player/vue/src/useDevelopmentTime.ts",
   "player/vue/src/useImageCapture.ts",
   "player/vue/src/useMessageUpdateAnnouncements.ts",
+  "player/vue/src/usePhotoSwatches.ts",
   "player/vue/src/usePlayerDebug.ts",
   "player/vue/src/usePlayerNotifications.ts",
   "player/vue/src/usePlayerSession.ts",
+  "player/vue/src/usePlayerTheme.ts",
   "player/vue/src/usePlayerToasts.ts",
 ];
 
 // One server-side bundle for all test processes, built with the other UI builds, instead of every test file
 // transforming the Player and the engine sources again. Shared modules become shared chunks, so the entries keep one
-// module graph; dependencies such as `vue` stay external, so tests and composables share one Vue instance.
+// module graph; dependencies such as `vue` stay external, so tests and composables share one Vue instance. MCU is
+// bundled: its extensionless internal imports do not load in Node.
 export default defineConfig({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   logLevel: "warn",
   publicDir: false,
+  ssr: { noExternal: ["@material/material-color-utilities"] },
   build: {
     ssr: true,
     outDir: "dist/player-test-modules",
