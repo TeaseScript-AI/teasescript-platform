@@ -4,8 +4,8 @@ import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 type IrNode = IrStatement | IrExpression;
-/** What declares a variable: a `let`, a parameter, or a loop. */
-type Owner = IrStatement | IrFunctionParameter | { loop: string };
+/** What declares a variable: a `let` or a parameter (a loop's variable keeps its numbers). */
+type Owner = IrStatement | IrFunctionParameter;
 
 function isIrNode(value: unknown): value is IrNode {
   return typeof value === "object" && value !== null && "kind" in value;
@@ -48,14 +48,14 @@ export function withNativeTime(programs: readonly TimeProgram[]): IrStatement[][
     return key;
   };
   // Rounds until no variable or key changes what it holds or loses its time: each round reads the times of the round
-  // before.
-  for (let round = 0; round < 30; round += 1) {
+  // before. Each change only moves a record one way (a time it gains, or its numbers), so the rounds end; a package
+  // that has not settled after many keeps its Unix numbers.
+  let settled = false;
+  for (let round = 0; round < 1000 && !settled; round += 1) {
     const all = [...variables.values(), ...keys.values()];
     const before = all.map(signature).join(";");
-    for (const record of all) {
-      record.writes = [];
-      record.nullable = false;
-    }
+    // Writes are read anew each round; that a record may hold null only grows.
+    for (const record of all) record.writes = [];
     for (const program of programs)
       analyse(program.statements, program.shared, variables, declared, keyFor);
     for (const record of [...variables.values(), ...keys.values()]) {
@@ -65,8 +65,9 @@ export function withNativeTime(programs: readonly TimeProgram[]): IrStatement[][
         record.time = null;
       }
     }
-    if ([...variables.values(), ...keys.values()].map(signature).join(";") === before) break;
+    settled = [...variables.values(), ...keys.values()].map(signature).join(";") === before;
   }
+  if (!settled) return programs.map((program) => program.statements);
   return programs.map((program) =>
     mentionsClock(program.statements) || mentionsKey(program.statements, keys)
       ? rewrite(program.statements, variables, declared, keyFor, program.diagnostics)
@@ -108,7 +109,7 @@ interface Variable {
 
 function signature(variable: Variable): string {
   const time = variable.time;
-  return `${variable.native}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
+  return `${variable.native}:${variable.nullable === true}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
 }
 
 function timeOf(variable: Variable | undefined): Time | null {
@@ -296,10 +297,13 @@ function kindOf(value: IrExpression, scope: Scope): Kind {
   const key = storedKey(value);
   if (key !== null) return timeOf(scope.keys(key)) ?? "plain";
   if (value.kind === "literal") return value.value === null ? "null" : "plain";
+  // A whole number of a time is the time itself, which legacy held in whole seconds already; of a duration scaled by a
+  // number, `Math.floor(took * 0.5)`, it is a number, that rounding of the duration's seconds.
   const inner = rounded(value);
   if (inner !== null) {
     const kind = kindOf(inner, scope);
-    return typeof kind === "object" || kind === "fail" ? kind : "plain";
+    if (kind === "fail") return kind;
+    return typeof kind === "object" && !scaled(inner) ? kind : "plain";
   }
   if (value.kind === "unary" && value.operator === "-") {
     const kind = kindOf(value.value, scope);
@@ -361,6 +365,16 @@ function rebuiltMoment(value: IrExpression, scope: Scope): IrExpression | null {
   seconds = rounded(seconds) ?? seconds;
   const kind = kindOf(seconds, scope);
   return typeof kind === "object" && kind.kind === "moment" && kind.unit === "s" ? seconds : null;
+}
+
+/** A time value multiplied or divided by a number somewhere, as `took * 0.5`. */
+function scaled(value: IrExpression): boolean {
+  if (value.kind === "binary" && (value.operator === "*" || value.operator === "/")) return true;
+  if (value.kind === "binary" && (value.operator === "+" || value.operator === "-"))
+    return scaled(value.left) || scaled(value.right);
+  if (value.kind === "unary") return scaled(value.value);
+  const inner = rounded(value);
+  return inner !== null && scaled(inner);
 }
 
 /** A number computed from written numbers, apart from factors of them: `7200`, `days * 86400`, `(n + 1) * 60`. */
@@ -566,7 +580,12 @@ function analyse(
     }
     const kind = kindOf(value, scope);
     variable.writes.push(kind);
-    if (mayBeMissing(value)) variable.nullable = true;
+    // A read of a key that may be missing, or of a variable that may hold its null, may be null.
+    if (
+      mayBeMissing(value) ||
+      (value.kind === "variable" && scope.resolve(value.name)?.nullable === true)
+    )
+      variable.nullable = true;
     if (typeof kind === "object") operands(value, scope);
     else if (kind === "fail") {
       demote(value, scope);
@@ -632,12 +651,9 @@ function analyse(
       case "for": {
         plain(item.collection, scope);
         const loop = new Scope(scope);
-        loop.names.set(item.variable, variableFor({ loop: item.variable }, item.variable, false));
+        loop.names.set(item.variable, unknownVariable(item.variable));
         if (item.valueVariable !== undefined)
-          loop.names.set(
-            item.valueVariable,
-            variableFor({ loop: item.valueVariable }, item.valueVariable, false),
-          );
+          loop.names.set(item.valueVariable, unknownVariable(item.valueVariable));
         walk(item.body, loop);
         return;
       }
@@ -775,6 +791,13 @@ function rewrite(
     }
     if (value.kind === "methodCall" && momentMethod(value, scope))
       return { ...value, target: time(value.target, scope) };
+    // The rounding legacy wrote, of the duration's seconds.
+    const wrapped = rounded(value);
+    if (wrapped !== null && value.kind === "call") {
+      const kind = kindOf(wrapped, scope);
+      if (typeof kind === "object" && kind.kind === "duration")
+        return { ...value, positional: [binary("/", time(wrapped, scope), unitOf(kind.unit))] };
+    }
     return mapChildren(value, (child) => plain(child, scope));
   };
   const comparedTimes = (

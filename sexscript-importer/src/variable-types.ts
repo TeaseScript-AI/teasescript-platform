@@ -1278,8 +1278,9 @@ function analyse(
           item.target.target.target.kind === "variable" &&
           item.operator === "="
         ) {
+          // A value of unknown type, such as a parameter's, may be of any type: the rows hold any values then.
           const rows = scope.resolve(item.target.target.target.name);
-          if (rows !== undefined && nonNull(value).kind !== "unknown")
+          if (rows !== undefined && value.kind !== "null")
             rowWrites.set(rows, [...(rowWrites.get(rows) ?? []), nonNull(value)]);
           return;
         }
@@ -1627,17 +1628,19 @@ function analyse(
   for (const rows of nullRows) {
     if (rows.declaration === null || rows.fixed !== undefined || rows.union !== undefined) continue;
     const written = rowWrites.get(rows) ?? [];
-    const element = written.reduce<TeaseType | null>(
-      (joined, type) =>
-        joined === null
-          ? null
-          : isAssignable(joined, type)
-            ? joined
-            : isAssignable(type, joined)
-              ? type
-              : null,
-      written[0] ?? null,
-    );
+    const element = written.some((type) => type.kind === "unknown")
+      ? null
+      : written.reduce<TeaseType | null>(
+          (joined, type) =>
+            joined === null
+              ? null
+              : isAssignable(joined, type)
+                ? joined
+                : isAssignable(type, joined)
+                  ? type
+                  : null,
+          written[0] ?? null,
+        );
     if (element?.kind === "scalar") {
       const nullable = listOf(listOf({ kind: "optional", value: element }));
       change(() => (rows.union = nullable));
