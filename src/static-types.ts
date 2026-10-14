@@ -5,6 +5,7 @@ import type {
   GlobalStatement,
   LetStatement,
   ScalarTypeName,
+  SpeakerDeclaration,
   TypeAnnotation,
   TypeName,
 } from "./ast.js";
@@ -152,10 +153,16 @@ export type Origin = Declaration | PartOrigin;
 
 /**
  * The declaration of a variable without a type annotation: `let`, `global`, a parameter with a default, or a loop
- * variable: the `for` statement for its first variable, and the identifier of a pair loop's value variable.
+ * variable: the `for` statement for its first variable, and the identifier of a pair loop's value variable. A speaker's
+ * declaration stands for the object of its custom properties (V30 §37).
  */
 export type Declaration =
-  LetStatement | GlobalStatement | FunctionParameter | ForStatement | Identifier;
+  | LetStatement
+  | GlobalStatement
+  | FunctionParameter
+  | ForStatement
+  | Identifier
+  | SpeakerDeclaration;
 
 /**
  * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
