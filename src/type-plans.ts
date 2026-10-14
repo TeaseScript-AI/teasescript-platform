@@ -51,3 +51,14 @@ function* typePlanTask(type: StaticType): CompileTask<TypePlan | null> {
       return { kind: value.kind };
   }
 }
+
+/** Whether a check of `plan` reads a property, which an object of type `object` may have of another type. */
+export function checksProperties(plan: TypePlan): boolean {
+  const pending = [plan];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.kind === "object" && next.properties.length > 0) return true;
+    if (next.kind === "union") for (const member of next.members) pending.push(member);
+    else if ("element" in next && next.element !== null) pending.push(next.element);
+  }
+  return false;
+}

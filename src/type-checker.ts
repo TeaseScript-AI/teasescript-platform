@@ -216,7 +216,7 @@ import {
   type PartOrigin,
   type StaticType,
 } from "./static-types.js";
-import { typePlan } from "./type-plans.js";
+import { checksProperties, typePlan } from "./type-plans.js";
 import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 import {
   detachedType,
@@ -1095,6 +1095,8 @@ class TypeChecker {
     readonly site: RuntimeCheckSite;
     readonly place: StaticType;
     readonly label: string;
+    /** Whether only the properties of a value of type `object` are unknown, which only a check of properties reads. */
+    readonly properties?: true;
   }[] = [];
 
   /** Whether this check found a variable to widen that earlier checks did not. */
@@ -1542,7 +1544,8 @@ class TypeChecker {
     const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
     for (const check of this.#runtimeChecks) {
       const type = typePlan(check.place);
-      if (type !== null) checks.set(check.site, { type, place: check.label });
+      if (type !== null && (check.properties === undefined || checksProperties(type)))
+        checks.set(check.site, { type, place: check.label });
     }
     return checks;
   }
@@ -7381,8 +7384,9 @@ class TypeChecker {
   }
 
   /**
-   * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7). The
-   * place's type is read after the whole check, because a later value can still decide it.
+   * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7), also
+   * an object of type `object`, whose properties are unknown (V30 §13). The place's type is read after the whole
+   * check, because a later value can still decide it.
    */
   #recordRuntimeCheck(
     site: RuntimeCheckSite,
@@ -7391,6 +7395,8 @@ class TypeChecker {
     value: StaticType,
   ): void {
     if (mayBeUnknown(value)) this.#runtimeChecks.push({ site, place, label });
+    else if (containsType(value, (part) => part.kind === "object" && part.properties === null))
+      this.#runtimeChecks.push({ site, place, label, properties: true });
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------

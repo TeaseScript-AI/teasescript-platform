@@ -304,6 +304,107 @@ test("a value with unknown parts is checked part by part", () => {
   }
 });
 
+test("a value of type object is checked against the known properties of its place where it is stored", () => {
+  const bad = 'text (string) "bad" at';
+  for (const [setup, store, value, message] of [
+    [
+      "let o = { v: 0 }",
+      "o = x",
+      "x",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let h = { inner: { v: 0 } }",
+      "h.inner = x",
+      "x",
+      `Property 'h.inner' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let h = { inner: { v: 0 } }",
+      "h = { inner: x }",
+      "{ inner: x }",
+      `'h' holds an object, so it cannot take an object with ${bad} .inner.v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os[0] = x",
+      "x",
+      `An element of 'os' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os.add(x)",
+      "x",
+      `An element of 'os' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let d = dict{ a: { v: 0 } }",
+      'd["a"] = x',
+      "x",
+      `A value of 'd' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "function use(o = { v: 0 }) {\n    say o.v\n}",
+      "use(x)",
+      "x",
+      `Parameter 'o' of 'use' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let o = { v: 0 }\nfunction give(y: object) {\n    return y\n}",
+      "o = give(x)",
+      "give(x)",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os = [x]",
+      "[x]",
+      `'os' holds a list (object[]), so it cannot take a list with ${bad} [0].v.`,
+    ],
+  ] as const) {
+    const source = `${setup}\nfunction put(x: object) {\n    ${store}\n}\nput({ v: "bad" })\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, value], source);
+  }
+  // A value that a test found to be an object, and a load of a key that another load declares an object.
+  assert.deepEqual(
+    failure(
+      'let o = { v: 0 }\nfunction put(x) {\n    if x is object {\n        o = x\n    }\n}\nput({ v: "bad" })\nexit',
+    ),
+    ["TSR058", `'o' holds an object, so it cannot take an object with ${bad} .v.`, "x"],
+  );
+  assert.deepEqual(
+    failure(
+      'let d: object = load("key", default: {})\nsave { v: "bad" } as "key"\nlet o = { v: 0 }\no = load("key", default: { v: 0 })\nexit',
+    ),
+    [
+      "TSR058",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+      'load("key", default: { v: 0 })',
+    ],
+  );
+  // An object fits when the known properties that it has fit, and a place of type object takes any object.
+  const result = runValidSource(
+    [
+      "let o = { v: 0 }",
+      "let any: object = { a: 1 }",
+      "function put(x: object) {",
+      "    o = x",
+      "}",
+      "function keep(x: object) {",
+      "    any = x",
+      "}",
+      'put({ v: 5, w: "extra" })',
+      "say o.v + 1",
+      'put({ w: "no v" })',
+      'keep({ v: "any value" })',
+      'say "stored"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["6", "stored"]);
+});
+
 test("values that fit their place pass the runtime check unchanged", () => {
   const result = runValidSource(
     PICK +
