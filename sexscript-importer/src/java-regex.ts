@@ -26,6 +26,14 @@ const LINE_TERMINATORS = String.raw`\n\r\x{85}\x{2028}\x{2029}`;
 const SPACES = String.raw`\t\n\x0B\f\r `;
 /** RE2's repetition limit. */
 const MAX_REPEAT = 1000;
+/**
+ * Bounds well inside TeaseScript's regex limits (docs/RESOURCE-LIMITS.md: 10,000 pattern characters and program
+ * instructions, 100 capturing groups): the pattern's length, its groups, and the copies its counted repetitions make
+ * together.
+ */
+const MAX_LENGTH = 1000;
+const MAX_GROUPS = 100;
+const MAX_COPIES = 1000;
 const FOLDS_APART = "a letter that RE2 matches with other characters when it ignores case";
 /** ASCII punctuation, which Java escapes as itself. */
 const PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/u;
@@ -35,6 +43,8 @@ const PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/u;
  * match anywhere (=~ as a condition), where a match may take one more character, but no match's text is used.
  */
 export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
+  if (source.length > MAX_LENGTH)
+    return { reason: `a pattern longer than ${MAX_LENGTH} characters` };
   // Modes at the start, `(?s)`, `(?i)`, or both, are the regex's flags.
   const modes = /^\(\?([is]+)\)/u.exec(source)?.[1] ?? "";
   const characters = [...source.slice(modes === "" ? 0 : modes.length + 3)];
@@ -57,6 +67,8 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   const out: string[] = [];
   let index = 0;
   let depth = 0;
+  let groups = 0;
+  let copies = 0;
   // What the last token lets a quantifier repeat: a single character or class, a group, or nothing.
   let last = null as "atom" | "group" | null;
   // How the pattern so far may end: after a single character or class that may match \r or \n, repeated at least `min`
@@ -127,6 +139,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
         index += 2;
         open = "(?:";
       }
+      if (open === "(" && ++groups > MAX_GROUPS) return fail(`more than ${MAX_GROUPS} groups`);
       out.push(open);
       depth += 1;
       last = null;
@@ -160,6 +173,8 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       const high = bounds[3] === undefined || bounds[3] === "" ? null : Number(bounds[3]);
       if (low > MAX_REPEAT || (high !== null && (high > MAX_REPEAT || high < low)))
         return fail(`a repetition over ${MAX_REPEAT} or with its bounds reversed`);
+      copies += Math.max(low, high ?? 0);
+      if (copies > MAX_COPIES) return fail(`counted repetitions of more than ${MAX_COPIES} copies`);
       index = end + 1;
       // Written without leading zeros, which RE2 does not read as a count.
       const quantified = quantifier(
@@ -213,7 +228,8 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       if (member === "[") return { reason: "a nested class" };
       if (member === "&" && characters[index] === "&") return { reason: "a class intersection" };
       if (member === "-" && single !== null && characters[index] !== "]") {
-        const end = characters[index++]!;
+        const end = characters[index++];
+        if (end === undefined) return { reason: "an unclosed class" };
         if (insensitive) return { reason: FOLDS_APART };
         if (end === "\\" || end === "[" || end.codePointAt(0)! < single.codePointAt(0)!)
           return { reason: "a range that is not of two characters in order" };

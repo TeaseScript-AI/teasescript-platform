@@ -83,6 +83,10 @@ test("Java regular expressions as RE2 patterns", () => {
     ["\\r$", "$ after a part that may end with a carriage return"],
     ["a{1001}", "a repetition over 1000 or with its bounds reversed"],
     ["(a{100}){11}", "a counted repetition of a group or of nothing"],
+    ["[a-", "an unclosed class"],
+    ["a{600}b{600}", "counted repetitions of more than 1000 copies"],
+    ["(a)".repeat(101), "more than 100 groups"],
+    ["a".repeat(1001), "a pattern longer than 1000 characters"],
   ])
     assert.deepEqual(javaRegex(pattern!, "find"), { reason }, pattern);
 });
