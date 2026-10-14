@@ -302,6 +302,11 @@ const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
 let restoreChoiceFocus = false;
 let suppressComposerRefocus = false;
+/**
+ * Whether the player was typing in the composer when the last interaction gave way to none, so a lock's password field
+ * that shows next takes the focus back, also on a touch device, whose keyboard would otherwise close.
+ */
+let typingBeforeField = false;
 
 function clearFeedback() {
   if (feedbackTimeout !== undefined) clearTimeout(feedbackTimeout);
@@ -317,6 +322,8 @@ function showFeedback(message: string) {
 }
 
 watch(draft, clearFeedback);
+// Typing the repeat again clears "The passwords do not match", which empties it.
+watch(repeated, (text) => text !== "" && clearFeedback());
 
 // The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
 // Enter keeps it; after the field closes, focus returns to the field's button.
@@ -451,6 +458,7 @@ watch(
       active instanceof HTMLElement && active.matches("[data-composer-input]");
     const wasEditing =
       (active instanceof HTMLTextAreaElement || composerFocused) && !suppressComposerRefocus;
+    typingBeforeField = wasEditing && actionId.value === undefined;
     suppressComposerRefocus = false;
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
@@ -773,8 +781,10 @@ watch(
     const active = document.activeElement;
     const unowned = (!active || active === document.body) && hoverAvailable.value;
     const owned = !!active && !!root.value?.contains(active);
+    const typing = typingBeforeField;
+    typingBeforeField = false;
     await nextTick();
-    if (unowned || owned) focusInput();
+    if (unowned || owned || typing) focusInput();
   },
 );
 
@@ -783,15 +793,15 @@ function submit(source: "input" | "button") {
   if (field) {
     // As for askPassword, an empty field answers nothing.
     if (field.busy || draft.value === "") return focusInput();
+    // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
     if (field.repeat && repeated.value !== draft.value) {
+      repeated.value = "";
       showFeedback("The passwords do not match");
-      focusInput();
+      composer.value?.selectInput();
       return;
     }
+    // The fields keep what was typed, read-only, while the Player locks or opens with it; they empty once it is done.
     props.lock?.submit({ password: draft.value, openAtMs: null });
-    // The Player keeps it only until the lock or opening uses it.
-    draft.value = "";
-    repeated.value = "";
     return;
   }
   void complete(

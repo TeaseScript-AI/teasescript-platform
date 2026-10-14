@@ -108,7 +108,8 @@ function handleKeydown(event: KeyboardEvent): void {
   // A press that began before the interaction appeared, or a held key repeating, belongs to what came before, such as
   // the message the same Space skipped.
   const fresh = !event.repeat && event.timeStamp >= props.freshAfter;
-  if (event.key === "Enter" && !event.shiftKey) {
+  // In a password field, which has one line, Shift+Enter is Enter.
+  if (event.key === "Enter" && (!event.shiftKey || props.password)) {
     event.preventDefault();
     if (!fresh) return;
     if (props.password && props.repeat && event.currentTarget === picker.value)
@@ -261,7 +262,7 @@ function selectInput(): void {
   void nextTick(() => {
     const element = input.value;
     element?.focus({ preventScroll: true });
-    if (element instanceof HTMLTextAreaElement) element.select();
+    if (element instanceof HTMLTextAreaElement || props.password) element?.select();
   });
 }
 
@@ -322,6 +323,8 @@ defineExpose({ focusInput, selectInput, openPicker });
             :type="shown ? 'text' : 'password'"
             :value="modelValue"
             :placeholder="placeholder"
+            :readonly="submitting"
+            :enterkeyhint="repeat ? 'next' : undefined"
             :aria-label="accessibleName"
             :aria-invalid="feedback ? true : undefined"
             :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
@@ -362,6 +365,7 @@ defineExpose({ focusInput, selectInput, openPicker });
             :type="shown ? 'text' : 'password'"
             :value="repeated"
             placeholder="Repeat password"
+            :readonly="submitting"
             aria-label="Repeat password"
             :aria-invalid="feedback ? true : undefined"
             :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"

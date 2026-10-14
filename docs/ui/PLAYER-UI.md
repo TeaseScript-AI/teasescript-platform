@@ -920,8 +920,9 @@ the text while the person typing chooses to, and "Caps Lock is on" under it whil
 empty field answers nothing, and the answer adds no line to the chat. The password field of `password: askPassword(...)`
 in an encrypt or decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field on a line of
 its own, to which Enter in the first moves, and Send or Enter there locks only when both match, else the composer notice
-says "The passwords do not match". It starts empty each time it shows, also after a block interrupted it, and nothing
-typed in it is kept. A prefill starts as the composer text,
+says "The passwords do not match", the repeat empties, and the password is selected. While the Player locks or opens,
+the fields are read-only. The field starts empty each time it shows, also after a block interrupted it, and takes the
+focus back when the player was typing in the composer before it; nothing typed in it is kept. A prefill starts as the composer text,
 which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
 composer shows the prefill again, and unsent edits are not kept.
 
