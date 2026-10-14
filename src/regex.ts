@@ -38,7 +38,7 @@ export function isCanonicalRegexFlags(flags: string): boolean {
 export function regexFlagProblem(flags: string): string | null {
   for (const [index, flag] of [...flags].entries()) {
     if (flag === "g")
-      return "A regex has no 'g' flag: it is not needed. Finding every match will be findAll, which comes later, and replace and split with text already handle every occurrence.";
+      return "A regex has no 'g' flag: it is not needed. findAll finds every match, and replace and split handle every occurrence.";
     if (flag === "u") return "A regex has no 'u' flag: a regex always matches Unicode characters.";
     if (!REGEX_FLAGS.includes(flag))
       return `A regex has no flag '${flag}'. Its flags are 'i' (ignore case), 'm' (^ and $ match at each line), and 's' (. also matches a line break).`;
@@ -178,6 +178,126 @@ function syntaxMessage(error: string, fragment: string): string {
     if (fragment.startsWith(opener))
       return `A regex cannot look ${direction} with '${opener}', ${slow}. Match that text as part of the regex, or check it with a second regex.`;
   return `This regex is not valid: ${error} in '${messageText(fragment)}'.`;
+}
+
+/** A part of the replacement for a regex search: text, or the number of the group whose text goes there, 0 the match. */
+export type ReplacementPart = string | number;
+
+/**
+ * The parts of `replacement` for a regex search (V30 §8), with the regex's pattern `source` and its number of
+ * `groups`: `$0` is the whole match, `$` and more digits the group they number, `$<name>` the named group, and `$$` one
+ * `$`; any other `$` is text. A reference to a group the regex does not have is a problem. One pass reads the
+ * replacement, and the search for each `>` goes on from the last one.
+ */
+export function replacementParts(
+  replacement: string,
+  source: string,
+  groups: number,
+):
+  | { readonly ok: true; readonly parts: readonly ReplacementPart[] }
+  | { readonly ok: false; readonly problem: string } {
+  const parts: ReplacementPart[] = [];
+  let text = "";
+  let names: ReadonlyMap<string, number> | undefined;
+  let close = -2;
+  let index = 0;
+  for (
+    let dollar = replacement.indexOf("$");
+    dollar >= 0;
+    dollar = replacement.indexOf("$", index)
+  ) {
+    text += replacement.slice(index, dollar);
+    const next = replacement.charCodeAt(dollar + 1);
+    let end = dollar + 1;
+    let group: number | undefined;
+    if (next === 0x24) {
+      text += "$";
+      end += 1;
+    } else if (isDigit(next)) {
+      while (isDigit(replacement.charCodeAt(end))) end += 1;
+      const digits = replacement.slice(dollar + 1, end);
+      group = Number(digits);
+      if (group > groups) return { ok: false, problem: missingGroupMessage(digits, groups) };
+    } else if (next === 0x3c) {
+      if (close !== -1 && close < dollar + 2) close = replacement.indexOf(">", dollar + 2);
+      if (close >= 0) {
+        const name = replacement.slice(dollar + 2, close);
+        names ??= regexGroupNames(source);
+        group = names.get(name);
+        if (group === undefined)
+          return {
+            ok: false,
+            problem: `'$<${messageText(name)}>' in the replacement refers to a group named '${messageText(name)}', but this regex has no group of that name. Name a group with '(?<${messageText(name)}>...)', or write '$$' for a '$'.`,
+          };
+        end = close + 1;
+      } else text += "$";
+    } else {
+      text += "$";
+    }
+    if (group !== undefined) {
+      if (text !== "") parts.push(text);
+      text = "";
+      parts.push(group);
+    }
+    index = end;
+  }
+  text += replacement.slice(index);
+  if (text !== "") parts.push(text);
+  return { ok: true, parts };
+}
+
+function isDigit(unit: number): boolean {
+  return unit >= 0x30 && unit <= 0x39;
+}
+
+function missingGroupMessage(digits: string, groups: number): string {
+  const has =
+    groups === 0 ? "no groups" : groups === 1 ? "1 group" : `${groupedDigits(groups)} groups`;
+  const use =
+    groups === 0
+      ? "'$0' for the whole match"
+      : `'$0' for the whole match or ${groups === 1 ? "'$1' for its group" : `'$1' to '$${groups}' for its groups`}`;
+  return `'$${messageText(digits)}' in the replacement refers to group ${messageText(digits)}, but this regex has ${has}. Write ${use}, or '$$' for a '$'.`;
+}
+
+/**
+ * The number of each named group of a pattern RE2 compiled, `(?<name>...)` or `(?P<name>...)`, by its opening
+ * parenthesis among all groups that capture. RE2 numbers groups the same way; re2js's own map of names can miss a name
+ * when it simplifies the pattern, as in `(a){0}(?<v>b)`.
+ */
+function regexGroupNames(source: string): ReadonlyMap<string, number> {
+  const names = new Map<string, number>();
+  const namedClassEnds = { next: -2 };
+  let groups = 0;
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index]!;
+    if (character === "[") {
+      const end = classEnd(source, index, namedClassEnds);
+      if (end < 0) break;
+      index = end;
+    } else if (character === "\\" && source[index + 1] === "Q") {
+      const end = source.indexOf("\\E", index + 2);
+      index = end < 0 ? source.length : end + 2;
+    } else if (character === "\\") {
+      index = escapeEnd(source, index);
+    } else if (character === "(") {
+      const named = /^\(\?P?<(?![=!])/u.exec(source.slice(index, index + 4));
+      if (named !== null) {
+        const close = source.indexOf(">", index);
+        if (close < 0) break;
+        groups += 1;
+        names.set(source.slice(index + named[0].length, close), groups);
+        index = close + 1;
+      } else {
+        if (source[index + 1] !== "?") groups += 1;
+        index += 1;
+      }
+    } else {
+      index += codePointWidth(source, index);
+    }
+  }
+  return names;
 }
 
 /**
