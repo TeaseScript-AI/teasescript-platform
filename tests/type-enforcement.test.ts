@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
 function mismatches(source: string): [string, string, string][] {
@@ -1353,6 +1355,163 @@ test("a speaker's custom property keeps the type of its first value like an obje
     ),
     [["TSV041", '"high"']],
   );
+});
+
+test("reading a custom property that no declaration or assignment gives a speaker is a compile error (V30 §37)", () => {
+  // Through the speaker's name, also by a compound assignment and before a method; a misspelling names the property.
+  assert.deepEqual(
+    mismatches(
+      [
+        "speaker vera { level: 0 }",
+        "say vera.mood",
+        "vera.score += 1",
+        "vera.items.add(1)",
+        "say vera.levle",
+        "say vera.firstname",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'mood'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+        "mood",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'score'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { score: ... }', or assign it before reading it.",
+        "score",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'items'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { items: ... }', or assign it before reading it.",
+        "items",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'levle'. Its only custom property is 'level'. Did you mean 'level'?",
+        "levle",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'firstname'. Its only custom property is 'level'. Did you mean 'firstName'?",
+        "firstname",
+      ],
+    ],
+  );
+  assert.deepEqual(mismatches("speaker vera {}\nsay vera.mood\nexit"), [
+    [
+      "TSV043",
+      "Speaker 'vera' has no custom properties, so it has no 'mood'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+      "mood",
+    ],
+  ]);
+  // A property that a store through an alias may give it counts as one it can have.
+  assert.deepEqual(mismatches("speaker vera {}\nlet s = vera\ns.mood = 1\nsay vera.mod\nexit"), [
+    [
+      "TSV043",
+      "Speaker 'vera' has no property 'mod'. Its only custom property is 'mood'. Did you mean 'mood'?",
+      "mod",
+    ],
+  ]);
+  // As `speaker` where `as` or the speaker's own properties name the speaker, also when another speaker has it.
+  assert.deepEqual(
+    codes(
+      [
+        "speaker vera {",
+        "    a: 1",
+        "    b: speaker.c",
+        "}",
+        "speaker anna { mood: 1 }",
+        'say as vera "${speaker.mood}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV043", "c"],
+      ["TSV043", "mood"],
+    ],
+  );
+  // Through a speaker the compiler cannot tell apart: an alias, a parameter, an element, or the default speaker, when
+  // no speaker has the property.
+  const none =
+    "No speaker has a property 'mood'. The custom property of speakers is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.";
+  assert.deepEqual(
+    mismatches(
+      [
+        "speaker vera { level: 0 }",
+        "speaker vera",
+        "function show(s: speaker) {",
+        "    say s.mood",
+        "}",
+        "show(vera)",
+        "let alias = vera",
+        "say alias.mood",
+        "say [vera][0].mood",
+        'say "${speaker.mood}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+    ],
+  );
+  // In another file, also in a function the read calls first.
+  const files = (read: string) =>
+    compileProject([
+      { path: "main.tease", source: `calm()\nsay ${read}\nexit` },
+      {
+        path: "people.tease",
+        source: 'speaker vera {}\nglobal function calm {\n    vera.mood = "calm"\n}',
+      },
+    ]);
+  assert.deepEqual(
+    files("vera.moood").diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["main.tease", "TSV043"]],
+  );
+  const calm = files("vera.mood");
+  assert.deepEqual(calm.diagnostics, []);
+  const result = run(calm.plan!, createImmediatePacingRuntimeSnapshot(calm.plan!));
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["calm"],
+  );
+});
+
+test("a speaker's custom property that some store may give it is read when the script runs", () => {
+  // Stores in a function, through a speaker parameter, an untyped parameter, or an object's property, and a read through
+  // a parameter of a speaker that has the property while another does not, compile, and run where the property is set.
+  assert.deepEqual(
+    sayTexts(
+      [
+        "speaker vera {}",
+        'speaker anna { mood: "calm" }',
+        "function later {",
+        '    vera.mood = "later"',
+        "}",
+        "function name(s: speaker, x) {",
+        '    s.nick = "nick"',
+        '    x.pet = "pet"',
+        "}",
+        "function show(s: speaker) {",
+        "    say s.mood",
+        "}",
+        "later()",
+        "name(vera, vera)",
+        "let holder = { s: vera }",
+        'holder.s.tag = "tag"',
+        'say "${vera.mood} ${vera.nick} ${vera.pet} ${vera.tag}"',
+        "show(anna)",
+        "exit",
+      ].join("\n"),
+    ),
+    ["later nick pet tag", "calm"],
+  );
+  // A term that V30 gives every speaker is not a custom property; the runtime checks a read of one.
+  assert.deepEqual(mismatches('speaker vera { gender: "female" }\nsay vera.heShe\nexit'), []);
 });
 
 test("a function's result type comes from its return values, and returns of different types are an error", () => {

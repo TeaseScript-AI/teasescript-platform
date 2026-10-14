@@ -11,14 +11,53 @@ export function missingPropertyMessage(
   properties: readonly string[],
 ): string {
   const subject = label === null ? "This object" : `'${label}'`;
-  const names = properties.slice(0, 10).map((property) => `'${property}'`);
-  const more = properties.length - names.length;
-  if (names.length === 0) return `${subject} has no properties, so it has no '${name}'.`;
+  if (properties.length === 0) return `${subject} has no properties, so it has no '${name}'.`;
   const listed =
-    names.length === 1
-      ? `Its only property is ${names[0]}`
-      : `Its properties are ${more > 0 ? `${names.join(", ")}, and ${more} more` : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`}`;
+    properties.length === 1
+      ? `Its only property is ${nameList(properties)}`
+      : `Its properties are ${nameList(properties)}`;
   return `${subject} has no property '${name}'. ${listed}.`;
+}
+
+/**
+ * The message for a read of a custom property that no declaration or assignment gives a speaker (V30 §37): of the
+ * speaker `speaker`, or of any declared speaker for `null`. `properties` are the custom properties it can have, and
+ * `names` every property a misspelled name may be meant as; `example` is a speaker to declare the property in.
+ */
+export function missingSpeakerPropertyMessage(
+  speaker: string | null,
+  name: string,
+  properties: readonly string[],
+  names: readonly string[],
+  example: string,
+): string {
+  const one = properties.length === 1;
+  let found: string;
+  if (speaker === null)
+    found =
+      properties.length === 0
+        ? `Speakers have no custom properties, so none has '${name}'.`
+        : `No speaker has a property '${name}'. The custom ${one ? "property of speakers is" : "properties of speakers are"} ${nameList(properties)}.`;
+  else
+    found =
+      properties.length === 0
+        ? `Speaker '${speaker}' has no custom properties, so it has no '${name}'.`
+        : `Speaker '${speaker}' has no property '${name}'. Its ${one ? "only custom property is" : "custom properties are"} ${nameList(properties)}.`;
+  return (
+    found +
+    (misspelledPropertyHint(name, names) ||
+      ` Give the property a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`)
+  );
+}
+
+/** Up to ten names in quotes, joined as in `'a', 'b', and 'c'`, with how many more there are. */
+function nameList(names: readonly string[]): string {
+  const quoted = names.slice(0, 10).map((name) => `'${name}'`);
+  const more = names.length - quoted.length;
+  if (more > 0) return `${quoted.join(", ")}, and ${more} more`;
+  return quoted.length <= 2
+    ? quoted.join(" and ")
+    : `${quoted.slice(0, -1).join(", ")}, and ${quoted.at(-1)}`;
 }
 
 /** The property or method of several that `name` likely misspells, as `name` for `nmae`, as a hint after the message. */

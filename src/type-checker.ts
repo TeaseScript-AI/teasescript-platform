@@ -130,7 +130,11 @@ import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
-import { missingPropertyMessage, misspelledPropertyHint } from "./object-properties.js";
+import {
+  missingPropertyMessage,
+  missingSpeakerPropertyMessage,
+  misspelledPropertyHint,
+} from "./object-properties.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -249,6 +253,11 @@ export interface TypeCheckOptions {
    * how, from name checking.
    */
   readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
+  /**
+   * The speaker that each `speaker` names, where a message names it with `as` or its properties use it, from name
+   * checking.
+   */
+  readonly speakers?: ReadonlyMap<Identifier, string>;
 }
 
 export interface TypeCheckResult {
@@ -1082,6 +1091,9 @@ class TypeChecker {
   /** The declarations of the variables that a block shares and assigns or changes in place (see {@link VariableSite}). */
   readonly #sharedWrites: ReadonlyMap<VariableSite, Sharing>;
 
+  /** The speaker that each `speaker` names, where a message names it with `as` or its properties use it. */
+  readonly #contextualSpeakers: ReadonlyMap<Identifier, string>;
+
   /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
   #sharedGlobals: ReadonlyMap<string, Sharing> = new Map();
 
@@ -1158,6 +1170,9 @@ class TypeChecker {
 
   /** For a named speaker's custom property, the names that stores read after it on the way to their targets. */
   readonly #storedThrough = new Map<string, string[]>();
+
+  /** The custom properties of each declared speaker by its name, in the order a session sets the speakers up. */
+  readonly #speakerProperties = new Map<string, PropertyTable>();
 
   /** The fallbacks of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
@@ -1328,6 +1343,7 @@ class TypeChecker {
     this.#unchecked = unchecked;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
+    this.#contextualSpeakers = options.speakers ?? new Map();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -1523,6 +1539,7 @@ class TypeChecker {
     };
     this.#declared.set(declaration, custom);
     this.#project.declare(declaration.name.name, { kind: "speaker", custom });
+    this.#speakerProperties.set(declaration.name.name, properties);
     for (const property of declaration.properties) {
       const name = property.name.name;
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
@@ -1559,6 +1576,51 @@ class TypeChecker {
       return undefined;
     const entry = scope.resolve(node.name);
     return entry?.kind === "speaker" ? entry.custom.type : undefined;
+  }
+
+  /** The declared speaker that `receiver` names: by its name, or as `speaker` where `as` or its properties name it. */
+  #speakerName(receiver: Expression, scope: Scope): string | undefined {
+    const node = unwrap(receiver);
+    if (node.kind !== "identifier") return undefined;
+    const entry = scope.resolve(node.name);
+    if (entry?.kind === "speaker") return node.name;
+    return entry === undefined ? this.#contextualSpeakers.get(node) : undefined;
+  }
+
+  /**
+   * Notes the read `read` of a speaker's custom property, also by `+=` or `-=`, whose receiver has the type `receiver`:
+   * of the speaker the receiver names, or of any declared speaker when the compiler cannot tell which. When no
+   * declaration or assignment gives such a speaker the property, the end of the check reports the read (V30 §37), as
+   * one of an object (see {@link #noteMissingProperty}). A property that a store may reach unchecked, and a term that V30
+   * gives every speaker, are checked when the script runs (TSR017).
+   */
+  #noteSpeakerRead(read: PropertyAccessExpression, receiver: StaticType, scope: Scope): void {
+    const name = read.property.name;
+    if (resolved(receiver).kind !== "speaker" || !this.#keepsType(name) || SPEAKER_TERMS.has(name))
+      return;
+    const speaker = this.#speakerName(read.object, scope);
+    const own = speaker === undefined ? undefined : this.#speakerProperties.get(speaker);
+    if (speaker !== undefined && own === undefined) return;
+    const all = own === undefined ? [...this.#speakerProperties.values()] : [own];
+    const tables = all.filter((properties) => !properties.has(name));
+    const example = speaker ?? this.#speakerProperties.keys().next().value ?? "name";
+    this.#noteMissingIn(
+      read,
+      name,
+      tables.length < all.length ? null : tables,
+      read.property.span,
+      (properties) => {
+        // A store that the compiler cannot check may give any speaker a property too.
+        const custom = [...new Set([...properties, ...this.#unchecked])];
+        return missingSpeakerPropertyMessage(
+          speaker ?? null,
+          name,
+          custom,
+          [...custom, ...BUILT_IN_SPEAKER_PROPERTIES],
+          example,
+        );
+      },
+    );
   }
 
   /**
@@ -2393,6 +2455,7 @@ class TypeChecker {
         }
       } else {
         const name = target.property.name;
+        if (statement.operator !== "=") this.#noteSpeakerRead(target, object, scope);
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
         const value = resolved(nonNullType(receiver));
@@ -2423,7 +2486,7 @@ class TypeChecker {
               this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
             }
           }
-          // `+=` and `-=` read the property first; a speaker's missing property is a runtime error.
+          // `+=` and `-=` read the property first; a speaker's is noted above.
           else if (custom === undefined) this.#noteMissingAccess(target, receiver);
           return;
         }
@@ -3838,9 +3901,10 @@ class TypeChecker {
       case "propertyAccessExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
         const name = expression.property.name;
+        this.#noteSpeakerRead(expression, object, scope);
         const custom = this.#customProperties(expression.object, object, name, scope);
         if (custom === undefined) return this.#propertyType(object, expression);
-        // A custom property that no store gave the speaker yet is of unknown type, and missing ones fail when read.
+        // A custom property that no store gave the speaker yet is of unknown type.
         return placeRead(memberPropertyType(custom, name) ?? UNKNOWN_TYPE);
       }
       case "indexExpression": {
@@ -5533,14 +5597,30 @@ class TypeChecker {
     span: SourceSpan,
     message: string | ((properties: readonly string[]) => string),
   ): void {
+    // A read from a speaker is noted by `#noteSpeakerRead`.
+    if (resolved(object).kind === "speaker") return;
     const objects = members(object).map(resolved);
     const tables = objects.flatMap((member) =>
       member.kind === "object" && member.properties !== null && !member.properties.has(name)
         ? [member.properties]
         : [],
     );
+    this.#noteMissingIn(site, name, tables.length < objects.length ? null : tables, span, message);
+  }
+
+  /**
+   * Notes a read of the property `name` at `site` from objects of `tables`, which lack it so far, or from a value that
+   * may have it, for `null` (see {@link #noteMissingProperty}).
+   */
+  #noteMissingIn(
+    site: Expression,
+    name: string,
+    tables: PropertyTable[] | null,
+    span: SourceSpan,
+    message: string | ((properties: readonly string[]) => string),
+  ): void {
     const noted = this.#missingReads.get(site);
-    if (tables.length < objects.length) {
+    if (tables === null) {
       if (noted !== undefined) this.#missingReads.set(site, null);
     } else if (noted === undefined) {
       this.#missingReads.set(site, { name, tables, named: typeof message !== "string" });
@@ -9422,6 +9502,41 @@ const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
   "bubble",
   "prose",
   "defaultSaySkippable",
+]);
+
+/**
+ * The name lists and gender-derived terms that V30 §37 gives the player and every speaker, which the runtime does not
+ * supply: a speaker has one only when the script gives it, and a read of one it lacks fails when it runs (TSR017).
+ */
+const SPEAKER_TERMS: ReadonlySet<string> = new Set([
+  "petNames",
+  "degradingNames",
+  "lovingNames",
+  "maleFemale",
+  "manWoman",
+  "boyGirl",
+  "heShe",
+  "himHer",
+  "hisHer",
+  "himselfHerself",
+  "penisVagina",
+  "cockPussy",
+  "penisClitoris",
+  "cockClit",
+  "glansClitoris",
+  "ballsLabia",
+  "scrotumVulva",
+  "foreskinClitoralHood",
+  "chestBreasts",
+  "nippleBreast",
+  "hardWet",
+  "strokeRub",
+  "strokingRubbing",
+  "wankRub",
+  "wankingRubbing",
+  "strokedRubbed",
+  "wankedRubbed",
+  "strokerMasturbator",
 ]);
 
 /** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
