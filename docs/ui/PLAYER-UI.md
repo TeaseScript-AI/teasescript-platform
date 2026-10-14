@@ -998,9 +998,9 @@ script go on; a click beside it does not, and nothing enters the transcript. Its
 Debug runs, and its return after a block or a reload, are a popup's.
 
 A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that must ask the player opens a dialog like a
-popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, says "Choose
-one or more ways this can be opened again." ("Choose how this can be opened again." for one) and shows only those
-openers, each with a line that says what it does: the checked box **Time lock**, "Opens by itself after the time you
+popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, shows only
+those openers, under "Choose one or more ways this can be opened again." where it shows more than one, each with a line
+that says what it does: the checked box **Time lock**, "Opens by itself after the time you
 set.", with a date-and-time field prefilled 7 days ahead; and **Password (optional)**, "Opens with a password you
 choose.", which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**,
 which says "The passwords do not match" under it as soon as it differs from the password. Where the password is the only

@@ -211,12 +211,9 @@ function heldKey(event: KeyboardEvent) {
         @keydown="heldKey"
         @submit.prevent="lock"
       >
-        <p class="text-sm text-muted-foreground" data-lock-intro>
-          {{
-            choices.length > 1
-              ? "Choose one or more ways this can be opened again."
-              : "Choose how this can be opened again."
-          }}
+        <!-- With one opener to set there is nothing to choose: its own line says what it does. -->
+        <p v-if="choices.length > 1" class="text-sm text-muted-foreground" data-lock-intro>
+          Choose one or more ways this can be opened again.
         </p>
         <div v-if="choosesTime" class="grid gap-1.5" data-lock-time>
           <!-- The checkbox switches the time lock off; the moment's field names itself by its label. -->
