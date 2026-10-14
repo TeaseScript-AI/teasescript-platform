@@ -140,13 +140,15 @@ watch(contrast, (value) => (storedContrast.value = value));
 watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
-// The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, and the
-// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted.
+// The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, the
+// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, and the photo colour
+// transition to A, 0.6 s in Oklab.
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
 // A new key: until B became the default, every browser stored the default A on its first load.
 const photoAccentOption = usePlayerPreference("player-photo-accent-v2", ["photo", "theme"], "theme");
 const photoFamily = usePlayerPreference("player-photo-family", PHOTO_FAMILIES, "large-vibrant");
 const photoFamilyShare = usePlayerNumberPreference("player-photo-family-share", { min: 0, max: 100 }, 3);
+const photoTransition = usePlayerPreference("player-photo-transition", ["oklab", "srgb"], "oklab");
 // Settings' switch for the A/B tests panel, on unless turned off.
 const storedAbTestsMenu = usePlayerPreference("player-ab-tests-menu", ["on", "off"], "on");
 const abTestsMenu = computed({
@@ -475,6 +477,7 @@ const photoColours = usePhotoColour(
   ),
   computed(() => themeIntent.value.mode),
   computed(() => ({ family: photoFamily.value, minShare: photoFamilyShare.value / 100 })),
+  photoTransition,
   { canvas: computed(() => toolsShell.value?.$el as HTMLElement | undefined), stage: stageElement },
 );
 usePlayerTheme(
@@ -483,6 +486,7 @@ usePlayerTheme(
     return accent ? { ...themeIntent.value, accentSeed: accent } : themeIntent.value;
   }),
   computed(() => photoColours.value?.surfaces ?? null),
+  photoTransition,
 );
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
@@ -545,6 +549,7 @@ async function toggleFullscreen() {
         v-model:photo-accent="photoAccentOption"
         v-model:photo-family="photoFamily"
         v-model:photo-family-share="photoFamilyShare"
+        v-model:photo-transition="photoTransition"
       />
       <slot v-else name="tool" v-bind="scope" />
     </template>

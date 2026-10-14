@@ -282,7 +282,8 @@ available in every build to every user. It currently offers:
   - **Title bar on short screens:** A or B above (default A);
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
   - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
-    photo from which a Vibrant swatch counts as large enough (default 3 %)
+    photo from which a swatch counts as large enough (default 3 %);
+  - **Photo colour transition:** A, 0.6 s blended in Oklab (default), or B, 0.3 s blended in sRGB
     ([Stage and media presentation](#stage-and-media-presentation)).
 
 Apart from the Debug menu, these settings and the A/B test choices are presentation preferences, not canonical runtime
@@ -609,7 +610,7 @@ Standard image/video-like presentation:
   both sit. The background has no separate Stage or chat colour and no fade that marks where the Stage ends.
   Media-derived colour and decorative effects, such as a glow or vignette, belong to that one background, centred on
   or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. Readable contrast is
-  required once a change has settled; a short colour transition, such as the 0.6 s photo fade, may pass through lower
+  required once a change has settled; a short colour transition, such as the photo fade, may pass through lower
   contrast. An accepted author/media capability may still provide an explicit stage/background presentation. Tool
   panels and Player controls keep their own materials. Stage and transcript remain separate regions with separate
   content and scrolling ownership;
@@ -636,9 +637,11 @@ Stage image the script names, by its path or as a candidate of `showImage tagged
 and after any photo the Stage waits for; such a photo then only needs decoding when it shows. An image path the script
 computes while it runs is downloaded when it shows. When the browser does not let the Player read an image's pixels,
 the previous photo's colour stays; a camera view or an image request's preview over the Stage does not change it. The
-Player reuses recent image measurements, also when the photo colour family or its share changes. The background and message bubbles fade in 0.6 s whenever the
-photo colour changes: to the first photo's colour, from one photo's colour to the next, back to the theme's colours,
-and with a mode change. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
+colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
+a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
+message bubbles, the buttons, the accent, and the composer. The Photo colour transition A/B test sets the fade: A, the
+default, 0.6 s blended in Oklab; B, as in Milovana's player, 0.3 s blended in sRGB. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content

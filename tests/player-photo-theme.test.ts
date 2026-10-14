@@ -8,7 +8,7 @@ import {
   type Rgb,
   type SwatchName,
 } from "../player/theme/node-vibrant/swatches.js";
-import type { OklchColor } from "../player/theme/color.js";
+import { legacySrgbCss, type OklchColor } from "../player/theme/color.js";
 import type {
   ContrastDiagnostic,
   PhotoSurfaces,
@@ -174,6 +174,11 @@ test("a Vibrant swatch standing in for a missing Muted one is the larger one", (
   const red = hue(swatches({ Vibrant: RED }), "light", VIBRANT);
   assert.equal(hue(neon, "light", MUTED), red);
   assert.equal(hue(neon, "light", { family: "large-vibrant", minShare: 0.05 }), red);
+});
+
+test("the sRGB photo transition writes the theme's colours in legacy sRGB syntax, which fades in sRGB", () => {
+  assert.equal(legacySrgbCss("oklch(1 0 0)"), "rgb(255 255 255 / 1)");
+  assert.equal(legacySrgbCss("oklch(0 0 0 / 0.25)"), "rgb(0 0 0 / 0.25)");
 });
 
 // The six photos of the node-vibrant fixture, and a sweep of photo colours around the hue circle.
