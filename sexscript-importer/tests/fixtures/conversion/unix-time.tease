@@ -28,7 +28,7 @@ if timepassed > 45 s {
 } else if timepassed < 45 s {
   say prose "Weak", instant
 }
-// A number added to a moment or a duration counts seconds, and a duration divided by a number counts those units.
+// A number added to a moment or a duration counts seconds; multiplied or divided, a duration is its whole seconds.
 let timewrite = 2 min
 let starttime = getAbsoluteDateTime()
 let start = getAbsoluteDateTime()
@@ -41,7 +41,7 @@ while starttime + timewrite > getAbsoluteDateTime() and rounds < 3 {
     timewrite += getAbsoluteDateTime() - start
   }
   // NOTE SX_ROUNDING_TIES line 16: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
-  say prose "Writing for ${round(timewrite / 1 min)} minutes", instant
+  say prose "Writing for ${round(round(timewrite / 1 s) / 60)} minutes", instant
 }
 let endTime = getAbsoluteDateTime() + 2 min
 let remaining = endTime - getAbsoluteDateTime()

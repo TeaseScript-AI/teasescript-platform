@@ -297,25 +297,37 @@ function kindOf(value: IrExpression, scope: Scope): Kind {
   const key = storedKey(value);
   if (key !== null) return timeOf(scope.keys(key)) ?? "plain";
   if (value.kind === "literal") return value.value === null ? "null" : "plain";
-  // A whole number of a time is the time itself, which legacy held in whole seconds already; of a duration scaled by a
-  // number, `Math.floor(took * 0.5)`, it is a number, that rounding of the duration's seconds.
+  // A whole number of a moment is the moment, which legacy held in whole seconds already; of a duration it is a number,
+  // that rounding of the duration's whole seconds, as legacy wrote it.
   const inner = rounded(value);
   if (inner !== null) {
     const kind = kindOf(inner, scope);
     if (kind === "fail") return kind;
-    return typeof kind === "object" && !scaled(inner) ? kind : "plain";
+    return typeof kind === "object" && kind.kind === "moment" ? kind : "plain";
   }
   if (value.kind === "unary" && value.operator === "-") {
     const kind = kindOf(value.value, scope);
     return typeof kind === "object" && kind.kind === "moment" ? "fail" : kind;
   }
   if (value.kind === "binary" && ARITHMETIC.has(value.operator)) {
+    const left = kindOf(value.left, scope);
     const right = kindOf(value.right, scope);
+    // A duration and a fraction of a second make a number: legacy added it to the whole seconds.
+    const fraction = (side: IrExpression): boolean => {
+      const number = numberLiteral(side);
+      return number !== null && !Number.isInteger(number);
+    };
+    const duration = (kind: Kind): boolean => typeof kind === "object" && kind.kind === "duration";
+    if (
+      (value.operator === "+" || value.operator === "-") &&
+      ((duration(left) && fraction(value.right)) || (duration(right) && fraction(value.left)))
+    )
+      return "plain";
     // A number taken from a moment is an offset where it is computed from written numbers, `getTime() - 7200`; one
     // read from a variable or a call may be a moment kept as a number, whose difference would be a duration.
     return arithmetic(
       value.operator,
-      kindOf(value.left, scope),
+      left,
       right === "plain" && offsetLike(value.right) ? "offset" : right,
     );
   }
@@ -367,16 +379,6 @@ function rebuiltMoment(value: IrExpression, scope: Scope): IrExpression | null {
   return typeof kind === "object" && kind.kind === "moment" && kind.unit === "s" ? seconds : null;
 }
 
-/** A time value multiplied or divided by a number somewhere, as `took * 0.5`. */
-function scaled(value: IrExpression): boolean {
-  if (value.kind === "binary" && (value.operator === "*" || value.operator === "/")) return true;
-  if (value.kind === "binary" && (value.operator === "+" || value.operator === "-"))
-    return scaled(value.left) || scaled(value.right);
-  if (value.kind === "unary") return scaled(value.value);
-  const inner = rounded(value);
-  return inner !== null && scaled(inner);
-}
-
 /** A number computed from written numbers, apart from factors of them: `7200`, `days * 86400`, `(n + 1) * 60`. */
 function offsetLike(value: IrExpression): boolean {
   if (value.kind === "literal") return typeof value.value === "number";
@@ -423,13 +425,13 @@ function arithmetic(operator: string, left: Kind, rightKind: Kind | "offset"): K
         return left;
       if (duration(right) && left === "plain") return right;
       return "fail";
+    // Legacy multiplied and divided the whole seconds: a number of them, read where the duration becomes one.
     case "*":
-      if (duration(left) && right === "plain") return left;
-      if (duration(right) && left === "plain") return right;
+      if ((duration(left) && right === "plain") || (duration(right) && left === "plain"))
+        return "plain";
       return "fail";
     case "/":
-      if (duration(left) && (right === "plain" || (duration(right) && same(left, right))))
-        return "plain";
+      if (duration(left) && (right === "plain" || duration(right))) return "plain";
       return "fail";
     default:
       return "fail";
@@ -776,28 +778,8 @@ function rewrite(
       const times = comparedTimes("<", pair[0], pair[1], scope);
       if (times !== null) return { ...value, positional: [times[0], times[1]] };
     }
-    if (value.kind === "binary" && value.operator === "/") {
-      const left = kindOf(value.left, scope);
-      if (typeof left === "object" && left.kind === "duration") {
-        const right = kindOf(value.right, scope);
-        return binary(
-          "/",
-          time(value.left, scope),
-          typeof right === "object"
-            ? time(value.right, scope)
-            : durationOf(plain(value.right, scope), left.unit),
-        );
-      }
-    }
     if (value.kind === "methodCall" && momentMethod(value, scope))
       return { ...value, target: time(value.target, scope) };
-    // The rounding legacy wrote, of the duration's seconds.
-    const wrapped = rounded(value);
-    if (wrapped !== null && value.kind === "call") {
-      const kind = kindOf(wrapped, scope);
-      if (typeof kind === "object" && kind.kind === "duration")
-        return { ...value, positional: [binary("/", time(wrapped, scope), unitOf(kind.unit))] };
-    }
     return mapChildren(value, (child) => plain(child, scope));
   };
   const comparedTimes = (

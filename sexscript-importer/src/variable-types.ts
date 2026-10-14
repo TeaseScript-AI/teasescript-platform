@@ -763,11 +763,14 @@ function analyse(
   const nullRows = new Set<Binding>();
   const rowWrites = new Map<Binding, TeaseType[]>();
   // A Java object array starts with null in every slot (sexscriptLegacyArray, sexscriptLegacyArrayRows).
+  // Only where the code reads and writes the array's slots by their positions: another name for the array or one of
+  // its rows, a call, or a result may write other values, which these rules do not see.
   const noteNullArray = (target: Binding, value: IrExpression): void => {
     if (value.kind !== "call" || value.local === true) return;
     const start = value.positional.at(-1);
     if (start?.kind !== "literal" || start.value !== null) return;
-    if (value.name === "sexscriptLegacyArray") nullableWrites.add(target);
+    if (value.name === "sexscriptLegacyArray" && slotsOnly(statements, target.name, 1))
+      nullableWrites.add(target);
     if (value.name === "sexscriptLegacyArrayRows") nullRows.add(target);
   };
   // Lists that get a stored number read without a default, which a missing key gives as null,
@@ -1641,7 +1644,7 @@ function analyse(
                   : null,
           written[0] ?? null,
         );
-    if (element?.kind === "scalar") {
+    if (element?.kind === "scalar" && slotsOnly(statements, rows.name, 2)) {
       const nullable = listOf(listOf({ kind: "optional", value: element }));
       change(() => (rows.union = nullable));
     } else if (rows.anyRows !== true) change(() => (rows.anyRows = true));
@@ -2044,6 +2047,39 @@ function bindingType(binding: Binding): TeaseType | undefined {
   if (binding.widened) type = widen(type);
   if (binding.optional && type.kind !== "optional") type = { kind: "optional", value: type };
   return type;
+}
+
+/**
+ * Whether every use of a variable of this name reads or writes one of its slots, `rows[i][j]` at `depth` 2, or its
+ * length, or assigns it: no other name, call, or result can reach its slots.
+ */
+function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 2): boolean {
+  let only = true;
+  const visit = (value: unknown, parents: readonly unknown[]): void => {
+    if (!only) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, parents);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "variable" && value.name === name) {
+      const [parent, grand] = [parents.at(-1), parents.at(-2)];
+      const indexOf = (node: unknown, target: unknown): boolean =>
+        isRecord(node) && node.kind === "index" && node.target === target;
+      const length = isRecord(parent) && parent.kind === "property" && parent.name === "length";
+      const assigned = isRecord(parent) && parent.kind === "assign" && parent.target === value;
+      const slot =
+        depth === 1
+          ? indexOf(parent, value)
+          : indexOf(parent, value) &&
+            (indexOf(grand, parent) || (isRecord(grand) && grand.kind === "property"));
+      if (!length && !assigned && !slot) only = false;
+      return;
+    }
+    for (const child of Object.values(value)) visit(child, [...parents, value]);
+  };
+  visit(statements, []);
+  return only;
 }
 
 /** The record literals each list variable gets with `add`, by the variable's name. */
