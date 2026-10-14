@@ -94,17 +94,14 @@ function splitAlternatives(pattern: string): string[] | null {
   return parts;
 }
 
-/**
- * The text a pattern of literal characters and escaped characters matches, where Java escapes any character but a
- * letter or digit as itself (`\\#`); null for any other pattern.
- */
+/** The text a pattern of literal characters and escaped metacharacters matches; null for any other pattern. */
 function literalText(pattern: string): string | null {
   let text = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
     if (character === "\\") {
       const next = pattern[index + 1];
-      if (next === undefined || /[A-Za-z0-9]/u.test(next)) return null;
+      if (next === undefined || !META.has(next)) return null;
       text += next;
       index += 1;
       continue;

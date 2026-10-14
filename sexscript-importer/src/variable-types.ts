@@ -783,6 +783,7 @@ function analyse(
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
   const nullTested = nullTestedNames(statements);
+  const needValues = valueUses(statements);
   // Names that some statement assigns after their declaration; a script variable that none assigns keeps a null test's
   // narrowing in a branch, as a local does.
   const reassigned = assignedNames(statements);
@@ -951,6 +952,7 @@ function analyse(
       if (
         jsonGet &&
         value.kind === "optional" &&
+        !needValues.has(target.name) &&
         target.declaration !== null &&
         type !== undefined &&
         type.kind !== "optional" &&
@@ -1886,6 +1888,36 @@ function assignedNames(value: unknown, names = new Set<string>()): Set<string> {
   if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
     names.add(String(value.target.name));
   for (const child of Object.values(value)) assignedNames(child, names);
+  return names;
+}
+
+/**
+ * Variables that some statement uses where null cannot stand: in arithmetic, an order, a compound assignment, or as the
+ * receiver of a property, method, or index, `goal += 1` or `name.length`.
+ */
+function valueUses(value: unknown, names = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) valueUses(item, names);
+    return names;
+  }
+  if (!isRecord(value)) return names;
+  const add = (operand: unknown): void => {
+    if (isRecord(operand) && operand.kind === "variable" && typeof operand.name === "string")
+      names.add(operand.name);
+  };
+  if (value.kind === "assign" && typeof value.operator === "string" && value.operator !== "=")
+    add(value.target);
+  if (
+    value.kind === "binary" &&
+    typeof value.operator === "string" &&
+    (ARITHMETIC.has(value.operator) || ["<", "<=", ">", ">="].includes(value.operator))
+  ) {
+    add(value.left);
+    add(value.right);
+  }
+  if (value.kind === "methodCall" || value.kind === "property" || value.kind === "index")
+    add(value.target);
+  for (const child of Object.values(value)) valueUses(child, names);
   return names;
 }
 

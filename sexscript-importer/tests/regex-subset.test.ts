@@ -6,8 +6,6 @@ import { javaReplacementText, parseRegexSubset, parseTailPattern } from "../src/
 test("the regular expressions that text operations express are recognized", () => {
   assert.deepEqual(parseRegexSubset("BOSS"), { kind: "literal", text: "BOSS" });
   assert.deepEqual(parseRegexSubset("\\\\"), { kind: "literal", text: "\\" });
-  // Java escapes any character but a letter or digit as itself.
-  assert.deepEqual(parseRegexSubset("\\#BODYPART"), { kind: "literal", text: "#BODYPART" });
   assert.deepEqual(parseRegexSubset("\\[|\\]"), { kind: "alternatives", texts: ["[", "]"] });
   assert.deepEqual(parseRegexSubset("[^0-9X]"), {
     kind: "class",
