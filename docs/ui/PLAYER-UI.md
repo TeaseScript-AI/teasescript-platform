@@ -1030,7 +1030,8 @@ Where a public key opens it, it shows **Send this to the owner of the private ke
 read-only field, **Copy**, which says "Copied." or, where the browser refuses, selects the text and says "Could not copy.
 The text is selected, so copy it by hand or use Download.", **Download**, which saves it as `unlock-request.age`, and the
 same **How does this work?**; and **Unlock key**, which takes focus where no password opens it. Unlock tries the key
-when one is given, otherwise the password; a wrong key keeps it open with "That key does not open it." under the field.
+when one is given, otherwise the password, and without a password opener it waits for a key; a wrong key keeps it open
+with "That key does not open it." under the field, which takes focus.
 A wrong password keeps it open with "That password does not open it." under the field; a
 passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
 reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
