@@ -97,16 +97,13 @@ async function checks(page) {
   const expected = await state();
   check(
     await page.evaluate(() => {
-      const dock = document.querySelector('[data-slot="sidebar"] > .fixed').getBoundingClientRect();
-      const stage = document.querySelector(".player-stage").getBoundingClientRect();
-      return !(
-        dock.left < stage.right - 1 &&
-        stage.left < dock.right - 1 &&
-        dock.top < stage.bottom - 1 &&
-        stage.top < dock.bottom - 1
-      );
+      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
+      const image = document.querySelector(".stage-media");
+      return !playerChecks
+        .imagePoints(image)
+        .some((point) => dock.contains(document.elementFromPoint(...point)));
     }),
-    "The wide dock covers the Stage",
+    "The wide dock covers the Stage's image",
   );
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 700 });
@@ -1068,16 +1065,12 @@ async function choiceLayoutChecks(page) {
         ".transcript-entry:last-child [data-slot='bubble-content']",
       );
       const composer = document.querySelector("[data-composer-shell]");
-      const meet = (first, second) => {
-        const [a, b] = [first.getBoundingClientRect(), second.getBoundingClientRect()];
-        return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-      };
       const long = choices.find((button) => button.innerText.startsWith("Take the longer path"));
       const label = long.querySelector(".player-action-label") ?? long;
       return {
-        overlap: choices
-          .filter((choice) => meet(choice, bubble) || meet(choice, composer))
-          .map((choice) => choice.innerText.trim()),
+        overlap: [...choices, bubble, composer]
+          .filter((element) => !playerChecks.uncovered(element))
+          .map((element) => element.innerText.trim().slice(0, 40)),
         longReadable:
           long.scrollWidth <= long.clientWidth + 1 && label.scrollWidth <= label.clientWidth + 1,
       };
@@ -1087,7 +1080,7 @@ async function choiceLayoutChecks(page) {
     const state = await layout();
     check(
       state.overlap.length === 0,
-      `${width}px: a choice covers the message or the composer: ${JSON.stringify(state)}`,
+      `${width}px: a choice, the message or the composer is covered: ${JSON.stringify(state)}`,
     );
     check(
       state.longReadable,
@@ -1107,8 +1100,9 @@ async function topBarChecks(page) {
   const show = page.getByRole("button", { name: "Show sidebar", exact: true });
   const fullscreen = page.locator("[data-fullscreen-control]");
   const actions = page.locator(".player-top-bar-actions");
-  // The controls stay reachable and the title stays readable beside them.
-  const visible = async (tools, titleVisible = true) => {
+  // The controls stay reachable and the title stays readable beside them; with the narrow drawer open (`barShown`
+  // false), which covers the bar as a modal sheet, its own toggle stays reachable.
+  const visible = async (tools, barShown = true) => {
     // The title's pill, as drawn; its row around it passes input through to the Stage.
     const boxes = await Promise.all([
       tools.boundingBox(),
@@ -1116,13 +1110,31 @@ async function topBarChecks(page) {
       page.locator(".player-top-bar-title > :is(span, button)").boundingBox(),
     ]);
     check(boxes.every(Boolean), "Top controls and title must remain visible");
-    const [left, right, title] = boxes;
-    const meet = (a, b) =>
-      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-    check(
-      !titleVisible || (!meet(title, left) && !meet(title, right)),
-      "Title must not collide with controls",
-    );
+    // Neither covers the other: every control is uncovered, and no control is drawn over the title's pill, which is
+    // plain text that passes input through to the Stage. A drawer that is still sliding in is waited for.
+    await tools.evaluate((element) => element.setAttribute("data-check-toggle", ""));
+    const clear = await page
+      .waitForFunction(
+        (barShown) => {
+          const controls = [...document.querySelectorAll(".player-top-bar-actions button")];
+          const pill = document.querySelector(".player-top-bar-title > :is(span, button)");
+          return (
+            playerChecks.uncovered(document.querySelector("[data-check-toggle]")) &&
+            (!barShown ||
+              (controls.every(playerChecks.uncovered) &&
+                pill.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+                !controls.some((control) => playerChecks.hides(control, pill))))
+          );
+        },
+        barShown,
+        { timeout: 5000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    await tools.evaluate((element) => element.removeAttribute("data-check-toggle"));
+    check(clear, "Title must not collide with controls");
   };
   await visible(hide);
   await hide.click();
@@ -1357,19 +1369,22 @@ async function contentContainmentChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // What hides the media or the retained reading column: running off the window, or under the docked sidebar. The
-  // narrow layout's drawer slides over the Stage by design.
+  // What hides the media or the retained reading column, judged by what is drawn: the Stage's image or the conversation's
+  // text running off the window or under the docked sidebar. The narrow layout's drawer slides over the Stage by design.
   const hidden = `(() => {
     const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-    const docked = dock && !document.querySelector(".tools-drawer") ? dock.getBoundingClientRect() : null;
+    const docked = dock && !document.querySelector(".tools-drawer") ? dock : null;
+    const under = (point) => !!docked && docked.contains(document.elementFromPoint(...point));
     const problems = [];
-    for (const [name, selector] of [["media", ".stage-media-frame"], ["conversation", ".transcript-native-overlay"]]) {
-      const box = document.querySelector(selector)?.getBoundingClientRect();
-      if (!box) problems.push(name + " is missing");
-      else if (box.left < -1 || box.right > innerWidth + 1) problems.push(name + " runs off the window");
-      else if (docked && box.left < docked.right - 1 && docked.left < box.right - 1 && box.top < docked.bottom - 1 && docked.top < box.bottom - 1)
-        problems.push(name + " runs under the dock");
-    }
+    const image = document.querySelector(".stage-media");
+    const drawn = image ? playerChecks.imagePoints(image) : [];
+    if (!image) problems.push("media is missing");
+    else if (drawn.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("media runs off the window");
+    else if (drawn.some(under)) problems.push("media runs under the dock");
+    const text = playerChecks.textPoints(document.querySelector(".transcript"));
+    if (text.length === 0) problems.push("the conversation shows no text");
+    else if (text.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("conversation runs off the window");
+    else if (text.filter(playerChecks.inWindow).some(under)) problems.push("conversation runs under the dock");
     return problems.join("; ");
   })()`;
   const verify = async (label) => {
@@ -1464,18 +1479,16 @@ async function composerNoticeChecks(page) {
     await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
     const placement = await page.evaluate(() => {
       const notice = document.querySelector(".composer-notice").getBoundingClientRect();
-      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       return {
         inside:
           notice.left >= 0 &&
           notice.right <= innerWidth &&
           notice.top >= 0 &&
           notice.bottom <= innerHeight,
-        coversComposer:
-          notice.left < composer.right - 1 &&
-          composer.left < notice.right - 1 &&
-          notice.top < composer.bottom - 1 &&
-          composer.top < notice.bottom - 1,
+        coversComposer: !(
+          playerChecks.uncovered(document.querySelector(".composer-notice")) &&
+          playerChecks.uncovered(document.querySelector("[data-composer-shell]"))
+        ),
         pageOverflow: document.documentElement.scrollWidth > innerWidth,
       };
     });
@@ -1567,30 +1580,50 @@ async function focusIndicatorChecks(page) {
 }
 
 async function backgroundControlPlacementChecks(page) {
-  // What the rail's visible parts (its timers and the controls' scroll area; the rail itself is transparent) hide,
-  // wherever they sit: the reading column or the timer, and whether the controls' area runs out of the window.
+  // What the rail hides, judged by what is drawn (the rail and its controls' wrapper are transparent): the reading
+  // column's text or its timers, and whether a person can reach and press every background control, scrolling the
+  // controls to it.
   const placement = () =>
-    page.evaluate(() => {
+    page.evaluate(async () => {
       const rail = document.querySelector(".stage-right-rail");
-      const box = (element) => element.getBoundingClientRect();
-      const meet = (a, b) =>
-        a.left < b.right - 1 &&
-        b.left < a.right - 1 &&
-        a.top < b.bottom - 1 &&
-        b.top < a.bottom - 1;
-      // The controls' visible area: the group scrolls inside it when the rail is short.
-      const group = box(rail.querySelector(".stage-right-rail-controls"));
-      const timers = [...rail.querySelectorAll(".timer-display")].map(box);
-      const column = box(document.querySelector("[data-conversation-overlay]"));
+      const text = playerChecks
+        .textPoints(document.querySelector(".transcript"))
+        .filter(playerChecks.inWindow);
+      const viewport = rail.querySelector(
+        ".stage-right-rail-controls [data-reka-scroll-area-viewport]",
+      );
+      // A disabled control only has to be seen, in the controls' visible scroll area; it takes no input.
+      const seen = (button) => {
+        const box = button.getBoundingClientRect();
+        const area = viewport.getBoundingClientRect();
+        const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+        return (
+          button.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+          playerChecks.inWindow([x, y]) &&
+          x >= area.left &&
+          x <= area.right &&
+          y >= area.top &&
+          y <= area.bottom
+        );
+      };
+      const unreachable = [];
+      for (const button of rail.querySelectorAll(".stage-right-rail-controls button")) {
+        button.scrollIntoView({ block: "nearest", inline: "nearest" });
+        await new Promise(requestAnimationFrame);
+        const disabled = button.disabled || button.getAttribute("aria-disabled") === "true";
+        if (!(disabled ? seen(button) : playerChecks.pressable(button)))
+          unreachable.push(button.textContent.trim());
+      }
+      viewport.scrollTop = 0;
+      await new Promise(requestAnimationFrame);
       return {
         extent: rail.dataset.railExtent,
-        coversColumn: [group, ...timers].some((part) => meet(part, column)),
-        coversTimer: timers.some((timer) => meet(group, timer)),
-        clipped:
-          group.top < -1 ||
-          group.bottom > innerHeight + 1 ||
-          group.left < -1 ||
-          group.right > innerWidth + 1,
+        columnText: text.length,
+        coversColumn: text.some((point) => rail.contains(document.elementFromPoint(...point))),
+        coversTimer: [...rail.querySelectorAll(".timer-display")].some(
+          (timer) => !playerChecks.uncovered(timer),
+        ),
+        unreachable,
       };
     });
   const settle = async (width, height) => {
@@ -1605,20 +1638,21 @@ async function backgroundControlPlacementChecks(page) {
   let state;
   for (const width of [800, 1200, 1216, 1240, 1280]) {
     state = await settle(width, 900);
+    if (state.columnText === 0) throw new Error(`The reading column shows no text at ${width}px`);
     if (state.extent === "player" && state.coversColumn)
       throw new Error(
         `Full-height rail covers the reading column at ${width}px: ${JSON.stringify(state)}`,
       );
   }
-  // A short Player keeps the controls clear of the timer and inside the window, without clipping.
+  // A short Player keeps the controls clear of the timer and within reach.
   state = await settle(1440, 420);
-  if (state.coversTimer || state.clipped)
+  if (state.coversTimer || state.unreachable.length > 0)
     throw new Error(
-      `Short viewport clipped the group or overlapped the timer: ${JSON.stringify(state)}`,
+      `Short viewport covered the timer or put a control out of reach: ${JSON.stringify(state)}`,
     );
-  // Too little height: the group scrolls, clear of the timer, instead of clipping or overlapping it.
+  // Too little height: the group scrolls, clear of the timer, to every control.
   state = await settle(1440, 330);
-  if (state.coversTimer || state.clipped)
+  if (state.coversTimer || state.unreachable.length > 0)
     throw new Error(`Insufficient height must scroll the group: ${JSON.stringify(state)}`);
   const controls = page.locator(".stage-right-rail-controls [data-reka-scroll-area-viewport]");
   await controls.scrollIntoViewIfNeeded();
@@ -1877,18 +1911,15 @@ async function noticeChecks(page) {
   const bell = page.locator("[data-notification-bell]");
   const blocked = await page.evaluate(() => {
     const toasts = [...document.querySelectorAll('[data-sonner-toast][data-visible="true"]')];
-    const controls = [...document.querySelectorAll(".player-top-bar-actions button")];
-    const meet = (a, b) =>
-      a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
     const problems = [];
     for (const toast of toasts) {
       const box = toast.getBoundingClientRect();
       if (box.left < 0 || box.right > innerWidth || box.top < 0 || box.bottom > innerHeight)
         problems.push("a toast runs off the window");
-      for (const control of controls)
-        if (meet(box, control.getBoundingClientRect()))
-          problems.push(`a toast covers ${control.getAttribute("aria-label")}`);
     }
+    for (const control of document.querySelectorAll(".player-top-bar-actions button"))
+      if (!playerChecks.uncovered(control))
+        problems.push(`something covers ${control.getAttribute("aria-label")}`);
     return problems;
   });
   check(blocked.length === 0, `Toasts must stay in view beside the top controls: ${blocked}`);
@@ -2260,19 +2291,31 @@ async function directDemoLatestChecks(page) {
   try {
     await mobile.goto(page.url().split("?")[0]);
     await mobile.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
-    // It opens at the latest message, with the message and the choices clear of the composer.
+    // It opens at the latest message: the message's end and the choices are shown uncovered, not under the composer.
     await mobile.waitForFunction(() => {
       const scroll = document.querySelector(".transcript-scroll");
       const composer = document.querySelector(".conversation-glass");
       const rows = document.querySelectorAll(".transcript-entry");
       const choices = document.querySelector("[data-foreground-controls]");
-      const meet = (first, second) => {
-        const [a, b] = [first.getBoundingClientRect(), second.getBoundingClientRect()];
-        return (
-          a.left < b.right - 1 &&
-          b.left < a.right - 1 &&
-          a.top < b.bottom - 1 &&
-          b.top < a.bottom - 1
+      // Rendered visibly, with its centre and a point just inside the middle of each edge hitting it.
+      const uncovered = (element) => {
+        if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+          return false;
+        const box = element.getBoundingClientRect();
+        const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+        return [
+          [x, y],
+          [box.left + 2, y],
+          [box.right - 2, y],
+          [x, box.top + 2],
+          [x, box.bottom - 2],
+        ].every((point) => element.contains(document.elementFromPoint(...point)));
+      };
+      // The end of a message is shown: the middle of its bottom edge hits it.
+      const endShown = (element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(box.left + box.width / 2, box.bottom - 2),
         );
       };
       return (
@@ -2281,8 +2324,8 @@ async function directDemoLatestChecks(page) {
         rows.length &&
         choices &&
         scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2 &&
-        !meet(rows[rows.length - 1], composer) &&
-        !meet(choices, composer) &&
+        endShown(rows[rows.length - 1]) &&
+        [...choices.querySelectorAll("button")].every(uncovered) &&
         !document.querySelector(".return-to-latest")
       );
     });
@@ -3045,6 +3088,73 @@ async function runGroup(browserPage, run, url, artifacts) {
     .context()
     .browser()
     .newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+  // What a person sees, wherever it sits, judged by hit-testing what is drawn rather than comparing boxes, which may be
+  // transparent wrappers: `pressable` (rendered visibly, its centre in the window hits it), `uncovered` (also a point
+  // just inside the middle of each edge), `hides(cover, element)` (any of those points hits `cover`), `textPoints` (points
+  // every 8 px along the text lines under a root, as drawn), and `imagePoints` (the same points of an image as drawn inside
+  // its box, letterboxed by `object-fit`).
+  await context.addInitScript(() => {
+    const around = (box) => {
+      const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+      return [
+        [x, y],
+        [box.left + 2, y],
+        [box.right - 2, y],
+        [x, box.top + 2],
+        [x, box.bottom - 2],
+      ];
+    };
+    const points = (element) => around(element.getBoundingClientRect());
+    const inWindow = ([x, y]) => x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight;
+    const visible = (element) =>
+      !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+    window.playerChecks = {
+      pressable: (element) => {
+        if (!visible(element)) return false;
+        const [centre] = points(element);
+        return inWindow(centre) && element.contains(document.elementFromPoint(...centre));
+      },
+      uncovered: (element) =>
+        visible(element) &&
+        points(element).every(
+          (point) => inWindow(point) && element.contains(document.elementFromPoint(...point)),
+        ),
+      hides: (cover, element) =>
+        points(element).some(
+          (point) => inWindow(point) && cover.contains(document.elementFromPoint(...point)),
+        ),
+      inWindow,
+      textPoints: (root) => {
+        const result = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          if (!walker.currentNode.textContent.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(walker.currentNode);
+          for (const line of range.getClientRects())
+            for (let x = line.left + 1; line.width > 0 && x < line.right; x += 8)
+              result.push([x, line.top + line.height / 2]);
+        }
+        return result;
+      },
+      imagePoints: (image) => {
+        const box = image.getBoundingClientRect();
+        const fit = getComputedStyle(image).objectFit;
+        if (!["contain", "scale-down"].includes(fit) || !image.naturalWidth) return around(box);
+        const scale = Math.min(
+          box.width / image.naturalWidth,
+          box.height / image.naturalHeight,
+          fit === "scale-down" ? 1 : Infinity,
+        );
+        const [width, height] = [image.naturalWidth * scale, image.naturalHeight * scale];
+        const [left, top] = [
+          box.left + (box.width - width) / 2,
+          box.top + (box.height - height) / 2,
+        ];
+        return around({ left, top, width, height, right: left + width, bottom: top + height });
+      },
+    };
+  });
   const page = await context.newPage();
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   try {
