@@ -1156,10 +1156,10 @@ export function freshPlaceType(type: StaticType): StaticType {
 }
 
 /**
- * The type of a new variable whose type is a fresh copy of a slot that took null before any other value: that slot with
- * `null` as a member of its own, as after `let x = null`, instead of the mark that its later value is optional. A test
- * that excludes null then keeps only the slot, so that the value that decides it does not bring the null back. Other
- * types are returned as they are.
+ * A fresh copy of a slot that took null before any other value, such as an element read from a list after `add(null)`,
+ * with that null as a member of its own, as after `let x = null`, instead of the mark that its later value is optional.
+ * A test that excludes null then keeps only the slot, so that the value that decides it does not bring the null back.
+ * Other types are returned as they are. Only a copy that no other place shares may be given.
  */
 export function ownNull(copy: StaticType): StaticType {
   if (copy.kind !== "open" || copy.resolved !== null || !copy.sawNull) return copy;

@@ -5916,7 +5916,7 @@ class TypeChecker {
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
       if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
-      const element = copyType(value.element);
+      const element = ownNull(copyType(value.element));
       const other = plainType(typeOf(fallback.value));
       const undecided = (type: StaticType): boolean =>
         containsType(type, (part) => part.kind === "open");
@@ -8706,7 +8706,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     if (method === "contains") return BOOLEAN_TYPE;
     if (method === "clear") return NULL_TYPE;
     // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
-    return method === "remove" || method === "get" ? copyType(value.element) : undefined;
+    return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
@@ -8736,7 +8736,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
       return value.kind === "list" ? INTEGER_TYPE : undefined;
     // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
     case "get":
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
     case "toSet":
       return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
@@ -8752,7 +8752,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "removeFirst":
     case "removeLast":
       // The removed element leaves the list, so its type is a copy for the place that keeps it.
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     default:
       return undefined;
   }

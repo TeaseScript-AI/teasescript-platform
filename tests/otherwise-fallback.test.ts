@@ -359,8 +359,9 @@ test("a read of a place that held only values of unknown type is of unknown type
 });
 
 test("a null check removes the null of a copy of a place that took null first", () => {
-  // The copy keeps that null as a value of its own, so after the check it holds the text that replaced it, also where
-  // the list or dict it goes into was read before its first value, which a first check decides for the next.
+  // A copy, also of an element that a method gives, keeps that null as a value of its own, so after the check it holds
+  // the text that replaced it, also where the list or dict it goes into was read before its first value, which a first
+  // check decides for the next.
   const targets = [
     ["let other = []\nif other.length > 0 {\n    say other[0]\n}", "other.add(x)", "other[0]"],
     [
@@ -371,7 +372,9 @@ test("a null check removes the null of a copy of a place that took null first", 
   ];
   for (const [target, store, read] of targets)
     for (const copy of [
-      `let x = out[0]\nif x == null {\n    x = "z"\n}\n${target}\n${store}`,
+      ...["out[0]", "out.get(0, default: null)", "out.removeLast()"].map(
+        (value) => `let x = ${value}\nif x == null {\n    x = "z"\n}\n${target}\n${store}`,
+      ),
       `${target}\nfor x in out {\n    if x == null {\n        x = "z"\n    }\n    ${store}\n}`,
     ]) {
       const source = `let out = []\nout.add(null)\n${copy}\nlet kept: string = ${read}\nsay kept\nexit`;
