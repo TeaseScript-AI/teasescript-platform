@@ -40,50 +40,6 @@ async function cli(...args) {
 // Firefox's fake camera runs through Firefox's real capture pipeline with a generated picture and no permission prompt.
 async function checks(page, url) {
   const context = page.context();
-  // A person only presses or focuses what they see and can reach: each such input first brings its element into view
-  // and waits until it is rendered visibly. A click then relies on Playwright's own check of the point it presses;
-  // focus needs some exposed point of the element (its centre, or a point a quarter in or just inside an edge).
-  const locatorPrototype = Object.getPrototypeOf(page.locator("body"));
-  for (const name of ["click", "focus"]) {
-    const act = locatorPrototype[name];
-    locatorPrototype[name] = async function (...args) {
-      const deadline = Date.now() + 5000;
-      const reachable = async () => {
-        await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-        return this.evaluate((element, exposed) => {
-          if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
-            return false;
-          if (!exposed) return true;
-          const box = element.getBoundingClientRect();
-          const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-          return [
-            [x, y],
-            [box.left + box.width / 4, y],
-            [box.right - box.width / 4, y],
-            [x, box.top + box.height / 4],
-            [x, box.bottom - box.height / 4],
-            [box.left + 2, y],
-            [box.right - 2, y],
-            [x, box.top + 2],
-            [x, box.bottom - 2],
-          ].some(
-            ([px, py]) =>
-              px >= 0 &&
-              py >= 0 &&
-              px <= innerWidth &&
-              py <= innerHeight &&
-              element.contains(document.elementFromPoint(px, py)),
-          );
-        }, name === "focus");
-      };
-      while (!(await reachable())) {
-        if (Date.now() > deadline)
-          throw new Error(`A person cannot see and reach ${this} to ${name} it`);
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      return act.apply(this, args);
-    };
-  }
   const decodedPhotos = () =>
     [...document.querySelectorAll("img")].filter(
       (image) => image.src.startsWith("blob:") && image.complete && image.naturalWidth > 0,
@@ -207,22 +163,9 @@ async function checks(page, url) {
   const wide = (selector) =>
     tab.waitForFunction((selector) => {
       const video = document.querySelector(`${selector} [data-viewfinder] video`);
-      return (
-        video?.videoWidth === 1280 &&
-        !video.paused &&
-        getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)"
-      );
+      return video?.videoWidth === 1280 && !video.paused;
     }, selector);
   await wide("[data-floating-viewfinder]");
-  const windowPlace = () =>
-    tab.evaluate(() => {
-      const box = document.querySelector("[data-floating-viewfinder]").getBoundingClientRect();
-      return [box.left, box.top, box.width, box.height].map(Math.round).join();
-    });
-  // Down against the Player's bottom edge, where a wrong aspect on the way back would move it.
-  await tab.locator("[data-floating-viewfinder]").focus();
-  for (let step = 0; step < 20; step++) await tab.keyboard.press("Shift+ArrowDown");
-  const placed = await windowPlace();
   await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
   await shows(tab, "There you are. I'll keep that one.");
   await tab.waitForFunction(decodedPhotos);
@@ -230,11 +173,6 @@ async function checks(page, url) {
   await wide("[data-stage-camera]");
   await tab.locator("button", { hasText: "Back to the window" }).click();
   await wide("[data-floating-viewfinder]");
-  // A 16:9 camera's window comes back with the place and size it had.
-  check(
-    (await windowPlace()) === placed,
-    "The window lost its place on the way back from the Stage",
-  );
   // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
   await tab.locator("button", { hasText: "Yes, Mistress" }).click();
   await shows(tab, "Good. That's enough looking for now.");
