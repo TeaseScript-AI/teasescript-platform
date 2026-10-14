@@ -24,6 +24,7 @@ import type {
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
   RuntimeInteractionActionSnapshot,
+  RuntimeLockActionSnapshot,
   RuntimePendingActionSnapshot,
   InteractionResultValue,
 } from "./actions/model.js";
@@ -339,12 +340,13 @@ export type RuntimeTimerInterruptionSnapshot =
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
 
-/** Foreground actions that an interrupt block can suspend. */
+/** Foreground actions that an interrupt block can suspend; of a lock, only a step whose dialog asks the player. */
 export type RuntimeInterruptibleActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot
-  | RuntimeMediaPlaybackActionSnapshot;
+  | RuntimeMediaPlaybackActionSnapshot
+  | RuntimeLockActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
   readonly kind: "function";
@@ -388,7 +390,7 @@ export type RuntimeFrameSnapshot = RuntimeCallFrameSnapshot | RuntimeFileCallFra
 
 export interface RuntimeInteractionResultHandoffSnapshot {
   /** Which foreground action produced the result: an interaction, a capture, or a file store. */
-  readonly actionKind: "interaction" | "capture" | "fileStore";
+  readonly actionKind: "interaction" | "capture" | "fileStore" | "lock";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
@@ -934,6 +936,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
       files: action.files.map((file) => ({ ...file })),
       references: [...action.references],
     };
+  if (action.kind === "lock") return { ...action };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -1070,6 +1073,7 @@ function cloneSettlement(
     return { ...settlement };
   if (settlement.actionKind === "fileStore")
     return { ...settlement, references: [...settlement.references] };
+  if (settlement.actionKind === "lock") return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",
@@ -2498,7 +2502,8 @@ function validateTimerHandlerFrame(
     (action.kind !== "delay" &&
       action.kind !== "interaction" &&
       action.kind !== "chatPacingGate" &&
-      action.kind !== "mediaPlayback") ||
+      action.kind !== "mediaPlayback" &&
+      (action.kind !== "lock" || action.phase !== "ask")) ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");
@@ -3064,6 +3069,7 @@ function validateStatusConsistency(
         "storageWrite",
         "capture",
         "fileStore",
+        "lock",
       ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -3250,6 +3256,9 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "fileStore" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime file store result destination is already occupied.");
+  }
+  if (instruction.kind === "lock" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime lock result destination is already occupied.");
   }
   if (
     instruction.kind === "say" &&

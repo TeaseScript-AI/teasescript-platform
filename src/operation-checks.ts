@@ -14,6 +14,7 @@ import {
   WRITABLE_JSON_FIX,
   type ConversionResult,
 } from "./conversions.js";
+import { LOCK_CALLS } from "./capture-call.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
@@ -369,6 +370,7 @@ export function builtinCallProblems(
   )
     return dataTextProblems(name, call, typeOf);
   if (name === "toRegex") return regexConversionProblems(call, typeOf);
+  if (LOCK_CALLS.has(name)) return lockProblems(name, call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -406,6 +408,86 @@ export function builtinCallProblems(
         kind: "invalidOperand",
         message: `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeValue(fallbackType)}.`,
         span: fallback.span,
+      });
+  }
+  return problems;
+}
+
+/**
+ * Problems with `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
+ * `decryptFile(file, ..., default:)` (V30 §13): their arguments, a named argument the call does not take, a missing
+ * `default:`, a `password:` that can never be text, an `openAt:` that can never be a moment or `null`, and an encrypt call
+ * whose only opener is a written `openAt: null`. The text or file is checked where it is called.
+ */
+function lockProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const decrypts = name === "decryptText" || name === "decryptFile";
+  const parameters = decrypts ? ["password", "default"] : ["password", "openAt"];
+  const problems: OperationProblem[] = [];
+  const named = new Map<string, Expression>();
+  let positional = 0;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional += 1;
+    else if (parameters.includes(argument.name.name)) named.set(argument.name.name, argument.value);
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${parameters.map((parameter) => `'${parameter}:'`).join(" and ")}.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional !== 1)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes 1 argument (${name.endsWith("File") ? "file" : "text"})${decrypts ? " and a 'default:'" : ""}, received ${positional}.`,
+      span: call.span,
+    });
+  else if (decrypts && !named.has("default"))
+    problems.push({
+      kind: "argumentCount",
+      message: `'${name}(${name === "decryptText" ? "text" : "file"}, default: value)' needs a 'default:' for when it does not open, such as with a wrong password. Add one, such as 'default: null'.`,
+      span: call.span,
+    });
+  const password = named.get("password");
+  if (password !== undefined) {
+    const type = typeOf(password);
+    const candidates = members(forUse(type)).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `'password:' takes text (string), not ${describeValue(type)}.`,
+        span: password.span,
+      });
+  }
+  const openAt = named.get("openAt");
+  if (openAt !== undefined) {
+    const type = typeOf(openAt);
+    const candidates = members(type).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every(
+        (candidate) =>
+          isKnown(candidate) &&
+          candidate.kind !== "null" &&
+          !isScalar(candidate, "absoluteDateTime"),
+      )
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `'openAt:' takes a moment (absoluteDateTime) or null, not ${describeValue(type)}.`,
+        span: openAt.span,
+      });
+    else if (openAt.kind === "nullLiteral" && password === undefined)
+      problems.push({
+        kind: "invalidOperand",
+        message: `${name}(...) with 'openAt: null' and no 'password:' has no way to open, so nothing could ever open it. Give a 'password:', or a moment in 'openAt:'.`,
+        span: openAt.span,
       });
   }
   return problems;

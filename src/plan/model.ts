@@ -167,6 +167,7 @@ export type Instruction =
   | InteractionInstruction
   | CaptureInstruction
   | FileStoreInstruction
+  | LockInstruction
   | GotoInstruction
   | TransferInstruction
   | SetFallbackInstruction
@@ -983,6 +984,30 @@ export interface FileStoreInstruction extends InstructionBase {
   readonly defaultTemporary: number | null;
   /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
   readonly files: ExpressionPlan | null;
+  readonly destinationTemporary: number;
+}
+
+/** The calls that lock and open text and stored files, which `lock` instructions run (V30 §13). */
+export type LockCall = "encryptText" | "encryptFile" | "decryptText" | "decryptFile";
+
+/**
+ * `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
+ * `decryptFile(file, ..., default:)` (V30 §13). It asks the Player to lock or open and waits, with the instruction itself
+ * as the continuation; each answer is handed off and the instruction runs again with it, either to give the result or
+ * to wait again, as while the Player's dialog asks the player. Its operands are temporaries or literals, so every run
+ * reads the same values.
+ */
+export interface LockInstruction extends InstructionBase {
+  readonly kind: "lock";
+  readonly call: LockCall;
+  /** The text, Base64 lock, or stored file. */
+  readonly value: ExpressionPlan;
+  /** The written `password:`, or `null`. */
+  readonly password: ExpressionPlan | null;
+  /** The written `openAt:` of an encrypt call; `null` without one, which means the default time lock. */
+  readonly openAt: ExpressionPlan | null;
+  /** The `default:` of a decrypt call; `null` for an encrypt call. */
+  readonly default: ExpressionPlan | null;
   readonly destinationTemporary: number;
 }
 

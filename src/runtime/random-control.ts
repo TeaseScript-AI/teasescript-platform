@@ -449,6 +449,13 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
       return instruction.tags === null ? [] : [instruction.tags];
     case "fileStore":
       return [instruction.value, ...(instruction.files === null ? [] : [instruction.files])];
+    case "lock":
+      return [
+        instruction.value,
+        ...(instruction.password === null ? [] : [instruction.password]),
+        ...(instruction.openAt === null ? [] : [instruction.openAt]),
+        ...(instruction.default === null ? [] : [instruction.default]),
+      ];
     case "storageWrite":
       return instruction.value === null ? [instruction.key] : [instruction.value, instruction.key];
     case "playMedia":

@@ -44,6 +44,26 @@ export function isFileStoreCall(expression: Expression): boolean {
   );
 }
 
+/** The calls that lock and open text and stored files (V30 §13), which `lock` instructions run. */
+export const LOCK_CALLS: ReadonlySet<string> = new Set([
+  "encryptText",
+  "encryptFile",
+  "decryptText",
+  "decryptFile",
+]);
+
+/**
+ * Whether an expression is `encryptText(...)`, `encryptFile(...)`, `decryptText(...)`, or `decryptFile(...)` (V30 §13).
+ * Like `takePhoto()` it waits for the Player, which may ask the player first, so it lowers to a lock instruction.
+ */
+export function isLockCall(expression: Expression): boolean {
+  return (
+    expression.kind === "callExpression" &&
+    expression.callee.kind === "identifier" &&
+    LOCK_CALLS.has(expression.callee.name)
+  );
+}
+
 /** Whether any of the programs takes a photo with `tags:`, which joins the image catalog at runtime (ADR 0023). */
 export function capturesTaggedPhotos(programs: readonly Program[]): boolean {
   const work: unknown[] = [...programs];

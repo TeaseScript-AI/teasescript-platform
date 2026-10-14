@@ -5,6 +5,7 @@ import type {
   InteractionKind,
   InteractionResultDomain,
   InteractionUiPayload,
+  LockCall,
   PlanTag,
 } from "../../plan/model.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
@@ -263,6 +264,53 @@ export function fileStoreOperation(
   return call === "hashFile" ? "hash" : "read";
 }
 
+/** Why the unlock dialog asks again: the typed password did not open, or the passed time lock could not be fetched. */
+export type RuntimeLockNotice = "wrongPassword" | "unreachable";
+
+/**
+ * How a step of a lock ended: `locked` or `opened` with the result, `notOpened` (the default), `unreadable` or `failed`
+ * (a runtime error), `ask` (the Player must ask the player), or, for a dialog, `submitted` or `cancelled` (the default).
+ */
+export type RuntimeLockOutcome =
+  "locked" | "opened" | "notOpened" | "unreadable" | "failed" | "ask" | "submitted" | "cancelled";
+
+/**
+ * A `lock` instruction waits while the Player locks or opens text or a stored file (V30 §13). In its `work` phase the
+ * Player locks or opens with what it has, without the player; nothing interrupts it, so a due block runs once it
+ * settles. In its `ask` phase the Player's dialog asks the player first, like an interaction: a due block interrupts it,
+ * and it is presented again afterwards. Each answer is handed off to the instruction, which runs again, either to give
+ * the result or to wait in the next phase, so its continuation is itself.
+ */
+export interface RuntimeLockActionSnapshot {
+  readonly kind: "lock";
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  /** Where the instruction puts its result once it runs again with the last answer. */
+  readonly destinationTemporary: number;
+  readonly createdAtMs: number;
+  readonly requestEventSequence: number;
+  readonly call: LockCall;
+  readonly phase: "work" | "ask";
+  /** `encryptText`'s text, `decryptText`'s lock as standard Base64, or the stored file of the file calls. */
+  readonly value: string;
+  /** The written `password:`, or `null`. */
+  readonly password: string | null;
+  /**
+   * An encrypt call's time lock: the moment it opens by itself, in epoch milliseconds, from `openAt:` or 7 days from now,
+   * or `null` with `openAt: null`; while the lock dialog asks, the moment it suggests. `null` for a decrypt call and for
+   * the step after a dialog.
+   */
+  readonly openAtMs: number | null;
+  /** The `ask` action whose dialog the player answered just before this `work` step, or `null`. */
+  readonly dialogActionId: number | null;
+  /** Why the unlock dialog asks again, or `null`. */
+  readonly notice: RuntimeLockNotice | null;
+}
+
 /** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */
 export type CaptureUnavailableReason =
   "unconfigured" | "denied" | "notFound" | "busy" | "unsupported" | "revoked" | "failed";
@@ -285,7 +333,8 @@ export type RuntimeForegroundActionSnapshot =
   | RuntimeMediaPlaybackActionSnapshot
   | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot
-  | RuntimeFileStoreActionSnapshot;
+  | RuntimeFileStoreActionSnapshot
+  | RuntimeLockActionSnapshot;
 
 export type RuntimePendingActionSnapshot =
   | RuntimeDelayActionSnapshot
@@ -295,6 +344,7 @@ export type RuntimePendingActionSnapshot =
   | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot
   | RuntimeFileStoreActionSnapshot
+  | RuntimeLockActionSnapshot
   | RuntimeTimerActionSnapshot
   | RuntimeMediaActionSnapshot
   | RuntimePermanentButtonActionSnapshot;
@@ -315,7 +365,8 @@ export function requiredActionCompletionEvents(action: { readonly kind?: unknown
     action?.kind === "media" ||
     action?.kind === "mediaPlayback" ||
     action?.kind === "permanentButton" ||
-    action?.kind === "fileStore"
+    action?.kind === "fileStore" ||
+    action?.kind === "lock"
   )
     return 1;
   return 0;
@@ -491,6 +542,26 @@ export interface RuntimeFileStoreActionSettlementSnapshot {
   readonly references: readonly string[];
 }
 
+/**
+ * A settled step of a lock, retained so a repeated Player completion replays instead of locking or opening twice. Its
+ * answer is handed off to the instruction, which runs again; only the stored file it kept is recorded here.
+ */
+export interface RuntimeLockActionSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "lock";
+  readonly settlementKind: "completed";
+  readonly outcome: RuntimeLockOutcome;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly destinationTemporary: number;
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
+  /** The stored file a lock or an opening kept: the locked file, or the opened one; `null` otherwise. */
+  readonly file: string | null;
+}
+
 export type RuntimeActionSettlementSnapshot =
   | RuntimeDelayActionSettlementSnapshot
   | RuntimeInteractionActionSettlementSnapshot
@@ -498,4 +569,5 @@ export type RuntimeActionSettlementSnapshot =
   | RuntimeMediaPlaybackSettlementSnapshot
   | RuntimeStorageWriteSettlementSnapshot
   | RuntimeCaptureActionSettlementSnapshot
-  | RuntimeFileStoreActionSettlementSnapshot;
+  | RuntimeFileStoreActionSettlementSnapshot
+  | RuntimeLockActionSettlementSnapshot;

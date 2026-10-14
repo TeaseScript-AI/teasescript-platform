@@ -1,0 +1,658 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../src/compiler.js";
+import type { InstructionPlan } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
+import type { RuntimeLockActionSnapshot } from "../src/runtime/actions/model.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../src/runtime/checkpoint.js";
+import { run } from "../src/runtime/engine.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
+import {
+  validateRuntimeSnapshot,
+  type FreshRuntimeOptions,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
+import { storedFileKind, type StoredFileKind } from "../src/runtime/stored-files.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+
+/*
+ * encryptText, encryptFile, decryptText, and decryptFile (V30 §13), from source through the engine's lock steps, which a
+ * fake Player answers here: it keeps what each lock holds under a made-up Base64 lock or locked file, and opens it with
+ * the right password, or with its time lock once its moment has passed. The real locks are tested with the Player.
+ */
+
+const WALL_CLOCK_MS = Date.UTC(2026, 9, 14, 12, 0, 0);
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+interface FakeLock {
+  readonly content: string;
+  readonly password: string | null;
+  readonly openAtMs: number | null;
+}
+
+type DialogAnswer = { readonly password?: string; readonly openAtMs?: number } | "cancel";
+
+/** The Player's store and its locks, as the engine meets them. */
+class FakePlayer {
+  readonly files = new Map<string, { readonly kind: StoredFileKind; readonly content: string }>();
+  readonly locks = new Map<string, FakeLock>();
+  /** What the dialogs answer, in order: what the player typed, or a cancel. */
+  readonly dialogs: DialogAnswer[] = [];
+  /** Whether the typed answer is lost before the step after the dialog, as on a reload. */
+  forget = false;
+  #typed: Exclude<DialogAnswer, "cancel"> | null = null;
+  #next = 1;
+
+  readonly admission = {
+    holds: (reference: string, kind: StoredFileKind) => this.files.get(reference)?.kind === kind,
+  };
+
+  /** The moment the Player's time service gives when it opens: the session's clock, moving with scene time. */
+  nowMs(action: RuntimeLockActionSnapshot): number {
+    return WALL_CLOCK_MS + action.createdAtMs;
+  }
+
+  keep(type: string, content: string): string {
+    const reference = `stored:${this.#next++}`;
+    this.files.set(reference, { kind: storedFileKind(type), content });
+    return reference;
+  }
+
+  /** A made-up lock as standard Base64, unique per lock. */
+  #lock(lock: FakeLock): string {
+    const text = Buffer.from(`lock ${this.#next++}`).toString("base64");
+    this.locks.set(text, lock);
+    return text;
+  }
+
+  answer(action: RuntimeLockActionSnapshot) {
+    if (action.phase === "ask") {
+      const dialog = this.dialogs.shift() ?? {};
+      if (dialog === "cancel") return { kind: "cancelled" };
+      this.#typed = this.forget ? null : dialog;
+      return { kind: "submitted" };
+    }
+    const typed = action.dialogActionId === null ? null : this.#typed;
+    this.#typed = null;
+    if (action.call === "encryptText" || action.call === "encryptFile") {
+      if (action.dialogActionId !== null && typed === null) return { kind: "ask" };
+      const lock: FakeLock = {
+        content:
+          action.call === "encryptText" ? action.value : this.files.get(action.value)!.content,
+        password: typed === null ? action.password : (typed.password ?? null),
+        openAtMs: typed === null ? action.openAtMs : (typed.openAtMs ?? null),
+      };
+      const text = this.#lock(lock);
+      return action.call === "encryptText"
+        ? { kind: "locked", text }
+        : { kind: "locked", file: this.keep("application/octet-stream", text) };
+    }
+    const text =
+      action.call === "decryptText" ? action.value : this.files.get(action.value)?.content;
+    const lock = text === undefined ? undefined : this.locks.get(text);
+    if (lock === undefined) return { kind: "notOpened" };
+    const password = typed?.password ?? action.password;
+    const passed = lock.openAtMs !== null && lock.openAtMs <= this.nowMs(action);
+    const opens = password !== null ? password === lock.password : passed;
+    if (!opens) {
+      // A written password gives the default; so does a lock with nothing else to try.
+      if (action.password !== null || (lock.password === null && passed))
+        return { kind: "notOpened" };
+      return password === null ? { kind: "ask" } : { kind: "ask", notice: "wrongPassword" };
+    }
+    return action.call === "decryptText"
+      ? { kind: "opened", text: lock.content }
+      : { kind: "opened", file: this.keep("image/png", lock.content), type: "image/png" };
+  }
+}
+
+interface Played {
+  readonly plan: InstructionPlan;
+  readonly snapshot: RuntimeSnapshot;
+  readonly events: InterpreterEvent[];
+  /** The lock steps, in order. */
+  readonly steps: RuntimeLockActionSnapshot[];
+}
+
+/**
+ * Runs `source` until it ends, answering each lock step from `player` and letting each wait's time pass. It restores a
+ * checkpoint of the state at every boundary first, so that each pending step and each handed-off answer is also carried
+ * by a checkpoint.
+ */
+function play(
+  source: string,
+  player = new FakePlayer(),
+  options: Pick<FreshRuntimeOptions, "storedFiles" | "wallClockMs"> = {
+    wallClockMs: WALL_CLOCK_MS,
+  },
+): Played {
+  const plan = compileValidPlan(source);
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const restored = (snapshot: RuntimeSnapshot): RuntimeSnapshot => {
+    assert.deepEqual(validateRuntimeSnapshot(snapshot, plan).errors, []);
+    const json = serializeCheckpoint(createCheckpoint(plan, snapshot));
+    const checkpoint = deserializeCheckpoint(json);
+    assert.equal(serializeCheckpoint(checkpoint), json);
+    return checkpoint.snapshot;
+  };
+  const events: InterpreterEvent[] = [];
+  const steps: RuntimeLockActionSnapshot[] = [];
+  let result = run(plan, createImmediatePacingRuntimeSnapshot(plan, options));
+  events.push(...result.events);
+  for (let guard = 0; result.snapshot.status === "waiting"; guard += 1) {
+    assert.ok(guard < 50, "the script keeps waiting");
+    const snapshot = restored(result.snapshot);
+    const action = snapshot.foregroundAction!;
+    if (action.kind === "delay") {
+      const observed = observeTime(plan, snapshot, action.deadlineMs);
+      events.push(...observed.events);
+      result = run(plan, restored(observed.snapshot));
+      events.push(...result.events);
+      continue;
+    }
+    assert.equal(action.kind, "lock");
+    steps.push(action);
+    const completed = completeAction(
+      plan,
+      snapshot,
+      { actionId: action.actionId, actionKind: "lock", payload: player.answer(action) },
+      { capturedMedia: player.admission },
+    );
+    assert.equal(completed.outcome.kind, "completed", JSON.stringify(completed.outcome));
+    events.push(...completed.events);
+    result = run(plan, restored(completed.snapshot));
+    events.push(...result.events);
+  }
+  return { plan, snapshot: result.snapshot, events, steps };
+}
+
+/** The lock step a state waits for. */
+function lockStep(snapshot: RuntimeSnapshot): RuntimeLockActionSnapshot {
+  const action = snapshot.foregroundAction;
+  assert.ok(action?.kind === "lock");
+  return action;
+}
+
+function variables(played: Played): Record<string, SerializableRuntimeValue> {
+  assert.equal(played.snapshot.failure, null, JSON.stringify(played.snapshot.failure));
+  return Object.fromEntries(
+    played.snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
+  );
+}
+
+function failure(played: Played): { code: string; message: string } {
+  const failed = played.snapshot.failure;
+  assert.notEqual(failed, null);
+  return { code: failed!.code, message: failed!.message };
+}
+
+function diagnostics(source: string): [string, string][] {
+  return compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+  ]);
+}
+
+/** What each step asked for: its call, phase, password, time lock, whether a dialog came first, and its notice. */
+const asked = (played: Played) =>
+  played.steps.map((step) => [
+    step.call,
+    step.phase,
+    step.password,
+    step.openAtMs,
+    step.dialogActionId !== null,
+    step.notice,
+  ]);
+
+test("encryptText locks with a written password and the default time lock, and decryptText opens it", () => {
+  const played = play(
+    [
+      'let locked = encryptText("corner time", password: "corner")',
+      'let opened = decryptText(locked, password: "corner", default: null)',
+      'let wrong = decryptText(locked, password: "Corner", default: "no")',
+      "exit",
+    ].join("\n"),
+  );
+  const { locked, opened, wrong } = variables(played);
+  assert.equal(typeof locked, "string");
+  assert.equal(opened, "corner time");
+  assert.equal(wrong, "no");
+  assert.deepEqual(asked(played), [
+    ["encryptText", "work", "corner", WALL_CLOCK_MS + 7 * DAY_MS, false, null],
+    ["decryptText", "work", "corner", null, false, null],
+    ["decryptText", "work", "Corner", null, false, null],
+  ]);
+  assert.equal(played.steps[0]!.value, "corner time");
+  assert.equal(played.steps[1]!.value, locked);
+});
+
+test("openAt: gives the time lock's moment, and openAt: null leaves the password alone", () => {
+  const played = play(
+    [
+      'let friday = toAbsoluteDateTime("2026-10-16T18:00:00Z")',
+      'let timed = encryptText("a", openAt: getAbsoluteDateTime() + 3 days)',
+      'let both = encryptText("b", password: "p", openAt: friday)',
+      'let passwordOnly = encryptText("c", password: "p", openAt: null)',
+      "exit",
+    ].join("\n"),
+  );
+  variables(played);
+  assert.deepEqual(
+    asked(played).map((step) => step.slice(1, 4)),
+    [
+      ["work", null, WALL_CLOCK_MS + 3 * DAY_MS],
+      ["work", "p", Date.UTC(2026, 9, 16, 18)],
+      ["work", "p", null],
+    ],
+  );
+});
+
+test("a time lock opens without asking once its moment passed, and the unlock dialog asks before", () => {
+  const player = new FakePlayer();
+  player.dialogs.push("cancel");
+  const played = play(
+    [
+      'let locked = encryptText("later", openAt: getAbsoluteDateTime() + 1 hour)',
+      'let early = decryptText(locked, default: "not yet")',
+      "wait 2 h",
+      'let late = decryptText(locked, default: "not yet")',
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  const { early, late } = variables(played);
+  assert.equal(early, "not yet");
+  assert.equal(late, "later");
+  assert.deepEqual(
+    asked(played).map((step) => step.slice(0, 2)),
+    [
+      ["encryptText", "work"],
+      ["decryptText", "work"],
+      ["decryptText", "ask"],
+      ["decryptText", "work"],
+    ],
+  );
+});
+
+test("without any opener the lock dialog asks, suggesting 7 days, and the Player locks with what the player chose", () => {
+  const player = new FakePlayer();
+  player.dialogs.push({ password: "typed" }, { password: "typed" });
+  const played = play(
+    [
+      'let locked = encryptText("chosen")',
+      "let opened = decryptText(locked, default: null)",
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  const { locked, opened } = variables(played);
+  assert.equal(opened, "chosen");
+  assert.ok(typeof locked === "string");
+  assert.deepEqual(player.locks.get(locked), {
+    content: "chosen",
+    password: "typed",
+    openAtMs: null,
+  });
+  assert.deepEqual(asked(played), [
+    ["encryptText", "ask", null, WALL_CLOCK_MS + 7 * DAY_MS, false, null],
+    ["encryptText", "work", null, null, true, null],
+    ["decryptText", "work", null, null, false, null],
+    ["decryptText", "ask", null, null, false, null],
+    ["decryptText", "work", null, null, true, null],
+  ]);
+  // The typed password never reaches the engine.
+  assert.ok(!JSON.stringify([played.snapshot, played.events]).includes("typed"));
+});
+
+test("a wrong password in the unlock dialog asks again with a notice, and a cancel gives the default", () => {
+  const player = new FakePlayer();
+  player.dialogs.push({ password: "wrong" }, "cancel");
+  const played = play(
+    [
+      'let locked = encryptText("secret", password: "right", openAt: null)',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  assert.equal(variables(played).opened, "closed");
+  assert.deepEqual(
+    asked(played)
+      .slice(1)
+      .map((step) => [step[1], step[4], step[5]]),
+    [
+      ["work", false, null],
+      ["ask", false, null],
+      ["work", true, null],
+      ["ask", false, "wrongPassword"],
+    ],
+  );
+});
+
+test("a lock dialog whose typed answer was lost, as on a reload, asks again", () => {
+  /** Forgets the first dialog's answer, and keeps the second's. */
+  class ForgetfulPlayer extends FakePlayer {
+    override answer(action: RuntimeLockActionSnapshot) {
+      if (action.phase === "ask" && this.dialogs.length === 0) {
+        this.forget = false;
+        this.dialogs.push({ openAtMs: WALL_CLOCK_MS + DAY_MS });
+      }
+      return super.answer(action);
+    }
+  }
+  const player = new ForgetfulPlayer();
+  player.forget = true;
+  player.dialogs.push({ password: "lost" });
+  const played = play(['let locked = encryptText("again")', "exit"].join("\n"), player);
+  variables(played);
+  assert.deepEqual(
+    asked(played).map((step) => [step[1], step[4]]),
+    [
+      ["ask", false],
+      ["work", true],
+      ["ask", false],
+      ["work", true],
+    ],
+  );
+});
+
+test("encryptFile locks a stored file into a locked file, and decryptFile opens it into a file of its type", () => {
+  const player = new FakePlayer();
+  const photo = player.keep("image/png", "PNG bytes");
+  const played = play(
+    [
+      `let photo = "${photo}"`,
+      'let locked = encryptFile(photo, password: "p")',
+      'let opened = decryptFile(locked, password: "p", default: null)',
+      'let wrong = decryptFile(locked, password: "q", default: null)',
+      "exit",
+    ].join("\n"),
+    player,
+    { wallClockMs: WALL_CLOCK_MS, storedFiles: [photo] },
+  );
+  const { locked, opened, wrong } = variables(played);
+  assert.ok(typeof locked === "string" && typeof opened === "string");
+  assert.equal(player.files.get(locked)?.kind, "file");
+  assert.equal(player.files.get(opened)?.kind, "image");
+  assert.equal(player.files.get(opened)?.content, "PNG bytes");
+  assert.equal(wrong, null);
+  assert.deepEqual(played.snapshot.storedFiles, [photo, locked, opened].sort());
+});
+
+test("decryptText of text that is no Base64 gives the default at once, and a lock reads Base64 as fromBase64 does", () => {
+  const player = new FakePlayer();
+  const played = play(
+    [
+      'let locked = encryptText("spaced", password: "p")',
+      'let spaced = locked.replace("=", "") + " \\n"',
+      'let opened = decryptText(spaced, password: "p", default: null)',
+      'let none = decryptText("not base64!", password: "p", default: "default")',
+      // A value of no known type that is not text is no lock either.
+      'let amount = fromJson("42", default: null)',
+      'let notText = decryptText(amount, password: "p", default: "default")',
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  const { opened, none, notText } = variables(played);
+  assert.equal(opened, "spaced");
+  assert.equal(none, "default");
+  assert.equal(notText, "default");
+  assert.deepEqual(
+    played.steps.map((step) => step.call),
+    ["encryptText", "decryptText"],
+  );
+});
+
+test("the encrypt and decrypt calls check their arguments when they compile", () => {
+  assert.deepEqual(diagnostics('let a = decryptText("x", password: "p")'), [
+    [
+      "TSV020",
+      "'decryptText(text, default: value)' needs a 'default:' for when it does not open, such as with a wrong password. Add one, such as 'default: null'.",
+    ],
+  ]);
+  const problems = [
+    'let a = encryptText("x", key: "k")',
+    'let a = decryptText("x", openAt: getAbsoluteDateTime(), default: null)',
+    'let a = encryptText("x", password: 4)',
+    'let a = encryptText("x", openAt: toDateTime("2026-10-16T18:00"))',
+    'let a = encryptText("x", openAt: null)',
+    "let a = encryptText(4)",
+    'let a = encryptFile(4, password: "p")',
+    'let a = encryptText("x", "y")',
+    'function f(a: string = encryptText("x")) {\n}',
+  ].map((source) => diagnostics(source).map(([, message]) => message));
+  assert.deepEqual(problems, [
+    ["encryptText(...) has no parameter 'key'. Its named arguments are 'password:' and 'openAt:'."],
+    [
+      "decryptText(...) has no parameter 'openAt'. Its named arguments are 'password:' and 'default:'.",
+    ],
+    ["'password:' takes text (string), not a whole number (integer)."],
+    ["'openAt:' takes a moment (absoluteDateTime) or null, not a date and time."],
+    [
+      "encryptText(...) with 'openAt: null' and no 'password:' has no way to open, so nothing could ever open it. Give a 'password:', or a moment in 'openAt:'.",
+    ],
+    problems[5]!,
+    problems[6]!,
+    ["encryptText(...) takes 1 argument (text), received 2."],
+    [
+      "encryptText(...) is not supported in function parameter defaults, because it may ask the player. Call it in the function's body.",
+    ],
+  ]);
+  assert.match(problems[5]![0]!, /encryptText\(\.\.\.\) locks text \(string\)/);
+  assert.match(problems[6]![0]!, /encryptFile\(\.\.\.\) locks a stored file/);
+  // A password or moment known only when the script runs compiles.
+  assert.deepEqual(
+    diagnostics(
+      [
+        'let saved = fromJson("{}", default: null)',
+        'let a = encryptText("x", password: saved, openAt: saved)',
+        'let b = decryptText(a, password: saved, default: "")',
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
+test("an encrypt call fails at runtime without a way to open, with an argument of the wrong kind, or without a clock", () => {
+  const failures = [
+    [
+      'let nothing = fromJson("null", default: 1)',
+      'let a = encryptText("x", openAt: nothing)',
+      "exit",
+    ],
+    [
+      'let amount = fromJson("4", default: null)',
+      'let a = encryptText("x", password: amount)',
+      "exit",
+    ],
+    [
+      'let amount = fromJson("4", default: null)',
+      'let a = encryptText("x", openAt: amount)',
+      "exit",
+    ],
+    ['let a = encryptFile("images/a.jpg", password: "p")', "exit"],
+    ['let a = decryptFile("images/a.jpg", default: null)', "exit"],
+  ].map((lines) => failure(play(lines.join("\n"))));
+  assert.deepEqual(failures, [
+    {
+      code: "TSR059",
+      message:
+        "encryptText(...) has no way to open, because 'openAt:' is null and there is no 'password:'. Give a 'password:', or a moment in 'openAt:'.",
+    },
+    {
+      code: "TSR059",
+      message: "'password:' of encryptText(...) takes text (string), not a number.",
+    },
+    {
+      code: "TSR059",
+      message:
+        "'openAt:' of encryptText(...) takes a moment (absoluteDateTime) or null, not a number.",
+    },
+    {
+      code: "TSR059",
+      message:
+        'encryptFile(...) locks a stored file, but "images/a.jpg" is not one. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.',
+    },
+    {
+      code: "TSR059",
+      message:
+        'decryptFile(...) opens a stored file, but "images/a.jpg" is not one. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.',
+    },
+  ]);
+  assert.deepEqual(
+    failure(play('let a = encryptText("x", password: "p")\nexit', new FakePlayer(), {})),
+    {
+      code: "TSR064",
+      message:
+        "encryptText(...) needs the current time for its time lock, but this Player supplied no clock when the session started or continued.",
+    },
+  );
+});
+
+test("a due expiry block interrupts a lock dialog, which asks again afterwards, but waits for a lock step", () => {
+  const plan = compileValidPlan(
+    ['timer async 1 s { say "Time is up", instant }', 'let locked = encryptText("x")', "exit"].join(
+      "\n",
+    ),
+  );
+  let result = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  const dialog = lockStep(result.snapshot);
+  assert.deepEqual([dialog.kind, dialog.phase], ["lock", "ask"]);
+  // The block interrupts the dialog: no lock step waits meanwhile, and once it returns the dialog asks again.
+  result = observeTime(plan, result.snapshot, 1000);
+  result = run(plan, result.snapshot);
+  assert.ok(result.events.some((event) => event.kind === "say" && event.text === "Time is up"));
+  assert.deepEqual(validateRuntimeSnapshot(result.snapshot, plan).errors, []);
+  const again = lockStep(result.snapshot);
+  assert.deepEqual([again.actionId, again.phase], [dialog.actionId, "ask"]);
+
+  const working = compileValidPlan(
+    [
+      'timer async 1 s { say "Time is up", instant }',
+      'let locked = encryptText("x", password: "p")',
+      "exit",
+    ].join("\n"),
+  );
+  let step = run(
+    working,
+    createImmediatePacingRuntimeSnapshot(working, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  const work = lockStep(step.snapshot);
+  assert.equal(work.phase, "work");
+  step = observeTime(working, step.snapshot, 1000);
+  step = run(working, step.snapshot);
+  assert.ok(!step.events.some((event) => event.kind === "say"));
+  assert.equal(step.snapshot.foregroundAction?.actionId, work.actionId);
+  // Once the step settles, the block runs before the script goes on.
+  const completed = completeAction(working, step.snapshot, {
+    actionId: work.actionId,
+    actionKind: "lock",
+    payload: { kind: "locked", text: "AAAA" },
+  });
+  assert.equal(completed.outcome.kind, "completed");
+  const after = run(working, completed.snapshot);
+  assert.ok(after.events.some((event) => event.kind === "say" && event.text === "Time is up"));
+  assert.equal(after.snapshot.status, "halted");
+});
+
+test("a lock completion must fit its call and step, and its handoff is checked on restore", () => {
+  const plan = compileValidPlan(
+    'let a = encryptText("x", password: "p")\nlet b = decryptText(a, default: null)\nexit',
+  );
+  const started = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  const action = lockStep(started.snapshot);
+  const complete = (payload: unknown) =>
+    completeAction(plan, started.snapshot, {
+      actionId: action.actionId,
+      actionKind: "lock",
+      payload,
+    }).outcome.kind;
+  for (const payload of [
+    { kind: "locked", text: "not base64!" },
+    { kind: "locked", text: "AAAA", extra: 1 },
+    { kind: "locked", file: "stored:1" },
+    { kind: "opened", text: "x" },
+    { kind: "notOpened" },
+    { kind: "cancelled" },
+    { kind: "submitted" },
+    // A step with a written password never asks.
+    { kind: "ask" },
+    { kind: "failed", reason: "unreadable" },
+    { kind: "failed" },
+  ])
+    assert.equal(complete(payload), "invalidPayload", JSON.stringify(payload));
+  assert.equal(complete({ kind: "failed", reason: "unavailable" }), "completed");
+  const locked = completeAction(plan, started.snapshot, {
+    actionId: action.actionId,
+    actionKind: "lock",
+    payload: { kind: "locked", text: "AAAA" },
+  });
+  assert.equal(locked.outcome.kind, "completed");
+  // The handoff carries the outcome and the lock; another outcome or result is rejected on restore.
+  const handoff = locked.snapshot.interactionResultHandoff!;
+  assert.deepEqual(handoff.result, { kind: "list", items: ["locked", "AAAA"] });
+  for (const result of [
+    { kind: "list", items: ["opened", "AAAA"] },
+    { kind: "list", items: ["locked"] },
+    { kind: "list", items: ["locked", "not base64!"] },
+    { kind: "list", items: ["notOpened"] },
+  ]) {
+    const tampered = { ...locked.snapshot, interactionResultHandoff: { ...handoff, result } };
+    assert.notDeepEqual(validateRuntimeSnapshot(tampered, plan).errors, [], JSON.stringify(result));
+  }
+  // The decrypt step without a password may ask; its dialog may only be submitted or cancelled.
+  const decrypting = run(plan, locked.snapshot);
+  const unlock = lockStep(decrypting.snapshot);
+  assert.deepEqual([unlock.call, unlock.phase, unlock.password], ["decryptText", "work", null]);
+  const asks = completeAction(plan, decrypting.snapshot, {
+    actionId: unlock.actionId,
+    actionKind: "lock",
+    payload: { kind: "ask", notice: "unreachable" },
+  });
+  assert.equal(asks.outcome.kind, "completed");
+  // A wrong password needs a password the dialog asked for.
+  assert.equal(
+    completeAction(plan, decrypting.snapshot, {
+      actionId: unlock.actionId,
+      actionKind: "lock",
+      payload: { kind: "ask", notice: "wrongPassword" },
+    }).outcome.kind,
+    "invalidPayload",
+  );
+  const dialog = run(plan, asks.snapshot).snapshot;
+  const asking = lockStep(dialog);
+  assert.deepEqual([asking.phase, asking.notice], ["ask", "unreachable"]);
+  for (const payload of [{ kind: "opened", text: "x" }, { kind: "notOpened" }, { kind: "ask" }])
+    assert.equal(
+      completeAction(plan, dialog, { actionId: asking.actionId, actionKind: "lock", payload })
+        .outcome.kind,
+      "invalidPayload",
+    );
+  // A step is not changed into a dialog or given a password on restore.
+  for (const change of [
+    { phase: "work" },
+    { password: "p" },
+    { notice: "nonsense" },
+    { value: "*" },
+  ]) {
+    const tampered = { ...dialog, foregroundAction: { ...asking, ...change } };
+    assert.notDeepEqual(validateRuntimeSnapshot(tampered, plan).errors, [], JSON.stringify(change));
+  }
+});

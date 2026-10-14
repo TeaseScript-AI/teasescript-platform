@@ -1,4 +1,5 @@
 import { executeFileStore } from "./actions/file-store.js";
+import { executeLock } from "./actions/lock.js";
 import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { leaveScopes, resolveCaptures } from "./captures.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
@@ -1509,6 +1510,9 @@ function executePlannedInstruction(
     }
     case "fileStore":
       executeFileStore(instruction, snapshot, evaluator, events);
+      return;
+    case "lock":
+      executeLock(instruction, snapshot, evaluator, events);
       return;
     case "startTimer":
       startTimer(instruction, snapshot, evaluator, events);
