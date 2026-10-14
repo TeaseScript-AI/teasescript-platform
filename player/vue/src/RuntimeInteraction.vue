@@ -265,7 +265,12 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
+const composer = ref<{
+  focusInput(): void;
+  selectInput(): void;
+  openPicker(): void;
+  takeKey(event: KeyboardEvent): void;
+} | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -614,6 +619,56 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
   if (gesture?.pointerId === event.pointerId && gesture.target.isConnected)
     skipPacing(false, gesture.actionId);
 });
+
+// Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
+// devices. A click on Player content that is no control, which moves focus to the conversation or the page, gives it
+// back. A click that selected text keeps it, as focusing the composer would clear the selection, and a key typed then
+// goes to the composer as typed there.
+useEventListener(document, "click", (event: MouseEvent) => {
+  const target = event.target;
+  if (
+    event.button === 0 &&
+    hoverAvailable.value &&
+    !textSelected() &&
+    target instanceof Element &&
+    composition.value?.contains(target) &&
+    !target.closest(playerControls)
+  )
+    focusInput();
+});
+useEventListener(document, "keydown", (event: KeyboardEvent) => {
+  const target = event.target;
+  if (
+    event.key.length === 1 &&
+    !event.defaultPrevented &&
+    !event.isComposing &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    textSelected() &&
+    (target === document.body ||
+      (target instanceof Element &&
+        !!composition.value?.contains(target) &&
+        !target.closest(playerControls)))
+  ) {
+    document.documentElement.dataset.playerKeyboardFocus = "false";
+    composer.value?.takeKey(event);
+  }
+});
+// A message's pacing gives the composer its default focus when focus belongs to nothing, as an interaction does, such
+// as after a button pressed with the mouse left with its interaction.
+watch(
+  () => pacing.value?.actionId,
+  async (gate) => {
+    if (gate === undefined) return;
+    await nextTick();
+    const active = document.activeElement;
+    if ((!active || active === document.body) && hoverAvailable.value) {
+      document.documentElement.dataset.playerKeyboardFocus = "false";
+      focusInput();
+    }
+  },
+);
 
 /**
  * Makes one chosen or dropped file the preview of the image request the files are for, which "Use image" then answers

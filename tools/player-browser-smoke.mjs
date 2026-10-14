@@ -700,6 +700,7 @@ async function demoScenario(cdp, origin) {
   const stageSources = [];
   let inputOwnershipChecked = false;
   let spaceSkipChecked = false;
+  let spaceButtonChecked = false;
   let smartFollowChecked = false;
   const texts = new Set();
   const audio = [];
@@ -754,6 +755,9 @@ async function demoScenario(cdp, origin) {
       // The next two messages arrive on their own pacing, one after the other.
       smartFollowChecked = true;
       await smartFollowCheck(cdp);
+    } else if (!spaceButtonChecked && state.buttons.length === 1 && state.buttons[0] !== "Finish") {
+      spaceButtonChecked = true;
+      await spaceButtonCheck(cdp);
     } else if (state.buttons.length === 1) {
       finished = state.buttons[0] === "Finish";
       await physicalClick(cdp, "[data-foreground-controls] button");
@@ -775,7 +779,11 @@ async function demoScenario(cdp, origin) {
     `!document.querySelector('[data-foreground-controls] button') && document.querySelector('[data-composer-input]')?.disabled === true`,
   );
   await waitFor(cdp, `!document.querySelector('.stage-media')`);
-  assertEqual(inputOwnershipChecked && spaceSkipChecked, true, "The pacing input checks ran");
+  assertEqual(
+    inputOwnershipChecked && spaceSkipChecked && spaceButtonChecked,
+    true,
+    "The pacing and Space checks ran",
+  );
   assertEqual(smartFollowChecked, true, "The smart follow check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
@@ -836,6 +844,41 @@ async function pacingInputOwnershipCheck(cdp) {
     `${messageCount} > ${gate}`,
     1_000,
     "A press on a message did not skip pacing",
+  );
+}
+
+// A word selected in a message keeps focus there, so that it can be copied, and Space in the empty composer still
+// presses the showButton, which is preselected.
+async function spaceButtonCheck(cdp) {
+  await pressPoint(cdp, latestMessage(), "the latest message");
+  const word = await value(
+    cdp,
+    `(() => {
+      const walker = document.createTreeWalker(${latestMessage()}, NodeFilter.SHOW_TEXT);
+      let text = walker.nextNode();
+      while (text && !/\\S{3}/u.test(text.textContent)) text = walker.nextNode();
+      const start = text.textContent.search(/\\S{3}/u);
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, start + 3);
+      const box = range.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    })()`,
+  );
+  for (const clickCount of [1, 2])
+    for (const type of ["mousePressed", "mouseReleased"])
+      await cdp.call("Input.dispatchMouseEvent", { type, ...word, button: "left", clickCount });
+  assertEqual(
+    await value(cdp, `document.getSelection().toString().trim().length > 0`),
+    true,
+    "A double click did not select a word in the message",
+  );
+  await pressSpace(cdp);
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-foreground-controls] button')`,
+    1_000,
+    "Space in the empty composer did not press the showButton while a word was selected",
   );
 }
 

@@ -224,7 +224,16 @@ function selectInput(): void {
   });
 }
 
-defineExpose({ focusInput, selectInput, openPicker });
+/**
+ * Takes a key typed while focus is elsewhere, on content that is no control: it acts as in the input, and a character
+ * it does not use is typed into the input, which takes focus before the browser inserts it.
+ */
+function takeKey(event: KeyboardEvent): void {
+  handleKeydown(event);
+  if (!event.defaultPrevented) input.value?.focus({ preventScroll: true });
+}
+
+defineExpose({ focusInput, selectInput, openPicker, takeKey });
 </script>
 
 <template>
