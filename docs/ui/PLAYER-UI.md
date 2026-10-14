@@ -632,10 +632,14 @@ theme's accent, as does a photo with too little colour. A grey photo makes the P
 same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. A new photo and its
 colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
 stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
-photo shows with the previous colour, and its own colour follows. After Start, the Player downloads and measures every
-Stage image the script names, by its path or as a candidate of `showImage tagged`, in the background, one at a time
-and after any photo the Stage waits for; such a photo then only needs decoding when it shows. An image path the script
-computes while it runs is downloaded when it shows. When the browser does not let the Player read an image's pixels,
+photo shows with the previous colour, and its own colour follows. After Start, the Player downloads every Stage image
+the script names, by its path or as a candidate of `showImage tagged`, into its Cache Storage and measures it, in the
+background, one at a time and after any photo the Stage waits for; such a photo then shows from that copy without a new
+download and only needs decoding. An image path the script computes while it runs is downloaded into the cache when it
+shows. In memory the Player keeps each photo's colours, and the file only of the photo the Stage shows or prepares. The
+Player empties its cache when a newly opened page loads a script, so a later visit downloads changed files again, and
+keeps only the images a script names when another script starts. Without Cache Storage, as outside a secure context, a
+photo is downloaded again each time it shows. When the browser does not let the Player read an image's pixels,
 the previous photo's colour stays; a camera view or an image request's preview over the Stage does not change it. The
 Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
 colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
