@@ -345,6 +345,37 @@ async function transcriptNativeWheelChecks(page) {
   return "PASS native transcript wheel ownership across text, margins and thumb, malformed input, burst and drag";
 }
 
+// A refused answer shows the composer's notice, which a press or touch outside it dismisses.
+async function composerNoticeChecks(page) {
+  const baseUrl = page.url().split("?")[0];
+  const invalidAnswer = async () => {
+    await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
+    const input = page.locator("[data-runtime-interaction] textarea");
+    await input.fill("Not an option");
+    await input.press("Enter");
+    // The composer's own feedback; the Player notice live regions are separate status regions.
+    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
+  };
+  await page.setViewportSize({ width: 920, height: 560 });
+  await page.goto(baseUrl);
+  await invalidAnswer();
+  await page.locator(".player-stage").click();
+  await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto(baseUrl);
+  await invalidAnswer();
+  const stage = await page.locator(".player-stage").boundingBox();
+  const touch = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  // Well before the notice's own expiry, so only the touch can have dismissed it.
+  await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  return "PASS a refused answer shows the composer's notice, and an outside press or touch dismisses it";
+}
+
 async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -559,6 +590,7 @@ const groups = [
   fullscreenChecks,
   mediaPlaybackChecks,
   transcriptNativeWheelChecks,
+  composerNoticeChecks,
   composerMouseFocusChecks,
   startComposerFocusChecks,
   composerSendFocusChecks,
