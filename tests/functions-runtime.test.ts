@@ -547,6 +547,23 @@ test("does not retarget prepared speaker paths through identity aliases", () => 
   assert.deepEqual(sayTexts(result), ["Final", "2", "1"]);
 });
 
+test("keeps a prepared speaker receiver when a call gives its variable another speaker", () => {
+  const result = runSource(
+    [
+      'speaker vera { title: "Mistress" }',
+      'speaker anna { title: "Miss" }',
+      "let current = vera",
+      'function swap { current = anna\nreturn "Lady" }',
+      "current.title = swap()",
+      "say vera.title",
+      "say anna.title",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["Lady", "Miss"]);
+});
+
 test("functions read and assign package-global variables without leaking locals", () => {
   const result = runSource(
     [

@@ -1712,7 +1712,7 @@ restart, and report the failure with its debug export.
 | `TSR030` | A speaker property shown in output that is not text. | Set the property to text. |
 | `TSR031` | A value from the host with a cycle or another shape a script value cannot have. | Report it to the host. |
 | `TSR033` | Leaving the root scope. _Defect._ | Report it. |
-| `TSR034` | An assignment that replaces a speaker. | Change the speaker's properties instead. |
+| `TSR034` | An assignment to the name of a declared speaker. _Defect._ | Report it. |
 | `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. _Defect._ | Report it. |
 | `TSR036` | Arithmetic without a finite result: division or remainder by zero, a number or duration too large, a math function outside its domain, or a regression whose points all have the same x. | Check that the divisor is not 0, use smaller values, or pass values the function accepts. |
 | `TSR037` | The instruction budget of one run at one scene time is used up, usually by a loop that neither waits nor ends. | Add a wait, or check the loop's condition. |
