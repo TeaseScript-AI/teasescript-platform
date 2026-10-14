@@ -313,10 +313,8 @@ changes, outside/inside overlay input, keyboard focus, touch press feedback, scr
 when relevant.
 
 For visual-only work, compare key layout rectangles before and after the change so decoration does not silently alter
-geometry; this belongs to the scoped visual check, not to maintained test assertions (see
-[`TESTING.md`](../TESTING.md#player-browser-and-visual-verification)). Reproduce a reported bug and inspect computed
-layout/state before assigning a cause from a screenshot. For touch-specific behavior, prefer a real-device check when
-emulation cannot reproduce the report.
+geometry. Reproduce a reported bug and inspect computed layout/state before assigning a cause from a screenshot. For
+touch-specific behavior, prefer a real-device check when emulation cannot reproduce the report.
 
 When several consecutive fixes add special cases around the same invariant, stop patching and reassess ownership or the
 state model. A focused consolidation is usually safer than another override. Temporary experimental styling should be

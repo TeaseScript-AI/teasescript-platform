@@ -143,12 +143,11 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 ## Player browser and visual verification
 
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
-browser behavior: what a person can observe and do, such as a control opening, closing, playing, or going fullscreen,
-focus and keyboard input, scrolling, overlays, accessibility state, and content being shown, reachable, and readable.
-Smoke steps interact as a person does, scrolling to a control before using it. They do not assert sizes, positions,
-pixel offsets, or which element sits at which coordinates: adding, removing, or moving an element must not fail a check
-unless it breaks such behavior. Layout itself is checked by the scoped visual check below. The existing Chromium
-DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
+browser behavior. While the Player UI is a proof of concept, keep these checks coarse: the Player loads, plays the demo,
+its main controls work, and settled text stays readable. Behavior that took repeated fixes keeps focused checks, such
+as scrolling that must feel the same over the conversation, beside it, and over its scrollbar, and focus and input. Do
+not pin animations, timings, exact colours, or layout; the scoped visual check below covers those by eye. The existing
+Chromium DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
 [Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
 `npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
 `playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
@@ -586,132 +585,21 @@ The playground and the Player's repository demo have a reproducible Chromium smo
 node tools/player-browser-smoke.mjs
 ```
 
-`PLAYER_SMOKE_ONLY=photoColour,viewfinder` runs only the named scenarios (each scenario function's name without
-`Scenario`; the technical playground is `playground`), in their usual order and with the scenarios they need; an
-unknown name fails and lists the known ones. Without it, everything runs.
+`PLAYER_SMOKE_ONLY=photoColour,camera` runs only the named scenarios (each scenario function's name without
+`Scenario`; the technical playground is `playground`); an unknown name fails and lists the known ones.
 
-It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
-gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
-playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
-empty composer but not from a Player control, a press on message text, or Space while the composer holds text, smart
-follow that keeps a scrolled-up reader in place while a message arrives and resumes through Return to latest, a press
-held past one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow
-viewport that keeps the first question's input visible. With Chromium's fake camera showing a generated four-color test
-card it also runs the development preview's camera scenario (`/player/?dev&debug=off&scenario=camera`): granted, the session camera
-opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
-run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
-reference in saved data shows no photo. The camera view scenario (`?scenario=viewfinder`) checks that the script's
-camera view plays the test card mirrored in its window, stays where the arrow keys moved it while the sidebar is hidden
-and shown and after a visit to the Stage, and stays
-when the script takes its unmirrored photo; that `view.placement = "stage"` moves it over the Stage, where the photo stays
-underneath and a narrow Stage shows it whole; that `hideCamera` hides it; and that a denied camera shows none.
-The permanent buttons scenario (`?scenario=buttons`) checks that a clicked button stays in place, inactive and focused,
-until its block ends; that a block can remove its own button, passing focus to the next one; that a click interrupts
-the waiting question, which returns; and that a `goto` and `exit` remove the buttons. Serving the fixture package root
-`tests/fixtures/packages/`, it opens packages by URL in the Player, playground, and editor: a valid package starts at
-its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
-with file and line. Its `pictures` package checks `askImage(...)`: only while a request waits does the composer offer
-a paperclip, which opens the native picker, and a drop target; Upload file opens the picker too, a cancelled picker
-changes nothing, and Use image is greyed with its reason until a chosen image stands on the Stage as the preview, which
-another file replaces; Use image answers with a chosen and with a dropped image, while a text file, two files, or a
-file outside the request's filters are refused and the request keeps waiting; its `picture-race` package checks that a
-file chosen for a request a timer's request replaced becomes the preview of neither; and its `picture-camera` and
-`picture-camera-view` packages check that no camera turns on by itself, that Open camera shows the viewfinder without
-the question on the Stage or in the script's camera window, that Back returns without a photo, that Take photo and the
-Self-timer's countdown each return with a photo of the fake camera's test card as the preview, that only Use image
-answers, that the camera the request opened turns off when the camera step ends, also when a file is given there, that
-a reload at either step comes back at the first step without a photo, and that a busy camera offers Try again while the
-paperclip stays; its `picture-skip` package checks that a request written with `allowSkip: true` offers Skip in its
-first step, which answers `null`, and that one without offers none. Its `updates` package changes messages in place: a counter that grows while it is out of view keeps
-the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
-region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
-shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
-with the message above them, an update taller than the view shows directly and stops showing its first entry,
-with Return to latest, while later messages do not move the reader, also for a two-entry update after the reader
-scrolled back to the end, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
-waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
-with the saved photo's exact bytes and not the unsaved one, a copy without the clipboard API still copies the text, a
-refused copy selects it, closing releases the file,
-and the narrow dialog stays on the screen. In a fresh browser profile it imports that export: a chosen file
-lists every script as new and Cancel keeps the running session; a dropped file's confirmation ends the session, puts
-every script into its own scope, and the next Start shows the imported photo; pasted text replaces the data before
-Start; and, while another script runs, only the ticked script is replaced and the session continues. Its `debug-failure`
-package stops with TSR036 after an answer and a photo: the error line and its notice open the error dialog, which does
-not open by itself, names the file and line, and shows the code with its message and the failing line with its
-expression marked only once expanded; Close returns focus to the line, and the dialog fits a narrow screen; the debug
-export it hands over to with nothing chosen holds no answer or photo reference, the export with replay data and the
-photo chosen holds the photo's exact bytes and the offline tool reproduces the failure, and the narrow dialog stays on
-the screen. On the
-importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
-physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
-wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
-`debug-countdowns` package's countdown line with the Debug panel closed: for its wait, none for its blocking timer, then
-its pacing, 10 s shorter after +10 s, and its timed button after Skip event; the panel's Debug switch and the Debug menu
-hide and show it, an untimed
-button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. Its Now tab on the
-`debug-now` package, shaped like the Domme3 case, names a nested call chain and two overlapping sounds and the hidden
-timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. Its Storage
-tab on the `debug-storage` package lists the saved values in key order with typed previews, keeps reference-shaped text
-visible and says when it names no saved photo, shows the saved photo once with both keys that use it and expands a list
-to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
-off, and fits the narrow drawer. Its editor on the `debug-storage-edit` package refuses a malformed number inline and
-stores nothing, stores an added value that the running session's next load returns while the earlier load stays,
-marks the session edited, changes the value to text and deletes it, keeps a JSON-shaped draft too long to write as JSON
-as Text when Advanced is chosen and says so inline, also when editing it, and lists it saved as text with its preview,
-neither as a Player error, fits a narrow screen, and after the session ended stores a deletion for the next Start. The
-spill store of Debug's rewind history, loaded into the page, keeps and deletes
-rows in IndexedDB; its sweep deletes the history databases of pages that ended, a live one only once its page closes it,
-and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
-shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
-later state and Return the session; a different answer adopts the earlier state with its saved data; an inspected failed
-state shows its failure above the bar, which fits a narrow screen, and the error dialog's Open in
-Debug shows the failure on the Now tab. Its `session-end` package opens the end dialog with Close focused, which returns
-focus to the end line, and a five-star radio group chosen by click and arrow key beside an unavailable Send review;
-Escape closes it too, the line's Play again starts anew, and an end that rewind's Forward and Return restore opens no
-dialog; its `call-failure` package's error dialog shows the failing line and the call path from a function of another
-file. On `session-end`, Start takes a screen wake lock, the browser releases it while the minimized window hides the
-page, the page shown again takes a new one, and none is held once the script exits. Its `popup` package shows
-`showPopup` dialogs whose button takes focus: the Enter held since the answer before a
-popup does not close it, a fresh Enter, Escape, Space, or a click on the button does and a click beside it does not, a
-reload shows the waiting popup again, and no popup text reaches the transcript. Its `open-url` package, served as a
-catalog that names pages of the smoke's server, checks that right after a click `openUrl` opens its address at once in
-a tab without an opener and the script goes on, that with `alwaysButton: true` its button, with its `buttonText:`,
-shows also right after a click and opens it, that without a recent click its button "Open link" opens it, and that
-after a reload the address does not open by itself, also not from the click on Continue, but from its button, as after
-Debug's Return and after turning Debug off while the rewind inspects an earlier state. Its `export-text` package checks
-`exportText`'s dialog: its title and read-only text, Copy, a refused copy that leaves the text selected and points to
-Download, Download as a UTF-8 file with the script's file name, a click beside it that does not close it, Close, and a
-reload that shows the waiting dialog again, with no dialog text in the transcript. A choice and a form toggle held
-down with the mouse keep their box, rim colour and outline while held. With auto-skip, the
-`missing-media` package, which refers to a
-missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
-restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
-neither hides that image nor is reported. Its `photo-colour` package's green Stage photo, downloaded only once, colours
-the background, the theme's surfaces in both modes, and the accent; the photo accent A/B test's B changes only the
-accent back to the theme's; the photo shows again after the window shrank behind an image
-request's preview, and the background's effects are placed anew for it; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
-theme's return, a mode change in either direction, and the next photo fade the background and message bubbles, except
-under reduced motion; once each change has settled, text is readable and the authored speaker and prose colours are
-adapted to the background shown, in Standard and High contrast. Its `photo-vignette` package's authored text low at the
-side of a wide Stage photo, where the vignette is strong (prose, inline code with its fill, an inline colour, a link,
-and a coloured speaker's bubble with code), meets the authored-colour treatment's targets on the background as painted
-behind it, read from a screenshot with the glyphs made transparent, in both modes and contrasts. The `audio-overlap`
-package, whose `seeked` notifications arrive late as under load, plays one sound twice with overlap, another beside
-them, then a loop of 30 overlapping instances: each instance plays to its end once without rewinding or stopping
-another, and finished instances release their elements for reuse.
-With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
-model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
-presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).
-
-Firefox captures camera frames differently, so the same scenario has a Firefox route after `npm run build`: `npm run
-test:player:firefox-camera` drives Firefox's fake camera through `playwright-cli` and a Playwright-managed Firefox, and
-skips explicitly when either is missing. It checks a capture whose first frames have no size yet, as a real Firefox
-camera delivers them; the saved photo in a new run; a camera without frames, after which the script continues
-without a photo; and the camera view with such first frames from a wide camera, which plays them in the window and
-over the Stage, and whose window comes back from the Stage where the arrow keys moved it. Neither route needs a
-physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
-paths and then the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium
-executable is an explicit skip; an available browser must pass the configured smoke checks.
+It covers the technical playground and, on the built `/player/` route with trusted input, plays `examples/demo/` to its
+end without console errors, also over plain HTTP: a typed answer, buttons, Space and presses that skip pacing only on
+unused space, Stage images, audible sounds, and smart follow with Return to latest. It also opens fixture packages by
+URL in the Player, playground, and editor, including one that does not compile; checks script storage, a session kept
+across a reload with an image the script asked for, saved data exported and imported into a fresh profile, the debug
+export after a script error, the rewind history's IndexedDB store, readable text once photo colours and the vignette
+have settled, the reading position while messages change and enter, and the camera with Chromium's fake camera. Firefox
+captures camera frames differently: after `npm run build`, `npm run test:player:firefox-camera` drives Firefox's fake
+camera through `playwright-cli` and a Playwright-managed Firefox, and skips explicitly when either is missing. Neither
+route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium paths and then
+the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium executable is an
+explicit skip; an available browser must pass the configured smoke checks.
 
 The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
 `tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
