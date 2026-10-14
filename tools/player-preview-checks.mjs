@@ -1077,7 +1077,14 @@ async function choiceLayoutChecks(page) {
     });
   for (const width of [1440, 700]) {
     await page.setViewportSize({ width, height: 900 });
-    const state = await layout();
+    // The conversation lays itself out again for the new width; it is judged once it has come to rest uncovered,
+    // within five seconds.
+    const deadline = Date.now() + 5000;
+    let state = await layout();
+    while (state.overlap.length > 0 && Date.now() < deadline) {
+      await page.waitForTimeout(100);
+      state = await layout();
+    }
     check(
       state.overlap.length === 0,
       `${width}px: a choice, the message or the composer is covered: ${JSON.stringify(state)}`,
@@ -1378,11 +1385,18 @@ async function contentContainmentChecks(page) {
     const problems = [];
     const image = document.querySelector(".stage-media");
     const drawn = image ? playerChecks.imagePoints(image) : [];
-    if (!image) problems.push("media is missing");
+    if (!image || !image.complete || !image.naturalWidth || !image.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+      problems.push("the Stage shows no image");
     else if (drawn.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("media runs off the window");
     else if (drawn.some(under)) problems.push("media runs under the dock");
-    const text = playerChecks.textPoints(document.querySelector(".transcript"));
-    if (text.length === 0) problems.push("the conversation shows no text");
+    // Text the conversation shows: in the window, where a hit lands on the transcript itself.
+    const transcript = document.querySelector(".transcript");
+    const text = playerChecks.textPoints(transcript);
+    const shown = text.filter((point) => playerChecks.inWindow(point) && transcript.contains(document.elementFromPoint(...point)));
+    // The narrow layout's drawer covers the conversation by design.
+    const drawer = !!document.querySelector(".tools-drawer");
+    if (!drawer && (!transcript.checkVisibility({ opacityProperty: true, visibilityProperty: true }) || shown.length === 0))
+      problems.push("the conversation shows no text");
     else if (text.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("conversation runs off the window");
     else if (text.filter(playerChecks.inWindow).some(under)) problems.push("conversation runs under the dock");
     return problems.join("; ");
@@ -1554,8 +1568,8 @@ async function focusIndicatorChecks(page) {
     // A key press makes the following script focus keyboard focus for the browser (:focus-visible) and the Player.
     // Chromium ignores `focus({ focusVisible: true })`, so after the launcher click it would stay pointer focus.
     await page.keyboard.press("Tab");
+    await button.focus();
     const focused = await button.evaluate(async (el) => {
-      el.focus();
       await Promise.all(el.getAnimations().map((animation) => animation.finished));
       const style = getComputedStyle(el);
       return {
@@ -1626,10 +1640,20 @@ async function backgroundControlPlacementChecks(page) {
         unreachable,
       };
     });
+  // The Player lays itself out again for the new window; it is judged once it has come to rest without a problem,
+  // within five seconds.
   const settle = async (width, height) => {
     await page.setViewportSize({ width, height });
-    await page.waitForTimeout(300);
-    return placement();
+    const deadline = Date.now() + 5000;
+    let state = await placement();
+    while (
+      (state.coversColumn || state.coversTimer || state.unreachable.length > 0) &&
+      Date.now() < deadline
+    ) {
+      await page.waitForTimeout(100);
+      state = await placement();
+    }
+    return state;
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
@@ -1909,19 +1933,27 @@ async function noticeChecks(page) {
   );
   // The toasts are in view and leave the top controls free, whether or not a side panel such as the Visual Lab is open.
   const bell = page.locator("[data-notification-bell]");
-  const blocked = await page.evaluate(() => {
-    const toasts = [...document.querySelectorAll('[data-sonner-toast][data-visible="true"]')];
-    const problems = [];
-    for (const toast of toasts) {
-      const box = toast.getBoundingClientRect();
-      if (box.left < 0 || box.right > innerWidth || box.top < 0 || box.bottom > innerHeight)
-        problems.push("a toast runs off the window");
-    }
-    for (const control of document.querySelectorAll(".player-top-bar-actions button"))
-      if (!playerChecks.uncovered(control))
-        problems.push(`something covers ${control.getAttribute("aria-label")}`);
-    return problems;
-  });
+  const toastProblems = () =>
+    page.evaluate(() => {
+      const toasts = [...document.querySelectorAll('[data-sonner-toast][data-visible="true"]')];
+      const problems = [];
+      for (const toast of toasts) {
+        const box = toast.getBoundingClientRect();
+        if (box.left < 0 || box.right > innerWidth || box.top < 0 || box.bottom > innerHeight)
+          problems.push("a toast runs off the window");
+      }
+      for (const control of document.querySelectorAll(".player-top-bar-actions button"))
+        if (!playerChecks.uncovered(control))
+          problems.push(`something covers ${control.getAttribute("aria-label")}`);
+      return problems;
+    });
+  // Judged once the toasts have come to rest without a problem, within five seconds.
+  const deadline = Date.now() + 5000;
+  let blocked = await toastProblems();
+  while (blocked.length > 0 && Date.now() < deadline) {
+    await page.waitForTimeout(100);
+    blocked = await toastProblems();
+  }
   check(blocked.length === 0, `Toasts must stay in view beside the top controls: ${blocked}`);
   check(
     (await bell.locator(".player-notification-dot").count()) === 1,
@@ -2314,8 +2346,9 @@ async function directDemoLatestChecks(page) {
       // The end of a message is shown: the middle of its bottom edge hits it.
       const endShown = (element) => {
         const box = element.getBoundingClientRect();
-        return element.contains(
-          document.elementFromPoint(box.left + box.width / 2, box.bottom - 2),
+        return (
+          element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+          element.contains(document.elementFromPoint(box.left + box.width / 2, box.bottom - 2))
         );
       };
       return (
@@ -2534,6 +2567,8 @@ async function debugVariablesChecks(page) {
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   // A touch, unlike a click, does not scroll its target into view.
   await toggle.scrollIntoViewIfNeeded();
+  if (!(await toggle.evaluate((element) => playerChecks.pressable(element))))
+    throw new Error("A person cannot see and tap " + (await toggle.textContent()));
   const box = await toggle.boundingBox();
   const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
@@ -2738,6 +2773,8 @@ async function explainValuesChecks(page) {
   const proseButton = explain(prose);
   // A touch, unlike a click, does not scroll its target into view.
   await proseButton.scrollIntoViewIfNeeded();
+  if (!(await proseButton.evaluate((element) => playerChecks.pressable(element))))
+    throw new Error("A person cannot see and tap " + (await proseButton.textContent()));
   const box = await proseButton.boundingBox();
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
@@ -2948,6 +2985,8 @@ async function developmentTimeChecks(page) {
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   // A touch, unlike a click, does not scroll its target into view.
   await aboutAutoSkip.scrollIntoViewIfNeeded();
+  if (!(await aboutAutoSkip.evaluate((element) => playerChecks.pressable(element))))
+    throw new Error("A person cannot see and tap " + (await aboutAutoSkip.textContent()));
   const label = await aboutAutoSkip.boundingBox();
   const touch = { x: label.x + label.width / 2, y: label.y + label.height / 2 };
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
@@ -3081,6 +3120,39 @@ async function runGroup(browserPage, run, url, artifacts) {
           if (await start.count()) await start.click();
         }
         return response;
+      };
+    }
+  }
+  // A person only presses, types into, focuses or points at what they see: every input on a locator waits until its
+  // element is rendered visibly (not transparent or hidden) before Playwright's own scrolling, stability and hit checks
+  // apply. (A check that a hidden element refuses focus calls `focus()` in the page on purpose.)
+  const locatorPrototype = Object.getPrototypeOf(browserPage.locator("body"));
+  if (!locatorPrototype.playerActsOnWhatIsSeen) {
+    locatorPrototype.playerActsOnWhatIsSeen = true;
+    for (const name of [
+      "click",
+      "dblclick",
+      "tap",
+      "check",
+      "uncheck",
+      "selectOption",
+      "fill",
+      "hover",
+      "press",
+      "focus",
+    ]) {
+      const act = locatorPrototype[name];
+      locatorPrototype[name] = async function (...args) {
+        const deadline = Date.now() + 5000;
+        const seen = () =>
+          this.evaluate((element) =>
+            element.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
+          );
+        while (!(await seen())) {
+          if (Date.now() > deadline) throw new Error(`A person cannot see ${this} to ${name} it`);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return act.apply(this, args);
       };
     }
   }
