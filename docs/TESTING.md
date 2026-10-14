@@ -143,7 +143,11 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 ## Player browser and visual verification
 
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
-browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The existing Chromium
+browser behavior: what a person can observe and do, such as a control opening, closing, playing, or going fullscreen,
+focus and keyboard input, scrolling, overlays, accessibility state, and content being shown, reachable, and readable.
+Smoke steps interact as a person does, scrolling to a control before using it. They do not assert sizes, positions,
+pixel offsets, or which element sits at which coordinates: adding, removing, or moving an element must not fail a check
+unless it breaks such behavior. Layout itself is checked by the scoped visual check below. The existing Chromium
 DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
 [Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
 `npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
