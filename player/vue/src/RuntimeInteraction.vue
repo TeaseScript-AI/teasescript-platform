@@ -34,7 +34,6 @@ import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
 import { usePlayerConditions } from "./usePlayerConditions";
-import { playerPointerModality } from "./usePlayerKeyboardFocus";
 import type {
   PlayerFormPresentation,
   PlayerTranscriptEntryPresentation,
@@ -574,7 +573,7 @@ function textSelected() {
   return !!selection && !selection.isCollapsed;
 }
 function skipPacing(refocusInput: boolean, actionId?: number) {
-  if (!pacing.value || textSelected()) return;
+  if (!pacing.value) return;
   void complete(skipPlayerRuntimePacing, refocusInput, "pacing", actionId);
 }
 // A press skips the message whose pacing was presented when it began; a gate that elapses while the button is held
@@ -617,45 +616,50 @@ for (const type of ["pointercancel", "wheel", "scroll"] as const)
 useEventListener(document, "pointerup", (event: PointerEvent) => {
   const gesture = pacingGesture;
   pacingGesture = null;
-  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected)
+  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected && !textSelected())
     skipPacing(false, gesture.actionId);
 });
 
 // Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
 // devices. A click on Player content that is no control, which moves focus to the conversation or the page, gives it
-// back. A click that selected text keeps it, as focusing the composer would clear the selection, and a key typed then
-// goes to the composer as typed there; a part focused with the keyboard, such as the conversation by Tab, keeps its keys
-// until a pointer takes it again.
+// back. A click that selected text in a message keeps it, as focusing the composer would clear the selection; while that
+// selection is the player's last action, a character typed goes to the composer as typed there (owner decision
+// 2026-10-14). Any other press or any focus move, such as by Tab, ends that.
+let selectionTypes = false;
+let pressedWithMouse = false;
+useEventListener(
+  document,
+  "pointerdown",
+  (event: PointerEvent) => {
+    selectionTypes = false;
+    pressedWithMouse = event.pointerType === "mouse";
+  },
+  { capture: true },
+);
+useEventListener(document, "focusin", () => (selectionTypes = false));
 useEventListener(document, "click", (event: MouseEvent) => {
   const target = event.target;
   if (
-    event.button === 0 &&
-    hoverAvailable.value &&
-    !textSelected() &&
-    target instanceof Element &&
-    composition.value?.contains(target) &&
-    !target.closest(playerControls)
+    event.button !== 0 ||
+    !(target instanceof Element) ||
+    !composition.value?.contains(target) ||
+    target.closest(playerControls)
   )
-    focusInput();
+    return;
+  if (!textSelected()) {
+    if (hoverAvailable.value) focusInput();
+  } else selectionTypes = pressedWithMouse && !!target.closest(".transcript-entry");
 });
-let focusedByPointer = false;
-useEventListener(document, "pointerdown", () => (focusedByPointer = true), { capture: true });
-useEventListener(document, "focusin", () => (focusedByPointer = playerPointerModality()));
 useEventListener(document, "keydown", (event: KeyboardEvent) => {
-  const target = event.target;
   if (
+    selectionTypes &&
+    textSelected() &&
     event.key.length === 1 &&
     !event.defaultPrevented &&
     !event.isComposing &&
     !event.ctrlKey &&
     !event.metaKey &&
-    !event.altKey &&
-    textSelected() &&
-    focusedByPointer &&
-    (target === document.body ||
-      (target instanceof Element &&
-        !!composition.value?.contains(target) &&
-        !target.closest(playerControls)))
+    !event.altKey
   ) {
     document.documentElement.dataset.playerKeyboardFocus = "false";
     composer.value?.takeKey(event);
