@@ -229,6 +229,8 @@ export interface FileSemanticResult {
   readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** The declarations of the shared variables that a block assigns or changes in place, with how. */
   readonly sharedWrites: ReadonlyMap<VariableSite, Sharing>;
+  /** The speaker that each `speaker` names: the one a message names with `as`, or whose properties use it. */
+  readonly speakers: ReadonlyMap<Identifier, string>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
   checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
@@ -290,6 +292,7 @@ export function validateProjectSemantics(
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
+      speakers: validators[index]?.speakers ?? new Map<Identifier, string>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
       checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
@@ -787,6 +790,9 @@ class SemanticValidator {
    * them (V30 §13).
    */
   readonly sharedWrites = new Map<VariableSite, Sharing>();
+
+  /** The speaker that each `speaker` names, where a message names it with `as` or its properties use it. */
+  readonly speakers = new Map<Identifier, string>();
 
   /** Records that the running block assigns or changes `name`, when that is a variable it shares. */
   #recordSharedWrite(name: string | null, scope: SemanticScope, how: Sharing): void {
@@ -1924,8 +1930,9 @@ class SemanticValidator {
       }
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) {
+          if (contextualSpeaker !== "speaker") this.speakers.set(expression, contextualSpeaker);
           // Without `as`, a message has the default speaker, which a script that never sets one cannot have.
-          if (contextualSpeaker === "speaker" && !this.project.setsDefaultSpeaker)
+          else if (!this.project.setsDefaultSpeaker)
             this.#report(
               semanticCode.noSpeaker,
               "This message has no speaker, so 'speaker' has no value: it names none with 'as', and the script never sets a default speaker. Give it one with 'as name', or set a default speaker with 'speaker name'.",

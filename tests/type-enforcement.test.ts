@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
 function mismatches(source: string): [string, string, string][] {
@@ -374,10 +376,161 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('for step in 1..=3 {\n    step = "x"\n}\nexit'), [
     [
       "TSV041",
-      "'step' holds a whole number (integer), so it cannot be set to text (string). To allow both, declare it as 'let step: integer | string = ...'.",
+      // No type can be written for a loop variable.
+      "'step' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
       '"x"',
     ],
   ]);
+});
+
+test("a fix writes another type where the place declares its type, and the code it suggests compiles", () => {
+  // A parameter is declared in its function's parameter list (V30 §11), with its default, also after another default.
+  assert.deepEqual(
+    mismatches(
+      [
+        "function f(xs = [1], n = 1, m = null) {",
+        '    xs.add("a")',
+        "    n = null",
+        '    xs = xs + ["b"]',
+        '    m = askChoice 1, "c"',
+        "}",
+        "f()",
+        "function g(xs: integer[], a = 1, k: integer = 2) {",
+        "    k = 2.5",
+        "}",
+        'g(["d"])',
+        "g([1], 1, 3.5)",
+        'global gs: integer[] = ["e"]',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV041",
+        "'gs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare it as 'global gs: (integer | string)[] = ...'.",
+        '"e"',
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare the parameter as 'xs: (integer | string)[] = ...'.",
+        '"a"',
+      ],
+      [
+        "TSV041",
+        "'n' holds a whole number (integer), so it cannot be set to null. To allow null, declare the parameter as 'n: integer? = 1'.",
+        "null",
+      ],
+      [
+        "TSV044",
+        "'+' would mix a whole number (integer) and text (string). A list holds one type. To keep both, declare the parameter as 'xs: (integer | string)[] = ...'.",
+        'xs + ["b"]',
+      ],
+      [
+        "TSV044",
+        "This askChoice returns a whole number (integer) or text (string). A place keeps one type. To keep both, declare the parameter as 'm: integer | string = ...'.",
+        'askChoice 1, "c"',
+      ],
+      [
+        "TSV041",
+        "'k' holds a whole number (integer), so it cannot be set to a number. Round it with floor(...), round(...), or ceil(...), or declare the parameter as 'k: number = 2'.",
+        "2.5",
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare the parameter as 'xs: (integer | string)[]'.",
+        '"d"',
+      ],
+      [
+        "TSV041",
+        "'g' takes 'k' as a whole number (integer), so it cannot take a number. Round it with floor(...), round(...), or ceil(...), or declare the parameter as 'k: number = 2'.",
+        "3.5",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    codes(
+      [
+        'function f(xs: (integer | string)[] = [1], n: integer? = 1, m: integer | string = "") {',
+        '    xs.add("a")',
+        "    n = null",
+        '    xs = xs + ["b"]',
+        '    m = askChoice 1, "c"',
+        "}",
+        "f()",
+        "function g(xs: (integer | string)[], a = 1, k: number = 2) {",
+        "    k = 2.5",
+        "}",
+        'g(["d"])',
+        "g([1], 1, 3.5)",
+        'global gs: (integer | string)[] = ["e"]',
+        "exit",
+      ].join("\n"),
+    ),
+    [],
+  );
+  // A property has no written type (V30 §15, §37), so its first value gives it one. A loop variable, a property that a
+  // dict computes (V30 §40), and a media block's own handle have no declaration to change.
+  assert.deepEqual(
+    mismatches(
+      [
+        "let door = { keys: [1] }",
+        'door.keys.add("x")',
+        "speaker vera { items: [1] }",
+        'vera.items.add("x")',
+        "for xs in [[1]] {",
+        '    xs.add("y")',
+        "}",
+        "let d = dict{ a: 1 }",
+        "d.keys.add(2)",
+        'let music = playAudio async "music.mp3" {',
+        "    at 1 s { music = 1 }",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV041",
+        "'door.keys' holds integer values (integer[]), so it cannot contain text (string). To allow both, give 'door.keys' a first value of type (integer | string)[], such as a variable declared with that type.",
+        '"x"',
+      ],
+      [
+        "TSV041",
+        "'vera.items' holds integer values (integer[]), so it cannot contain text (string). To allow both, give 'vera.items' a first value of type (integer | string)[], such as a variable declared with that type.",
+        '"x"',
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+        '"y"',
+      ],
+      [
+        "TSV041",
+        "'d.keys' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
+        "2",
+      ],
+      [
+        "TSV041",
+        "'music' holds a media handle, so it cannot be set to a whole number (integer). Use a separate variable for a value of another type.",
+        "1",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    sayTexts(
+      [
+        "let keys: (integer | string)[] = [1]",
+        "let door = { keys: keys }",
+        'door.keys.add("x")',
+        "global items: (integer | string)[] = [1]",
+        "speaker vera { items: items }",
+        'vera.items.add("x")',
+        'say "${door.keys.length} ${vera.items.length}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2 2"],
+  );
 });
 
 test("handles, speakers, and a typed load default keep their types", () => {
@@ -1218,6 +1371,163 @@ test("a speaker's custom property keeps the type of its first value like an obje
     ),
     [["TSV041", '"high"']],
   );
+});
+
+test("reading a custom property that no declaration or assignment gives a speaker is a compile error (V30 §37)", () => {
+  // Through the speaker's name, also by a compound assignment and before a method; a misspelling names the property.
+  assert.deepEqual(
+    mismatches(
+      [
+        "speaker vera { level: 0 }",
+        "say vera.mood",
+        "vera.score += 1",
+        "vera.items.add(1)",
+        "say vera.levle",
+        "say vera.firstname",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'mood'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+        "mood",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'score'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { score: ... }', or assign it before reading it.",
+        "score",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'items'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { items: ... }', or assign it before reading it.",
+        "items",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'levle'. Its only custom property is 'level'. Did you mean 'level'?",
+        "levle",
+      ],
+      [
+        "TSV043",
+        "Speaker 'vera' has no property 'firstname'. Its only custom property is 'level'. Did you mean 'firstName'?",
+        "firstname",
+      ],
+    ],
+  );
+  assert.deepEqual(mismatches("speaker vera {}\nsay vera.mood\nexit"), [
+    [
+      "TSV043",
+      "Speaker 'vera' has no custom properties, so it has no 'mood'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+      "mood",
+    ],
+  ]);
+  // A property that a store through an alias may give it counts as one it can have.
+  assert.deepEqual(mismatches("speaker vera {}\nlet s = vera\ns.mood = 1\nsay vera.mod\nexit"), [
+    [
+      "TSV043",
+      "Speaker 'vera' has no property 'mod'. Its only custom property is 'mood'. Did you mean 'mood'?",
+      "mod",
+    ],
+  ]);
+  // As `speaker` where `as` or the speaker's own properties name the speaker, also when another speaker has it.
+  assert.deepEqual(
+    codes(
+      [
+        "speaker vera {",
+        "    a: 1",
+        "    b: speaker.c",
+        "}",
+        "speaker anna { mood: 1 }",
+        'say as vera "${speaker.mood}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV043", "c"],
+      ["TSV043", "mood"],
+    ],
+  );
+  // Through a speaker the compiler cannot tell apart: an alias, a parameter, an element, or the default speaker, when
+  // no speaker has the property.
+  const none =
+    "No speaker has a property 'mood'. The custom property of speakers is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.";
+  assert.deepEqual(
+    mismatches(
+      [
+        "speaker vera { level: 0 }",
+        "speaker vera",
+        "function show(s: speaker) {",
+        "    say s.mood",
+        "}",
+        "show(vera)",
+        "let alias = vera",
+        "say alias.mood",
+        "say [vera][0].mood",
+        'say "${speaker.mood}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+      ["TSV043", none, "mood"],
+    ],
+  );
+  // In another file, also in a function the read calls first.
+  const files = (read: string) =>
+    compileProject([
+      { path: "main.tease", source: `calm()\nsay ${read}\nexit` },
+      {
+        path: "people.tease",
+        source: 'speaker vera {}\nglobal function calm {\n    vera.mood = "calm"\n}',
+      },
+    ]);
+  assert.deepEqual(
+    files("vera.moood").diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["main.tease", "TSV043"]],
+  );
+  const calm = files("vera.mood");
+  assert.deepEqual(calm.diagnostics, []);
+  const result = run(calm.plan!, createImmediatePacingRuntimeSnapshot(calm.plan!));
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["calm"],
+  );
+});
+
+test("a speaker's custom property that some store may give it is read when the script runs", () => {
+  // Stores in a function, through a speaker parameter, an untyped parameter, or an object's property, and a read through
+  // a parameter of a speaker that has the property while another does not, compile, and run where the property is set.
+  assert.deepEqual(
+    sayTexts(
+      [
+        "speaker vera {}",
+        'speaker anna { mood: "calm" }',
+        "function later {",
+        '    vera.mood = "later"',
+        "}",
+        "function name(s: speaker, x) {",
+        '    s.nick = "nick"',
+        '    x.pet = "pet"',
+        "}",
+        "function show(s: speaker) {",
+        "    say s.mood",
+        "}",
+        "later()",
+        "name(vera, vera)",
+        "let holder = { s: vera }",
+        'holder.s.tag = "tag"',
+        'say "${vera.mood} ${vera.nick} ${vera.pet} ${vera.tag}"',
+        "show(anna)",
+        "exit",
+      ].join("\n"),
+    ),
+    ["later nick pet tag", "calm"],
+  );
+  // A term that V30 gives every speaker is not a custom property; the runtime checks a read of one.
+  assert.deepEqual(mismatches('speaker vera { gender: "female" }\nsay vera.heShe\nexit'), []);
 });
 
 test("a function's result type comes from its return values, and returns of different types are an error", () => {

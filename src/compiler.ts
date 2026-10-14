@@ -293,7 +293,11 @@ function checkProject(
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(
       files.map((file) => ({ path: file.result.path, program: file.result.program })),
-      { ...options, sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])) },
+      {
+        ...options,
+        sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
+        speakers: new Map(names.flatMap((result) => [...result.speakers])),
+      },
       track,
     );
     // A transfer or script reference that can run enters its label afresh, which has then run nothing of its file. As
