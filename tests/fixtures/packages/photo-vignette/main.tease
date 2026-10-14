@@ -1,9 +1,15 @@
-// Photo colours: authored prose low at the side of the transcript, where the Stage photo's vignette is strong.
+// Photo colours: authored text low at the side of the transcript, where the Stage photo's vignette is strong.
+speaker guide {
+    displayName: "Guide"
+    color: "#999999"
+}
 showImage "images/wide.svg"
-repeat 14 {
+repeat 12 {
     say "Earlier conversation line.", instant
 }
+say prose(color: "#777777", position: "right") "Plain grey `Grey code` [color=#777777]Inline grey[/color] [Link](https://example.com)", instant
 say prose(color: "#eeeeee", position: "right") "Light prose", instant
 say prose(color: "#292929", position: "right") "Dark prose", instant
+say as guide "A grey speaker with `grey code` in a bubble.", instant
 showButton "Done"
 exit

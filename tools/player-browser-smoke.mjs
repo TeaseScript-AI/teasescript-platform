@@ -2749,54 +2749,48 @@ async function photoColourScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo vignette (`photo-vignette` package): authored prose low at the side of the transcript, under the strongest part
+ * Photo vignette (`photo-vignette` package): authored text low at the side of the transcript, under the strongest part
  * of the vignette around a wide Stage photo, stays readable on the background as painted there, in both modes and both
- * contrasts. The pixels behind each prose span are read from a screenshot with the transcript hidden, the span's
- * backing is laid over them, and its ink must meet the authored-colour treatment's own targets on every one.
+ * contrasts: prose, inline code with its fill, inline colours, a link, and a coloured speaker's bubble with code. With
+ * the glyphs made transparent, so that every fill, backing and surface stays painted, a screenshot gives the background
+ * behind each line of text, and the text's ink must meet the authored-colour treatment's own targets on every pixel
+ * sampled there.
  */
 async function photoVignetteScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  const spans = `[...document.querySelectorAll('.prose span')].filter((span) => span.textContent.trim() !== '').map((span) => { const box = span.getBoundingClientRect(); const style = getComputedStyle(span); return { text: span.textContent.trim(), box: [box.left, box.top, box.width, box.height], ink: style.color, cover: style.backgroundColor }; })`;
+  // Points inside each line of authored text, clear of a code span's border, where the text is shown: not scrolled out
+  // of the transcript or under the composer.
+  const samples = `[...document.querySelectorAll('.prose :is(span, a), .message-speaker :is(span, a)')].filter((element) => !element.closest('[data-slot="message-header"]') && [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '')).flatMap((element) => [...element.getClientRects()].flatMap((box) => [0, 1, 2].flatMap((row) => [0, 1, 2, 3, 4, 5].map((column) => ({ text: element.textContent.trim().slice(0, 24), ink: getComputedStyle(element).color, x: Math.round(box.left + 3 + ((box.width - 6) * column) / 5), y: Math.round(box.top + 3 + ((box.height - 6) * row) / 2) }))))).filter(({ x, y }, index, all) => { const hit = document.elementFromPoint(x, y); return hit !== null && hit.closest('.prose, .message-speaker') !== null && hit.textContent.includes(all[index].text.slice(0, 4)); })`;
   const readable = async (label, enhanced) => {
-    const texts = await value(cdp, spans);
-    assertEqual(texts.length >= 2, true, `${label}: the prose is not shown`);
+    const points = await value(cdp, samples);
+    const texts = new Set(points.map(({ text }) => text));
+    assertEqual(
+      texts.size >= 7,
+      true,
+      `${label}: the authored text is not shown: ${[...texts].join(" | ")}`,
+    );
     await evaluate(
       cdp,
-      `for (const entry of document.querySelectorAll('.transcript-entry')) entry.style.visibility = 'hidden';`,
+      `const style = document.createElement('style'); style.id = 'smoke-hidden-glyphs'; style.textContent = '.transcript-entry, .transcript-entry * { -webkit-text-fill-color: transparent !important; text-decoration-color: transparent !important; text-shadow: none !important; }'; document.head.append(style);`,
     );
     await delay(100);
     const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
-    await evaluate(
-      cdp,
-      `for (const entry of document.querySelectorAll('.transcript-entry')) entry.style.visibility = '';`,
-    );
+    await evaluate(cdp, `document.getElementById('smoke-hidden-glyphs').remove();`);
     const image = decodePng(Buffer.from(shot.result.data, "base64"));
-    for (const { text, box, ink, cover } of texts) {
-      const [left, top, width, height] = box;
-      const backing = new Color(cover).to("srgb");
-      const alpha = backing.alpha ?? 1;
-      for (let row = 0; row < 3; row += 1)
-        for (let column = 0; column < 6; column += 1) {
-          const x = Math.round(left + 1 + ((width - 2) * column) / 5);
-          const y = Math.round(top + 1 + ((height - 2) * row) / 2);
-          const offset = (y * image.width + x) * image.channels;
-          const painted = [0, 1, 2].map(
-            (channel) =>
-              (backing.coords[channel] ?? 0) * alpha +
-              (image.pixels[offset + channel] / 255) * (1 - alpha),
-          );
-          const background = new Color("srgb", painted);
-          const wcag = Color.contrast(background, ink, "WCAG21");
-          const apca = Math.abs(Color.contrast(background, ink, "APCA"));
-          const passes = enhanced
-            ? wcag >= 7 && apca >= 55
-            : apca >= 55 || (wcag >= 3.5 && apca >= 40);
-          assertEqual(
-            passes,
-            true,
-            `${label}: "${text}" at ${x},${y} on the painted background: WCAG ${wcag.toFixed(2)}, APCA ${apca.toFixed(1)}`,
-          );
-        }
+    for (const { text, ink, x, y } of points) {
+      const offset = (y * image.width + x) * image.channels;
+      const background = new Color(
+        "srgb",
+        [0, 1, 2].map((channel) => image.pixels[offset + channel] / 255),
+      );
+      const wcag = Color.contrast(background, ink, "WCAG21");
+      const apca = Math.abs(Color.contrast(background, ink, "APCA"));
+      const passes = enhanced ? wcag >= 7 && apca >= 55 : apca >= 55 || (wcag >= 3.5 && apca >= 40);
+      assertEqual(
+        passes,
+        true,
+        `${label}: "${text}" at ${x},${y} on the painted background: WCAG ${wcag.toFixed(2)}, APCA ${apca.toFixed(1)}`,
+      );
     }
   };
   const settings = async (option) => {
@@ -2826,7 +2820,7 @@ async function photoVignetteScenario(cdp, origin) {
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(
     cdp,
-    `document.documentElement.hasAttribute('data-photo-colour') && document.querySelectorAll('.prose').length === 2`,
+    `document.documentElement.hasAttribute('data-photo-colour') && document.querySelectorAll('.prose').length === 3`,
     8_000,
     "The wide photo did not colour the Player",
   );

@@ -101,12 +101,15 @@ function minimalAmount(score: (amount: number) => number, target: number): numbe
 /**
  * Authored ink, or a backing behind it, that keeps `colour` readable on `backdrop`. Text that can sit on any of several
  * backdrops, such as a background with and without its vignette, must be readable on each: every check takes the
- * least readable of them, which also bounds the backdrops between them. The first one decides the direction.
+ * least readable of them, which also bounds the backdrops between them. The first one decides the direction. Without
+ * a backing, a Player fill of `tint` of the text's own colour lies under it, as under inline code; a backing replaces
+ * that fill.
  */
 export function readabilityFor(
   colour: string,
   backdrop: string | readonly string[],
   enhanced = false,
+  tint = 0,
 ): { ink: string; cover: string | null } {
   const backdrops = typeof backdrop === "string" ? [backdrop] : backdrop;
   const ink = paint(colour);
@@ -151,6 +154,11 @@ export function readabilityFor(
     adjustedInk: readonly [number, number, number],
     adjustedBackgrounds: readonly (readonly [number, number, number])[],
   ) => Math.min(...adjustedBackgrounds.map((layer) => scoreOn(adjustedInk, layer)));
+  // Every backdrop with the text's own fill over it, where no backing replaces that fill.
+  const filled = (adjustedInk: readonly [number, number, number]) =>
+    tint === 0
+      ? backgrounds
+      : backgrounds.map((layer) => paint(rgb(layer), `rgb(${adjustedInk.join(" ")} / ${tint})`));
   // Every backdrop with a backing of `amount` over it.
   const covered = (amount: number) =>
     backdrops.map((layer) =>
@@ -164,11 +172,14 @@ export function readabilityFor(
       : apca >= STANDARD_APCA_TARGET ||
           (wcag >= ADAPTIVE_WCAG_TARGET && apca >= MINIMUM_APCA_WITH_WCAG);
   };
-  if (backgrounds.every(readable)) return { ink: colour, cover: null };
+  if (filled(ink).every(readable)) return { ink: colour, cover: null };
   const target = enhanced ? 1 + SEARCH_MARGIN / ENHANCED_WCAG_TARGET : 1;
 
   const cover = minimalAmount((amount) => score(ink, covered(amount)), target);
-  const inkAmount = minimalAmount((amount) => score(adjustInk(amount), backgrounds), target);
+  const inkAmount = minimalAmount(
+    (amount) => score(adjustInk(amount), filled(adjustInk(amount))),
+    target,
+  );
   if (cover !== null && cover <= SUBTLE_COVER_LIMIT) {
     const coveredBackground = covered(cover)[0]!;
     const backingChange = Color.deltaE(rgb(background), rgb(coveredBackground), "OK");

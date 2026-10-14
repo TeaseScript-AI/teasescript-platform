@@ -683,12 +683,13 @@ accent back to the theme's; the background's effects stay centred on the photo a
 request's preview; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
 theme's return, and a mode change switch at once; a fade between photos keeps the background's luminance, and switching
 light/dark during it keeps text readable in both directions; afterwards the authored speaker and prose colours are
-adapted to the background shown, in Standard and High contrast. Its `photo-vignette` package's authored prose, low at
-the side of a wide Stage photo where the vignette is strong, meets the authored-colour treatment's targets on the
-background as painted there, read from a screenshot with the transcript hidden, in both modes and contrasts. The
-`audio-overlap` package, whose `seeked` notifications arrive late as under load, plays one sound twice with overlap,
-another beside them, then a loop of 30 overlapping instances: each instance plays to its end once without rewinding or
-stopping another, and finished instances release their elements for reuse.
+adapted to the background shown, in Standard and High contrast. Its `photo-vignette` package's authored text low at the
+side of a wide Stage photo, where the vignette is strong (prose, inline code with its fill, an inline colour, a link,
+and a coloured speaker's bubble with code), meets the authored-colour treatment's targets on the background as painted
+behind it, read from a screenshot with the glyphs made transparent, in both modes and contrasts. The `audio-overlap`
+package, whose `seeked` notifications arrive late as under load, plays one sound twice with overlap, another beside
+them, then a loop of 30 overlapping instances: each instance plays to its end once without rewinding or stopping
+another, and finished instances release their elements for reuse.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

@@ -13,19 +13,26 @@ const props = defineProps<{
   authoredBackground: boolean;
 }>();
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
-function authoredTreatment(piece: {
-  style: Readonly<Record<string, string>>;
-  href: string | null;
-}) {
+// Inline code lays this share of its text colour under it (`.markup-code` in `TranscriptMarkup.vue`).
+const CODE_TINT = 0.08;
+function authoredTreatment(piece: PlayerMarkupPiece) {
   if (props.authoredBackground) return null;
   if (piece.style["backgroundColor"] !== undefined) {
     if (piece.style["color"] === undefined && piece.href === null && props.authoredInk !== null)
       return { ink: props.authoredInk, cover: null };
     return null;
   }
-  const colour = piece.style["color"] ?? (piece.href === null ? undefined : props.link);
+  const code = piece.classes.includes("markup-code");
+  // Inline code shows its fill under the message's authored colour unless the line has a backing, which replaces it.
+  const inherited = code && props.cover === null ? (props.authoredInk ?? undefined) : undefined;
+  const colour = piece.style["color"] ?? (piece.href === null ? inherited : props.link);
   if (colour === undefined) return props.cover === null ? null : { ink: null, cover: props.cover };
-  const treatment = readabilityFor(colour, props.backdrop, enhancedContrast?.value);
+  const treatment = readabilityFor(
+    colour,
+    props.backdrop,
+    enhancedContrast?.value,
+    code ? CODE_TINT : 0,
+  );
   return treatment.ink === colour && treatment.cover === null ? null : treatment;
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.

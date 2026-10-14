@@ -713,14 +713,15 @@ to centre, uses the same width limits as bubbles, and has no panel unless the au
 
 When an authored foreground sits on a Player-generated bubble or prose surface, the Player measures it against that
 surface unless an inline authored background encloses it; prose on a Stage photo's background is measured against both
-the background and its vignette at full strength. It leaves readable pairs alone using APCA or a WCAG ratio backed by a
-minimum APCA score; neither is a universal readability guarantee. For other pairs it compares a subtle local backing
-with an ink lightness change by colour difference, and can combine both when gamut mapping would wash out the authored
-colour. It retains the ink's original light/dark direction. Inline coloured text on a Player-generated surface follows
-the same rule. When an author supplies the bubble or prose background, authored text remains unchanged, including inline
-colours and high-contrast mode. Without an authored foreground, the Player chooses default black or white ink for that
-background. Authored text inside an inline background (including inherited message colour) also remains unchanged.
-Compile-time feedback for a poorly contrasting authored pair is tracked in #434.
+the background and its vignette at full strength, and inline code with the fill it lays under its text. It leaves
+readable pairs alone using APCA or a WCAG ratio backed by a minimum APCA score; neither is a universal readability
+guarantee. For other pairs it compares a subtle local backing with an ink lightness change by colour difference, and can
+combine both when gamut mapping would wash out the authored colour. It retains the ink's original light/dark direction.
+Inline coloured text on a Player-generated surface follows the same rule. When an author supplies the bubble or prose
+background, authored text remains unchanged, including inline colours and high-contrast mode. Without an authored
+foreground, the Player chooses default black or white ink for that background. Authored text inside an inline background
+(including inherited message colour) also remains unchanged. Compile-time feedback for a poorly contrasting authored
+pair is tracked in #434.
 The High contrast setting in [Player Settings](#player-settings) gives one-sided colours stronger treatment.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
