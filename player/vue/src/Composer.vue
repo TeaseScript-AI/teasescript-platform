@@ -186,16 +186,20 @@ function releaseOnBlur(): void {
   if (!replacingField) allowSoftwareKeyboard();
 }
 
-// The password field's eye button and Caps Lock warning. Only a key event says whether Caps Lock is on; a field that has
-// seen none shows no warning.
+// The password fields' eye buttons, one each, and their Caps Lock warning. Only a key event says whether Caps Lock is
+// on; a field that has seen none shows no warning.
 const shown = ref(false);
+const repeatShown = ref(false);
 const capsLock = ref(false);
 function readCapsLock(event: KeyboardEvent): void {
   capsLock.value = event.getModifierState("CapsLock");
 }
 watch(
   () => [props.password, props.freshAfter],
-  () => (shown.value = false),
+  () => {
+    shown.value = false;
+    repeatShown.value = false;
+  },
 );
 
 function allowSoftwareKeyboard(): void {
@@ -315,75 +319,94 @@ defineExpose({ focusInput, selectInput, openPicker });
           :accept="attach?.accept"
           @change="chooseFiles"
         />
-        <div v-if="password" class="composer-password-field" data-composer-password>
-          <!-- No saved or suggested passwords: a password typed on the player's device must not stay in its browser. -->
-          <input
-            ref="picker"
-            data-composer-input
-            :type="shown ? 'text' : 'password'"
-            :value="modelValue"
-            :placeholder="placeholder"
-            :readonly="submitting"
-            :enterkeyhint="repeat ? 'next' : undefined"
-            :aria-label="accessibleName"
-            :aria-invalid="feedback ? true : undefined"
-            :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
-            :inputmode="effectiveInputMode"
-            :disabled="disabled"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            class="composer-input composer-picker composer-password-input"
-            @input="updateFromPicker"
-            @keydown="
-              readCapsLock($event);
-              handleKeydown($event);
-            "
-            @keyup="readCapsLock"
-            @pointerdown="allowSoftwareKeyboard"
-            @blur="releaseOnBlur"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            :aria-label="shown ? 'Hide password' : 'Show password'"
-            :title="shown ? 'Hide password' : 'Show password'"
-            :disabled="disabled"
-            data-composer-password-toggle
-            @click="shown = !shown"
-            @pointerdown="preserveEditingFocus"
-            @mousedown="keepMouseEditingFocus"
-          >
-            <EyeOff v-if="shown" aria-hidden="true" />
-            <Eye v-else aria-hidden="true" />
-          </Button>
-          <input
-            v-if="repeat"
-            ref="repeatInput"
-            data-composer-repeat
-            :type="shown ? 'text' : 'password'"
-            :value="repeated"
-            placeholder="Repeat password"
-            :readonly="submitting"
-            aria-label="Repeat password"
-            :aria-invalid="feedback ? true : undefined"
-            :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
-            :inputmode="effectiveInputMode"
-            :disabled="disabled"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            class="composer-input composer-picker composer-password-repeat"
-            @input="updateRepeated"
-            @keydown="
-              readCapsLock($event);
-              handleKeydown($event);
-            "
-            @keyup="readCapsLock"
-            @pointerdown="allowSoftwareKeyboard"
-            @blur="releaseOnBlur"
-          />
+        <!-- Like the text field, one line with its own eye button, and "Repeat password" as a second field below it. -->
+        <div v-if="password" class="composer-password-fields" data-composer-password>
+          <div class="composer-password-row">
+            <!-- No saved or suggested passwords: a password typed on the player's device must not stay in its browser. -->
+            <input
+              ref="picker"
+              data-composer-input
+              :type="shown ? 'text' : 'password'"
+              :value="modelValue"
+              :placeholder="placeholder"
+              :readonly="submitting"
+              :enterkeyhint="repeat ? 'next' : undefined"
+              :aria-label="accessibleName"
+              :aria-invalid="feedback ? true : undefined"
+              :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
+              :inputmode="effectiveInputMode"
+              :disabled="disabled"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              class="composer-input composer-picker"
+              @input="updateFromPicker"
+              @keydown="
+                readCapsLock($event);
+                handleKeydown($event);
+              "
+              @keyup="readCapsLock"
+              @pointerdown="allowSoftwareKeyboard"
+              @blur="releaseOnBlur"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="shown ? 'Hide password' : 'Show password'"
+              :title="shown ? 'Hide password' : 'Show password'"
+              :disabled="disabled"
+              data-composer-password-toggle
+              @click="shown = !shown"
+              @pointerdown="preserveEditingFocus"
+              @mousedown="keepMouseEditingFocus"
+            >
+              <EyeOff v-if="shown" aria-hidden="true" />
+              <Eye v-else aria-hidden="true" />
+            </Button>
+          </div>
+          <div v-if="repeat" class="composer-password-row composer-password-repeat">
+            <input
+              ref="repeatInput"
+              data-composer-repeat
+              :type="repeatShown ? 'text' : 'password'"
+              :value="repeated"
+              placeholder="Repeat password"
+              :readonly="submitting"
+              aria-label="Repeat password"
+              :aria-invalid="feedback ? true : undefined"
+              :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
+              :inputmode="effectiveInputMode"
+              :disabled="disabled"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              class="composer-input composer-picker"
+              @input="updateRepeated"
+              @keydown="
+                readCapsLock($event);
+                handleKeydown($event);
+              "
+              @keyup="readCapsLock"
+              @pointerdown="allowSoftwareKeyboard"
+              @blur="releaseOnBlur"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="repeatShown ? 'Hide repeated password' : 'Show repeated password'"
+              :title="repeatShown ? 'Hide repeated password' : 'Show repeated password'"
+              :disabled="disabled"
+              data-composer-repeat-toggle
+              @click="repeatShown = !repeatShown"
+              @pointerdown="preserveEditingFocus"
+              @mousedown="keepMouseEditingFocus"
+            >
+              <EyeOff v-if="repeatShown" aria-hidden="true" />
+              <Eye v-else aria-hidden="true" />
+            </Button>
+          </div>
           <span :id="capsLockId" role="status" class="composer-caps-lock" data-composer-caps-lock>{{
             capsLock ? "Caps Lock is on" : ""
           }}</span>
@@ -525,22 +548,21 @@ defineExpose({ focusInput, selectInput, openPicker });
   gap: 4px 8px;
   min-inline-size: 0;
 }
-.composer-password-field {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 4px;
+.composer-password-fields {
+  display: grid;
   min-inline-size: 0;
 }
-/* The eye button stays beside the password, which takes the rest of the line, and the repeat takes a line of its own. */
-.composer-form .composer-picker.composer-password-input {
-  flex-basis: 0;
+/* Each field takes its line, with its eye button at the end; a line between them makes the repeat a field of its own. */
+.composer-password-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-inline-size: 0;
 }
-.composer-form .composer-picker.composer-password-repeat {
-  flex-basis: 100%;
+.composer-password-repeat {
+  border-block-start: 1px solid var(--border);
 }
 .composer-caps-lock {
-  flex-basis: 100%;
   padding-inline-start: 12px;
   color: var(--text-muted);
   font-size: 0.875rem;
