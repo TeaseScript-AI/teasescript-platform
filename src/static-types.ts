@@ -385,6 +385,16 @@ export function mayBeUnknown(type: StaticType): boolean {
   );
 }
 
+/**
+ * Whether a value of this type is read from a place that no value decided yet but that held a value the compiler cannot
+ * know, such as an element of `[]` after `add(load(key, default: null))`. Such a read gives a value of unknown type, as
+ * any other would (rule 1.7): a later value does not decide a variable that holds it, and a known place checks it when
+ * the script runs (#859).
+ */
+export function readsHeldUnknown(type: StaticType): boolean {
+  return members(type).some((part) => part.kind === "open" && part.heldUnknown !== undefined);
+}
+
 export function isKnown(type: StaticType): boolean {
   const value = resolved(type);
   return value.kind !== "unknown" && value.kind !== "open" && value.kind !== "never";
@@ -1145,6 +1155,26 @@ export function freshPlaceType(type: StaticType): StaticType {
   return runCompileTask(placeTask(type, false));
 }
 
+/**
+ * A fresh copy of a slot that took null before any other value, such as an element read from a list after `add(null)`,
+ * with that null as a member of its own, as after `let x = null`, instead of the mark that its later value is optional.
+ * A test that excludes null then keeps only the slot, so that the value that decides it does not bring the null back.
+ * Other types are returned as they are, also a slot that held a value the compiler cannot know: what it holds is of
+ * unknown type, which a known place checks when the script runs, null included (rule 1.7). Only a copy that no other
+ * place shares may be given.
+ */
+export function ownNull(copy: StaticType): StaticType {
+  if (
+    copy.kind !== "open" ||
+    copy.resolved !== null ||
+    !copy.sawNull ||
+    copy.heldUnknown !== undefined
+  )
+    return copy;
+  copy.sawNull = false;
+  return optional(copy);
+}
+
 function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticType> {
   const type = resolved(typeToPlace);
   if (type.kind === "null") return optional(openType());
@@ -1854,13 +1884,14 @@ export function excludeType(type: StaticType, test: StaticType): StaticType {
 
 /**
  * The type a variable of `declared` type is known to hold directly after a value of type `value` is stored in it
- * (ADR 0021 rule 5.2): the declared members that the value fits, or the value's type for a variable of unknown type.
+ * (ADR 0021 rule 5.2): the declared members that the value fits, or the value's type for a variable of unknown type,
+ * unless that value is of unknown type itself (see {@link readsHeldUnknown}).
  */
 export function assignedType(declared: StaticType, value: StaticType): StaticType {
   const kept = canonical(declared);
   const stored = canonical(value);
   if (stored.kind === "unknown") return kept;
-  if (kept.kind === "unknown") return stored;
+  if (kept.kind === "unknown") return readsHeldUnknown(stored) ? kept : stored;
   // A value an `askChoice` restricted to some literal values keeps that restriction while nothing else is stored.
   const restricted = (part: StaticType): boolean =>
     part.kind === "scalar" && part.values !== undefined;

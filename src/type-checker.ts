@@ -177,6 +177,7 @@ import {
   optional,
   placeType,
   freshPlaceType,
+  ownNull,
   resolved,
   settle,
   STRING_TYPE,
@@ -203,6 +204,7 @@ import {
   placedSlots,
   nextDecision,
   mayBeUnknown,
+  readsHeldUnknown,
   type OpenType,
   numberPaths,
   integerParts,
@@ -1852,8 +1854,7 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, a dict, or a range",
         );
-        // The loop variable is a place: it keeps the plain element type.
-        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+        const loopType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1971,7 +1972,7 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    const valueType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
@@ -2045,13 +2046,12 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      // A place that no value decided yet but that held a value the compiler cannot know, such as an element of `[]`
-      // after `add(load(key, default: null))`, gives such a value, so the variable is of unknown type, as after any
-      // other (rule 1.7): a later value does not decide it, and a known place checks what it holds when the script runs
-      // (#859).
-      if (members(value).some((part) => part.kind === "open" && part.heldUnknown !== undefined))
-        value = UNKNOWN_TYPE;
+      // A read of a place that held only values the compiler cannot know gives such a value (rule 1.7).
+      if (readsHeldUnknown(value)) value = UNKNOWN_TYPE;
       type = this.#newPlaceType(written, value);
+      // A copy of a place that took null keeps that null as a member, which a null check removes; only a copy belongs
+      // to this variable alone.
+      if (this.#placeReads.has(written)) type = ownNull(type);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);
@@ -5930,7 +5930,7 @@ class TypeChecker {
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
       if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
-      const element = copyType(value.element);
+      const element = ownNull(copyType(value.element));
       const other = plainType(typeOf(fallback.value));
       const undecided = (type: StaticType): boolean =>
         containsType(type, (part) => part.kind === "open");
@@ -8253,6 +8253,18 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
 }
 
 /**
+ * The type of a loop variable that takes each value of a collection whose values are of type `element`, as a `let` of a
+ * read of one would have: a copy that keeps the plain type (see {@link ownNull}), or the unknown type of a place that held
+ * only values the compiler cannot know (see {@link readsHeldUnknown}). Either way the loop reads the values, so a store
+ * that decides them later in the check decides them for the loop too.
+ */
+function loopValueType(element: StaticType): StaticType {
+  if (!readsHeldUnknown(element)) return ownNull(copyType(plainType(element)));
+  observe(element);
+  return UNKNOWN_TYPE;
+}
+
+/**
  * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
  * `global` with `default:` assigns where it stands.
  */
@@ -8711,7 +8723,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     if (method === "contains") return BOOLEAN_TYPE;
     if (method === "clear") return NULL_TYPE;
     // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
-    return method === "remove" || method === "get" ? copyType(value.element) : undefined;
+    return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
@@ -8741,7 +8753,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
       return value.kind === "list" ? INTEGER_TYPE : undefined;
     // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
     case "get":
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
     case "toSet":
       return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
@@ -8757,7 +8769,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "removeFirst":
     case "removeLast":
       // The removed element leaves the list, so its type is a copy for the place that keeps it.
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     default:
       return undefined;
   }
