@@ -80,7 +80,7 @@ function setShare(event: Event) {
       <select
         v-model="photoFamily"
         aria-label="Photo colour family"
-        class="rounded-md border bg-background p-2"
+        class="min-h-11 rounded-md border border-input bg-transparent px-3"
       >
         <option v-for="family in PHOTO_FAMILIES" :key="family" :value="family">
           {{ familyLabels[family] }}
@@ -95,7 +95,7 @@ function setShare(event: Event) {
           step="0.5"
           inputmode="decimal"
           :value="photoFamilyShare"
-          class="w-20 rounded-md border bg-background p-2"
+          class="min-h-11 w-20 rounded-md border border-input bg-transparent px-3"
           data-ab-test-share
           @change="setShare"
         />
