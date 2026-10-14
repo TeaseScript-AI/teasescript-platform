@@ -468,7 +468,8 @@ test("a fix writes another type where the place declares its type, and the code 
     ),
     [],
   );
-  // A property has no written type (V30 §15, §37), so its first value gives it one; a loop variable has none either.
+  // A property has no written type (V30 §15, §37), so its first value gives it one. A loop variable, a property that a
+  // dict computes (V30 §40), and a media block's own handle have no declaration to change.
   assert.deepEqual(
     mismatches(
       [
@@ -478,6 +479,11 @@ test("a fix writes another type where the place declares its type, and the code 
         'vera.items.add("x")',
         "for xs in [[1]] {",
         '    xs.add("y")',
+        "}",
+        "let d = dict{ a: 1 }",
+        "d.keys.add(2)",
+        'let music = playAudio async "music.mp3" {',
+        "    at 1 s { music = 1 }",
         "}",
         "exit",
       ].join("\n"),
@@ -497,6 +503,16 @@ test("a fix writes another type where the place declares its type, and the code 
         "TSV041",
         "'xs' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
         '"y"',
+      ],
+      [
+        "TSV041",
+        "'d.keys' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
+        "2",
+      ],
+      [
+        "TSV041",
+        "'music' holds a media handle, so it cannot be set to a whole number (integer). Use a separate variable for a value of another type.",
+        "1",
       ],
     ],
   );

@@ -1391,8 +1391,19 @@ class TypeChecker {
         ? variableDeclared(entry.variable, this.#keyword(node.name))
         : null;
     }
-    const label = node.kind === "propertyAccessExpression" ? expressionLabel(node) : null;
-    return label === null ? null : { kind: "property", label };
+    if (node.kind !== "propertyAccessExpression") return null;
+    // Only a property that an object or a speaker keeps has a first value; one that a dict, list, or set computes,
+    // such as `keys`, has none.
+    const receivers = members(nonNullType(this.#typeOf(node.object))).map(resolved);
+    const kept =
+      receivers.length > 0 &&
+      receivers.every(
+        (receiver) =>
+          receiver.kind === "object" ||
+          (receiver.kind === "speaker" && this.#keepsType(node.property.name)),
+      );
+    const label = expressionLabel(node);
+    return kept && label !== null ? { kind: "property", label } : null;
   }
 
   /** Continues in the source of `file`, returning the file to come back to. */
@@ -3361,13 +3372,16 @@ class TypeChecker {
       all.length === 1 && all[0]!.kind === "object"
         ? this.#pathOf(objectExpression, scope)
         : undefined;
+    // Only an object's property has a first value that a fix may give another type; a handle's has a fixed type.
     return propertyPlace(
       type,
       label,
       `'${label}'`,
       this.#text,
       extendPath(owner, name),
-      objectLabel === null ? null : { kind: "property", label },
+      objectLabel !== null && all.every((member) => member.kind === "object")
+        ? { kind: "property", label }
+        : null,
     );
   }
 
@@ -8739,13 +8753,18 @@ function variablePlace(variable: Variable, text: PlaceText): Place {
   };
 }
 
-/** Where a fix writes another type for a variable: its `let` or `global`, or its parameter, but not a loop variable. */
+/**
+ * Where a fix writes another type for a variable: its `let` or `global`, or its parameter. A loop variable has no
+ * declaration to change, nor has a name the session gives, such as a media block's own handle.
+ */
 function variableDeclared(variable: Variable, keyword: "global" | "let"): Declared {
   if (variable.parameter !== undefined) return { kind: "parameter", parameter: variable.parameter };
   const kind = variable.declaration?.kind;
-  return kind === "forStatement" || kind === "identifier"
-    ? null
-    : { kind: keyword, name: variable.name };
+  const declared =
+    kind === undefined
+      ? variable.annotated === true
+      : kind !== "forStatement" && kind !== "identifier";
+  return declared ? { kind: keyword, name: variable.name } : null;
 }
 
 /** The elements of a collection that `name` spells, whose type a fix writes where `declared` says. */
