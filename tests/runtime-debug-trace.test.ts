@@ -1833,6 +1833,33 @@ test("release works once an operation that threw has unwound, and does nothing i
   }
 });
 
+test("release works in an observer's dispatch, before the block starts", () => {
+  const plan = compile(
+    "let original = 1\ntimer async 0 s {\n    let inner = original\n}\nwait 1 s\nexit",
+  );
+  const trace = new RuntimeDebugContext();
+  const session = createFreshRuntimeSession(plan, {
+    seed: SEED,
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+  });
+  const retained: number[] = [];
+  session.run({
+    debugTrace: trace,
+    instructionObserver: {
+      dispatch: () => {
+        retained.push(trace.status().records);
+        trace.release(Infinity);
+        retained.push(trace.status().records);
+      },
+    },
+  });
+  assert.equal(retained.length, 2);
+  assert.ok(retained[0]! > 0);
+  assert.equal(retained[1], 0);
+});
+
 test("status names the retained records and the next record ID, before any record and after a release", () => {
   const plan = compile("let total = 0\nrepeat 3 {\n    total += 1\n}\nexit");
   const trace = new RuntimeDebugContext();
