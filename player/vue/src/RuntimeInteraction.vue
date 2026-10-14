@@ -34,6 +34,7 @@ import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
 import { usePlayerConditions } from "./usePlayerConditions";
+import { playerPointerModality } from "./usePlayerKeyboardFocus";
 import type {
   PlayerFormPresentation,
   PlayerTranscriptEntryPresentation,
@@ -623,7 +624,7 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 // Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
 // devices. A click on Player content that is no control, which moves focus to the conversation or the page, gives it
 // back. A click that selected text keeps it, as focusing the composer would clear the selection, and a key typed then
-// goes to the composer as typed there.
+// goes to the composer as typed there; a part focused with the keyboard, such as the conversation, keeps its keys.
 useEventListener(document, "click", (event: MouseEvent) => {
   const target = event.target;
   if (
@@ -636,6 +637,8 @@ useEventListener(document, "click", (event: MouseEvent) => {
   )
     focusInput();
 });
+let focusedByPointer = false;
+useEventListener(document, "focusin", () => (focusedByPointer = playerPointerModality()));
 useEventListener(document, "keydown", (event: KeyboardEvent) => {
   const target = event.target;
   if (
@@ -647,7 +650,8 @@ useEventListener(document, "keydown", (event: KeyboardEvent) => {
     !event.altKey &&
     textSelected() &&
     (target === document.body ||
-      (target instanceof Element &&
+      (focusedByPointer &&
+        target instanceof Element &&
         !!composition.value?.contains(target) &&
         !target.closest(playerControls)))
   ) {
