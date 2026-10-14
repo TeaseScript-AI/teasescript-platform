@@ -204,7 +204,7 @@ test(
         [
           ["Listed", 9],
           ["Convert fully", 8],
-          ["Compile", 6],
+          ["Compile", 7],
           ["Play to the end", 3],
           ["Played on an older conversion", 1],
           ["Parked (step limit)", 1],
