@@ -617,12 +617,14 @@ The background, message bubbles, composer, buttons, and tools follow the photo t
 colour around the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent
 A/B test's A, the default, the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue
 too; B keeps the theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
-same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a new image loads,
-and when the browser does not let the Player read an image's pixels, the previous photo's colour stays; a camera view or
-an image request's preview over the Stage does not change it. The Player follows a new photo once it has shown briefly
-and reuses recent image measurements. The background and message bubbles fade in 0.6 s whenever the photo colour
-changes: to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with a mode
-change. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. A new photo and its
+colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
+stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
+photo shows with the previous colour, and its own colour follows. When the browser does not let the Player read an
+image's pixels, the previous photo's colour stays; a camera view or an image request's preview over the Stage does not
+change it. The Player reuses recent image measurements. The background and message bubbles fade in 0.6 s whenever the
+photo colour changes: to the first photo's colour, from one photo's colour to the next, back to the theme's colours,
+and with a mode change. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
