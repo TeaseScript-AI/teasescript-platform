@@ -1015,7 +1015,8 @@ set.", with a date-and-time field prefilled 7 days ahead; **Password (optional)*
 which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**, which says
 "The passwords do not match" under it as soon as it differs from the password; and **Public key (optional)**, "Only the
 person with the matching private key can open it.", which takes `age1…` or `ssh-ed25519 …` keys, one per line, and once
-left, or when Lock is pressed, says "That is not a public key." under it for a line that is none, and has a collapsed
+left, or when Lock is pressed, says "That is not a public key." under it for a line that is none, and for more than
+594 lines "A lock holds at most 594 public keys.", and has a collapsed
 **How does this work?** on public keys, where they come from, and the `age` command that opens the unlock request.
 Where an opener is the only one there can be, its label has no "(optional)". Unchecking the box hides the field, which
 keeps its moment for when the box is checked again. A line above **Lock** says what still opens the lock while no time

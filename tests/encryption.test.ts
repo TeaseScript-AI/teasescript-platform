@@ -675,11 +675,15 @@ test("public keys and keys are checked when they compile and when they run", () 
   const problems = [
     'let a = encryptText("x", publicKey: "age1nothing")',
     `let a = encryptText("x", publicKey: ["${AGE_KEY}", "ssh-rsa AAAAB3NzaC1yc2E"])`,
+    'let a = encryptText("x", publicKey: [("age1nothing")])',
     'let a = encryptText("x", publicKey: 4)',
     'let a = decryptText("x", key: 4, default: null)',
     'let a = decryptText("x", publicKey: "k", default: null)',
   ].map((source) => diagnostics(source).map(([, message]) => message));
   assert.deepEqual(problems, [
+    [
+      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+    ],
     [
       `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
     ],

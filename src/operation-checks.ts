@@ -513,7 +513,9 @@ function lockProblems(
     let written = publicKey;
     while (written.kind === "parenthesizedExpression") written = written.expression;
     const literals = written.kind === "listLiteral" ? written.elements : [written];
-    const wrong = literals.find((literal) => {
+    const wrong = literals.find((element) => {
+      let literal = element;
+      while (literal.kind === "parenthesizedExpression") literal = literal.expression;
       const text = literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
       return text !== undefined && parsePublicKey(text) === null;
     });

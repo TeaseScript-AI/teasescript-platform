@@ -461,6 +461,51 @@ test("publicKey: written in the script locks for the keyholders, and key: opens,
   assert.ok(opening.dialogs.every((shown) => shown === null));
 });
 
+test("a password field with a written key asks again for a password the Player lost, and the lock dialog asks again for more keys than a lock holds", async () => {
+  const locking = new Harness(
+    'let locked = encryptText("both", password: "corner", openAt: null)\nexit',
+  );
+  const { locked } = await locking.ended();
+  locking.stop();
+  const player = new Harness(
+    [
+      `let opened = decryptText("${String(locked)}", password: askPassword("Code?"), key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", default: "closed")`,
+      'let many = encryptText("many")',
+      "exit",
+    ].join("\n"),
+    { start: false },
+  );
+  // Another Player answered the field and was reloaded.
+  const field = activePlayerRuntimeLock(player.session.state)!;
+  player.session = answerPlayerRuntimeLock(
+    player.session,
+    field.actionId,
+    { kind: "submitted" },
+    player.media,
+  ).session;
+  player.service.request();
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "password" && again.actionId > field.actionId, true);
+  player.answer({ password: "corner", openAtMs: null });
+  const lock = await player.dialog();
+  assert.equal(lock.kind, "lock");
+  // 595 keys do not fit into a lock: the dialog asks again rather than failing.
+  const keyholder = sshIdentity().recipient;
+  player.answer({
+    password: null,
+    openAtMs: NOW_MS + 3_600_000,
+    publicKeys: Array.from({ length: 595 }, () => keyholder),
+  });
+  const fewer = await player.dialog();
+  assert.ok(fewer.kind === "lock" && fewer.key !== lock.key);
+  player.answer({ password: null, openAtMs: NOW_MS + 3_600_000, publicKeys: [keyholder] });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "both");
+  assert.equal(typeof values.many, "string");
+  assert.deepEqual(player.diagnostics, []);
+});
+
 test("a cancelled unlock dialog gives the default, and a passed time lock out of reach asks only when a password can open it", async () => {
   const cancelled = new Harness(
     [

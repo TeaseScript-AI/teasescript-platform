@@ -8,6 +8,7 @@ import {
 } from "../src/index.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { parsePublicKey, type PublicKey } from "../src/public-keys.js";
+import { MAX_LOCK_PUBLIC_KEYS } from "../src/runtime/actions/lock.js";
 import {
   activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
@@ -400,11 +401,12 @@ export class LockService {
           ),
           timeLockMs: action.choices.includes("timeLock") ? answer.timeLockMs : action.timeLockMs,
         };
-        // A lock needs an opener. The dialog does not submit without one, and an answer without one asks again.
+        // No lock is without an opener or above its key limit: the dialog submits neither, and either asks again.
         if (
-          openers.password === null &&
-          openers.publicKeys.length === 0 &&
-          openers.timeLockMs === null
+          (openers.password === null &&
+            openers.publicKeys.length === 0 &&
+            openers.timeLockMs === null) ||
+          openers.publicKeys.length > MAX_LOCK_PUBLIC_KEYS
         )
           return { kind: "ask" };
         const content =

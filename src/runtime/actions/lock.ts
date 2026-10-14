@@ -724,12 +724,13 @@ export function resolveLockCompletion(
       return ok(payload.reason === "unreadable" ? "unreadable" : "failed");
     case "ask": {
       // Only the dialog's own call asks: a decrypt call without `password:` or `key:`, or one whose typed answer was
-      // lost. The password field asks again only for a password this Player no longer has. A wrong password or key
-      // was typed in the dialog.
-      if (
-        encrypts ? action.dialogActionId === null : action.password !== null || action.key !== null
-      )
-        break;
+      // lost. The password field asks again only for a password this Player no longer has, also with a written key. A
+      // wrong password or key was typed in the dialog.
+      const asksAgain =
+        encrypts || action.passwordField !== null
+          ? action.dialogActionId !== null
+          : action.password === null && action.key === null;
+      if (!asksAgain) break;
       if (keys === "kind") return ok("ask");
       if (
         encrypts ||

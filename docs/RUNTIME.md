@@ -1704,9 +1704,10 @@ The instruction then runs again with it, before any block: it gives the lock or 
 text too long), the default for `notOpened` or `cancelled`, fails with `TSR085` for `unreadable` and `TSR086` for
 `failed`, or waits again in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the
 dialog or field, which locks with the call's own openers and, for its password field and `choices`, what the player
-gave; a password field's decrypt call opens with the typed password alone, a wrong one giving the default. The player's
-typed password stays in the Player and never reaches the engine; the engine records only each step's outcome and
-result, so a restore or a replay of recorded completions needs neither the network, the store, nor a secret.
+gave; a password field's decrypt call opens with the typed password and its written key only, a wrong one giving the
+default. The player's typed password stays in the Player and never reaches the engine; the engine records only each
+step's outcome and result, so a restore or a replay of recorded completions needs neither the network, the store, nor a
+secret.
 
 The Player (`player/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
 file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field
