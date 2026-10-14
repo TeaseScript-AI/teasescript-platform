@@ -5,6 +5,7 @@ import type {
   GlobalStatement,
   LetStatement,
   ScalarTypeName,
+  SpeakerDeclaration,
   TypeAnnotation,
   TypeName,
 } from "./ast.js";
@@ -152,10 +153,16 @@ export type Origin = Declaration | PartOrigin;
 
 /**
  * The declaration of a variable without a type annotation: `let`, `global`, a parameter with a default, or a loop
- * variable: the `for` statement for its first variable, and the identifier of a pair loop's value variable.
+ * variable: the `for` statement for its first variable, and the identifier of a pair loop's value variable. A speaker's
+ * declaration stands for the object of its custom properties (V30 §37).
  */
 export type Declaration =
-  LetStatement | GlobalStatement | FunctionParameter | ForStatement | Identifier;
+  | LetStatement
+  | GlobalStatement
+  | FunctionParameter
+  | ForStatement
+  | Identifier
+  | SpeakerDeclaration;
 
 /**
  * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
@@ -355,6 +362,7 @@ export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
 export const ABSOLUTE_DATE_TIME_TYPE = scalar("absoluteDateTime");
 export const SCRIPT_TYPE = scalar("script");
+export const REGEX_TYPE = scalar("regex");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -382,6 +390,16 @@ export function mayBeUnknown(type: StaticType): boolean {
     type,
     (part) => part.kind === "unknown" || (part.kind === "open" && part.heldUnknown !== undefined),
   );
+}
+
+/**
+ * Whether a value of this type is read from a place that no value decided yet but that held a value the compiler cannot
+ * know, such as an element of `[]` after `add(load(key, default: null))`. Such a read gives a value of unknown type, as
+ * any other would (rule 1.7): a later value does not decide a variable that holds it, and a known place checks it when
+ * the script runs (#859).
+ */
+export function readsHeldUnknown(type: StaticType): boolean {
+  return members(type).some((part) => part.kind === "open" && part.heldUnknown !== undefined);
 }
 
 export function isKnown(type: StaticType): boolean {
@@ -574,22 +592,37 @@ export function coversType(outer: StaticType, inner: StaticType): boolean {
 }
 
 function includes(outer: StaticType, inner: StaticType): boolean {
-  return runCompileTask(includesTask(outer, inner));
+  return runCompileTask(includesTask(outer, inner, false));
 }
 
-function* includesTask(outerType: StaticType, innerType: StaticType): CompileTask<boolean> {
+/**
+ * Whether every value of `inner` is also a value of `outer` once each slot of `inner` that no value decided yet, such
+ * as the elements of `[]`, takes the type that `outer` has there, as in a list literal (V30 §16).
+ */
+function includesOnceDecided(outer: StaticType, inner: StaticType): boolean {
+  return runCompileTask(includesTask(outer, inner, true));
+}
+
+function* includesTask(
+  outerType: StaticType,
+  innerType: StaticType,
+  undecidedFits: boolean,
+): CompileTask<boolean> {
   const outer = resolved(outerType);
   const inner = resolved(innerType);
   if (outer.kind === "unknown" || inner.kind === "never") return true;
+  // A slot that held null or a value the compiler cannot know would change the type it joins.
+  if (undecidedFits && inner.kind === "open")
+    return inner.heldUnknown === undefined && !inner.sawNull;
   if (outer.kind === "open" || inner.kind === "open" || inner.kind === "unknown") return false;
   if (inner.kind === "union") {
     for (const member of inner.members)
-      if (!(yield* compileChild(includesTask(outer, member)))) return false;
+      if (!(yield* compileChild(includesTask(outer, member, undecidedFits)))) return false;
     return true;
   }
   if (outer.kind === "union") {
     for (const member of outer.members)
-      if (yield* compileChild(includesTask(member, inner))) return true;
+      if (yield* compileChild(includesTask(member, inner, undecidedFits))) return true;
     return false;
   }
   switch (outer.kind) {
@@ -605,7 +638,7 @@ function* includesTask(outerType: StaticType, innerType: StaticType): CompileTas
     case "dict":
       return (
         inner.kind === outer.kind &&
-        (yield* compileChild(includesTask(outer.element, inner.element)))
+        (yield* compileChild(includesTask(outer.element, inner.element, undecidedFits)))
       );
     case "object":
       return inner.kind === "object" && outer.properties === null;
@@ -1142,6 +1175,26 @@ export function placeType(type: StaticType): StaticType {
  */
 export function freshPlaceType(type: StaticType): StaticType {
   return runCompileTask(placeTask(type, false));
+}
+
+/**
+ * A fresh copy of a slot that took null before any other value, such as an element read from a list after `add(null)`,
+ * with that null as a member of its own, as after `let x = null`, instead of the mark that its later value is optional.
+ * A test that excludes null then keeps only the slot, so that the value that decides it does not bring the null back.
+ * Other types are returned as they are, also a slot that held a value the compiler cannot know: what it holds is of
+ * unknown type, which a known place checks when the script runs, null included (rule 1.7). Only a copy that no other
+ * place shares may be given.
+ */
+export function ownNull(copy: StaticType): StaticType {
+  if (
+    copy.kind !== "open" ||
+    copy.resolved !== null ||
+    !copy.sawNull ||
+    copy.heldUnknown !== undefined
+  )
+    return copy;
+  copy.sawNull = false;
+  return optional(copy);
 }
 
 function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticType> {
@@ -1705,6 +1758,9 @@ function* joinValuesTask(
   const plainRight = plainType(right);
   if (includes(plainLeft, plainRight) || includes(plainRight, plainLeft))
     return union([left, right]);
+  // A union keeps its members, so `[]` joins `integer[] | string` as a value of its `integer[]` member.
+  if (left.kind === "union" && includesOnceDecided(left, right)) return left;
+  if (right.kind === "union" && includesOnceDecided(right, left)) return right;
   return undefined;
 }
 
@@ -1853,13 +1909,14 @@ export function excludeType(type: StaticType, test: StaticType): StaticType {
 
 /**
  * The type a variable of `declared` type is known to hold directly after a value of type `value` is stored in it
- * (ADR 0021 rule 5.2): the declared members that the value fits, or the value's type for a variable of unknown type.
+ * (ADR 0021 rule 5.2): the declared members that the value fits, or the value's type for a variable of unknown type,
+ * unless that value is of unknown type itself (see {@link readsHeldUnknown}).
  */
 export function assignedType(declared: StaticType, value: StaticType): StaticType {
   const kept = canonical(declared);
   const stored = canonical(value);
   if (stored.kind === "unknown") return kept;
-  if (kept.kind === "unknown") return stored;
+  if (kept.kind === "unknown") return readsHeldUnknown(stored) ? kept : stored;
   // A value an `askChoice` restricted to some literal values keeps that restriction while nothing else is stored.
   const restricted = (part: StaticType): boolean =>
     part.kind === "scalar" && part.values !== undefined;
@@ -1994,6 +2051,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   datetime: "a date and time",
   absoluteDateTime: "an absolute date and time",
   script: "a script reference",
+  regex: "a regex",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */

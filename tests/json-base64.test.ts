@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -334,6 +335,82 @@ test("fromBase64 gives its default for text that is not Base64, bytes that are n
   );
   assert.equal(read.get("fromNumber"), null);
   assert.equal(read.get("listed"), null);
+});
+
+test("hashText gives the SHA-256 of text in UTF-8 as 64 lowercase hexadecimal digits, at once", () => {
+  const hashes = variables(
+    [
+      // The examples of FIPS 180-2: the 448-bit and 896-bit messages, and one million "a".
+      'let empty = hashText("")',
+      'let abc = hashText("abc")',
+      'let bits448 = hashText("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")',
+      'let bits896 = hashText("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu")',
+      'let million = hashText("".padStart(1000000, "a"))',
+      'let accents = hashText("ü 😀")',
+      // A surrogate pair right where the text is encoded in parts.
+      'let pair = hashText("".padStart(65535, "a") + "😀")',
+      // Lone surrogates, which JSON can write, count as U+FFFD, as in toBase64.
+      `let lone = hashText(fromJson(${literal('"\\ud800 \\udc00"')}, default: ""))`,
+      'let replaced = hashText("\uFFFD \uFFFD")',
+      `let loneBase64 = toBase64(fromJson(${literal('"\\ud800"')}, default: ""))`,
+    ].join("\n"),
+  );
+  const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
+  assert.equal(
+    hashes.get("empty"),
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  );
+  assert.equal(
+    hashes.get("abc"),
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  );
+  assert.equal(
+    hashes.get("bits448"),
+    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+  );
+  assert.equal(
+    hashes.get("bits896"),
+    "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1",
+  );
+  assert.equal(
+    hashes.get("million"),
+    "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+  );
+  assert.equal(hashes.get("accents"), sha256(Buffer.from("ü 😀", "utf8")));
+  assert.equal(hashes.get("pair"), sha256(Buffer.from(`${"a".repeat(65535)}😀`, "utf8")));
+  // EF BF BD, the UTF-8 of U+FFFD, for each lone surrogate.
+  assert.equal(hashes.get("lone"), sha256(Buffer.from([0xef, 0xbf, 0xbd, 0x20, 0xef, 0xbf, 0xbd])));
+  assert.equal(hashes.get("replaced"), hashes.get("lone"));
+  assert.equal(hashes.get("loneBase64"), "77+9");
+});
+
+test("a script compares an answer with a hash it holds, and hashText checks its argument", () => {
+  const answered = variables(
+    [
+      // The hash of "corner" as sha256sum gives it, so the script holds no answer itself.
+      'let expected = "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e"',
+      'let right = hashText("corner") == expected',
+      'let wrong = hashText("Corner") == expected',
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    ["right", "wrong"].map((name) => answered.get(name)),
+    [true, false],
+  );
+  const codes = (source: string) => diagnostics(source).map(([code]) => code);
+  assert.deepEqual(diagnostics("let a = hashText(5)"), [
+    ["TSV043", "hashText(...) hashes text (string), but this is a whole number (integer)."],
+  ]);
+  assert.deepEqual(codes('let a = hashText("a", algorithm: "sha1")'), ["TSV022"]);
+  assert.deepEqual(codes('let a = hashText("a", "b")'), ["TSV020"]);
+  assert.deepEqual(codes('let a: string = hashText("a")'), []);
+  assert.deepEqual(codes("let hashText = 1"), ["TSV001"]);
+  // Any other value goes through toJson first; one the compiler could not see fails when the script runs.
+  assert.deepEqual(failure('let a = hashText(fromJson("[1]", default: null))'), {
+    code: "TSR059",
+    message: "hashText(...) hashes text (string), not a list.",
+  });
+  assert.deepEqual(codes("let a = hashText(toJson([1, 2]))"), []);
 });
 
 test("a Cornertime preset goes through JSON and Base64 between its lines and back", () => {

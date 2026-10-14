@@ -3,6 +3,7 @@ import { onBeforeUnmount, watchEffect, type Ref } from "vue";
 import {
   generatePlayerTheme,
   themeCssVariables,
+  type PhotoSurfaces,
   type PlayerThemeIntent,
 } from "../../theme/palette.js";
 
@@ -29,7 +30,11 @@ export const defaultPlayerThemeIntents: Readonly<Record<"light" | "dark", Player
     }),
   });
 
-export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
+/** Applies the theme of `intent`, with `photo`'s surfaces while the Stage photo colours the Player. */
+export function usePlayerTheme(
+  intent: Readonly<Ref<PlayerThemeIntent>>,
+  photo?: Readonly<Ref<PhotoSurfaces | null>>,
+) {
   // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
   // Retain previous inline values so unmounting restores the exact baseline.
   const previousThemeProperties = new Map<string, { value: string; priority: string }>();
@@ -67,7 +72,7 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
     root.dataset.playerTheme = update.mode;
   }
   watchEffect(() => {
-    const theme = generatePlayerTheme(intent.value);
+    const theme = generatePlayerTheme(intent.value, photo?.value);
     applyGeneratedTheme({
       mode: intent.value.mode,
       variables: {

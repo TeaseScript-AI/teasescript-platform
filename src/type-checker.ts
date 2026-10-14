@@ -177,12 +177,14 @@ import {
   optional,
   placeType,
   freshPlaceType,
+  ownNull,
   resolved,
   settle,
   STRING_TYPE,
   TIME_TYPE,
   ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
+  REGEX_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -202,6 +204,7 @@ import {
   placedSlots,
   nextDecision,
   mayBeUnknown,
+  readsHeldUnknown,
   type OpenType,
   numberPaths,
   integerParts,
@@ -213,7 +216,7 @@ import {
   type PartOrigin,
   type StaticType,
 } from "./static-types.js";
-import { typePlan } from "./type-plans.js";
+import { checksProperties, typePlan } from "./type-plans.js";
 import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 import {
   detachedType,
@@ -331,6 +334,8 @@ export function checkTypes(
   const decided: Decided = new Map();
   const copies: Copies = new Map();
   const kept: KeptFallbacks = new Set();
+  // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
+  const unchecked: UncheckedProperties = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
   // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
@@ -345,13 +350,24 @@ export function checkTypes(
       decided,
       copies,
       kept,
+      unchecked,
       storage,
       programs.length,
       onFile,
       lines,
     );
     checker.check(programs);
-    checker.recordDecisions();
+    // A check that found more of them read those properties with the types they no longer keep, so what it found rests
+    // on those types: the next check starts again from nothing but the larger set, which only grows.
+    if (checker.uncheckedMore) {
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      storage = new Map();
+      storageRounds = 0;
+      continue;
+    }
     let storageChanged = false;
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
@@ -369,6 +385,10 @@ export function checkTypes(
         storageRounds += 1;
       }
     }
+    // A load that read its default's type reads the type that another load declares from the next check on, so what
+    // this check decided may rest on the wrong type: the next check decides again.
+    if (![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true))
+      checker.recordDecisions();
     // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
     // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
     let last =
@@ -440,6 +460,14 @@ type Copies = Map<Declaration, Map<string, string>>;
  * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
  */
 type KeptFallbacks = Set<Expression>;
+
+/**
+ * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
+ * as a parameter or the speaker of a message, or through a value of unknown type. Such a store is not checked, so no
+ * speaker keeps a type for a property of that name: its reads stay of unknown type, which a known place checks when the
+ * script runs (ADR 0021 rule 1.7), and stores into it are not checked.
+ */
+type UncheckedProperties = Set<string>;
 
 /** The type that decided a slot, and the store that decided it. */
 interface Decision {
@@ -835,7 +863,8 @@ function placeRead(type: StaticType): PlaceRead {
 
 type Entry =
   | { readonly kind: "variable"; readonly variable: Variable }
-  | { readonly kind: "speaker" }
+  /** A declared speaker, with its custom properties as the object of a variable (V30 §37). */
+  | { readonly kind: "speaker"; readonly custom: Variable }
   | { readonly kind: "function"; readonly fn: FunctionType };
 
 class Scope {
@@ -1089,6 +1118,8 @@ class TypeChecker {
     readonly site: RuntimeCheckSite;
     readonly place: StaticType;
     readonly label: string;
+    /** Whether only the properties of a value of type `object` are unknown, which only a check of properties reads. */
+    readonly properties?: true;
   }[] = [];
 
   /** Whether this check found a variable to widen that earlier checks did not. */
@@ -1104,6 +1135,14 @@ class TypeChecker {
   keptMore = false;
 
   readonly #kept: KeptFallbacks;
+
+  /** Whether this check found a custom speaker property that earlier checks did not (see {@link UncheckedProperties}). */
+  uncheckedMore = false;
+
+  readonly #unchecked: UncheckedProperties;
+
+  /** For a named speaker's custom property, the names that stores read after it on the way to their targets. */
+  readonly #storedThrough = new Map<string, string[]>();
 
   /** The fallbacks of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
@@ -1233,6 +1272,12 @@ class TypeChecker {
   readonly storageLoads: StorageLoad[] = [];
 
   /**
+   * The keys of loads that read their default's type because the previous check found no type for the key. Where another
+   * load declares its type, they read that type in the next check, so what this check decided from them may be wrong.
+   */
+  readonly keysReadAsDefault = new Set<string>();
+
+  /**
    * The declared type of the variable that a `load` starts or is assigned to, which the load reads the stored value as
    * (rule 6.2).
    */
@@ -1240,6 +1285,9 @@ class TypeChecker {
 
   /** Loads whose default cannot be saved, which a store does not check again. */
   readonly #rejectedDefaults = new Set<Expression>();
+
+  /** Loads that read the type another load of their key declares, which may take more values than their default. */
+  readonly #declaredLoads = new Set<Expression>();
 
   /** One origin for each element or property inside a variable, so equal parts are one origin. */
   readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
@@ -1250,6 +1298,7 @@ class TypeChecker {
     decided: Decided,
     copies: Copies,
     kept: KeptFallbacks,
+    unchecked: UncheckedProperties,
     storage: ReadonlyMap<string, StorageKeyType>,
     files: number,
     private readonly onFile: (file: number) => void,
@@ -1261,6 +1310,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#kept = kept;
+    this.#unchecked = unchecked;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
@@ -1433,11 +1483,95 @@ class TypeChecker {
       this.#rejectRandomSelection(declaration.initial);
       return;
     }
-    this.#project.declare(declaration.name.name, { kind: "speaker" });
+    // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
+    // declaration stands for, which takes its parts' origins and earlier checks' widenings once it has them all. A
+    // built-in property follows its own rules (see `#checkSpeakerProperty`).
+    const properties = new PropertyTable();
+    const custom: Variable = {
+      name: declaration.name.name,
+      type: { kind: "object", properties },
+      declaration,
+      shared: false,
+    };
+    this.#declared.set(declaration, custom);
+    this.#project.declare(declaration.name.name, { kind: "speaker", custom });
     for (const property of declaration.properties) {
+      const name = property.name.name;
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
-      this.#checkSpeakerProperty(property.name.name, property.value, type);
+      this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
+      if (!this.#keepsType(name)) continue;
+      properties.set(
+        name,
+        decidedSlot(this.#newPlaceType(property.value, type), property.value.span),
+      );
+      this.#follow({ root: declaration, path: [name] }, type, property.value.span);
+    }
+    this.#ownType(declaration, custom.type);
+  }
+
+  /** Whether a declared speaker keeps a type for its property `name`: a custom one that no store reaches unchecked. */
+  #keepsType(name: string): boolean {
+    return !BUILT_IN_SPEAKER_PROPERTIES.has(name) && !this.#unchecked.has(name);
+  }
+
+  /**
+   * The object of a declared speaker's custom properties when `receiver`, of type `type`, names that speaker and its
+   * property `name` keeps a type; a speaker that the compiler cannot tell apart, such as a parameter, has properties of
+   * unknown type.
+   */
+  #customProperties(
+    receiver: Expression,
+    type: StaticType,
+    name: string,
+    scope: Scope,
+  ): StaticType | undefined {
+    const node = unwrap(receiver);
+    if (type.kind !== "speaker" || node.kind !== "identifier" || !this.#keepsType(name))
+      return undefined;
+    const entry = scope.resolve(node.name);
+    return entry?.kind === "speaker" ? entry.custom.type : undefined;
+  }
+
+  /**
+   * Notes the custom speaker properties that a store into `target`, or an element added to it, may reach unchecked:
+   * a property read from a value that may be a speaker the compiler cannot tell apart, or of unknown type, on the way
+   * to `target` (see {@link UncheckedProperties}).
+   */
+  #noteUncheckedStore(target: Expression, scope: Scope): void {
+    const named = (node: Expression): boolean =>
+      node.kind === "identifier" && scope.resolve(node.name)?.kind === "speaker";
+    // The property names read on the way, from the target back to where the way starts.
+    const names: string[] = [];
+    let node = unwrap(target);
+    for (;;) {
+      if (node.kind === "propertyAccessExpression") {
+        const receiver = unwrap(node.object);
+        names.push(node.property.name);
+        if (!named(receiver) && mayBe(this.#typeOf(receiver), "speaker"))
+          this.#markUnchecked(node.property.name);
+        node = receiver;
+      } else if (node.kind === "indexExpression") node = unwrap(node.object);
+      else break;
+    }
+    // A named speaker's property that keeps no type may hold any speaker, so the names read after it are reached too.
+    // Its read gave them that reason above; one that loses its type later in this check gives it to them then.
+    if (!named(node) || names.length < 2) return;
+    const [first, ...later] = names.reverse();
+    if (!this.#keepsType(first!)) return;
+    const through = this.#storedThrough.get(first!) ?? [];
+    for (const name of later) through.push(name);
+    this.#storedThrough.set(first!, through);
+  }
+
+  /** Adds `name` to the custom speaker properties that keep no type, with the names stored through it on the way. */
+  #markUnchecked(name: string): void {
+    const work = [name];
+    for (let next = work.pop(); next !== undefined; next = work.pop()) {
+      if (this.#unchecked.has(next)) continue;
+      this.#unchecked.add(next);
+      this.uncheckedMore = true;
+      for (const later of this.#storedThrough.get(next) ?? []) work.push(later);
     }
   }
 
@@ -1527,7 +1661,8 @@ class TypeChecker {
     const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
     for (const check of this.#runtimeChecks) {
       const type = typePlan(check.place);
-      if (type !== null) checks.set(check.site, { type, place: check.label });
+      if (type !== null && (check.properties === undefined || checksProperties(type)))
+        checks.set(check.site, { type, place: check.label });
     }
     return checks;
   }
@@ -1839,8 +1974,7 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, a dict, or a range",
         );
-        // The loop variable is a place: it keeps the plain element type.
-        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+        const loopType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1958,7 +2092,7 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    const valueType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
@@ -2032,13 +2166,12 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      // A place that no value decided yet but that held a value the compiler cannot know, such as an element of `[]`
-      // after `add(load(key, default: null))`, gives such a value, so the variable is of unknown type, as after any
-      // other (rule 1.7): a later value does not decide it, and a known place checks what it holds when the script runs
-      // (#859).
-      if (members(value).some((part) => part.kind === "open" && part.heldUnknown !== undefined))
-        value = UNKNOWN_TYPE;
+      // A read of a place that held only values the compiler cannot know gives such a value (rule 1.7).
+      if (readsHeldUnknown(value)) value = UNKNOWN_TYPE;
       type = this.#newPlaceType(written, value);
+      // A copy of a place that took null keeps that null as a member, which a null check removes; only a copy belongs
+      // to this variable alone.
+      if (this.#placeReads.has(written)) type = ownNull(type);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);
@@ -2174,6 +2307,7 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
+      this.#noteUncheckedStore(target, scope);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
         this.#checkIndex(object, target.object, index, target.index);
@@ -2227,12 +2361,14 @@ class TypeChecker {
           read = elementType(object);
         }
       } else {
-        const value = resolved(nonNullType(object));
         const name = target.property.name;
+        const custom = this.#customProperties(target.object, object, name, scope);
+        const receiver = custom ?? object;
+        const value = resolved(nonNullType(receiver));
         // A new property takes its type from its first value, by the same rule as `let` (rule 1.4).
         if (value.kind === "object" && value.properties !== null && !value.properties.has(name)) {
           // A receiver that may be null needs a check first, also for a new property (owner decision on #504 Q1).
-          const receivers = members(object);
+          const receivers = members(receiver);
           if (receivers.some((member) => member.kind === "null")) {
             this.#reportMayBe(
               target.object,
@@ -2256,29 +2392,29 @@ class TypeChecker {
               this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
             }
           }
-          // `+=` and `-=` read the property first.
-          else this.#noteMissingAccess(target, object);
+          // `+=` and `-=` read the property first; a speaker's missing property is a runtime error.
+          else if (custom === undefined) this.#noteMissingAccess(target, receiver);
           return;
         }
         const before = this.diagnostics.length;
-        place = this.#propertyPlace(object, target.object, target.property, scope);
-        const speakers = members(nonNullType(object)).map(
+        place = this.#propertyPlace(receiver, target.object, target.property, scope);
+        const speakers = members(nonNullType(receiver)).map(
           (member) => resolved(member).kind === "speaker",
         );
         if (speakers.includes(true)) speakerProperty = name;
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
-        handle = mayBe(object, "timer", "media", "camera");
+        handle = mayBe(receiver, "timer", "media", "camera");
         // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
         // previous message's pacing.
-        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
-        if (name === "placement" && mayBe(object, "camera")) {
+        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
+        if (name === "placement" && mayBe(receiver, "camera")) {
           this.#suspend();
-          this.#checkCameraPlacement(object, statement);
+          this.#checkCameraPlacement(receiver, statement);
         }
         if (name === "text" && statement.operator === "=")
-          this.#checkMessageText(object, statement);
+          this.#checkMessageText(receiver, statement);
       }
     }
     const loaded = unwrap(statement.value);
@@ -2821,7 +2957,13 @@ class TypeChecker {
       node = unwrap(node.object);
     }
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
-    const root = entry?.kind === "variable" ? entry.variable.declaration : undefined;
+    const root =
+      entry?.kind === "variable"
+        ? entry.variable.declaration
+        : // A speaker that receives a property that keeps a type stands for the object of its custom properties.
+          entry?.kind === "speaker" && (steps.length === 0 || this.#keepsType(steps.at(-1)!))
+          ? entry.custom.declaration
+          : undefined;
     return root === undefined ? undefined : { root, path: steps.reverse() };
   }
 
@@ -3575,6 +3717,8 @@ class TypeChecker {
           if (part.kind === "stringInterpolation")
             yield* compileChild(this.#interpolationTask(part.expression, scope));
         return STRING_TYPE;
+      case "regexLiteral":
+        return REGEX_TYPE;
       case "parenthesizedExpression": {
         const type = yield* compileChild(this.#expressionTask(expression.expression, scope));
         return this.#placeReads.has(expression.expression) ? placeRead(type) : type;
@@ -3648,7 +3792,11 @@ class TypeChecker {
       }
       case "propertyAccessExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
-        return this.#propertyType(object, expression);
+        const name = expression.property.name;
+        const custom = this.#customProperties(expression.object, object, name, scope);
+        if (custom === undefined) return this.#propertyType(object, expression);
+        // A custom property that no store gave the speaker yet is of unknown type, and missing ones fail when read.
+        return placeRead(memberPropertyType(custom, name) ?? UNKNOWN_TYPE);
       }
       case "indexExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
@@ -3795,6 +3943,7 @@ class TypeChecker {
             );
         } else if (kept?.declared === true) {
           read = detachedType(kept.type);
+          this.#declaredLoads.add(expression);
           // A default the compiler cannot know may be anything, also null; it is checked when the load uses it.
           if (mayBeUnknown(fallback)) {
             this.storageLoads.push({ key, type: read, at: expression.span, declared: false });
@@ -3822,6 +3971,7 @@ class TypeChecker {
           // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
           if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
           read = given;
+          if (kept === undefined) this.keysReadAsDefault.add(key);
           // Each type that loads without a declared type read before this one accepts every value of it, or it of them.
           const earlier = kept?.loads ?? [];
           const text = typeKey(read);
@@ -5588,6 +5738,7 @@ class TypeChecker {
     )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
+    if (method === "add" || method === "addAll") this.#noteUncheckedStore(callee.object, scope);
     // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
     if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
@@ -5913,7 +6064,7 @@ class TypeChecker {
     if (method === "get") {
       const fallback = expression.arguments.find((argument) => argument.kind === "namedArgument");
       if (problems.length > 0 || fallback === undefined) return UNKNOWN_TYPE;
-      const element = copyType(value.element);
+      const element = ownNull(copyType(value.element));
       const other = plainType(typeOf(fallback.value));
       const undecided = (type: StaticType): boolean =>
         containsType(type, (part) => part.kind === "open");
@@ -6215,21 +6366,34 @@ class TypeChecker {
       case "toBase64":
       case "fromBase64":
       case "fileFromBase64":
-      case "fileToBase64": {
-        // The JSON or Base64 text of a value or a stored file, and what such text holds (V30 §13 and §33).
+      case "fileToBase64":
+      case "hashText":
+      case "hashFile": {
+        // The JSON or Base64 text of a value or a stored file, what such text holds, and the SHA-256 of text or a stored
+        // file (V30 §13 and §33).
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
         this.#reportProblems(problems);
-        if ((name === "toBase64" || name === "fileToBase64") && problems.length === 0)
+        if (
+          (name === "toBase64" ||
+            name === "fileToBase64" ||
+            name === "hashText" ||
+            name === "hashFile") &&
+          problems.length === 0
+        )
           this.#reportUnless(
             value!,
             (member) => isScalar(member, "string"),
             argument!.value,
             name === "toBase64"
               ? "toBase64(...) encodes text (string)"
-              : "fileToBase64(...) reads a stored file, which is text (string)",
+              : name === "hashText"
+                ? "hashText(...) hashes text (string)"
+                : name === "hashFile"
+                  ? "hashFile(...) hashes a stored file, which is text (string)"
+                  : "fileToBase64(...) reads a stored file, which is text (string)",
           );
-        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, or the
-        // result is the default.
+        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, a hash
+        // is text, or the result is the default.
         if (name === "fromJson") return UNKNOWN_TYPE;
         const fallback = expression.arguments.findIndex(
           (item) => item.kind === "namedArgument" && item.name.name === "default",
@@ -6237,6 +6401,19 @@ class TypeChecker {
         return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
+      }
+      case "toRegex": {
+        // A regex from pattern text, or the default, a regex or null (V30 §8).
+        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        const fallbackType = fallback === -1 ? undefined : values[fallback]!;
+        return fallbackType !== undefined &&
+          isKnown(fallbackType) &&
+          isAssignable(optional(REGEX_TYPE), fallbackType)
+          ? union([REGEX_TYPE, fallbackType])
+          : optional(REGEX_TYPE);
       }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
@@ -6698,9 +6875,8 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : isScalar(member, "script")
-            ? SCRIPT_CHOICE_MESSAGE
-            : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
+          : (unreturnableChoiceMessage(member) ??
+              "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set."),
         entry.span,
       ),
     );
@@ -6725,11 +6901,11 @@ class TypeChecker {
             this.#checkMembers(
               property.value,
               propertyType,
-              (member) => !isScalar(member, "script"),
-              () =>
+              (member) => unreturnableChoiceMessage(member) === undefined,
+              (member) =>
                 this.#report(
                   typeCode.invalidInteractionChoice,
-                  SCRIPT_CHOICE_MESSAGE,
+                  unreturnableChoiceMessage(member)!,
                   property.value.span,
                 ),
             );
@@ -6777,7 +6953,7 @@ class TypeChecker {
             typeCode.unshowableValue,
             member.kind === "dict"
               ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, and script references, and selects one element of a list.`,
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, script references, and regexes, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -6785,7 +6961,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -6801,7 +6977,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
           element.span,
         ),
       );
@@ -7274,13 +7450,17 @@ class TypeChecker {
 
   /**
    * What a store checks at compile time: for a load, its default, unless that default cannot be saved and was reported
-   * already. The loaded value itself is checked at runtime.
+   * already. The loaded value itself is checked at runtime against the load's type, which is then the type of the
+   * receiving variable or the default's. A load of the type another load of its key declares is checked as the loaded
+   * value instead: that type may take values that its default, which it accepts, does not, such as text where the
+   * default is a number.
    */
   #checkedValue(expression: Expression): Expression {
     const value = unwrap(expression);
     return value.kind === "loadExpression" &&
       value.defaultValue !== null &&
-      !this.#rejectedDefaults.has(value)
+      !this.#rejectedDefaults.has(value) &&
+      !this.#declaredLoads.has(value)
       ? value.defaultValue
       : expression;
   }
@@ -7288,8 +7468,7 @@ class TypeChecker {
   /**
    * After a store checked a load's default, stores the loaded value of type `loaded` in a place of type `place`: its
    * objects, which may have other properties, and what it decides where the default decided nothing, such as after
-   * `default: null`. A load of a declared key decides the type it declares, and a load of a computed key gives a value
-   * of unknown type, which the place may then hold (#859).
+   * `default: null`. A load of a computed key gives a value of unknown type, which the place may then hold (#859).
    */
   #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
     settle(place, loaded, expression.span);
@@ -7336,8 +7515,9 @@ class TypeChecker {
   }
 
   /**
-   * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7). The
-   * place's type is read after the whole check, because a later value can still decide it.
+   * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7), also
+   * an object of type `object`, whose properties are unknown (V30 §13). The place's type is read after the whole
+   * check, because a later value can still decide it.
    */
   #recordRuntimeCheck(
     site: RuntimeCheckSite,
@@ -7346,6 +7526,8 @@ class TypeChecker {
     value: StaticType,
   ): void {
     if (mayBeUnknown(value)) this.#runtimeChecks.push({ site, place, label });
+    else if (containsType(value, (part) => part.kind === "object" && part.properties === null))
+      this.#runtimeChecks.push({ site, place, label, properties: true });
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------
@@ -8208,6 +8390,18 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
 }
 
 /**
+ * The type of a loop variable that takes each value of a collection whose values are of type `element`, as a `let` of a
+ * read of one would have: a copy that keeps the plain type (see {@link ownNull}), or the unknown type of a place that held
+ * only values the compiler cannot know (see {@link readsHeldUnknown}). Either way the loop reads the values, so a store
+ * that decides them later in the check decides them for the loop too.
+ */
+function loopValueType(element: StaticType): StaticType {
+  if (!readsHeldUnknown(element)) return ownNull(copyType(plainType(element)));
+  observe(element);
+  return UNKNOWN_TYPE;
+}
+
+/**
  * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
  * `global` with `default:` assigns where it stands.
  */
@@ -8666,7 +8860,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     if (method === "contains") return BOOLEAN_TYPE;
     if (method === "clear") return NULL_TYPE;
     // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
-    return method === "remove" || method === "get" ? copyType(value.element) : undefined;
+    return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
@@ -8696,7 +8890,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
       return value.kind === "list" ? INTEGER_TYPE : undefined;
     // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
     case "get":
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
     case "toSet":
       return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
@@ -8712,7 +8906,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "removeFirst":
     case "removeLast":
       // The removed element leaves the list, so its type is a copy for the place that keeps it.
-      return value.kind === "list" ? copyType(value.element) : undefined;
+      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
     default:
       return undefined;
   }
@@ -8790,7 +8984,9 @@ const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remain
 /** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
 function mayBe(
   type: StaticType,
-  ...kinds: ("timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list")[]
+  ...kinds: (
+    "timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list" | "speaker"
+  )[]
 ): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
@@ -9115,12 +9311,20 @@ function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
 
-const SCRIPT_CHOICE_MESSAGE =
-  "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
+/** Why a button cannot return a value of this member type, which it may show: a script reference or a regex. */
+function unreturnableChoiceMessage(member: StaticType): string | undefined {
+  for (const [name, description] of [
+    ["script", "a script reference"],
+    ["regex", "a regex"],
+  ] as const)
+    if (isScalar(member, name))
+      return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`;
+  return undefined;
+}
 
-/** Whether a button may return a value of this member type: one that is shown, other than a script reference. */
+/** Whether a button may return a value of this member type: one that is shown, other than a script reference or regex. */
 function isChoiceValue(member: StaticType): boolean {
-  return isShowable(member) && !isScalar(member, "script");
+  return isShowable(member) && unreturnableChoiceMessage(member) === undefined;
 }
 
 const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
@@ -9140,6 +9344,23 @@ const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
   "shortTitle",
   "firstName",
   "lastName",
+]);
+
+/**
+ * A speaker's built-in properties (V30 §37), which the runtime checks where it uses them; any other property is a custom
+ * one, which keeps its type unless a store reaches it unchecked (see {@link UncheckedProperties}).
+ */
+const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
+  ...SPEAKER_TEXT_PROPERTIES,
+  "alias",
+  "gender",
+  "color",
+  "font",
+  "avatar",
+  "presentation",
+  "bubble",
+  "prose",
+  "defaultSaySkippable",
 ]);
 
 /** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
@@ -9862,10 +10083,19 @@ const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 
 /** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
 function textResultType(member: TextMember): StaticType {
-  if (member.result === "integer?") return optional(INTEGER_TYPE);
-  return member.result === "string[]"
-    ? { kind: "list", element: STRING_TYPE }
-    : scalarType(member.result);
+  switch (member.result) {
+    case "integer?":
+      return optional(INTEGER_TYPE);
+    case "string?":
+      return optional(STRING_TYPE);
+    case "string[]":
+      return { kind: "list", element: STRING_TYPE };
+    // The groups of a match, or null without one; a group that did not take part is null.
+    case "string?[]?":
+      return optional({ kind: "list", element: optional(STRING_TYPE) });
+    default:
+      return scalarType(member.result);
+  }
 }
 
 /** The answer of an `askForm` field whose kind only the runtime knows. */

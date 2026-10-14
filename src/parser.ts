@@ -98,6 +98,11 @@ import { TokenKind, type Token } from "./token.js";
 
 export interface ParseResult {
   readonly program: Program;
+  /**
+   * The offsets of each `/` that starts a regex literal although the token before does not show it (V30 §8), which
+   * lexing the source or a part of it again needs to read it the same way.
+   */
+  readonly regexStarts: ReadonlySet<number>;
   /** The file's `---` header, or `null` when it has none. */
   readonly header: ScriptHeader | null;
   readonly diagnostics: readonly Diagnostic[];
@@ -195,8 +200,11 @@ type TypeContext = "statement" | "delimited" | "typeTest" | "delimitedTypeTest";
 type StorageDelimiter = "as" | "default";
 /** What the parsers over one token list share. */
 interface SharedParse {
-  /** For each token, whether its innermost enclosing opener is `(` or `[`, where a newline may continue a type (V30 §1). */
-  readonly bracketed: readonly boolean[];
+  /**
+   * For each token, its innermost enclosing opener, if any: inside `(` or `[` a newline may continue a type, and an
+   * expression directly inside `${` does not continue before an operator (V30 §1).
+   */
+  readonly openers: readonly (TokenKind | undefined)[];
   /** For each opening delimiter, the index of the delimiter that closes it, once one is looked up. */
   closers: ReadonlyMap<number, number> | null;
   /**
@@ -224,6 +232,8 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
+  /** The offsets of the `/` where its parse expected a value (see `Parser.regexStarts`). */
+  readonly regexStarts: readonly number[];
   /** The statement ranges its parse recorded. */
   readonly ranges: RangeSegment;
   readonly recovered: boolean;
@@ -310,16 +320,27 @@ const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
-  const header = readScriptHeader(lex(source));
-  const parser = new Parser(header.programTokens);
-  const program = parser.parseProgram();
-
-  return Object.freeze({
-    program,
-    header: header.header,
-    diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
-    statementRanges: Object.freeze(parser.statementRanges()),
-  });
+  // A `/` where the grammar expects a value starts a regex literal (V30 §8). The lexer tells most such places from the
+  // token before; where a parse with errors expected a value at a `/` that the lexer took for division, the source is
+  // lexed and parsed again with a regex there, until no new one appears. A parse without errors is never changed.
+  const regexStarts = new Set<number>();
+  for (;;) {
+    const header = readScriptHeader(lex(source, regexStarts));
+    const parser = new Parser(header.programTokens);
+    const program = parser.parseProgram();
+    const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
+    if (added.length > 0 && parser.diagnostics.length > 0) {
+      for (const offset of added) regexStarts.add(offset);
+      continue;
+    }
+    return Object.freeze({
+      program,
+      regexStarts,
+      header: header.header,
+      diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
+      statementRanges: Object.freeze(parser.statementRanges()),
+    });
+  }
 }
 
 class Parser {
@@ -329,6 +350,11 @@ class Parser {
    * `say` value it reuses.
    */
   readonly #statementRanges: (StatementRange | RangeSegment)[] = [];
+  /**
+   * The offsets of each `/` where this parse expected a value, which a regex literal starts there; like its diagnostics,
+   * a speculative parser keeps its own.
+   */
+  readonly #regexStarts: number[] = [];
   #current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -347,7 +373,7 @@ class Parser {
    * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
-  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §1). */
   #insideDelimiters = false;
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   readonly #shared: SharedParse;
@@ -355,7 +381,7 @@ class Parser {
   public constructor(
     private readonly tokens: readonly Token[],
     shared: SharedParse = {
-      bracketed: bracketContexts(tokens),
+      openers: innermostOpeners(tokens),
       closers: null,
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
@@ -367,6 +393,10 @@ class Parser {
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
+  }
+
+  public get regexStarts(): readonly number[] {
+    return this.#regexStarts;
   }
 
   /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
@@ -977,6 +1007,7 @@ class Parser {
     );
     if (known !== undefined) {
       this.#diagnostics.push(...known.diagnostics);
+      this.#regexStarts.push(...known.regexStarts);
       this.#statementRanges.push(known.ranges);
       this.#current = known.end;
       this.#recoveredAtStatementBoundary = known.recovered;
@@ -989,6 +1020,7 @@ class Parser {
       recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
     };
     const diagnosticCount = this.#diagnostics.length;
+    const regexStartCount = this.#regexStarts.length;
     const rangeCount = this.#statementRanges.length;
     const parts = yield* parseChild(this.#parseSayParts(false));
     parsed.push({
@@ -996,6 +1028,7 @@ class Parser {
       parts,
       end: this.#current,
       diagnostics: this.#diagnostics.slice(diagnosticCount),
+      regexStarts: this.#regexStarts.slice(regexStartCount),
       ranges: { list: this.#statementRanges, from: rangeCount, to: this.#statementRanges.length },
       recovered: this.#recoveredAtStatementBoundary,
     });
@@ -3487,12 +3520,17 @@ class Parser {
       );
       return value;
     }
+    const opener = this.#shared.openers[this.#current];
     const type = yield* parseChild(
       this.#parseTypeTask(
-        this.#shared.bracketed[this.#current] === true ? "delimitedTypeTest" : "typeTest",
+        opener === TokenKind.LeftParenthesis || opener === TokenKind.LeftBracket
+          ? "delimitedTypeTest"
+          : "typeTest",
       ),
     );
     if (type === null) return value;
+    // A type test ends its operand too (see `#parseMultiplicative`).
+    this.#skipNewlinesBeforeOperator();
     return Object.freeze({
       kind: "typeTestExpression",
       value,
@@ -3649,12 +3687,15 @@ class Parser {
 
   *#parseMultiplicative(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseUnaryArithmetic());
-    while (
-      expression !== null &&
-      (this.#check(TokenKind.Star) ||
-        this.#check(TokenKind.Slash) ||
-        this.#check(TokenKind.Percent))
-    ) {
+    while (expression !== null) {
+      // Every operand but a type test ends here, so each level above finds an operator that starts the next line.
+      this.#skipNewlinesBeforeOperator();
+      if (
+        !this.#check(TokenKind.Star) &&
+        !this.#check(TokenKind.Slash) &&
+        !this.#check(TokenKind.Percent)
+      )
+        break;
       const operator = this.#advance();
       this.#skipContinuationNewlines();
       const right = yield* parseChild(this.#parseUnaryArithmetic());
@@ -4068,6 +4109,17 @@ class Parser {
     if (this.#match(TokenKind.StringStart)) {
       return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseStringLiteral(token)));
     }
+    if (this.#match(TokenKind.RegexLiteral)) {
+      const source = tokenValue(token);
+      // The lexer reported a literal without its closing slash.
+      if (token.lexeme.length < source.length + 2) return null;
+      return Object.freeze({
+        kind: "regexLiteral",
+        source,
+        flags: token.lexeme.slice(source.length + 2),
+        span: copySpan(token.span),
+      });
+    }
     if (this.#match(TokenKind.LeftParenthesis)) {
       return yield* parseChild(this.#withinDelimiters(this.#parseParenthesized(token)));
     }
@@ -4088,6 +4140,8 @@ class Parser {
         this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
       );
     }
+    // The lexer took this `/` for division, but a value starts here (see `parse`).
+    if (token.kind === TokenKind.Slash) this.#regexStarts.push(token.span.start.offset);
     return null;
   }
 
@@ -4627,7 +4681,7 @@ class Parser {
 
   /**
    * The offset of the token after a `,` and any newlines after it, or `null` without a comma. Inside delimiters a line
-   * break does not end the expression, so the comma may also start the next line there (V30 §2). Nested interactions
+   * break does not end the expression, so the comma may also start the next line there (V30 §1). Nested interactions
    * that end at the same token reuse one scan of the newlines.
    */
   #offsetAfterComma(): number | null {
@@ -5259,6 +5313,19 @@ class Parser {
     this.#skipNewlines();
   }
 
+  /**
+   * Inside `()`, `[]`, and object literals, where a line break does not end an expression, a binary operator may also
+   * start the next line (V30 §1): skips the newlines before one, so that it continues the expression. Elsewhere a
+   * newline before an operator ends the statement.
+   */
+  #skipNewlinesBeforeOperator(): void {
+    if (!this.#insideDelimiters || !this.#check(TokenKind.Newline)) return;
+    // V30 §1 does not list `${...}`, so its own expression ends at the newline, whatever encloses the string.
+    if (this.#shared.openers[this.#current] === TokenKind.InterpolationStart) return;
+    const after = this.#shared.newlineRuns.ends[this.#current]!;
+    if (startsBinaryOperator(this.tokens, after)) this.#current = after;
+  }
+
   #reportPositionalAfterNamed(span: SourceSpan): void {
     this.#reportSpan(
       parserDiagnosticCode.mixedArguments,
@@ -5436,6 +5503,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "media",
       "messageHandle",
       "script",
+      "regex",
     ] as const
   ).map((name) => [name, name]),
 );
@@ -5534,6 +5602,7 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.Identifier ||
     token.kind === TokenKind.NumberLiteral ||
     token.kind === TokenKind.StringStart ||
+    token.kind === TokenKind.RegexLiteral ||
     token.kind === TokenKind.KeywordSpeaker ||
     token.kind === TokenKind.KeywordSay ||
     token.kind === TokenKind.KeywordWait ||
@@ -5583,16 +5652,36 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
  */
 function continuesExpression(kind: TokenKind): boolean {
   return (
+    isBinaryOperatorKind(kind) ||
+    kind === TokenKind.Comma ||
+    kind === TokenKind.KeywordNot ||
+    kind === TokenKind.Bang
+  );
+}
+
+/**
+ * Whether the token at `index` starts a binary operator, also a symbol that the parser reads as a word operator, such
+ * as `&&`, `||`, or `??`. After a value, `-` and `+` subtract and add; `not` and `!` only negate the value after them.
+ * A single `|` only separates the types of a union, which the type's own context continues (see `TypeContext`).
+ */
+function startsBinaryOperator(tokens: readonly Token[], index: number): boolean {
+  const token = tokens[index]!;
+  const next = tokens[index + 1];
+  if (token.kind === TokenKind.Question || token.kind === TokenKind.Pipe)
+    return next?.kind === token.kind && next.span.start.offset === token.span.end.offset;
+  return isBinaryOperatorKind(token.kind);
+}
+
+/** Binary operators, and the symbols `|` and `&` that the parser reads as `or` and `and`. */
+function isBinaryOperatorKind(kind: TokenKind): boolean {
+  return (
     isComparisonKind(kind) ||
     kind === TokenKind.KeywordIs ||
-    kind === TokenKind.Comma ||
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
-    kind === TokenKind.KeywordNot ||
     kind === TokenKind.KeywordOtherwise ||
     kind === TokenKind.Pipe ||
     kind === TokenKind.Ampersand ||
-    kind === TokenKind.Bang ||
     kind === TokenKind.RangeExclusive ||
     kind === TokenKind.RangeInclusive ||
     kind === TokenKind.Plus ||
@@ -5681,12 +5770,12 @@ function newlineRuns(tokens: readonly Token[]): SharedParse["newlineRuns"] {
   return { starts, ends };
 }
 
-function bracketContexts(tokens: readonly Token[]): boolean[] {
-  const contexts: boolean[] = [];
+function innermostOpeners(tokens: readonly Token[]): (TokenKind | undefined)[] {
+  const contexts: (TokenKind | undefined)[] = [];
   const openers: TokenKind[] = [];
   for (const token of tokens) {
     const innermost = openers.at(-1);
-    contexts.push(innermost === TokenKind.LeftParenthesis || innermost === TokenKind.LeftBracket);
+    contexts.push(innermost);
     if (
       token.kind === TokenKind.LeftParenthesis ||
       token.kind === TokenKind.LeftBracket ||

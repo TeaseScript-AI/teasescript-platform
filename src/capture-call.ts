@@ -26,13 +26,13 @@ export function isAskImageCall(expression: Expression): boolean {
 
 /**
  * Whether an expression is a call that may use the Player's file store (V30 §13 and §33): `fileFromBase64(...)`,
- * `fileToBase64(...)`, or a `toJson(...)` or `fromJson(...)` without a literal `files: false`. Like `takePhoto()` it
- * may wait for the Player, so it lowers to a file store instruction.
+ * `fileToBase64(...)`, `hashFile(...)`, or a `toJson(...)` or `fromJson(...)` without a literal `files: false`. Like
+ * `takePhoto()` it may wait for the Player, so it lowers to a file store instruction.
  */
 export function isFileStoreCall(expression: Expression): boolean {
   if (expression.kind !== "callExpression" || expression.callee.kind !== "identifier") return false;
   const name = expression.callee.name;
-  if (name === "fileFromBase64" || name === "fileToBase64") return true;
+  if (name === "fileFromBase64" || name === "fileToBase64" || name === "hashFile") return true;
   if (name !== "toJson" && name !== "fromJson") return false;
   // Only a plain `false`, which plan validation recognizes as a literal; any other `files:` is read when it runs.
   return !expression.arguments.some(

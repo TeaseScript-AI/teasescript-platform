@@ -1,7 +1,7 @@
 import type { RandomDrawPendingOutcome } from "../random-control.js";
 import { randomDrawPending } from "./observe-time.js";
 import type { InstructionPlan } from "../../plan/model.js";
-import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, pendingResult } from "./support.js";
@@ -26,10 +26,9 @@ export function setDebugMode(
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<DebugModeOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const set = setCapturedDebugMode(captured.snapshot, enabled);
-  closeDebugTrace(trace, set);
-  return set;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, () =>
+    setCapturedDebugMode(captured.snapshot, enabled),
+  );
 }
 
 /** Sets `debugMode` in engine-owned plan/state that already passed complete validation. */
@@ -39,10 +38,9 @@ export function setValidatedDebugMode(
   enabled: unknown,
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<DebugModeOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const set = setCapturedDebugMode(snapshot, enabled);
-  closeDebugTrace(trace, set);
-  return set;
+  return withDebugTrace(options.debugTrace, plan, snapshot, () =>
+    setCapturedDebugMode(snapshot, enabled),
+  );
 }
 
 function setCapturedDebugMode(

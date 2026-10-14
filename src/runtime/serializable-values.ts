@@ -5,6 +5,7 @@ import {
   type StoredDuration,
 } from "../duration.js";
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
+import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   isValidDate,
   isValidEpochMilliseconds,
@@ -132,6 +133,16 @@ export interface SerializableScriptReference {
   readonly label: string | null;
 }
 
+/**
+ * A regex (V30 §8): its RE2 pattern and its flags, any of `i`, `m`, and `s` in that order. It is immutable plain data,
+ * valid within the regex limits; a search compiles it, and the compiled program is only a cache.
+ */
+export interface SerializableRegex {
+  readonly kind: "regex";
+  readonly source: string;
+  readonly flags: string;
+}
+
 export interface SerializableRuntimeProperty {
   readonly name: string;
   value: SerializableRuntimeValue;
@@ -153,7 +164,8 @@ export type SerializableRuntimeValue =
   | SerializableMessageHandle
   | SerializableCameraViewHandle
   | SerializableSpeakerReference
-  | SerializableScriptReference;
+  | SerializableScriptReference
+  | SerializableRegex;
 
 export class SerializableValueError extends Error {
   public constructor(
@@ -375,6 +387,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "messageHandle":
     case "cameraView":
     case "script":
+    case "regex":
       return { ...value };
     case "set":
       return { kind: "set", items: new Array(value.items.length) };
@@ -698,6 +711,8 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return "c;";
     case "script":
       return `x${textKey(value.path)}${value.label === null ? "z" : textKey(value.label)}`;
+    case "regex":
+      return `e${textKey(value.source)}${textKey(value.flags)}`;
     default:
       return undefined;
   }
@@ -716,7 +731,7 @@ function numberText(value: number): string {
 /**
  * Structural equality. Objects compare property names and values regardless of property order, dicts compare keys and
  * values regardless of entry order, lists compare elements in order, and sets compare members regardless of insertion
- * order. Handles and speaker references compare identity.
+ * order. Handles and speaker references compare identity, and regexes their pattern and flags.
  * Scalar children are compared as soon as their container is visited, before any nested list, object, or set, and
  * nested values use an explicit stack, so deep values never exhaust the native call stack.
  */
@@ -841,6 +856,8 @@ function equalsOrDefer(
       return right.kind === "speakerReference" && right.speakerId === left.speakerId;
     case "script":
       return right.kind === "script" && right.path === left.path && right.label === left.label;
+    case "regex":
+      return right.kind === "regex" && right.source === left.source && right.flags === left.flags;
   }
 }
 
@@ -1069,6 +1086,19 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         (current.label !== null && typeof current.label !== "string")
       )
         return `${path()} contains a malformed script reference.`;
+      continue;
+    }
+    if (current.kind === "regex") {
+      if (
+        !hasOnlyKeys(current, ["kind", "source", "flags"]) ||
+        typeof current.source !== "string" ||
+        typeof current.flags !== "string" ||
+        !isCanonicalRegexFlags(current.flags)
+      )
+        return `${path()} contains a malformed regex.`;
+      const compiled = compileRegex(current.source, current.flags);
+      if (!compiled.ok)
+        return `${path()} contains a regex that cannot be used: ${compiled.problem}`;
       continue;
     }
     if (current.kind === "range") {

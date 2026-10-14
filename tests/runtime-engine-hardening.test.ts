@@ -31,6 +31,50 @@ test("requires explicit own registration for an inherited builtin name", () => {
   assert.equal(calls, 1);
 });
 
+test("a call reaches the function that a host's builtin record gives when its instruction runs", () => {
+  const compiled = compile(
+    "let first = answer()\nlet ignored = swap()\nlet second = answer()\nexit",
+    ["answer", "swap"],
+  );
+  const values = (builtins: Readonly<Record<string, RuntimeBuiltinFunction>>) => {
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
+    assert.equal(result.snapshot.status, "halted");
+    const bound = new Map(
+      result.snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
+    );
+    return [bound.get("first"), bound.get("second")];
+  };
+  // Frozen records still give other functions: through a getter, and through a proxy's reads.
+  let current: RuntimeBuiltinFunction = () => 1;
+  const swap = () => {
+    current = () => 2;
+    return 0;
+  };
+  assert.deepEqual(
+    values(
+      Object.freeze({
+        get answer() {
+          return current;
+        },
+        swap,
+      }),
+    ),
+    [1, 2],
+  );
+  let reads = 0;
+  const counted = new Proxy(Object.freeze({ answer: () => reads, swap: () => 0 }), {
+    get(target, key) {
+      if (key === "swap") return target.swap;
+      if (key !== "answer") return undefined;
+      reads += 1;
+      return target.answer;
+    },
+  });
+  // The second call's instruction read the record again.
+  const [first, second] = values(counted);
+  assert.ok(Number(second) > Number(first));
+});
+
 test("keeps core builtin precedence over injected names", () => {
   const compiled = compile("let output = random()\nexit", []);
   let injectedCalls = 0;

@@ -97,6 +97,22 @@ test("formatting reaches a command inside a computed call target", () => {
   assert.equal(formatLanguageDocument(document).text, 'call script(askText "Room?")\nexit');
 });
 
+test("formatting a say leaves its regex literals as written, also in a nested say", () => {
+  // The parse finds a regex after a message mode; lexing the say alone would take its slashes for division.
+  const source = [
+    "speaker vera {}",
+    "say   as   vera /a ,b/",
+    "say   prose() /c ,d/",
+    "say (say   prose() /e ,f/).text",
+    'say "${(say prose() /g ,h/).text}"',
+    "exit",
+  ].join("\n");
+  assert.equal(
+    formatLanguageDocument(createLanguageDocument("file:///main.tease", source)).text,
+    source.replaceAll("   ", " "),
+  );
+});
+
 test("formatting spaces an ask's question mode and reaches the asks inside its options", () => {
   const document = createLanguageDocument(
     "file:///main.tease",

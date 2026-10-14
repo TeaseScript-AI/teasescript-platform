@@ -1,0 +1,4 @@
+say "No timer yet."
+showButton "Start the timer"
+timer 600 s
+exit

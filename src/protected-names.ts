@@ -59,6 +59,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "media",
   "messageHandle",
   "script",
+  "regex",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
@@ -114,6 +115,9 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "fromBase64",
   "fileFromBase64",
   "fileToBase64",
+  "hashText",
+  "hashFile",
+  "toRegex",
   "getDate",
   "getTime",
   "getDateTime",
@@ -229,6 +233,9 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "fromBase64",
   "fileFromBase64",
   "fileToBase64",
+  "hashText",
+  "hashFile",
+  "toRegex",
   "getDate",
   "getTime",
   "getDateTime",

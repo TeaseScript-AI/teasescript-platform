@@ -304,6 +304,236 @@ test("a value with unknown parts is checked part by part", () => {
   }
 });
 
+test("a value of type object is checked against the known properties of its place where it is stored", () => {
+  const bad = 'text (string) "bad" at';
+  for (const [setup, store, value, message] of [
+    [
+      "let o = { v: 0 }",
+      "o = x",
+      "x",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let h = { inner: { v: 0 } }",
+      "h.inner = x",
+      "x",
+      `Property 'h.inner' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let h = { inner: { v: 0 } }",
+      "h = { inner: x }",
+      "{ inner: x }",
+      `'h' holds an object, so it cannot take an object with ${bad} .inner.v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os[0] = x",
+      "x",
+      `An element of 'os' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os.add(x)",
+      "x",
+      `An element of 'os' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let d = dict{ a: { v: 0 } }",
+      'd["a"] = x',
+      "x",
+      `A value of 'd' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "function use(o = { v: 0 }) {\n    say o.v\n}",
+      "use(x)",
+      "x",
+      `Parameter 'o' of 'use' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let o = { v: 0 }\nfunction give(y: object) {\n    return y\n}",
+      "o = give(x)",
+      "give(x)",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+    ],
+    [
+      "let os = [{ v: 0 }]",
+      "os = [x]",
+      "[x]",
+      `'os' holds a list (object[]), so it cannot take a list with ${bad} [0].v.`,
+    ],
+  ] as const) {
+    const source = `${setup}\nfunction put(x: object) {\n    ${store}\n}\nput({ v: "bad" })\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, value], source);
+  }
+  // A value that a test found to be an object, and a load of a key that another load declares an object.
+  assert.deepEqual(
+    failure(
+      'let o = { v: 0 }\nfunction put(x) {\n    if x is object {\n        o = x\n    }\n}\nput({ v: "bad" })\nexit',
+    ),
+    ["TSR058", `'o' holds an object, so it cannot take an object with ${bad} .v.`, "x"],
+  );
+  assert.deepEqual(
+    failure(
+      'let d: object = load("key", default: {})\nsave { v: "bad" } as "key"\nlet o = { v: 0 }\no = load("key", default: { v: 0 })\nexit',
+    ),
+    [
+      "TSR058",
+      `'o' holds an object, so it cannot take an object with ${bad} .v.`,
+      'load("key", default: { v: 0 })',
+    ],
+  );
+  // An object fits when the known properties that it has fit, and a place of type object takes any object.
+  const result = runValidSource(
+    [
+      "let o = { v: 0 }",
+      "let any: object = { a: 1 }",
+      "function put(x: object) {",
+      "    o = x",
+      "}",
+      "function keep(x: object) {",
+      "    any = x",
+      "}",
+      'put({ v: 5, w: "extra" })',
+      "say o.v + 1",
+      'put({ w: "no v" })',
+      'keep({ v: "any value" })',
+      'say "stored"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["6", "stored"]);
+});
+
+test("a speaker's custom property is checked where a value the compiler cannot know is stored in it", () => {
+  const level = `Property 'vera.level' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  const element = `An element of 'vera.items' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  for (const [setup, store, message, span] of [
+    ["speaker vera { level: 0 }", 'vera.level = pick("bad")', level, 'pick("bad")'],
+    // A property that a store declares keeps that store's type, as one in the speaker's block does.
+    [
+      'speaker vera { title: "Miss" }\nvera.mood = 0',
+      'vera.mood = pick("bad")',
+      `Property 'vera.mood' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    [
+      "speaker vera { level: 0 }",
+      "vera.level += pick(0.5)",
+      "Property 'vera.level' holds a whole number (integer), so it cannot take 0.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "vera.level += pick(0.5)",
+    ],
+    [
+      "speaker vera { data: { v: 0 } }",
+      'vera.data.v = pick("bad")',
+      `Property 'vera.data.v' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    ["speaker vera { items: [0] }", 'vera.items[0] = pick("bad")', element, 'pick("bad")'],
+    [
+      "speaker vera { scores: dict{ a: 0 } }",
+      'vera.scores["a"] = pick("bad")',
+      `A value of 'vera.scores' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    ["speaker vera { items: [0] }", 'vera.items.add(pick("bad"))', element, 'pick("bad")'],
+    ["speaker vera { items: [0] }", 'vera.items.addAll(pick(["bad"]))', element, 'pick(["bad"])'],
+    [
+      "speaker vera { level: 0 }",
+      'vera.level = fromJson("\\"bad\\"", default: null)',
+      level,
+      'fromJson("\\"bad\\"", default: null)',
+    ],
+    [
+      'speaker vera { level: 0 }\nlet n = 1\nsave "bad" as "level1"',
+      'vera.level = load("level${n}", default: 0)',
+      level,
+      'load("level${n}", default: 0)',
+    ],
+    [
+      "speaker vera { level: 0 }\nfunction put(x) {\n    vera.level = x\n}",
+      'put("bad")',
+      level,
+      "x",
+    ],
+    // A value of type object is checked against the properties the place knows (V30 §13).
+    [
+      "speaker vera { data: { v: 0 } }\nfunction put(x: object) {\n    vera.data = x\n}",
+      'put({ v: "bad" })',
+      `Property 'vera.data' holds an object, so it cannot take an object with text (string) "bad" at .v.`,
+      "x",
+    ],
+  ] as const) {
+    const source = `${PICK}${setup}\n${store}\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, span], source);
+  }
+  // Values that fit pass: a number widens a property that took whole numbers, an object needs only the properties it
+  // has, and two speakers keep their own types for a property of the same name.
+  const result = runValidSource(
+    PICK +
+      [
+        "speaker vera {",
+        "    level: 0",
+        "    data: { v: 0 }",
+        "    items: [0]",
+        "}",
+        'speaker cora { level: "high" }',
+        "vera.level = pick(2)",
+        "vera.level = vera.level * 1.5",
+        'vera.data = pick({ w: "other" })',
+        "vera.items.add(pick(4))",
+        'cora.level = pick("low")',
+        'say "${vera.level} ${vera.items[1]} ${cora.level}"',
+        "exit",
+      ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["3 4 low"]);
+});
+
+test("a speaker's custom property that a store may reach unchecked is checked where a known place reads it", () => {
+  // A speaker that the compiler cannot tell apart may be any speaker, so what it stores is not checked against one.
+  const message = `'n' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  for (const [setup, store, read] of [
+    ["let s = vera", 's.level = "bad"', "vera.level"],
+    ['function put(s: speaker) {\n    s.level = "bad"\n}', "put(vera)", "vera.level"],
+    ['function put(s) {\n    s.level = "bad"\n}', "put(vera)", "vera.level"],
+    ["let team = [vera]", 'team[0].level = "bad"', "vera.level"],
+    ['function put(s: speaker) {\n    s.data.v = "bad"\n}', "put(vera)", "vera.data.v"],
+    ["speaker vera", 'say "${speaker.items.add("bad")}"', "vera.items[1]"],
+  ] as const) {
+    const source = `speaker vera {\n    level: 0\n    data: { v: 0 }\n    items: [0]\n}\n${setup}\n${store}\nlet n: integer = ${read}\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, read], source);
+  }
+  // Each property here keeps no type only once the one before it keeps none, through a copy of it, so finding them
+  // takes more checks than storage key types may change in; the key that a load of the last one types has none then.
+  const steps = Array.from({ length: 8 }, (_, step) => 7 - step);
+  const result = runValidSource(
+    [
+      "speaker vera {",
+      ...Array.from({ length: 9 }, (_, index) => `    p${index}: { v: 0 }`),
+      "}",
+      "function chain {",
+      ...steps.map(
+        (index) => `    let t${index} = vera.p${index}\n    t${index}.p${index + 1} = 0`,
+      ),
+      "}",
+      "function seed(s: speaker) {",
+      "    s.p0 = 0",
+      "}",
+      ...Array.from(
+        { length: 9 },
+        (_, index) => `let x${index} = load("k${index}", default: vera.p${index}.v)`,
+      ),
+      'save "bad" as "k8"',
+      'say load("k8", default: vera.p8.v)',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["bad"]);
+});
+
 test("values that fit their place pass the runtime check unchanged", () => {
   const result = runValidSource(
     PICK +

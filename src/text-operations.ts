@@ -4,10 +4,11 @@
  */
 
 /**
- * What an argument must be: `text`, `nonEmptyText`, a `position` from 0 through the text length, or a `count` (a
- * repetition count or target length) of 0 or more.
+ * What an argument must be: `text`, `nonEmptyText`, a `regex`, `textOrRegex`, a `position` from 0 through the text
+ * length, or a `count` (a repetition count or target length) of 0 or more.
  */
-export type TextParameterKind = "text" | "nonEmptyText" | "position" | "count";
+export type TextParameterKind =
+  "text" | "nonEmptyText" | "regex" | "textOrRegex" | "position" | "count";
 
 export interface TextParameter {
   readonly name: string;
@@ -19,11 +20,17 @@ export interface TextMember {
   readonly name: string;
   /** `null` for the `length` property; otherwise the method's parameters. */
   readonly parameters: readonly TextParameter[] | null;
-  /** `integer?` for a position that is `null` when the part does not occur. */
-  readonly result: "string" | "integer" | "integer?" | "boolean" | "string[]";
+  /**
+   * `integer?` for a position that is `null` when the part does not occur, `string?` for a match that is `null` when
+   * there is none, and `string?[]?` for the groups of a match.
+   */
+  readonly result:
+    "string" | "integer" | "integer?" | "boolean" | "string[]" | "string?" | "string?[]?";
 }
 
 const part: TextParameter = { name: "part", kind: "text" };
+const partOrRegex: TextParameter = { name: "part", kind: "textOrRegex" };
+const pattern: TextParameter = { name: "pattern", kind: "regex" };
 const count = (name: string): TextParameter => ({ name, kind: "count" });
 const fill: TextParameter = { name: "fill", kind: "nonEmptyText" };
 
@@ -37,10 +44,10 @@ function member(
 
 export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
   member("length", null, "integer"),
-  member("contains", [part], "boolean"),
+  member("contains", [partOrRegex], "boolean"),
   member("startsWith", [part], "boolean"),
   member("endsWith", [part], "boolean"),
-  member("indexOf", [part], "integer?"),
+  member("indexOf", [partOrRegex], "integer?"),
   member("lastIndexOf", [part], "integer?"),
   member(
     "substring",
@@ -59,6 +66,9 @@ export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
     ],
     "string",
   ),
+  member("matches", [pattern], "boolean"),
+  member("find", [pattern], "string?"),
+  member("capture", [pattern], "string?[]?"),
   member("trim", [], "string"),
   member("trimStart", [], "string"),
   member("trimEnd", [], "string"),
@@ -112,18 +122,39 @@ export function argumentCountMessage(member: MethodParameters, received: number)
   return `${member.name}() takes ${expected}, received ${received}.`;
 }
 
+/** The text methods whose search will also take a regex in a later step. */
+const LATER_REGEX_SEARCHES: ReadonlySet<string> = new Set(["lastIndexOf", "split", "replace"]);
+
 /** An argument of the wrong kind; `argumentFix` names the conversion that fixes it. */
 export function argumentTypeMessage(
   member: TextMember,
   parameter: TextParameter,
   description: string,
 ): string {
-  return `${member.name}() needs ${isTextParameter(parameter) ? "text (string)" : "a whole number (integer)"} for '${parameter.name}', not ${description}.`;
+  if (
+    description === "a regex" &&
+    LATER_REGEX_SEARCHES.has(member.name) &&
+    parameter === member.parameters?.[0]
+  )
+    return `${member.name}() does not take a regex yet: that comes later. Give text for '${parameter.name}' instead.`;
+  const needed =
+    parameter.kind === "regex"
+      ? "a regex"
+      : parameter.kind === "textOrRegex"
+        ? "text (string) or a regex"
+        : isTextParameter(parameter)
+          ? "text (string)"
+          : "a whole number (integer)";
+  return `${member.name}() needs ${needed} for '${parameter.name}', not ${description}.`;
 }
 
 /** The conversion that turns an argument of scalar `kind` into what `parameter` needs, or nothing. */
 export function argumentFix(parameter: TextParameter, kind: ArgumentKind): string {
-  if (isTextParameter(parameter))
+  if (parameter.kind === "regex")
+    return kind === "string"
+      ? " Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...)."
+      : "";
+  if (isTextParameter(parameter) || parameter.kind === "textOrRegex")
     return kind !== null && kind !== "string" ? " Convert it with toString(...)." : "";
   if (kind === "number") return " Convert it with toInteger(...), which drops the fraction.";
   return kind === "string" ? " Convert it with toInteger(...)." : "";
@@ -160,6 +191,13 @@ export function endBeforeStartMessage(member: TextMember, start: number, end: nu
 
 /** The failure message for an unknown text member, suggesting the TeaseScript name for a common one. */
 export function unknownTextMemberMessage(name: string, use: "method" | "property"): string {
+  if (name === "findAll" && use === "method")
+    return "Text has no method 'findAll' yet: it comes later. Use find(...) for the first match.";
   const suggestion = TEXT_MEMBER_SUGGESTIONS.get(name);
   return `Text has no ${use} '${name}'.${suggestion === undefined ? "" : ` Use ${suggestion}.`}`;
+}
+
+/** The failure message for a member of a regex, which has none: the text methods take the regex instead. */
+export function regexMemberMessage(name: string, use: "method" | "property"): string {
+  return `A regex has no ${use} '${name}'. Call a method of the text with the regex instead, such as text.contains(regex) or text.matches(regex).`;
 }

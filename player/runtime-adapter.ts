@@ -1212,10 +1212,14 @@ export function activePlayerRuntimeFileStore(
   return action?.kind === "fileStore" ? action : null;
 }
 
-/** The Player's answer to a file store: the stored files' references, the read files' Base64, or a failure. */
+/**
+ * The Player's answer to a file store: the stored files' references, the read files' Base64, the hashed files' SHA-256
+ * as 64 lowercase hexadecimal digits, or a failure.
+ */
 export type PlayerFileStoreAnswer =
   | { readonly kind: "stored"; readonly references: readonly string[] }
   | { readonly kind: "read"; readonly files: readonly string[] }
+  | { readonly kind: "hashed"; readonly hashes: readonly string[] }
   | { readonly kind: "failed" };
 
 /**

@@ -22,6 +22,7 @@ import {
   isObject,
   isRange,
   isScriptReference,
+  isRegex,
   isSet,
   isSpeakerReference,
   isTime,
@@ -239,6 +240,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isMessageHandle(value);
     case "script":
       return isScriptReference(value);
+    case "regex":
+      return isRegex(value);
     case "date":
       return isDate(value);
     case "time":

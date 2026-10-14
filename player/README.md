@@ -68,6 +68,13 @@ Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma a
 with Player Settings and kept browser-locally like the other Player Settings. Zero tint is achromatic; accent remains
 independent. High contrast increases tone separation rather than saturation.
 Colour-pair presets change surface/accent inputs without changing mode or contrast; they do not register themes.
+While the Stage shows a photo, its colours replace the intent's surfaces and, under the photo accent A/B test's A, its
+accent; Theme Lab's diagnostics show the intent's own theme.
+
+Photo colours ([Stage and media presentation](../docs/ui/PLAYER-UI.md#stage-and-media-presentation)):
+`theme/node-vibrant/swatches.ts` measures a photo's six swatches as node-vibrant 4.0.4 does, without the library; it is
+derived from node-vibrant, whose MIT notice is kept in `theme/node-vibrant/LICENSE`. `theme/photo-theme.ts` maps the
+swatches to surfaces and an accent seed for the generator, and `vue/src/usePhotoColour.ts` measures the Stage image.
 
 Surface roles drive canvas ambience, containers and neutral interaction states; accent drives primary actions,
 focus and progress. Nested surfaces use less tint. Translucent media controls and Timer materials account for

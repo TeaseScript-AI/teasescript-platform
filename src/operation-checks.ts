@@ -33,6 +33,7 @@ import {
   nonNullType,
   NULL_TYPE,
   NUMBER_TYPE,
+  REGEX_TYPE,
   resolved,
   STRING_TYPE,
   TIME_TYPE,
@@ -50,6 +51,7 @@ import {
   endBeforeStartMessage,
   LIST_JOIN,
   negativeMessage,
+  regexMemberMessage,
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
@@ -110,7 +112,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -125,7 +127,9 @@ export function memberProblems(
       return problem(
         name === "length"
           ? LENGTH_PROPERTY
-          : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
+          : name === "findAll"
+            ? unknownTextMemberMessage(name, "method")
+            : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
       );
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
@@ -145,6 +149,8 @@ export function memberProblems(
     return positionalMethodProblems(name, call, true);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
+  if (isScalar(type, "regex"))
+    return problem(regexMemberMessage(name, call === null ? "property" : "method"));
   const fix =
     type.kind === "scalar" && TEXT_MEMBERS.has(name)
       ? " Convert it to text first with toString(...)."
@@ -201,19 +207,28 @@ function argumentProblems(
       problems.push({ kind: "invalidOperand", message, span: value.span });
     };
     const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
-    const needed = text ? STRING_TYPE : INTEGER_TYPE;
+    const searches = parameter.kind === "regex" || parameter.kind === "textOrRegex";
+    const needed =
+      parameter.kind === "regex"
+        ? REGEX_TYPE
+        : parameter.kind === "textOrRegex"
+          ? union([STRING_TYPE, REGEX_TYPE])
+          : text
+            ? STRING_TYPE
+            : INTEGER_TYPE;
     if (!isAssignable(needed, type)) {
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
           message: argumentTypeMessage(member, parameter, describeValue(type)),
           span: value.span,
-          ...(text ? {} : { widened: value }),
+          ...(text || searches ? {} : { widened: value }),
           fix: argumentFix(parameter, argumentKind(type)),
         },
       );
       continue;
     }
+    if (searches) continue;
     if (text) {
       if (parameter.kind === "nonEmptyText" && staticVisibleText(value) === "")
         fail(emptyTextMessage(member, parameter));
@@ -320,8 +335,14 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
-  if (DATA_TEXT_FUNCTIONS.has(name) || name === "fileFromBase64" || name === "fileToBase64")
+  if (
+    DATA_TEXT_FUNCTIONS.has(name) ||
+    name === "fileFromBase64" ||
+    name === "fileToBase64" ||
+    name === "hashFile"
+  )
     return dataTextProblems(name, call, typeOf);
+  if (name === "toRegex") return regexConversionProblems(call, typeOf);
   if (!isConversionName(name)) return [];
   const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
@@ -366,10 +387,10 @@ export function builtinCallProblems(
 
 /**
  * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, `fromBase64(text, default:)`,
- * `fileFromBase64(text, default:)`, or `fileToBase64(file)` (V30 §13 and §33): their arguments, a required `default:`
- * that is missing, a `files:` of `toJson` or `fromJson` that is not true or false, text to read that can never be text,
- * and a value that is or may hold one that `toJson` cannot write. The text of `toBase64` and the file of `fileToBase64`
- * are checked where they are called.
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashText(text)`, or `hashFile(file)` (V30 §13 and §33):
+ * their arguments, a required `default:` that is missing, a `files:` of `toJson` or `fromJson` that is not true or
+ * false, text to read that can never be text, and a value that is or may hold one that `toJson` cannot write. The text
+ * of `toBase64` and `hashText` and the file of `fileToBase64` and `hashFile` are checked where they are called.
  */
 function dataTextProblems(
   name: string,
@@ -413,7 +434,7 @@ function dataTextProblems(
   if (positional.length !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" || name === "hashFile" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
       span: call.span,
     });
   else if (reads && !fallback)
@@ -422,7 +443,14 @@ function dataTextProblems(
       message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
       span: call.span,
     });
-  if (problems.length > 0 || name === "toBase64" || name === "fileToBase64") return problems;
+  if (
+    problems.length > 0 ||
+    name === "toBase64" ||
+    name === "fileToBase64" ||
+    name === "hashText" ||
+    name === "hashFile"
+  )
+    return problems;
   const value = positional[0]!;
   const type = typeOf(value);
   if (reads) {
@@ -444,7 +472,7 @@ function dataTextProblems(
     if (
       !SESSION_HANDLE_KINDS.has(part.kind) &&
       part.kind !== "range" &&
-      !isScalar(part, "calendarDuration", "script")
+      !isScalar(part, "calendarDuration", "script", "regex")
     )
       return false;
     unwritable = part;
@@ -462,6 +490,62 @@ function dataTextProblems(
       span: value.span,
     });
   }
+  return problems;
+}
+
+/**
+ * Problems with `toRegex(text, default:)` (V30 §8): its arguments, a required `default:` that is missing, text that can
+ * never be text, and a `default:` that can be neither a regex nor `null`.
+ */
+function regexConversionProblems(
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const problems: OperationProblem[] = [];
+  const positional: Expression[] = [];
+  let fallback: Expression | undefined;
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    else if (argument.name.name === "default") fallback = argument.value;
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: `toRegex(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional.length !== 1)
+    problems.push({
+      kind: "argumentCount",
+      message: `toRegex(...) takes 1 argument (text) and a 'default:', received ${positional.length}.`,
+      span: call.span,
+    });
+  else if (fallback === undefined)
+    problems.push({
+      kind: "argumentCount",
+      message:
+        "'toRegex(text, default: value)' needs a 'default:' for text that is not a valid regex. Add one, such as 'default: null'.",
+      span: call.span,
+    });
+  if (problems.length > 0) return problems;
+  const text = positional[0]!;
+  const candidates = members(forUse(typeOf(text))).map(resolved);
+  if (
+    candidates.length > 0 &&
+    candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+  )
+    problems.push({
+      kind: "invalidOperand",
+      message: `toRegex(...) reads pattern text (string), not ${describeValue(typeOf(text))}.`,
+      span: text.span,
+    });
+  const fallbackType = typeOf(fallback!);
+  if (!isAssignable(union([REGEX_TYPE, NULL_TYPE]), fallbackType))
+    problems.push({
+      kind: "invalidOperand",
+      message: `toRegex(...) needs a regex or null as its default:, not ${describeValue(fallbackType)}.`,
+      span: fallback!.span,
+    });
   return problems;
 }
 
@@ -616,7 +700,7 @@ function candidateConversionProblem(
       ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
         ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
-        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(type)}.`;
+        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
     const conversion = TEMPORAL_CONVERSIONS[result];

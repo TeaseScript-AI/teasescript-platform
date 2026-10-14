@@ -202,20 +202,48 @@
   }
 }
 
+/* The background's colour as a registered colour, so that it can fade to a new photo's colour. */
+@property --player-field {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+/* One background behind the Stage and the chat, in which both sit (PLAYER-UI.md "Stage and media presentation"): one
+   field colour, and effects centred on the photo that fade into it, so no edge marks where the Stage ends. */
 .player-viewport-canvas {
   position: fixed;
   left: var(--viewport-left);
   top: var(--viewport-top);
   width: var(--usable-width);
   height: var(--usable-height);
+  --player-field: var(--background);
   /* One continuous canvas includes the cutout clearance above Player content. */
   background:
     radial-gradient(ellipse 90% 55% at 68% 0%,
       color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
-    linear-gradient(to bottom,
-      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
-      transparent calc(var(--stage-height) + 200px)),
-    var(--background);
+    var(--player-field);
+}
+/* A Stage photo's colour (`usePhotoColour.ts`) replaces the theme's ambience. A vignette centred on the photo
+   (`--photo-cx`/`-cy`/`-w`/`-h`) darkens the far edges in dark mode and pales them in light mode, where darker edges
+   would cost the text on the background its contrast. */
+:root[data-photo-colour] .player-viewport-canvas { background: var(--player-field); }
+.player-viewport-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    calc(var(--photo-w, 480px) * 0.5 + var(--usable-width) * 0.4)
+      calc(var(--photo-h, 320px) * 0.5 + var(--usable-height) * 0.75)
+      at var(--photo-cx, 50%) var(--photo-cy, 30%),
+    transparent 50%, var(--photo-edge, black) 100%);
+  opacity: var(--photo-vignette, 0);
+  pointer-events: none;
+}
+:root[data-player-theme="light"] .player-viewport-canvas { --photo-edge: white; }
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-photo-fade] .player-viewport-canvas { transition: --player-field 0.6s; }
+  :root[data-photo-fade] .player-viewport-canvas::before { transition: opacity 0.6s; }
+  :root[data-photo-fade] .message-speaker { transition: background-color 0.6s; }
 }
 
 .player-sidebar {

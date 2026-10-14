@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 91;
+export const INSTRUCTION_PLAN_VERSION = 93;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -932,14 +932,14 @@ export interface CaptureInstruction extends InstructionBase {
 }
 
 /** The calls that may use the Player's file store, which `fileStore` instructions run. */
-export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "toJson" | "fromJson";
+export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "hashFile" | "toJson" | "fromJson";
 
 /**
- * `fileFromBase64(text, default:)`, `fileToBase64(file)`, or a `toJson` or `fromJson` without a written
- * `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store or read
- * them and waits, with the instruction itself as the continuation, and once the answer is handed off it runs again and
- * gives the result. Without files it gives the result at once. Its operands are temporaries or literals, so both runs
- * read the same values.
+ * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashFile(file)`, or a `toJson` or `fromJson` without a
+ * written `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store,
+ * read, or hash them and waits, with the instruction itself as the continuation, and once the answer is handed off it
+ * runs again and gives the result. Without files it gives the result at once. Its operands are temporaries or literals,
+ * so both runs read the same values.
  */
 export interface FileStoreInstruction extends InstructionBase {
   readonly kind: "fileStore";
@@ -1022,6 +1022,7 @@ export type AssignmentTargetPlan =
 
 export type ExpressionPlan =
   | LiteralExpressionPlan
+  | RegexExpressionPlan
   | DurationExpressionPlan
   | CalendarDurationExpressionPlan
   | IdentifierExpressionPlan
@@ -1052,6 +1053,13 @@ interface ExpressionPlanBase {
 export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly kind: "literal";
   readonly value: string | number | boolean | null;
+}
+
+/** A regex literal (V30 §8): its pattern and its flags, valid and in canonical order, as a regex value holds them. */
+export interface RegexExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "regex";
+  readonly source: string;
+  readonly flags: string;
 }
 
 /** An exact duration literal, in milliseconds. */
@@ -1162,7 +1170,8 @@ export type TypePlanName =
   | "camera"
   | "permanentButton"
   | "messageHandle"
-  | "script";
+  | "script"
+  | "regex";
 
 export interface TypePropertyPlan {
   readonly name: string;

@@ -22,7 +22,7 @@ import {
 import type { RandomDrawPendingOutcome, RandomPolicy } from "../random-control.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
-import { closeDebugTrace, openDebugTrace, type TraceStore } from "../debug-trace.js";
+import { withDebugTrace, type TraceStore } from "../debug-trace.js";
 
 /** The Player's load result for one media ID. */
 export type MediaLoadReport =
@@ -53,10 +53,9 @@ export function reportMediaLoad(
 ): PendingActionOperationResult<MediaReportOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const policy = catchUpPolicy(captured.plan, options);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const reported = reportCapturedMediaLoad(captured, mediaId, report, trace, policy);
-  closeDebugTrace(trace, reported);
-  return reported;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    reportCapturedMediaLoad(captured, mediaId, report, trace, policy),
+  );
 }
 
 /** Reports a media load for engine-owned plan/state that already passed complete validation. */
@@ -69,10 +68,9 @@ export function reportValidatedMediaLoad(
 ): PendingActionOperationResult<MediaReportOutcome> {
   const policy =
     options.randomPolicy === undefined ? catchUpPolicy(plan, options) : options.randomPolicy;
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const reported = reportCapturedMediaLoad({ plan, snapshot }, mediaId, report, trace, policy);
-  closeDebugTrace(trace, reported);
-  return reported;
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    reportCapturedMediaLoad({ plan, snapshot }, mediaId, report, trace, policy),
+  );
 }
 
 function reportCapturedMediaLoad(

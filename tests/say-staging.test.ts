@@ -65,16 +65,19 @@ test("a say whose expressions only read, compute, and draw stages selectively", 
     'say items.random\nsay "${items}"\nsay random()\nsay randomInteger(1..=6)',
     'say person.name.uppercase()\nsay items.join(", ")\nsay items.take(2)\nsay items.contains("a")',
     'say lookup.get("z", default: 0)\nsay lookup.keys\nsay toString(count)\nsay max(count, 5)',
-    // JSON and Base64 without files only read their arguments.
+    // JSON and Base64 without files, and hashText, only read their arguments.
     'say toJson(lookup, files: false)\nsay "${fromJson(toJson(person, files: false), default: null, files: false)}"',
-    'say toBase64(person.name)\nsay fromBase64("QW5u", default: "")',
+    'say toBase64(person.name)\nsay fromBase64("QW5u", default: "")\nsay hashText(person.name)',
     'say (load "k", default: count)',
     // A user function runs in instructions before the say, which reads its result.
     'say "${twice(count)}"',
     'say "x", pause\nsay "x", 2 s\nsay prose(color: tint) "x"',
+    // Regex searches only read their text and regex, and a regex is a plain value (V30 §8).
+    "say /a+/i\nsay toRegex(tint, default: null)\nsay tint.matches(/b.*/)\nsay tint.contains(/u/)",
+    "say tint.find(/[aeiou]/)\nsay tint.capture(/(b)(l)?/)\nsay tint.indexOf(/e/)",
   ];
   const results = staging(lines);
-  assert.equal(results.length, 34);
+  assert.equal(results.length, 42);
   assert.deepEqual(
     results.flatMap((admitted, index) => (admitted ? [] : [index])),
     [],
@@ -176,8 +179,9 @@ test("selective and deep staging give the same events and states", () => {
       'say items.join(", ").uppercase()',
       'say "${toString(count)} ${items.take(2).join()} ${person.name.padStart(5, ".")}", pause',
       'say prose(color: tint) "${twice(count)} left"',
+      'say "${tint.capture(/(b)(l)?/)} ${tint.find(/[aeiou]+/)} ${tint.matches(toRegex("b.*", default: /x/))}"',
       "say lookup",
-      'say "${toJson(lookup, files: false)} ${toBase64(person.name)} ${fromBase64("QW5u", default: "")}"',
+      'say "${toJson(lookup, files: false)} ${toBase64(person.name)} ${fromBase64("QW5u", default: "")} ${hashText(person.name)}"',
       'say "${fromJson(toJson(items, files: false), default: null, files: false)}"',
       "exit",
     ].join("\n"),

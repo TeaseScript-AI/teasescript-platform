@@ -19,6 +19,7 @@ import type {
   SerializableMessageHandle,
   SerializableCameraViewHandle,
   SerializableScriptReference,
+  SerializableRegex,
 } from "./serializable-values.js";
 
 export function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
@@ -94,6 +95,10 @@ export function isScriptReference(
   value: SerializableRuntimeValue,
 ): value is SerializableScriptReference {
   return typeof value === "object" && value !== null && value.kind === "script";
+}
+
+export function isRegex(value: SerializableRuntimeValue): value is SerializableRegex {
+  return typeof value === "object" && value !== null && value.kind === "regex";
 }
 
 /** A plain-language description of a runtime value's kind for error messages, such as "a number". */

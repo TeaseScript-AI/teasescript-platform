@@ -156,7 +156,7 @@ let music = playAudio(file: "music/track.mp3", async: true, volume: 0.5)
 let toy = { type: "buttPlug", name: "Black plug", diameter: 4 cm }
 ```
 
-An operator must remain at the end of the continued line. It may not begin a new statement line:
+Outside brackets, an operator must remain at the end of the continued line. It may not begin a new statement line:
 
 ```text
 let total = score
@@ -168,6 +168,14 @@ Correct:
 ```text
 let total = score +
     bonus
+```
+
+Inside `()`, `[]`, and object literals, where a line break does not end the expression, a binary operator may also
+start the next line, as a comma may; the expression means the same as on one line:
+
+```text
+let total = (score
+    + bonus)
 ```
 
 A command and its first argument remain on the same line:
@@ -819,6 +827,63 @@ Rules:
   hold at most about 536 million.` An error message that quotes text from the script cuts it after 1,024 characters
   with `…`.
 
+### Regexes
+**Status:** Accepted (Owner decision, 2026-10-13)
+
+A regex is a pattern that text can match. Regexes use the RE2 dialect, which matches in time proportional to the text,
+so it leaves out features that cannot, such as a back reference `\1` and lookahead or lookbehind.
+
+```text
+if code.matches(/\d{4}/) {
+    say "Four digits"
+}
+let count = report.find(/\d+/)                   // the first number in the text, or null
+let parts = report.capture(/moved (\d+) times/)  // ["moved 3 times", "3"], or null
+let rule = toRegex(ruleText, default: null)      // a regex? from text that arrives while the script runs
+```
+
+A regex literal is the pattern between two slashes, followed by its flags:
+
+- `/` starts a regex where the grammar expects a value, such as after `=`, `(`, `,`, an operator, `return`, `say`, or
+  `save`; after a value it divides, as in `a / b`. `//` and `/*` start comments, so there is no empty literal: write
+  `/(?:)/`.
+- The pattern is used as written, without `${...}` interpolation or string escapes: `/\d/` is the pattern `\d`. `\/`
+  and a `/` inside a character class, as in `/[/]/`, do not end it, and a literal ends on its line.
+- The flags are `i`, which ignores case, `m`, with which `^` and `$` match at the start and end of each line, and `s`,
+  with which `.` also matches a line break. A pattern can also turn them on inside itself, as in `(?i)`. An unknown or
+  repeated flag is a compile error, and so is `g`: `findAll`, which comes later, and `replace` and `split` with text
+  handle every occurrence without it. So is `u`, since a regex always matches Unicode characters.
+- The compiler checks every literal: a pattern that is not valid, uses a feature RE2 leaves out, or is over the
+  [regex limits](../RESOURCE-LIMITS.md#retained-poc-policies-and-defaults) is a compile error that says why.
+
+These text operations take a regex:
+
+| Operation | Result |
+| --- | --- |
+| `text.matches(regex)` | `true` when the regex matches the whole text |
+| `text.contains(regex)` | `true` when the regex matches somewhere in the text |
+| `text.find(regex)` | the text of the first match, or `null` |
+| `text.capture(regex)` | a `string?[]?`: `null` without a match, otherwise the whole match at index 0 followed by each group in the order of its opening parenthesis; a group that did not take part is `null`, and an empty one is `""` |
+| `text.indexOf(regex)` | the position of the first match, or `null` |
+
+- The first match is the leftmost one, and of alternatives the first that matches there: `"ab".find(/a|ab/)` is
+  `"a"`. `matches` tests the whole text, also with `m`: `"a\nb".matches(/^a$/m)` is `false`.
+- Positions count code points, as for the other text operations. A named group, `(?<name>...)`, keeps its number in
+  `capture`.
+- `findAll`, and a regex in `split`, `replace`, and `lastIndexOf`, come later. Until then they are compile errors, and
+  the forms with text stay as described above.
+
+A regex is a value of type `regex` ([§13](#13-explicit-types)), which holds its pattern and its flags in the order `i`,
+`m`, `s`. Two regexes are equal (`==`) when their patterns and flags are, so `/a/si == /a/is`, while `/a/i` and
+`/(?i)a/` are not equal. Checkpoints, `save`, and `load` keep a regex. Shown as text, in `${...}`, `say`, or
+`toString`, a regex reads as its literal: `"${/\d+/i}"` is `/\d+/i`. `toJson` cannot write it
+([JSON and Base64](#json-and-base64)).
+
+`toRegex(text, default: value)` makes a regex of pattern text. The text has no slashes, its flags go inside it, as in
+`"(?i)yes|no"`, and in a string a backslash is written twice, as in `"\\d+"`. The `default:` is required and is a
+regex or `null`; the result is a `regex`, or a `regex?` with `default: null`. Text that is not a valid pattern, or that
+is over the regex limits, gives the default.
+
 ## 9. Commands
 **Status:** Accepted
 
@@ -1121,7 +1186,8 @@ calendarDuration
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
 program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), `messageHandle` (a shown
-message, [§37](#updatable-messages)), and `script` (a script reference, [§29](#29-script-files-and-paths)). A type is a type name
+message, [§37](#updatable-messages)), `script` (a script reference, [§29](#29-script-files-and-paths)), and `regex` (a
+pattern, [§8](#regexes)). A type is a type name
 or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
 
 ```text
@@ -1277,7 +1343,7 @@ fits when every element or value fits, and an object fits when each known proper
 
 | Conversion | Converts | Result |
 | --- | --- | --- |
-| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, date and time values, and script references | the same text as `"${value}"` |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, date and time values, script references, and regexes | the same text as `"${value}"` |
 | `toNumber(value)` | numbers, and number text | a `number` |
 | `toInteger(value)` | numbers, and number text | an `integer` |
 | `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
@@ -1350,8 +1416,8 @@ fromBase64(text, default: value)
 | `duration` | its number of milliseconds |
 | `speaker` | an object with a copy of its properties |
 
-A `calendarDuration`, `range`, `script`, `timer`, `media`, `messageHandle`, or permanent button cannot be written: that
-is a compile error where the types show it, and a runtime error otherwise.
+A `calendarDuration`, `range`, `script`, `regex`, `timer`, `media`, `messageHandle`, or permanent button cannot be
+written: that is a compile error where the types show it, and a runtime error otherwise.
 
 `fromJson` reads JSON text. An object becomes a dict in the order of its keys, an array a list, whose elements may be of
 different types, and text, numbers, `true`, `false`, and `null` stay what they are; a whole number becomes an `integer`
@@ -1394,6 +1460,44 @@ let exported = toJson(preset)                     // its photos as data URLs
 let imported = fromJson(exported, default: null)  // stored files again
 let plain = toJson(preset, files: false)          // references stay text
 ```
+
+### Hashes
+**Status:** Accepted (Owner decisions, 2026-10-13)
+
+```text
+hashText(text)
+hashFile(file)
+```
+
+`hashText` gives the SHA-256 of a text's UTF-8 bytes and `hashFile` the SHA-256 of a stored file's bytes
+([§33](#stored-files)), as 64 lowercase hexadecimal characters, the usual notation, so that a hash can be compared with
+the one another program, such as `sha256sum`, gives. They hash only text and files; any other value goes through
+`toJson` first, as in `hashText(toJson(settings))`.
+
+`hashText` gives its result at once. A lone surrogate counts as U+FFFD, as in `toBase64`. `hashFile` hashes the stored
+files that `fileToBase64` reads, and fails where `fileToBase64` fails: for another value, also a package path such as
+`"images/a.jpg"`, and for a file that the Player can no longer read. Reading the file takes a short wait, and the result
+is recorded as that of `fileToBase64`: a restore or a replay can reuse a recorded result without asking the store again.
+
+```text
+// A secret answer or a keyholder's code: the script holds its hash, not the code itself.
+let code = askText("The code from your keyholder")
+if hashText(code) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e" {
+    say "Released."
+}
+
+// Whether a file has changed: its hash against the one saved last time.
+let image = askImage("Show me your corner")
+let hash = hashFile(image)
+if hash == load("cornerHash", default: "") {
+    say "That is the same photo as last time."
+}
+save hash as "cornerHash"
+```
+
+A hash hides a secret only when the secret has many possible values. A number from 1 to 1000 can be found by hashing all
+of them. A value that the script chooses itself with `random` can be recovered from the save, because the session's
+random generator is deterministic.
 
 ### Numeric functions
 **Status:** Accepted (Owner decision, 2026-10-07)
@@ -1657,8 +1761,8 @@ let newest = tasks.removeLast()
 
 `items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
 `["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
-Elements may be text, numbers, `true` or `false`, `null`, durations, date and time values, and script references,
-shown as `${...}` shows them; any other element raises an error.
+Elements may be text, numbers, `true` or `false`, `null`, durations, date and time values, script references, and
+regexes, shown as `${...}` shows them; any other element raises an error.
 
 List properties:
 
@@ -1689,7 +1793,7 @@ say "Come closer, ${player.petNames}"
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
 
 An interpolated list may contain any value that `${...}` shows on its own: text, numbers, `true` and `false`, `null`,
-durations, date and time values, and script references ([§29](#29-script-files-and-paths)). A list holds one element type ([§12](#12-variable-declarations)), and integers and
+durations, date and time values, script references ([§29](#29-script-files-and-paths)), and regexes. A list holds one element type ([§12](#12-variable-declarations)), and integers and
 numbers together are numbers. The selected element is shown as that value would be:
 
 ```text
@@ -1811,7 +1915,7 @@ Runtime behavior:
   equal element.
 - A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
   ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
-  handles, and script references. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
+  handles, script references, and regexes. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
   the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
   `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
   `.last`, `.random`, and a `for` loop give copies, so changing one does not change the set.
@@ -4214,8 +4318,9 @@ fileToBase64(file)
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
 `default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
-them as plain Base64 text. Storing a file and reading one each take a short wait, as a photo does. The result is
-recorded: a restore or a replay can reuse a recorded result without asking the store again. The Base64 text may be as long as any text.
+them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take
+a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a recorded result without asking
+the store again. The Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
@@ -5349,6 +5454,7 @@ range
 media
 messageHandle
 script
+regex
 ```
 
 The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names. `dict` also

@@ -60,6 +60,7 @@ import type {
 } from "../../plan/model.js";
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
+import { canonicalRegexFlags } from "../../regex.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -1387,6 +1388,7 @@ export class InstructionCompiler {
       case "nullLiteral":
       case "numberLiteral":
       case "durationLiteral":
+      case "regexLiteral":
         return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
       case "stringLiteral": {
         const interpolations = expression.parts
@@ -2298,7 +2300,7 @@ export class InstructionCompiler {
   /**
    * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
    * reads when it opens. It is always prepared: its request is checked then. Like a basic ask, it first says its
-   * question, the message, read from that object.
+   * question, the message, read from that object; `speaker` in its mode and in every argument is the asking speaker.
    */
   *#lowerAskImageTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
@@ -2317,7 +2319,10 @@ export class InstructionCompiler {
             this.#lowerQuestionPresentationTask(expression.presentation, speakerTemporary),
           );
     const values = yield* compileChild(
-      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+      this.#lowerInteractionPayloadsTask(
+        expression.arguments.map((argument) => argument.value),
+        speakerTemporary,
+      ),
     );
     const requestTemporary = this.#allocateTemporary();
     this.instructions.push({
@@ -2448,6 +2453,7 @@ export class InstructionCompiler {
     if (
       call !== "fileFromBase64" &&
       call !== "fileToBase64" &&
+      call !== "hashFile" &&
       call !== "toJson" &&
       call !== "fromJson"
     )
@@ -3342,6 +3348,13 @@ function assembleExpression(
     case "nullLiteral":
     case "numberLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+    case "regexLiteral":
+      return {
+        kind: "regex",
+        source: expression.source,
+        flags: canonicalRegexFlags(expression.flags),
+        span: copySpan(expression.span),
+      };
     case "durationLiteral": {
       const value = durationLiteralValue(expression);
       // The type checker rejects a calendar amount that is not whole before lowering.

@@ -45,15 +45,19 @@ const diagnosticCodes = {
   invalidNumber: "TSL006",
   unterminatedComment: "TSL007",
   physicalNewlineInString: "TSL008",
+  unterminatedRegex: "TSL009",
 } as const;
 
-/** Tokenizes the accepted core-language milestone. */
-export function lex(source: string): LexResult {
+/**
+ * Tokenizes the accepted core-language milestone. A `/` at an offset of `regexStarts` starts a regex literal, as one does
+ * wherever the token before shows that the grammar expects a value there; the parser finds the other places (V30 §8).
+ */
+export function lex(source: string, regexStarts: ReadonlySet<number> = new Set()): LexResult {
   if (typeof source !== "string") {
     throw new TypeError("source must be a string.");
   }
 
-  return new Lexer(source).scan();
+  return new Lexer(source, regexStarts).scan();
 }
 
 class Lexer {
@@ -67,8 +71,13 @@ class Lexer {
   readonly #interpolationStarts = new Map<number, number>();
   /** The end of the line `#quotesFollowOnLine` last searched, and the offset of the second-to-last quote before it. */
   #quoteSearch = { lineEnd: -1, secondToLastQuote: -1 };
+  /** For `:]` and `\E` in a regex literal, where the last search began and what it found: an offset, or -1 before `end`. */
+  readonly #markerSearches = new Map<string, { from: number; found: number; end: number }>();
 
-  public constructor(private readonly source: string) {}
+  public constructor(
+    private readonly source: string,
+    private readonly regexStarts: ReadonlySet<number>,
+  ) {}
 
   public scan(): LexResult {
     while (!this.#isAtEnd()) {
@@ -114,6 +123,10 @@ class Lexer {
     }
     if (character === "/" && this.#peek(1) === "*") {
       this.#scanBlockComment();
+      return;
+    }
+    if (character === "/" && (this.regexStarts.has(this.#offset) || this.#regexMayStart())) {
+      this.#scanRegex();
       return;
     }
 
@@ -239,6 +252,146 @@ class Lexer {
       start,
       this.#position(),
     );
+  }
+
+  /**
+   * Whether a `/` here starts a regex literal (V30 §8) rather than dividing: the grammar expects an operand, because the
+   * token before it, past line breaks, does not end one. A name, a number, text, a regex, `true`, `false`, `null`, a
+   * closing `)`, `]`, or `}`, and a word after `.` end an operand. The parser finds the places the token before does not
+   * show, such as after a message mode (see `parse`).
+   */
+  #regexMayStart(): boolean {
+    let index = this.#tokens.length - 1;
+    while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
+    const previous = this.#tokens[index];
+    if (previous === undefined) return true;
+    if (this.#tokens[index - 1]?.kind === TokenKind.Dot) return false;
+    switch (previous.kind) {
+      // `save` takes a value, and so does `say as speaker`.
+      case TokenKind.Identifier:
+        return (
+          previous.lexeme === "save" ||
+          (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
+            this.#tokens[index - 2]?.kind === TokenKind.KeywordSay)
+        );
+      case TokenKind.NumberLiteral:
+      case TokenKind.StringEnd:
+      case TokenKind.RegexLiteral:
+      case TokenKind.RightParenthesis:
+      case TokenKind.RightBracket:
+      case TokenKind.RightBrace:
+      case TokenKind.KeywordTrue:
+      case TokenKind.KeywordFalse:
+      case TokenKind.KeywordNull:
+      // Both may name a value, as in `speaker.name` or a variable `wait`.
+      case TokenKind.KeywordSpeaker:
+      case TokenKind.KeywordWait:
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * A regex literal `/pattern/flags`. The pattern is opaque: no interpolation and no string escapes. It ends at the first
+   * `/` that is not escaped as `\/`, inside a character class, or inside quoted text, read as RE2 reads them: a `]` right
+   * after the opening `[` or `[^` and a `]` of a named class such as `[:alpha:]` belong to the class, and quoted text runs
+   * from `\Q` to `\E`, or without `\E` on the line to the closing slash. The flags are the letters and digits right after
+   * it, which the compiler checks. A literal cannot continue past the end of its line.
+   */
+  #scanRegex(): void {
+    const startOffset = this.#offset;
+    const start = this.#position();
+    this.#advanceCodeUnit();
+    let pattern = "";
+    let inClass = false;
+    let quoted = false;
+    const take = (end: number): void => {
+      while (this.#offset < end) pattern += this.#advanceCodeUnit();
+    };
+    while (!this.#isAtEnd() && this.#peek() !== "\n" && this.#peek() !== "\r") {
+      const character = this.#peek();
+      if (character === "/" && !inClass) {
+        this.#advanceCodeUnit();
+        while (isIdentifierPart(this.#peek())) this.#advanceCodeUnit();
+        this.#emitValuedToken(
+          TokenKind.RegexLiteral,
+          startOffset,
+          start,
+          this.#position(),
+          pattern,
+        );
+        return;
+      }
+      if (quoted) {
+        // As everywhere, `\/` does not end the literal.
+        if (character === "\\") {
+          pattern += this.#advanceCodeUnit();
+          if (this.#isAtEnd() || this.#peek() === "\n" || this.#peek() === "\r") break;
+        }
+        pattern += this.#advanceCodePoint();
+        continue;
+      }
+      if (character === "\\" && this.#peek(1) === "Q" && !inClass) {
+        const end = this.#findOnLine("\\E", this.#offset + 2);
+        if (end < 0) quoted = true;
+        take(end < 0 ? this.#offset + 2 : end + 2);
+        continue;
+      }
+      if (character === "[" && this.#peek(1) === ":" && inClass) {
+        // RE2 looks for the `:]` from the `[`, so `[:]` names the class `[:]`.
+        const end = this.#findOnLine(":]", this.#offset + 1);
+        if (end >= 0) {
+          take(end + 2);
+          continue;
+        }
+      }
+      if (character === "[" && !inClass) {
+        inClass = true;
+        pattern += this.#advanceCodeUnit();
+        if (this.#peek() === "^") pattern += this.#advanceCodeUnit();
+        if (this.#peek() === "]") pattern += this.#advanceCodeUnit();
+        continue;
+      }
+      if (character === "]") inClass = false;
+      if (character === "\\") {
+        pattern += this.#advanceCodeUnit();
+        if (this.#isAtEnd() || this.#peek() === "\n" || this.#peek() === "\r") break;
+      }
+      pattern += this.#advanceCodePoint();
+    }
+    this.#report(
+      diagnosticCodes.unterminatedRegex,
+      "This regex has no closing '/' on its line. End it with '/', and write '\\/' for a slash inside it.",
+      start,
+      this.#position(),
+    );
+    this.#emitValuedToken(TokenKind.RegexLiteral, startOffset, start, this.#position(), pattern);
+  }
+
+  /**
+   * The offset of the next `marker` from `from` before the end of the line, or -1. A literal searches forward only, and an
+   * earlier result answers a later search that it covers, so every character is searched at most once for each marker.
+   */
+  #findOnLine(marker: string, from: number): number {
+    const known = this.#markerSearches.get(marker);
+    if (
+      known !== undefined &&
+      known.from <= from &&
+      (known.found >= from || (known.found < 0 && from < known.end))
+    )
+      return known.found;
+    let index = from;
+    for (; index < this.source.length; index += 1) {
+      const character = this.source[index];
+      if (character === "\n" || character === "\r") break;
+      if (this.source.startsWith(marker, index)) {
+        this.#markerSearches.set(marker, { from, found: index, end: index });
+        return index;
+      }
+    }
+    this.#markerSearches.set(marker, { from, found: -1, end: index });
+    return -1;
   }
 
   #scanOptionalEqual(single: TokenKind, double: TokenKind): void {
@@ -613,7 +766,10 @@ class Lexer {
         // EVIDENCE: invariant: literal/identifier scanners create their payload tokens separately from this emitter.
         kind: kind as Exclude<
           TokenKind,
-          typeof TokenKind.Identifier | typeof TokenKind.NumberLiteral | typeof TokenKind.StringText
+          | typeof TokenKind.Identifier
+          | typeof TokenKind.NumberLiteral
+          | typeof TokenKind.StringText
+          | typeof TokenKind.RegexLiteral
         >,
         lexeme: this.source.slice(startOffset, end.offset),
         span: createSourceSpan(start, end),
@@ -623,7 +779,10 @@ class Lexer {
 
   #emitValuedToken(
     kind:
-      typeof TokenKind.Identifier | typeof TokenKind.NumberLiteral | typeof TokenKind.StringText,
+      | typeof TokenKind.Identifier
+      | typeof TokenKind.NumberLiteral
+      | typeof TokenKind.StringText
+      | typeof TokenKind.RegexLiteral,
     startOffset: number,
     start: SourcePosition,
     end: SourcePosition,

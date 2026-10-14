@@ -30,12 +30,7 @@ import {
   timerSpan,
 } from "./timer-lifecycle.js";
 import { timeOutButton } from "./complete-action.js";
-import {
-  closeDebugTrace,
-  openDebugTrace,
-  type RuntimeDebugContext,
-  type TraceStore,
-} from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 import { randomControlFor } from "../random-control.js";
 import {
@@ -75,17 +70,16 @@ export function observeTime(
 ): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const policy = catchUpPolicy(captured.plan, options);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const observed = observeCapturedTime(
-    captured.plan,
-    captured.snapshot,
-    suppliedNowMs,
-    mediaReports,
-    trace,
-    policy,
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, (trace) =>
+    observeCapturedTime(
+      captured.plan,
+      captured.snapshot,
+      suppliedNowMs,
+      mediaReports,
+      trace,
+      policy,
+    ),
   );
-  closeDebugTrace(trace, observed);
-  return observed;
 }
 
 /** Observes time for engine-owned plan/state that already passed complete validation. */
@@ -98,10 +92,9 @@ export function observeValidatedTime(
 ): PendingActionOperationResult<TimeObservationOutcome> {
   const policy =
     options.randomPolicy === undefined ? catchUpPolicy(plan, options) : options.randomPolicy;
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const observed = observeCapturedTime(plan, snapshot, suppliedNowMs, mediaReports, trace, policy);
-  closeDebugTrace(trace, observed);
-  return observed;
+  return withDebugTrace(options.debugTrace, plan, snapshot, (trace) =>
+    observeCapturedTime(plan, snapshot, suppliedNowMs, mediaReports, trace, policy),
+  );
 }
 
 /** The checked random policy of a snapshot operation that only catches up; its timers draw from the session state. */

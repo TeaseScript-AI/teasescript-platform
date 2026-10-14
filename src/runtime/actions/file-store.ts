@@ -32,27 +32,29 @@ import {
   storedFileKind,
 } from "../stored-files.js";
 import { interactionStringFits } from "../../interaction-limits.js";
+import { isSha256Hex } from "../sha256.js";
 import { checkTextLength, messageText } from "../text-length.js";
 import { describeRuntimeValue } from "../value-predicates.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model.js";
 
 // The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files
-// to store or read. Without any it gives the result at once; otherwise it asks the Player and waits, and runs again with
-// the Player's answer, which the completion hands off, to give the result. Both runs read the same operands, so they
-// find the same files in the same order.
+// to store, read, or hash. Without any it gives the result at once; otherwise it asks the Player and waits, and runs
+// again with the Player's answer, which the completion hands off, to give the result. Both runs read the same operands,
+// so they find the same files in the same order.
 
 /**
- * The Player's answer as the instruction reads it: the stored files' references or the read files' Base64, in request
- * order, or `null` when the Player could not store or read them.
+ * The Player's answer as the instruction reads it: the stored files' references, the read files' Base64, or the hashed
+ * files' SHA-256, in request order, or `null` when the Player could not store, read, or hash them.
  */
 type FileStoreAnswer = readonly string[] | null;
 
-/** What the first run found: the result, or the files to store or read. */
+/** What the first run found: the result, or the files to store, read, or hash. */
 type FileStoreRequest =
   | { readonly result: SerializableRuntimeValue }
   | { readonly store: readonly RuntimeFileToStore[] }
-  | { readonly read: readonly string[] };
+  | { readonly read: readonly string[] }
+  | { readonly hash: readonly string[] };
 
 interface FileStoreOperands {
   readonly value: SerializableRuntimeValue;
@@ -131,7 +133,7 @@ function fileStoreAnswer(
   return texts;
 }
 
-/** The files a call needs stored or read, or its result when it needs none. */
+/** The files a call needs stored, read, or hashed, or its result when it needs none. */
 function startFileStore(
   instruction: FileStoreInstruction,
   { value, fallback, files }: FileStoreOperands,
@@ -148,7 +150,9 @@ function startFileStore(
       return { store: [{ type: fileType(binary), base64: base64FromBinary(binary) }] };
     }
     case "fileToBase64":
-      return { read: [storedFileOperand(value, snapshot, span)] };
+      return { read: [storedFileOperand(instruction.call, value, snapshot, span)] };
+    case "hashFile":
+      return { hash: [storedFileOperand(instruction.call, value, snapshot, span)] };
     case "toJson": {
       const references: string[] = [];
       const found = new Set<string>();
@@ -186,7 +190,7 @@ function startFileStore(
   }
 }
 
-/** The result of a call once the Player stored or read its files, or could not. */
+/** The result of a call once the Player stored, read, or hashed its files, or could not. */
 function finishFileStore(
   instruction: FileStoreInstruction,
   { value, fallback }: FileStoreOperands,
@@ -198,7 +202,7 @@ function finishFileStore(
   const span = instruction.span;
   const call = instruction.call;
   if (answer === null) {
-    if (call === "fileToBase64" || call === "toJson")
+    if (call === "fileToBase64" || call === "hashFile" || call === "toJson")
       throw new RuntimeFault(
         "TSR085",
         `${call}(...) could not read a stored file it needs, because this browser no longer has it or could not read it. Take, choose, or store the file again.`,
@@ -222,6 +226,7 @@ function finishFileStore(
   switch (call) {
     case "fileFromBase64":
     case "fileToBase64":
+    case "hashFile":
       if (answer.length !== 1) throw malformed();
       return answer[0]!;
     case "toJson": {
@@ -265,7 +270,7 @@ function finishFileStore(
   }
 }
 
-/** Asks the Player to store or read files and waits for its answer, with this instruction as the continuation. */
+/** Asks the Player to store, read, or hash files and waits for its answer, with this instruction as the continuation. */
 function requestFileStore(
   instruction: FileStoreInstruction,
   request: Exclude<FileStoreRequest, { readonly result: SerializableRuntimeValue }>,
@@ -296,9 +301,9 @@ function requestFileStore(
     destinationTemporary: instruction.destinationTemporary,
     createdAtMs: snapshot.currentSessionTimeMs,
     requestEventSequence: sequence,
-    operation: "store" in request ? "store" : "read",
+    operation: "store" in request ? "store" : "read" in request ? "read" : "hash",
     files: "store" in request ? request.store : [],
-    references: "read" in request ? request.read : [],
+    references: "read" in request ? request.read : "hash" in request ? request.hash : [],
   });
   snapshot.nextActionId += 1;
   snapshot.foregroundAction = action;
@@ -313,8 +318,9 @@ function requestFileStore(
   );
 }
 
-/** The text of `fileToBase64`, which must be a stored file this session knows. */
+/** The text of `fileToBase64` or `hashFile`, which must be a stored file this session knows. */
 function storedFileOperand(
+  call: "fileToBase64" | "hashFile",
   value: SerializableRuntimeValue,
   snapshot: RuntimeSnapshot,
   span: FileStoreInstruction["span"],
@@ -322,7 +328,7 @@ function storedFileOperand(
   if (typeof value === "string" && holdsStoredFile(snapshot.storedFiles, value)) return value;
   throw new RuntimeFault(
     "TSR059",
-    `fileToBase64(...) reads a stored file, ${
+    `${call}(...) ${call === "hashFile" ? "hashes" : "reads"} a stored file, ${
       typeof value === "string"
         ? `but ${JSON.stringify(messageText(value))} is not one`
         : `not ${describeRuntimeValue(value)}`
@@ -398,7 +404,7 @@ function fileInDataUrl(text: string): RuntimeFileToStore | undefined {
 export type FileStoreCompletion =
   | {
       readonly ok: true;
-      readonly outcome: "stored" | "read" | "failed";
+      readonly outcome: "stored" | "read" | "hashed" | "failed";
       readonly answer: FileStoreAnswer;
     }
   | { readonly ok: false; readonly message: string };
@@ -406,7 +412,8 @@ export type FileStoreCompletion =
 /**
  * Resolves a file store completion payload: `{ kind: "stored", references }` with one reference per file to store, each
  * of stored media of the file's kind that the trusted host vouches for and none twice; `{ kind: "read", files }` with
- * the standard Base64 of each file to read; or `{ kind: "failed" }` when the Player could not store or read them.
+ * the standard Base64 of each file to read; `{ kind: "hashed", hashes }` with the SHA-256 of each file to hash, as 64
+ * lowercase hexadecimal digits; or `{ kind: "failed" }` when the Player could not store, read, or hash them.
  */
 export function resolveFileStoreCompletion(
   payload: unknown,
@@ -448,6 +455,17 @@ export function resolveFileStoreCompletion(
       return invalidFileStorePayload();
     return { ok: true, outcome: "read", answer: files };
   }
+  if (payload.kind === "hashed" && action.operation === "hash") {
+    const hashes = texts(payload.hashes);
+    if (
+      Object.keys(payload).length !== 2 ||
+      hashes === null ||
+      hashes.length !== action.references.length ||
+      !hashes.every(isSha256Hex)
+    )
+      return invalidFileStorePayload();
+    return { ok: true, outcome: "hashed", answer: hashes };
+  }
   return invalidFileStorePayload();
 }
 
@@ -466,6 +484,6 @@ function invalidFileStorePayload(): FileStoreCompletion {
   return {
     ok: false,
     message:
-      "File store completion payload must be { kind: 'stored', references } for files to store, { kind: 'read', files } for files to read, or { kind: 'failed' }.",
+      "File store completion payload must be { kind: 'stored', references } for files to store, { kind: 'read', files } for files to read, { kind: 'hashed', hashes } for files to hash, or { kind: 'failed' }.",
   };
 }

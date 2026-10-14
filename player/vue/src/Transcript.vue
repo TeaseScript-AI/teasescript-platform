@@ -26,12 +26,13 @@ import { Button } from "@/components/ui/button";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
-import { backdropBehind, resolveColour } from "./messageContrast";
+import { backdropBehind, resolveColour, vignetteEdge } from "./messageContrast";
 import {
   adjoins,
   resolveAppearance,
   shownEntryIndex,
   shownPosition,
+  type TranscriptPalette,
 } from "./transcriptPresentation";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 
@@ -341,23 +342,30 @@ watch(endInset, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-const palette = ref({ surface: "#ffffff", canvas: "#ffffff", link: "#0000ee" });
+const palette = ref<TranscriptPalette>({
+  surface: "#ffffff",
+  canvas: "#ffffff",
+  edge: null,
+  link: "#0000ee",
+});
 function readPalette() {
   const element = scrollElement.value;
   if (element === null) return;
+  const canvas = backdropBehind(element);
   palette.value = {
     surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
-    canvas: backdropBehind(element),
+    canvas,
+    edge: vignetteEdge(element, canvas),
     link: resolveColour(element, "var(--markup-link)", "#0000ee"),
   };
 }
-// Theme changes update the document, not this component's props.
+// Theme changes update the document, not this component's props; the background settles when a photo colour's fade ends.
 let paletteObserver: MutationObserver | null = null;
 onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
   paletteObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["style", "class", "data-player-theme"],
+    attributeFilter: ["style", "class", "data-player-theme", "data-photo-fade"],
   });
 });
 onBeforeUnmount(() => {

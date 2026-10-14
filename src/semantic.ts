@@ -31,10 +31,12 @@ import type {
   LetStatement,
   OpenUrlStatement,
   ExportTextStatement,
+  RegexLiteral,
   ShowPopupParts,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import type { SourceSpan } from "./source.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
+import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -189,6 +191,7 @@ const semanticCode = {
   invalidFileTarget: "TSV057",
   invalidCameraHandleMember: "TSV059",
   noSpeaker: "TSV063",
+  invalidRegex: "TSV064",
 } as const;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
@@ -1895,6 +1898,9 @@ class SemanticValidator {
       case "numberLiteral":
       case "durationLiteral":
         return;
+      case "regexLiteral":
+        this.#validateRegexLiteral(expression);
+        return;
       case "stringLiteral":
         for (const part of expression.parts) {
           if (part.kind === "stringInterpolation") {
@@ -2074,9 +2080,11 @@ class SemanticValidator {
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
             this.#validatePresentationProperties(expression.presentation ?? null);
+            // `askImage` has no `as`, so the default speaker asks: `speaker` in its mode and in every argument is that
+            // speaker, as in a basic ask.
             if (expression.presentation !== undefined)
               yield* compileChild(
-                this.#validateExpressionTask(expression.presentation, scope, contextualSpeaker),
+                this.#validateExpressionTask(expression.presentation, scope, "speaker"),
               );
           } else if (name === "openUrl" || name === "exportText") {
             // A statement of its own is an `openUrlStatement` or an `exportTextStatement`.
@@ -2191,10 +2199,9 @@ class SemanticValidator {
             );
           }
         }
+        const argumentSpeaker = isAskImageCall(expression) ? "speaker" : contextualSpeaker;
         for (const argument of expression.arguments) {
-          yield* compileChild(
-            this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
-          );
+          yield* compileChild(this.#validateExpressionTask(argument.value, scope, argumentSpeaker));
         }
         if (
           method.kind === "propertyAccessExpression" &&
@@ -2283,6 +2290,24 @@ class SemanticValidator {
         return;
     }
     expression satisfies never;
+  }
+
+  /** A regex literal has valid flags, and RE2 compiles its pattern within the regex limits (V30 §8). */
+  #validateRegexLiteral(literal: RegexLiteral): void {
+    const flagProblem = regexFlagProblem(literal.flags);
+    if (flagProblem !== null) {
+      // The flags are the letters at the end of the literal's line.
+      const end = literal.span.end;
+      const start = createSourcePosition(
+        end.offset - literal.flags.length,
+        end.line,
+        end.column - literal.flags.length,
+      );
+      this.#report(semanticCode.invalidRegex, flagProblem, createSourceSpan(start, end));
+      return;
+    }
+    const compiled = compileRegex(literal.source, canonicalRegexFlags(literal.flags));
+    if (!compiled.ok) this.#report(semanticCode.invalidRegex, compiled.problem, literal.span);
   }
 
   /** The options of a message mode written for a `say` or an ask's question, such as `prose(align: "center")`. */

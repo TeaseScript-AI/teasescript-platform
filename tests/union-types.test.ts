@@ -296,6 +296,111 @@ test("mixed list literals need a declared union, and every other mix points to i
   );
 });
 
+test("an empty default, list, or result joins a union as a value of the member it fits (backlog 6)", () => {
+  // Each case reads the numbers of a list member after a test excludes the other member, or tests each element.
+  const numbers = (list: string): string => `for n in ${list} {\n    say n + 1\n}`;
+  const elements = `for w in v {\n    if w is string {\n        say w\n    } else {\n${numbers("w")}\n    }\n}`;
+  for (const [parameter, value, other, use, calls, said] of [
+    [
+      "(integer[] | string)[]",
+      "x.get(0, default: [])",
+      "string",
+      numbers("v"),
+      '[[1, 2]]\n[]\n["s"]',
+      ["2", "3", "-"],
+    ],
+    [
+      "(integer[] | string[])[]",
+      "x.get(0, default: [])",
+      "string[]",
+      numbers("v"),
+      "[[1]]\n[]",
+      ["2", "-"],
+    ],
+    [
+      "(integer[][] | boolean)[]",
+      "x.get(0, default: [[]])",
+      "boolean",
+      `for w in v {\n${numbers("w")}\n}`,
+      "[[[1]]]\n[]",
+      ["2"],
+    ],
+    [
+      "((integer[] | string)[])[]",
+      "x.get(0, default: [[]])",
+      null,
+      elements,
+      '[[[1], "s"]]\n[]',
+      ["2", "s"],
+    ],
+    [
+      "(integer[] | string) dict",
+      'x.get("a", default: [])',
+      "string",
+      numbers("v"),
+      'dict{ a: [1] }\ndict{}\ndict{ a: "s" }',
+      ["2", "-"],
+    ],
+    [
+      "(integer dict | string)[]",
+      "x.get(0, default: dict{})",
+      "string",
+      "for k, n in v {\n    say n + 1\n}",
+      "[dict{ k: 1 }]\n[]",
+      ["2"],
+    ],
+    [
+      "(integer[] | string)?",
+      "x otherwise []",
+      "string",
+      numbers("v"),
+      '[4]\nnull\n"s"',
+      ["5", "-"],
+    ],
+    ["(integer[] | string)[]?", "x otherwise [[]]", null, elements, 'null\n[[6], "s"]', ["7", "s"]],
+    ["integer[] | string", "[x, []]", null, elements, '[6]\n"s"', ["7", "s"]],
+    ["integer[] | string", "[[], x]", null, elements, "[6]", ["7"]],
+    ["integer[] | string", "[x] + [[]]", null, elements, '"s"', ["s"]],
+  ] as const) {
+    const body = other === null ? use : `if v is ${other} {\n    say "-"\n} else {\n${use}\n}`;
+    const source = [
+      `function f(x: ${parameter}) {\nlet v = ${value}\n${body}\n}`,
+      ...calls.split("\n").map((argument) => `f(${argument})`),
+      "exit",
+    ].join("\n");
+    assert.deepEqual(sayTexts(source), said, source);
+  }
+  // A function's results join the same way.
+  assert.deepEqual(
+    sayTexts(
+      [
+        "function pick(x: integer[] | string, empty: boolean) {",
+        "    if empty {",
+        "        return []",
+        "    }",
+        "    return x",
+        "}",
+        'for x in [pick([8], false), pick([8], true), pick("s", false)] {',
+        "    if x is string {",
+        "        say x",
+        "    } else {",
+        "        say x.length",
+        "    }",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["1", "0", "s"],
+  );
+  // A default that fits no member adds its type, so its elements still need a test.
+  assert.deepEqual(
+    codes(
+      `function f(x: (integer[] | string)[]) {\nlet v = x.get(0, default: [true])\nif v is string {\n    say v\n} else {\n${numbers("v")}\n}\n}\nexit`,
+    ),
+    [["TSV043", "n"]],
+  );
+});
+
 test("'|' outside a type points to 'or'", () => {
   assert.deepEqual(diagnostics("let both = true || false"), [
     ["TSP037", "TeaseScript writes 'or' instead of '||': if a or b { ... }", "||"],

@@ -21,6 +21,7 @@ import {
   isList,
   isObject,
   isScriptReference,
+  isRegex,
   isSet,
   isTemporal,
 } from "./value-predicates.js";
@@ -138,18 +139,22 @@ function choiceButton(
   };
 }
 
-/** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference is shown but not returned. */
+/** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference or regex is shown but not returned. */
 function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): InteractionChoiceValue {
   if (isAnyDuration(value)) return { ...value };
   if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;
-  if (isScriptReference(value))
-    throw fault(
-      "TSR052",
-      "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",
-      span,
-    );
+  for (const [shown, description] of [
+    [isScriptReference(value), "a script reference"],
+    [isRegex(value), "a regex"],
+  ] as const)
+    if (shown)
+      throw fault(
+        "TSR052",
+        `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`,
+        span,
+      );
   throw new Error("A choice value must be a visible scalar.");
 }
 

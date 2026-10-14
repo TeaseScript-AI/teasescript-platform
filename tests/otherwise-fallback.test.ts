@@ -317,6 +317,101 @@ exit`),
   assert.deepEqual(ran(grown("[null]")), [["1"], null]);
 });
 
+test("a read of a place that held only values of unknown type is of unknown type after an assignment and in a loop", () => {
+  // As after 'let x = items[0]' (#859): the variable is of unknown type, so a null check or a fallback replaces null
+  // and a use checks what is left when the script runs.
+  const start = (value: string) =>
+    `${HIDE}let items = []\nitems.add(hide(${value}))\nlet holder = { p: null }\nholder.p = hide(${value})\n`;
+  const reads = [
+    (check: string) => `let x = hide(null)\nx = items[0]\n${check}\nsay "\${x - 1}"`,
+    (check: string) =>
+      `let x = hide(null)\nx = items.get(0, default: null)\n${check}\nsay "\${x - 1}"`,
+    (check: string) => `let x = hide(null)\nx = holder.p\n${check}\nsay "\${x - 1}"`,
+    (check: string) =>
+      `function less(x) {\n    x = items[0]\n    ${check}\n    say "\${x - 1}"\n}\nless(1)`,
+  ];
+  for (const read of reads)
+    for (const check of ["if x == null { x = 0 }", "x = x otherwise 0"]) {
+      const script = (value: string) => `${start(value)}${read(check)}\nexit`;
+      assert.deepEqual(outcome(script("5")), [["4"], null], script("5"));
+      assert.deepEqual(outcome(script("null")), [["-1"], null], script("null"));
+      assert.equal(outcome(script('"t"'))[1]?.[0], "TSR027", script('"t"'));
+    }
+  // A loop variable is not decided by a later store either, so a null check of it is no constant test.
+  const loops = [
+    (value: string) =>
+      `${HIDE}let items = []\nitems.add(hide(${value}))\nfor x in items {\n    if x == null { x = 0 }\n    say "\${x - 1}"\n}\nexit`,
+    (value: string) =>
+      `${HIDE}let d = dict{}\nd["a"] = hide(${value})\nfor k, x in d {\n    if x == null { x = 0 }\n    say "\${x - 1}"\n}\nexit`,
+  ];
+  for (const loop of loops) {
+    assert.deepEqual(diagnostics(loop("null")), [], loop("null"));
+    assert.deepEqual(outcome(loop("5")), [["4"], null]);
+    assert.deepEqual(outcome(loop("null")), [["-1"], null]);
+  }
+  // An element that a method removes, where another element took null, is such a value too: a typed place or parameter
+  // checks it when the script runs.
+  const removed: [(value: string) => string, string][] = [
+    [
+      (value) =>
+        `${HIDE}let items = []\nitems.add(hide(${value}))\nitems.add(null)\nlet kept: integer = items.removeFirst()\nsay kept\nexit`,
+      "5",
+    ],
+    [
+      (value) =>
+        `${HIDE}function twice(n: integer) {\n    return n * 2\n}\nlet items = []\nitems.add(hide(${value}))\nitems.add(null)\nsay twice(items.removeFirst())\nexit`,
+      "10",
+    ],
+    [
+      (value) =>
+        `${HIDE}let d = dict{}\nd["a"] = hide(${value})\nd["b"] = null\nlet kept: integer = d.remove("a")\nsay kept\nexit`,
+      "5",
+    ],
+  ];
+  for (const [script, said] of removed) {
+    assert.deepEqual(outcome(script("5")), [[said], null], script("5"));
+    assert.equal(outcome(script('"t"'))[1]?.[0], "TSR058", script('"t"'));
+  }
+  // A store that decides the elements later still decides them for the loop, which checks them when they are added.
+  assert.deepEqual(
+    diagnostics(
+      `${HIDE}let bets = []\nfunction fill {\n    bets.add(hide(5))\n    for e in bets {\n        if e == null {\n            say "none"\n        }\n    }\n}\nfunction reset {\n    bets = [5, 10]\n}\nfill()\nreset()\nexit`,
+    ).map(([, code, , text]) => [code, text]),
+    [["TSV046", "e == null"]],
+  );
+});
+
+test("a null check removes the null of a copy of a place that took null first", () => {
+  // A copy, also of an element that a method gives, keeps that null as a value of its own, so after the check it holds
+  // the text that replaced it, also where the list or dict it goes into was read before its first value, which a first
+  // check decides for the next.
+  const targets = [
+    ["let other = []\nif other.length > 0 {\n    say other[0]\n}", "other.add(x)", "other[0]"],
+    [
+      'let other = dict{}\nif other.contains("a") {\n    say other["a"]\n}',
+      'other["a"] = x',
+      'other["a"]',
+    ],
+  ];
+  for (const [target, store, read] of targets)
+    for (const copy of [
+      ...["out[0]", "out.get(0, default: null)", "out.removeLast()"].map(
+        (value) => `let x = ${value}\nif x == null {\n    x = "z"\n}\n${target}\n${store}`,
+      ),
+      `${target}\nfor x in out {\n    if x == null {\n        x = "z"\n    }\n    ${store}\n}`,
+    ]) {
+      const source = `let out = []\nout.add(null)\n${copy}\nlet kept: string = ${read}\nsay kept\nexit`;
+      assert.deepEqual(sayTexts(source), ["z"], source);
+    }
+  // Without the check, the copy may still be null.
+  assert.deepEqual(
+    diagnostics(
+      'let out = []\nout.add(null)\nout.add("q")\nlet x = out[0]\nlet kept: string = x\nexit',
+    ).map(([, code, , text]) => [code, text]),
+    [["TSV041", "x"]],
+  );
+});
+
 test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
   const source = (value: string) =>
     `${HIDE}let count: integer? = hide(1)

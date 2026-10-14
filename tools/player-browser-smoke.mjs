@@ -3,7 +3,8 @@ import { createServer as createNetServer } from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { crc32, deflateSync, gunzipSync } from "node:zlib";
+import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
+import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -75,6 +76,9 @@ const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
 // The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
 const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
 const lateImage = { hold: false, release: null };
+// The photo-colour scenario counts the requests for its photo.
+const PHOTO_COLOUR_URL = "/dev-package/photo-colour/files/images/green.svg";
+const photoColourRequests = { count: 0 };
 
 await main();
 
@@ -94,6 +98,7 @@ async function main() {
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
+    if (request.url === PHOTO_COLOUR_URL) photoColourRequests.count += 1;
     if (request.url === LATE_IMAGE_URL && lateImage.hold) {
       lateImage.hold = false;
       lateImage.release = () => handleRequest(request, response);
@@ -196,6 +201,8 @@ async function main() {
       await missingMediaScenario(cdp, origin);
       await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
+      await photoColourScenario(cdp, origin, profile);
+      await photoVignetteScenario(cdp, origin);
       await messageUpdatesScenario(cdp, origin);
       await entrancesScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -209,7 +216,7 @@ async function main() {
       await exportTextScenario(cdp, origin, profile);
       await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their place beside the timer rail on a short screen, and the dialog X's target, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, colours that follow the Stage photo, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();
@@ -1123,6 +1130,8 @@ async function smartFollowCheck(cdp) {
 // A click at the element's centre once it no longer moves in: a control that live play just showed enters the
 // conversation for a moment, as do the messages it glides up with.
 async function physicalClick(cdp, selector) {
+  // A target whose centre is out of view, outside the window or a scrolling ancestor, is scrolled into view first, as a
+  // person scrolls to it, for example a control low in the scrolling Player Settings; a target in view never moves.
   const point = await evaluate(
     cdp,
     `return new Promise((resolve) => {
@@ -1135,6 +1144,16 @@ async function physicalClick(cdp, selector) {
           animation.effect?.target?.contains(target));
       const check = () => {
         if (entering() && performance.now() < deadline) return setTimeout(check, 16);
+        const shown = target.getBoundingClientRect();
+        const [x, y] = [shown.left + shown.width / 2, shown.top + shown.height / 2];
+        let clipped = x < 0 || y < 0 || x > innerWidth || y > innerHeight;
+        for (let node = target.parentElement; node !== null && !clipped; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+          const area = node.getBoundingClientRect();
+          clipped = x < area.left || x > area.right || y < area.top || y > area.bottom;
+        }
+        if (clipped) target.scrollIntoView({ block: "nearest", inline: "nearest" });
         const rect = target.getBoundingClientRect();
         resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       };
@@ -2126,6 +2145,36 @@ async function titleBarScenario(cdp, origin) {
     "The open tool hovers like a closed one",
   );
 
+  // On a short screen the default bar moves its controls left of the timer rail only while the rail is shown: without
+  // a timer they stay where a taller screen has them.
+  const actionsRight = `document.querySelector('.player-top-bar-actions').getBoundingClientRect().right`;
+  await setViewport(cdp, 1347, 900);
+  await open("package=timer-rail");
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `!!document.querySelector('[data-foreground-controls] button')`);
+  const edge = await value(cdp, actionsRight);
+  await setViewport(cdp, 1347, 689);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-player-vertical]').dataset.playerVertical === 'constrained'`,
+  );
+  assertEqual(
+    await value(cdp, actionsRight),
+    edge,
+    "The short screen's bar kept room for a timer rail not shown",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!!document.querySelector('.stage-right-rail .timer-display')`);
+  assertEqual(
+    await value(
+      cdp,
+      `${actionsRight} <= document.querySelector('.stage-right-rail').getBoundingClientRect().left`,
+    ),
+    true,
+    "The short screen's bar did not move its controls left of the timer rail",
+  );
+  await setViewport(cdp, 1440, 900);
+
   const full = "A title too long for the title bar of a narrow screen by Author fixture";
   // The bar's tooltip, read once: its content also holds a copy for assistive technology.
   const tooltip = `document.querySelector('[data-player-title-tooltip] [role="tooltip"]')?.textContent.trim() ?? null`;
@@ -2475,6 +2524,366 @@ async function lateImageScenario(cdp, origin) {
     0,
     "A late failure of a removed image was reported",
   );
+}
+
+/**
+ * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
+ * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
+ * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
+ * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, and a
+ * mode change switch at once; from one photo to the next in a mode the background fades at the same luminance, and
+ * switching light/dark during that fade keeps text readable, in both directions. Afterwards the transcript's authored
+ * speaker and prose colours are adapted to the background shown, in Standard and High contrast.
+ */
+async function photoColourScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const chosen = join(profile, "photo-colour-chosen.png");
+  await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
+  // The theme's colour roles on the document root, and the HSL hue of a colour as the screen shows it.
+  const roles = `Object.fromEntries([...document.documentElement.style].filter((name) => /^--(theme|story-accent)-/.test(name)).map((name) => [name, document.documentElement.style.getPropertyValue(name)]))`;
+  const hue = (colour) =>
+    `(() => { const probe = document.createElement('span'); probe.style.color = ${colour}; document.body.append(probe); const context = document.createElement('canvas').getContext('2d'); context.fillStyle = getComputedStyle(probe).color; probe.remove(); context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; const max = Math.max(r, g, b), min = Math.min(r, g, b); if (max === min) return null; const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min); return Math.round(((h * 60) % 360 + 360) % 360); })()`;
+  const green = (degrees) => degrees !== null && degrees > 80 && degrees < 160;
+  // WCAG relative luminance of a colour as the screen shows it.
+  const luminance = `const luminance = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0); };`;
+  const background = `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`;
+  const backgroundLuminance = `(() => { ${luminance} return luminance(${background}); })()`;
+  // The lower WCAG contrast of the text on the background and of a message bubble's text, as the screen shows them now.
+  const contrast = `(() => {
+    ${luminance}
+    const ratio = (first, second) => { const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a); return (high + 0.05) / (low + 0.05); };
+    const bubble = getComputedStyle(document.querySelector('.message-speaker'));
+    return Math.min(ratio(bubble.color, bubble.backgroundColor), ratio(getComputedStyle(document.body).color, ${background}));
+  })()`;
+  const readable = async (label) => {
+    const ratio = await value(cdp, contrast);
+    assertEqual(ratio >= 4.5, true, `${label}: text at ${ratio.toFixed(2)} to 1`);
+  };
+  // Every colour the transcript shows, and the same once the transcript has read the theme again after a root change
+  // that paints nothing: they differ when its authored colours were adapted to an earlier background.
+  const shown = `[...document.querySelectorAll('.transcript-entry, .transcript-entry *')].map((element) => { const style = getComputedStyle(element); return style.color + ' on ' + style.backgroundColor; }).join(', ')`;
+  const adapted = async (label) => {
+    const before = await value(cdp, shown);
+    await evaluate(
+      cdp,
+      `document.documentElement.classList.add('smoke-reread'); document.documentElement.classList.remove('smoke-reread');`,
+    );
+    await delay(150);
+    assertEqual(
+      await value(cdp, shown),
+      before,
+      `${label}: authored colours adapted to an earlier background`,
+    );
+  };
+  const switchMode = async (mode) => {
+    await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
+    await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
+  };
+  const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
+  const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
+  const stageShows = (name) =>
+    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/${name}'); })()`;
+  const press = async (label) => {
+    await waitFor(
+      cdp,
+      `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
+    );
+    await physicalClick(cdp, "[data-foreground-controls] button");
+  };
+  // Shows the next photo and waits for its colour to start fading in; the background keeps its luminance meanwhile.
+  const fadeTo = async (name) => {
+    const settled = await value(cdp, backgroundLuminance);
+    await waitFor(
+      cdp,
+      `${stageShows(name)} && ${fading}`,
+      5_000,
+      `The colour of ${name} did not fade in`,
+    );
+    for (let sample = 0; sample < 3; sample += 1) {
+      const now = await value(cdp, backgroundLuminance);
+      assertEqual(
+        Math.abs(now - settled) / settled < 0.05,
+        true,
+        `The background's luminance changed during a fade between photos: ${settled.toFixed(3)} to ${now.toFixed(3)}`,
+      );
+      await delay(60);
+    }
+  };
+  const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
+  const differing = (first, second) =>
+    Object.keys({ ...first, ...second }).filter((name) => first[name] !== second[name]);
+  const settings = async (change) => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-setting="photo-accent"]')`);
+    await change();
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  };
+  const chooseAccent = (option) =>
+    settings(async () => {
+      await physicalClick(cdp, `[data-player-setting="photo-accent"] input[value="${option}"]`);
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-player-setting="photo-accent"] input[value="${option}"]').checked`,
+      );
+    });
+  const chooseContrast = (option) =>
+    settings(async () => {
+      const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
+      const before = await value(cdp, secondary);
+      await evaluate(
+        cdp,
+        `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
+      );
+      await waitFor(
+        cdp,
+        `${secondary} !== ${JSON.stringify(before)}`,
+        3_000,
+        `Contrast ${option} was not applied`,
+      );
+    });
+  await navigate(cdp, `${origin}/player/?package=photo-colour`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  const theme = await value(cdp, roles);
+  photoColourRequests.count = 0;
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
+  assertEqual(await value(cdp, fading), false, "The first photo's colour faded in");
+  // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
+  // caching it.
+  assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
+  await waitFor(cdp, `document.querySelectorAll('.transcript-entry').length >= 3`);
+  await adapted("The first photo");
+  const withPhoto = await value(cdp, roles);
+  for (const [name, colour] of [
+    ["background", background],
+    ["canvas role", `'var(--theme-surface-canvas)'`],
+    ["accent", `'var(--theme-accent-solid)'`],
+  ])
+    assertEqual(green(await value(cdp, hue(colour))), true, `The ${name} is not the photo's green`);
+  // B: only the accent goes back to the theme's.
+  await chooseAccent("theme");
+  const themeAccent = await value(cdp, roles);
+  const changed = differing(withPhoto, themeAccent);
+  assertEqual(changed.length > 0, true, "B did not change the accent");
+  assertEqual(
+    changed.filter((name) => !accent(name)).join(", "),
+    "",
+    "B changed more than the accent",
+  );
+  assertEqual(
+    differing(theme, themeAccent).filter(accent).join(", "),
+    "",
+    "B did not give the theme's accent back",
+  );
+  await chooseAccent("photo");
+  assertEqual(
+    differing(withPhoto, await value(cdp, roles)).join(", "),
+    "",
+    "A did not restore the photo accent",
+  );
+  await chooseContrast("high");
+  await switchMode("dark");
+  assertEqual(await value(cdp, fading), false, "A mode change faded");
+  assertEqual(
+    green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
+    true,
+    "The dark canvas is not green",
+  );
+  await adapted("Dark mode, High contrast");
+  // The window shrinks while an image request's preview hides the photo; once answered, the photo shows again in its
+  // new box, and the background's effects are centred on it.
+  await waitFor(cdp, visible("[data-composer-attach]"));
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(cdp, decodedPreview, 8_000, "The chosen image showed no preview");
+  await setViewport(cdp, 900, 700);
+  await useImage(cdp);
+  const centred = `(() => {
+    const image = document.querySelector('img.stage-media:not([data-stage-preview])');
+    const box = image.getBoundingClientRect();
+    const origin = document.querySelector('.player-viewport-canvas').getBoundingClientRect();
+    const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+    const drawn = [box.left - origin.left + box.width / 2, box.top - origin.top + box.height / 2, image.naturalWidth * scale, image.naturalHeight * scale];
+    const placed = ['--photo-cx', '--photo-cy', '--photo-w', '--photo-h'].map((name) => parseFloat(document.documentElement.style.getPropertyValue(name)));
+    return box.width > 0 && drawn.every((value, index) => Math.abs(value - placed[index]) < 2);
+  })()`;
+  await waitFor(
+    cdp,
+    centred,
+    3_000,
+    "The background's effects are not centred on the photo after the preview",
+  );
+  await setViewport(cdp, 1440, 900);
+  // Dark to light during a fade between photos: the background switches together with its text.
+  await press("Next");
+  await fadeTo("red.svg");
+  await readable("During a fade between photos");
+  await switchMode("light");
+  await readable("Dark to light during a fade");
+  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
+  await adapted("A mode change during a fade");
+  // A fade between photos ends with the authored colours adapted to the new background.
+  await press("Back");
+  await fadeTo("green.svg");
+  await waitFor(cdp, `!${fading}`, 2_000, "The fade did not end");
+  await adapted("After a fade between photos");
+  // Light to dark during a fade between photos.
+  await press("Again");
+  await fadeTo("red.svg");
+  await switchMode("dark");
+  await readable("Light to dark during a fade");
+  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
+  // The empty Stage gives the theme's own colours back at once.
+  await chooseContrast("standard");
+  await press("Hide");
+  await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
+  assertEqual(await value(cdp, fading), false, "The theme's colours faded in");
+  await adapted("The theme's return");
+  await switchMode("light");
+  assertEqual(
+    differing(theme, await value(cdp, roles)).join(", "),
+    "",
+    "The empty Stage's colours are not the theme's",
+  );
+}
+
+/**
+ * Photo vignette (`photo-vignette` package): authored text low at the side of the transcript, under the strongest part
+ * of the vignette around a wide Stage photo, stays readable on the background as painted there, in both modes and both
+ * contrasts: prose, inline code with its fill, inline colours, a link, and a coloured speaker's bubble with code. With
+ * the glyphs made transparent, so that every fill, backing and surface stays painted, a screenshot gives the background
+ * behind each line of text, and the text's ink must meet the authored-colour treatment's own targets on every pixel
+ * sampled there.
+ */
+async function photoVignetteScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  // Points inside each line of authored text, clear of a code span's border, where the text is shown: not scrolled out
+  // of the transcript or under the composer.
+  const samples = `[...document.querySelectorAll('.prose :is(span, a), .message-speaker :is(span, a)')].filter((element) => !element.closest('[data-slot="message-header"]') && [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '')).flatMap((element) => [...element.getClientRects()].flatMap((box) => [0, 1, 2].flatMap((row) => [0, 1, 2, 3, 4, 5].map((column) => ({ text: element.textContent.trim().slice(0, 24), ink: getComputedStyle(element).color, x: Math.round(box.left + 3 + ((box.width - 6) * column) / 5), y: Math.round(box.top + 3 + ((box.height - 6) * row) / 2) }))))).filter(({ x, y }, index, all) => { const hit = document.elementFromPoint(x, y); return hit !== null && hit.closest('.prose, .message-speaker') !== null && hit.textContent.includes(all[index].text.slice(0, 4)); })`;
+  const readable = async (label, enhanced) => {
+    const points = await value(cdp, samples);
+    const texts = new Set(points.map(({ text }) => text));
+    // Each kind of authored text, among them both inline code examples, has visible samples.
+    for (const text of [
+      "Plain grey",
+      "Grey code",
+      "Inline grey",
+      "Link",
+      "Light prose",
+      "Dark prose",
+      "grey code",
+    ])
+      assertEqual(texts.has(text), true, `${label}: no visible sample of "${text}"`);
+    await evaluate(
+      cdp,
+      `const style = document.createElement('style'); style.id = 'smoke-hidden-glyphs'; style.textContent = '.transcript-entry, .transcript-entry * { -webkit-text-fill-color: transparent !important; text-decoration-color: transparent !important; text-shadow: none !important; }'; document.head.append(style);`,
+    );
+    await delay(100);
+    const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
+    await evaluate(cdp, `document.getElementById('smoke-hidden-glyphs').remove();`);
+    const image = decodePng(Buffer.from(shot.result.data, "base64"));
+    for (const { text, ink, x, y } of points) {
+      const offset = (y * image.width + x) * image.channels;
+      const background = new Color(
+        "srgb",
+        [0, 1, 2].map((channel) => image.pixels[offset + channel] / 255),
+      );
+      const wcag = Color.contrast(background, ink, "WCAG21");
+      const apca = Math.abs(Color.contrast(background, ink, "APCA"));
+      const passes = enhanced ? wcag >= 7 && apca >= 55 : apca >= 55 || (wcag >= 3.5 && apca >= 40);
+      assertEqual(
+        passes,
+        true,
+        `${label}: "${text}" at ${x},${y} on the painted background: WCAG ${wcag.toFixed(2)}, APCA ${apca.toFixed(1)}`,
+      );
+    }
+  };
+  const settings = async (option) => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-setting="contrast"]')`);
+    const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
+    const before = await value(cdp, secondary);
+    await evaluate(
+      cdp,
+      `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
+    );
+    await waitFor(
+      cdp,
+      `${secondary} !== ${JSON.stringify(before)}`,
+      3_000,
+      `Contrast ${option} was not applied`,
+    );
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  };
+  const switchMode = async (mode) => {
+    await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
+    await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
+  };
+  await navigate(cdp, `${origin}/player/?package=photo-vignette`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.documentElement.hasAttribute('data-photo-colour') && document.querySelectorAll('.prose').length === 3`,
+    8_000,
+    "The wide photo did not colour the Player",
+  );
+  await delay(300);
+  await readable("Light, Standard", false);
+  await switchMode("dark");
+  await readable("Dark, Standard", false);
+  await settings("high");
+  await readable("Dark, High", true);
+  await switchMode("light");
+  await readable("Light, High", true);
+  await settings("standard");
+}
+
+/** The pixels of an 8-bit, non-interlaced RGB or RGBA PNG, such as a DevTools screenshot. */
+function decodePng(buffer) {
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  const data = [];
+  for (let offset = 8; offset < buffer.length;) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const chunk = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = chunk.readUInt32BE(0);
+      height = chunk.readUInt32BE(4);
+      channels = { 2: 3, 6: 4 }[chunk[9]] ?? 0;
+      if (chunk[8] !== 8 || chunk[12] !== 0 || channels === 0) throw new Error("Unsupported PNG");
+    } else if (type === "IDAT") data.push(chunk);
+    else if (type === "IEND") break;
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(data));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= channels ? pixels[y * stride + x - channels] : 0;
+      const up = y > 0 ? pixels[(y - 1) * stride + x] : 0;
+      const upLeft = x >= channels && y > 0 ? pixels[(y - 1) * stride + x - channels] : 0;
+      const estimate = left + up - upLeft;
+      const [toLeft, toUp, toUpLeft] = [left, up, upLeft].map((value) =>
+        Math.abs(estimate - value),
+      );
+      const predictor = [
+        0,
+        left,
+        up,
+        (left + up) >> 1,
+        toLeft <= toUp && toLeft <= toUpLeft ? left : toUp <= toUpLeft ? up : upLeft,
+      ][filter];
+      pixels[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + predictor) & 255;
+    }
+  }
+  return { width, height, channels, pixels };
 }
 
 /**

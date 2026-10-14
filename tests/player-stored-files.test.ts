@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
@@ -20,9 +21,9 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
- * The Player's file store for fileFromBase64, fileToBase64, and toJson and fromJson with files (V30 §13 and §33): files
- * are session media of the kind of their type, durable only while a saved value references them, and only an image is
- * ever shown.
+ * The Player's file store for fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and
+ * §33): files are session media of the kind of their type, durable only while a saved value references them, and only
+ * an image is ever shown.
  */
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString(
@@ -33,7 +34,7 @@ const OGG = Buffer.from("OggS\0\x02\0\0", "latin1").toString("base64");
 const urls = { create: (data: Blob) => `blob:${data.type}`, revoke: () => {} };
 
 function request(
-  operation: "store" | "read",
+  operation: "store" | "read" | "hash",
   files: readonly RuntimeFileToStore[],
   references: readonly string[] = [],
 ): RuntimeFileStoreActionSnapshot {
@@ -86,6 +87,45 @@ test("the Player keeps files as session media of the kind of their type, and rea
     ),
     { kind: "failed" },
   );
+});
+
+test("the Player hashes a stored file with the browser's digest, and fails without one outside a secure context", async (context) => {
+  const media = new CapturedMediaStore(null, urls, "files");
+  const stored = await answerFileStore(
+    request("store", [
+      { type: "image/png", base64: PNG },
+      { type: "application/octet-stream", base64: SVG },
+    ]),
+    media,
+  );
+  const references = stored.kind === "stored" ? stored.references : [];
+  // As sha256sum gives them for the bytes.
+  const hashed = {
+    kind: "hashed",
+    hashes: [
+      createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"),
+      "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
+    ],
+  };
+  assert.deepEqual(await answerFileStore(request("hash", [], references), media), hashed);
+  assert.deepEqual(
+    await answerFileStore(
+      request("hash", [], ["captured-media:00000000-0000-4000-8000-000000000000:9"]),
+      media,
+    ),
+    { kind: "failed" },
+  );
+  // Browsers offer crypto.subtle only in secure contexts; a Player over plain HTTP on a local network has none, and
+  // answers that it failed rather than leaving the script waiting.
+  const subtle = Object.getOwnPropertyDescriptor(crypto, "subtle");
+  Object.defineProperty(crypto, "subtle", { configurable: true, value: undefined });
+  context.after(() => {
+    if (subtle) Object.defineProperty(crypto, "subtle", subtle);
+    else Reflect.deleteProperty(crypto, "subtle");
+  });
+  assert.deepEqual(await answerFileStore(request("hash", [], references), media), {
+    kind: "failed",
+  });
 });
 
 test("a stored file of no recognized type is kept and read back from durable storage only with its type", async () => {
@@ -267,6 +307,7 @@ test("a Player stores and reads files, shows only images, and knows saved files 
       'let picture: string = load("picture", default: "")',
       'let page: string = load("page", default: "")',
       "let data = fileToBase64(page)",
+      "let hash = hashFile(page)",
       "let json = toJson({ picture: picture })",
       "exit",
     ].join("\n"),
@@ -277,6 +318,7 @@ test("a Player stores and reads files, shows only images, and knows saved files 
     picture,
     page,
     data: SVG,
+    hash: "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
     json: JSON.stringify({ picture: `data:image/png;base64,${PNG}` }),
   });
 });

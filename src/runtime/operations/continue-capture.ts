@@ -22,7 +22,7 @@ import {
   isPlainRecord,
   pendingResult,
 } from "./support.js";
-import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 
 export type ContinueCaptureOutcome =
   | { readonly kind: "recorded"; readonly boundaryMs: number }
@@ -42,10 +42,9 @@ export function recordContinueCapture(
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ContinueCaptureOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
-  const recorded = recordCapturedContinueCapture(captured, capture);
-  closeDebugTrace(trace, recorded);
-  return recorded;
+  return withDebugTrace(options.debugTrace, captured.plan, snapshot, () =>
+    recordCapturedContinueCapture(captured, capture),
+  );
 }
 
 /** Records a Continue capture for engine-owned plan/state that already passed complete validation. */
@@ -55,10 +54,9 @@ export function recordValidatedContinueCapture(
   capture: unknown,
   options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ContinueCaptureOutcome> {
-  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
-  const recorded = recordCapturedContinueCapture({ plan, snapshot }, capture);
-  closeDebugTrace(trace, recorded);
-  return recorded;
+  return withDebugTrace(options.debugTrace, plan, snapshot, () =>
+    recordCapturedContinueCapture({ plan, snapshot }, capture),
+  );
 }
 
 function recordCapturedContinueCapture(

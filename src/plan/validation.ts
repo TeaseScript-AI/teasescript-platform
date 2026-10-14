@@ -4,6 +4,7 @@ import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
+import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -618,6 +619,7 @@ const FOR_LOOP_START_FIELDS = [
 /** Fields of expression kinds whose case in validateExpressionNode does not already require exact keys. */
 const EXPRESSION_FIELDS = fieldsByKind([
   ["literal", "value"],
+  ["regex", "source", "flags"],
   ["identifier", "name"],
   ["debugMode"],
   ["temporary", "temporaryId"],
@@ -1210,6 +1212,7 @@ function validateFileStoreInstruction(
   if (
     call !== "fileFromBase64" &&
     call !== "fileToBase64" &&
+    call !== "hashFile" &&
     call !== "toJson" &&
     call !== "fromJson"
   ) {
@@ -2252,6 +2255,7 @@ const TYPE_PLAN_NAMES = [
   "permanentButton",
   "messageHandle",
   "script",
+  "regex",
 ];
 
 function validateExpressionNode(
@@ -2280,6 +2284,22 @@ function validateExpressionNode(
         );
       }
       return;
+    case "regex": {
+      if (
+        typeof value.source !== "string" ||
+        typeof value.flags !== "string" ||
+        !isCanonicalRegexFlags(value.flags)
+      ) {
+        errors.push(planError("TSC002", "Regex literal plan is invalid.", path));
+        return;
+      }
+      const compiled = compileRegex(value.source, value.flags);
+      if (!compiled.ok)
+        errors.push(
+          planError("TSC002", `Regex literal plan cannot be used: ${compiled.problem}`, path),
+        );
+      return;
+    }
     case "duration":
       if (!isStoredDurationRecord(value, ["span"])) {
         errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
@@ -2374,6 +2394,7 @@ function validateExpressionNode(
         value.callee.kind === "identifier" &&
         (value.callee.name === "fileFromBase64" ||
           value.callee.name === "fileToBase64" ||
+          value.callee.name === "hashFile" ||
           ((value.callee.name === "toJson" || value.callee.name === "fromJson") &&
             !keepsFilesOut(value.arguments)))
       ) {

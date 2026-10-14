@@ -44,7 +44,7 @@ import {
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import type { InstructionTraceCollector } from "./instruction-trace.js";
+import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
 import type {
   DeveloperWarningEvent,
   InterpreterEvent,
@@ -90,6 +90,7 @@ import {
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
+import { textSha256 } from "./sha256.js";
 import {
   SET_OPERATIONS,
   setOperationArgumentMessage,
@@ -117,6 +118,7 @@ import {
 import {
   callStringMethod,
   checkTextArguments,
+  regexFromText,
   missingMemberMessage,
   STRING_METHODS,
   stringLength,
@@ -176,6 +178,7 @@ import {
   isObject,
   isRange,
   isScriptReference,
+  isRegex,
   isSet,
   isSpeakerReference,
   isTemporal,
@@ -275,8 +278,19 @@ function templateText(text: string, part: string, span: SourceSpan): string {
   return text + part;
 }
 
+/** Builtin records that a session created and froze itself, with data properties only (`RuntimeSession`). */
+const ADMITTED_BUILTINS = new WeakSet<object>();
+
+/** Marks a builtin record the engine created and froze, which reading never changes; returns it. */
+export function admittedBuiltinRecord<T extends object>(record: T): T {
+  ADMITTED_BUILTINS.add(record);
+  return record;
+}
+
 export class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
+  /** Whether the instruction observer ended the operation before an instruction. */
+  public stopped = false;
   #evaluator: Evaluator | null = null;
 
   public constructor(
@@ -289,6 +303,8 @@ export class RuntimeExecutionContext {
     public readonly instructionTrace: InstructionTraceCollector | null = null,
     /** The operation's controlled randomness, or `null` when every draw is natural. */
     public readonly control: RandomControl | null = null,
+    /** The session host's instruction observer, or `null`. */
+    public readonly observer: RuntimeInstructionObserver | null = null,
   ) {}
 
   public evaluator(): Evaluator {
@@ -310,6 +326,9 @@ export class RuntimeExecutionContext {
 
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+
+  /** The builtin record `#builtins` was last filled from. */
+  #registered: RuntimeCapabilities["builtins"] = undefined;
 
   #referenceEpoch = 0;
 
@@ -336,8 +355,16 @@ export class Evaluator {
   }
 
   public refreshBuiltinRegistration(): void {
+    const builtins = this.capabilities.builtins;
+    // A session's admitted record cannot change; a host's record is read again, as reading it may give or do more.
+    if (
+      builtins === this.#registered &&
+      (builtins === undefined || ADMITTED_BUILTINS.has(builtins))
+    )
+      return;
     for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
-    Object.assign(this.#builtins, this.capabilities.builtins ?? {});
+    Object.assign(this.#builtins, builtins ?? {});
+    this.#registered = builtins;
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
@@ -369,6 +396,7 @@ export class Evaluator {
       {
         kind:
           | "literal"
+          | "regex"
           | "duration"
           | "calendarDuration"
           | "identifier"
@@ -381,6 +409,8 @@ export class Evaluator {
     switch (expression.kind) {
       case "literal":
         return expression.value;
+      case "regex":
+        return { kind: "regex", source: expression.source, flags: expression.flags };
       case "debugMode":
         // The host sets it, so a read has no recorded origin.
         this.trace?.readState(
@@ -791,6 +821,7 @@ export class Evaluator {
       let owned = false;
       switch (expression.kind) {
         case "literal":
+        case "regex":
         case "duration":
         case "calendarDuration":
         case "identifier":
@@ -1776,7 +1807,7 @@ export class Evaluator {
     if (!value.items.every(isVisibleScalar))
       throw fault(
         "TSR021",
-        "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
+        "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
         span,
       );
     return visibleText(
@@ -1788,8 +1819,8 @@ export class Evaluator {
 
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    // A script reference shows as the call that makes it, which is notation too.
-    if (isVisibleScalar(value) && !isScriptReference(value))
+    // A script reference shows as the call that makes it, and a regex as its literal, which are notation too.
+    if (isVisibleScalar(value) && !isScriptReference(value) && !isRegex(value))
       return visibleText(value, span, currentTemporalContext(this.snapshot));
     const notation = valueNotation(
       value,
@@ -1859,7 +1890,7 @@ export class Evaluator {
     if (!isVisibleScalar(item))
       throw fault(
         "TSR021",
-        "join() can only join text, numbers, true or false, null, durations, date and time values, and script references. Select an element or a property first.",
+        "join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes. Select an element or a property first.",
         span,
       );
     return visibleText(item, span, currentTemporalContext(this.snapshot));
@@ -2075,6 +2106,7 @@ export class Evaluator {
         );
       if (DATA_TEXT_FUNCTIONS.has(name))
         return this.#dataTextFunction(name, positional, named, expression.span);
+      if (name === "toRegex") return regexFromText(positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
@@ -3346,9 +3378,9 @@ export class Evaluator {
   }
 
   /**
-   * `toJson`, `fromJson`, `toBase64`, or `fromBase64` (V30 §13), `toJson` and `fromJson` with `files: false`. Text that
-   * does not read as JSON or Base64, or a value that is not text, gives the `default:` of a reading function, never a
-   * runtime error.
+   * `toJson`, `fromJson`, `toBase64`, `fromBase64`, or `hashText` (V30 §13), `toJson` and `fromJson` with
+   * `files: false`. Text that does not read as JSON or Base64, or a value that is not text, gives the `default:` of a
+   * reading function, never a runtime error.
    */
   #dataTextFunction(
     name: string,
@@ -3384,14 +3416,14 @@ export class Evaluator {
         (speaker) => this.speakerById(speaker.speakerId, span).properties,
         span,
       );
-    if (name === "toBase64") {
+    if (name === "toBase64" || name === "hashText") {
       if (typeof value !== "string")
         throw fault(
           "TSR059",
-          `toBase64(...) encodes text (string), not ${describeRuntimeValue(value)}.`,
+          `${name}(...) ${name === "toBase64" ? "encodes" : "hashes"} text (string), not ${describeRuntimeValue(value)}.`,
           span,
         );
-      return base64Text(value, span);
+      return name === "toBase64" ? base64Text(value, span) : textSha256(value);
     }
     const read =
       typeof value !== "string"
@@ -4362,6 +4394,15 @@ export function findBinding(
   name: string,
 ): RuntimeBindingSnapshot | undefined {
   return findBindingLocation(snapshot, plan, name)?.binding;
+}
+
+/** The ID of the scope that `name` refers to, as `findBinding` finds it; `GLOBAL_SCOPE_ID` for a global. */
+export function bindingScopeId(
+  snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
+  name: string,
+): number | undefined {
+  return findBindingLocation(snapshot, plan, name)?.frame.id;
 }
 
 function findBindingLocation(

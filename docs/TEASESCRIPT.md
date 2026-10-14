@@ -202,6 +202,16 @@ text or of a `data:…;base64,` URL as a file and gives its reference, or the de
 can be kept, passed along, and turned back into Base64 ([§33](specifications/accepted-syntaxes-v30.md#stored-files),
 [stored files](RUNTIME.md#stored-files)).
 
+```tease
+let correct = hashText(answer) == "45d227c4b297a0ba4ce42738ad3d448e19628a5ecfd509ea861b24a23009d08e"
+let same = hashFile(image) == load("imageHash", default: "")
+```
+
+`hashText(text)` gives the SHA-256 of a text's UTF-8 bytes at once, and `hashFile(file)` that of a stored file's bytes
+after a short wait, both as the 64 lowercase hexadecimal digits that other programs, such as `sha256sum`, give. Any
+other value goes through `toJson` first. A hash hides only a secret with many possible values
+([§13](specifications/accepted-syntaxes-v30.md#hashes)).
+
 ### Compact choices
 
 `askChoice` returns the value of the selected button. A value may be written before an option's `:`; an option without
@@ -374,24 +384,25 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-Implemented value operations include the V30 §8 text operations, joining two texts or two lists with `+` (§4), list
-`join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and `get` with
-`default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
+Implemented value operations include the V30 §8 text operations and regexes, joining two texts or two lists with `+`
+(§4), list `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and
+`get` with `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
-`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §33 file functions
-`fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the numeric functions `round` (also
-with `decimals:`),
-`floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`,
-the exponentials, logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
-and `atan2`, `min` and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`,
-`linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`,
-`randomBeta`, and `randomPert`, and the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
+`toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
+`hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
+numeric functions `round` (also with
+`decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials,
+logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, and `atan2`, `min`
+and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`, `linearRegression`, and
+`predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`, `randomBeta`, and `randomPert`, and
+the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
 with that method takes them; a method that no value has is `TSV043` also on a receiver of unknown type, as is any method
 of a speaker; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
-list and set elements, dict values, object properties, parameters, and function results keep one type, including types
+list and set elements, dict values, object properties, the custom properties of a speaker that only stores through its
+name reach (V30 §37), parameters, and function results keep one type, including types
 decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
 variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
 `number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
@@ -423,6 +434,27 @@ The unbundled playground uses an import map and one explicit local module route;
 The dependency adds browser bundle weight and requires reviewing upstream parser/conversion changes on upgrades. Its
 input is restricted to concrete colour forms; it does not execute CSS, fetch resources or access the DOM. Dependency
 updates remain explicit and the accepted colour contract stays repository-owned.
+
+Regexes ([§8](specifications/accepted-syntaxes-v30.md#regexes)) use exact `re2js@2.8.6` (MIT, no runtime dependencies)
+through `src/regex-engine.ts`, its only importer, with RE2's own syntax. A script instruction cannot be interrupted, so
+a search must take time proportional to its text, which native backtracking `RegExp` does not guarantee; a WebAssembly
+RE2 would load asynchronously and weigh more, and a hand-written engine would duplicate a specialised one. re2js adds
+about 49 KB gzip to the Player. Upgrades need a review of its parser, which the size estimate in `src/regex.ts` mirrors,
+and of its case folding, which `src/regex-case-pairs.ts` pins: re2js folds characters outside its own table through the
+host's `toLowerCase` and `toUpperCase`, so while it compiles or searches, the engine answers those two methods for one
+character from Unicode 17.0 pairs, generated by `tools/generate-regex-case-pairs.mjs`, and restores the methods the host
+had afterwards. Patterns are data compiled within the [regex
+limits](RESOURCE-LIMITS.md#retained-poc-policies-and-defaults), never JavaScript. The engine is imported eagerly;
+loading it on demand needs only `src/regex-engine.ts` to load re2js before the host compiles source or validates or runs
+data that may hold a regex. The unbundled playground maps it like `colorjs.io`. The lexer tells a regex from division by
+the token before a `/`, also after `say as speaker`; where a parse with errors expected a value at a `/` that the lexer
+took for division, as after a message mode or a skip word, the parser lexes and parses the source again with a regex
+there, and tooling that lexes part of the source again reads those places the same way.
+
+The RE2 dialect differs from JavaScript in ways authors meet: `\d`, `\w`, and `\s` match ASCII characters only, so
+`\p{Nd}` matches every decimal digit and `\p{L}` every letter; `i` folds single characters, so `ß` does not match `ss`;
+back references such as `\1`, lookahead, and lookbehind are not supported; a pattern cannot hold half of a character, a
+surrogate such as `\x{D83D}`.
 
 ## Diagnostics
 

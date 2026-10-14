@@ -214,7 +214,10 @@ export function languageCompletions(
   const offset = position.offset;
   if (offset < 0 || offset > document.text.length) return Object.freeze([]);
   const prefix = document.text.slice(0, offset);
-  const tokens = lex(prefix).tokens.filter((token) => token.kind !== TokenKind.EndOfFile);
+  const regexStarts = regexStartsWithin(parseDocument(document.text).regexStarts, 0, offset);
+  const tokens = lex(prefix, regexStarts).tokens.filter(
+    (token) => token.kind !== TokenKind.EndOfFile,
+  );
   const significant = tokens.filter((token) => token.kind !== TokenKind.Newline);
   const last = significant.at(-1);
   const lineTokens = tokensAfterLastNewline(tokens);
@@ -317,6 +320,7 @@ export function languageSignatureHelp(
       located.command,
       located.range.start.offset,
       position.offset,
+      parseDocument(document.text).regexStarts,
     ),
     parameters,
   });
@@ -331,6 +335,8 @@ export function formatLanguageDocument(document: LanguageDocument): LanguageForm
     return Object.freeze({ edits: Object.freeze([]), text: document.text });
   }
 
+  // Where the parse found regex literals that lexing a `say` alone could take for division.
+  const regexStarts = parseDocument(document.text).regexStarts;
   const rawEdits: OffsetEdit[] = [];
   visitProgram(compilation.program, {
     showButton(node) {
@@ -340,7 +346,7 @@ export function formatLanguageDocument(document: LanguageDocument): LanguageForm
       formatInteraction(document.text, node, rawEdits);
     },
     say(node) {
-      formatSay(document.text, node, rawEdits);
+      formatSay(document.text, node, regexStarts, rawEdits);
     },
   });
   const normalized = normalizeOffsetEdits(rawEdits);
@@ -536,7 +542,7 @@ function locateCompactCommand(
   });
   if (best !== null) return best;
 
-  const tokens = lex(document.text).tokens;
+  const tokens = lex(document.text, parsed.regexStarts).tokens;
   for (const token of tokens) {
     const command = tokenToCompactCommand(token);
     if (command !== null && offset >= token.span.start.offset && offset <= token.span.end.offset) {
@@ -557,14 +563,24 @@ function locateCompactCommand(
   return nearestOpenCompactCommand(before);
 }
 
-/** The syntax of a document, or none when parsing it exhausted the call stack, which the compiler reports. */
+/** The last document parsed, which help, signature help, and formatting of the same text read again. */
+let lastParse: { readonly text: string; readonly result: ParseResult } | null = null;
+
+/**
+ * The syntax of a document, or none when parsing it exhausted the call stack, which the compiler reports. Only a parse
+ * that succeeded is kept, so that the same text is parsed again after a failure.
+ */
 function parseDocument(text: string): ParseResult {
+  if (lastParse?.text === text) return lastParse.result;
+  let result: ParseResult;
   try {
-    return parse(text);
+    result = parse(text);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     return parse("");
   }
+  lastParse = { text, result };
+  return result;
 }
 
 /**
@@ -685,8 +701,13 @@ function activeParameterFor(
   command: CompactCommand,
   start: number,
   offset: number,
+  regexStarts: ReadonlySet<number>,
 ): number {
-  const tokens = lex(source.slice(start, Math.max(start, offset))).tokens.filter(
+  const end = Math.max(start, offset);
+  const tokens = lex(
+    source.slice(start, end),
+    regexStartsWithin(regexStarts, start, end),
+  ).tokens.filter(
     (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
   );
   const tail = tokens.slice(1);
@@ -1055,6 +1076,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "nullLiteral":
     case "numberLiteral":
     case "durationLiteral":
+    case "regexLiteral":
     case "showCameraExpression":
       return;
   }
@@ -1141,8 +1163,16 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
   }
 }
 
-function formatSay(source: string, node: SayParts, edits: OffsetEdit[]): void {
-  const tokens = lex(source.slice(node.span.start.offset, node.span.end.offset)).tokens.filter(
+function formatSay(
+  source: string,
+  node: SayParts,
+  regexStarts: ReadonlySet<number>,
+  edits: OffsetEdit[],
+): void {
+  const tokens = lex(
+    source.slice(node.span.start.offset, node.span.end.offset),
+    regexStartsWithin(regexStarts, node.span.start.offset, node.span.end.offset),
+  ).tokens.filter(
     (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
   );
   const absolute = (token: Token) => ({
@@ -1166,6 +1196,16 @@ function formatSay(source: string, node: SayParts, edits: OffsetEdit[]): void {
     )
       whitespaceEdit(source, l.end, r.start, " ", edits);
   }
+}
+
+/**
+ * The offsets of `starts` from `start` up to `end`, counted from `start`: where a regex literal starts in that part of the
+ * source although the token before does not show it, for lexing the part alone as the parse read it (V30 §8).
+ */
+function regexStartsWithin(starts: ReadonlySet<number>, start: number, end: number): Set<number> {
+  const within = new Set<number>();
+  for (const offset of starts) if (offset >= start && offset < end) within.add(offset - start);
+  return within;
 }
 
 function tokenIsSayModifier(token: Token): boolean {

@@ -419,6 +419,10 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
     const root = resolve(roots.projectRoot, "node_modules/colorjs.io/dist");
     return { root, path: resolve(root, "color.js") };
   }
+  if (pathname === "/vendor/re2js.js") {
+    const root = resolve(roots.projectRoot, "node_modules/re2js/build");
+    return { root, path: resolve(root, "index.js") };
+  }
   if (pathname === "/") {
     return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "index.html") };
   }
