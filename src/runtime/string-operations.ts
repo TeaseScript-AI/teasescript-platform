@@ -7,8 +7,11 @@ import {
   beyondLengthMessage,
   emptyTextMessage,
   endBeforeStartMessage,
+  needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
+  takesRegex,
+  takesText,
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
@@ -17,8 +20,8 @@ import {
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
-import { compileRegex } from "../regex.js";
-import type { RegexProgram } from "../regex-engine.js";
+import { compileRegex, replacementParts, type ReplacementPart } from "../regex.js";
+import { REGEX_WORK_EXCEEDED, RegexWork, type RegexProgram } from "../regex-engine.js";
 import { describeRuntimeValue, isAnyDuration, isDuration, isRegex } from "./value-predicates.js";
 import type { SerializableRegex, SerializableRuntimeValue } from "./serializable-values.js";
 
@@ -160,7 +163,7 @@ export function callStringMethod(
   checkTextArguments(member, positional, span);
   const searched = positional[0];
   if (searched !== undefined && isRegex(searched))
-    return regexSearch(text, name, regexProgram(searched, span));
+    return regexOperation(text, name, searched, positional[1], span);
   // EVIDENCE: invariant: checkTextArguments proved that every text parameter received text.
   const texts = positional as readonly string[];
   // EVIDENCE: invariant: checkTextArguments proved that every position and count is a whole number of 0 or more.
@@ -307,34 +310,153 @@ export function callStringMethod(
 }
 
 /**
- * A search of `text` for a regex (V30 §8): `matches` the whole text, or `contains`, `indexOf`, `find`, or `capture` the
- * first leftmost match. RE2 reports UTF-16 offsets, and the one position `indexOf` gives counts code points up to it.
+ * A text operation with a regex (V30 §8), which may use at most the regex work limit: past it, the operation fails with
+ * `TSR087` and returns nothing.
  */
-function regexSearch(text: string, name: string, program: RegexProgram): SerializableRuntimeValue {
+function regexOperation(
+  text: string,
+  name: string,
+  regex: SerializableRegex,
+  replacement: SerializableRuntimeValue | undefined,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  const program = regexProgram(regex, span);
+  const work = new RegexWork();
+  try {
+    // A replacement is read once, before any search, so one that refers to a group the regex does not have fails even
+    // without a match.
+    let parts: readonly ReplacementPart[] = [];
+    if (name === "replace") {
+      // EVIDENCE: invariant: checkTextArguments proved that the replacement is text.
+      const template = replacement as string;
+      work.charge(template.length);
+      const parsed = replacementParts(template, regex.source, program.groups);
+      if (!parsed.ok) throw fault("TSR057", parsed.problem, span);
+      parts = parsed.parts;
+    }
+    return regexResult(text, name, program, parts, work);
+  } catch (error) {
+    if (error !== REGEX_WORK_EXCEEDED) throw error;
+    throw fault(
+      "TSR087",
+      "This regex needed too much work for this text. Use a simpler pattern or a shorter text.",
+      span,
+    );
+  }
+}
+
+/**
+ * The result of a text operation with a regex. `matches` tests the whole text; `contains`, `indexOf`, `find`, and
+ * `capture` read the first leftmost match; `findAll`, `split`, `replace`, and `lastIndexOf` read every match, as
+ * `regexMatches` finds them. RE2 reports UTF-16 offsets, and a position counts the code points up to it once. Each
+ * match, and each piece of a result before it is added, charges `work`, so a result never outgrows the work limit.
+ */
+function regexResult(
+  text: string,
+  name: string,
+  program: RegexProgram,
+  replacement: readonly ReplacementPart[],
+  work: RegexWork,
+): SerializableRuntimeValue {
+  const piece = (start: number, end: number): string => {
+    work.charge(1 + end - start);
+    return text.slice(start, end);
+  };
   switch (name) {
     case "matches":
-      return program.matchesWhole(text);
+      return program.matchesWhole(text, work);
     case "contains":
-      return program.matchesPart(text);
+      return program.matchesPart(text, work);
     case "indexOf": {
-      const match = program.firstMatch(text, false);
+      const match = program.search(text, 0, false, work);
       return match === null ? null : codePointCount(text, match[0]!);
     }
     case "find": {
-      const match = program.firstMatch(text, false);
+      const match = program.search(text, 0, false, work);
       return match === null ? null : text.slice(match[0], match[1]);
     }
     case "capture": {
       // The whole match, then each group in opening-parenthesis order; a group that did not take part is null.
-      const match = program.firstMatch(text, true);
+      const match = program.search(text, 0, true, work);
       if (match === null) return null;
       const groups: (string | null)[] = [];
       for (let index = 0; index < match.length; index += 2)
         groups.push(match[index]! < 0 ? null : text.slice(match[index], match[index + 1]));
       return { kind: "list", items: groups };
     }
+    case "findAll": {
+      const found: string[] = [];
+      for (const [start, end] of regexMatches(text, program, false, work))
+        found.push(piece(start!, end!));
+      return { kind: "list", items: found };
+    }
+    case "lastIndexOf": {
+      // The start of the last match as findAll finds them, so the matches do not overlap.
+      let last = -1;
+      for (const [start] of regexMatches(text, program, false, work)) last = start!;
+      return last < 0 ? null : codePointCount(text, last);
+    }
+    case "split": {
+      // Separators that match no text separate nothing at the text's ends or right after another separator, and
+      // splitting empty text by a separator that matches gives no parts.
+      const parts: string[] = [];
+      let previous = 0;
+      let matched = false;
+      for (const [start, end] of regexMatches(text, program, false, work)) {
+        matched = true;
+        if (start === end && (start === previous || start === text.length)) continue;
+        parts.push(piece(previous, start!));
+        previous = end!;
+      }
+      if (text === "" && matched) return { kind: "list", items: [] };
+      parts.push(piece(previous, text.length));
+      return { kind: "list", items: parts };
+    }
+    case "replace": {
+      const groups = replacement.some((part) => typeof part === "number" && part > 0);
+      let result = "";
+      let previous = 0;
+      for (const match of regexMatches(text, program, groups, work)) {
+        result += piece(previous, match[0]!);
+        for (const part of replacement) {
+          if (typeof part === "string") {
+            work.charge(1 + part.length);
+            result += part;
+          } else if (match[2 * part]! >= 0) {
+            result += piece(match[2 * part]!, match[2 * part + 1]!);
+          }
+        }
+        previous = match[1]!;
+      }
+      return result + piece(previous, text.length);
+    }
     default:
       throw new Error(`Text operation '${name}' takes no regex.`);
+  }
+}
+
+/**
+ * The matches of a regex in `text` for `findAll`, `split`, `replace`, and `lastIndexOf` (V30 §8): each one the leftmost
+ * match from where the previous one ended, so they do not overlap. An empty match counts, also right after another
+ * match; the next search starts one code point after it, and one at the end of the text is the last. Each match charges
+ * `work` for handling it.
+ */
+function* regexMatches(
+  text: string,
+  program: RegexProgram,
+  groups: boolean,
+  work: RegexWork,
+): Generator<number[]> {
+  let from = 0;
+  while (true) {
+    const match = program.search(text, from, groups, work);
+    if (match === null) return;
+    work.charge(1);
+    yield match;
+    const [start, end] = match;
+    if (end! > start!) from = end!;
+    else if (end === text.length) return;
+    else from = end! + utf16Width(text, end!);
   }
 }
 
@@ -391,26 +513,16 @@ export function checkTextArguments(
   for (const [index, value] of positional.entries()) {
     const parameter = parameters[index]!;
     const position = parameter.kind === "position";
-    if (
-      (parameter.kind === "regex" && !isRegex(value)) ||
-      (parameter.kind === "textOrRegex" && typeof value !== "string" && !isRegex(value))
-    )
-      throw fault(
-        "TSR057",
-        argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
-          argumentFix(parameter, argumentKind(value)),
-        span,
-      );
-    if (parameter.kind === "regex" || parameter.kind === "textOrRegex") continue;
-    if (parameter.kind === "text" || parameter.kind === "nonEmptyText") {
-      if (typeof value !== "string")
+    if (takesRegex(parameter) || takesText(parameter)) {
+      if (takesRegex(parameter) && isRegex(value)) continue;
+      if (!takesText(parameter) || typeof value !== "string")
         throw fault(
           "TSR057",
           argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
             argumentFix(parameter, argumentKind(value)),
           span,
         );
-      if (parameter.kind === "nonEmptyText" && value === "")
+      if (needsNonEmptyText(parameter) && value === "")
         throw fault("TSR057", emptyTextMessage(member, parameter), span);
     } else if (typeof value !== "number" || !Number.isInteger(value)) {
       throw fault(

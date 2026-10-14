@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { lex } from "../src/lexer.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { compileRegexProgram } from "../src/regex-engine.js";
+import { compileRegexProgram, MAX_REGEX_WORK, withRegexWorkLimit } from "../src/regex-engine.js";
 import {
   MAX_REGEX_GROUPS,
   MAX_REGEX_LENGTH,
@@ -29,8 +29,9 @@ import { sayTexts } from "./helpers/runtime-events.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
 /*
- * Regexes (V30 §8): the literal, the `regex` value, `toRegex`, and the step-A searches `matches`, `contains`, `find`,
- * `capture`, and `indexOf`, from source through the runtime, checkpoints, and storage.
+ * Regexes (V30 §8): the literal, the `regex` value, `toRegex`, the searches `matches`, `contains`, `find`, `capture`,
+ * `indexOf`, `findAll`, and `lastIndexOf`, `split` and `replace` with a regex, and the work limit of each operation,
+ * from source through the runtime, checkpoints, and storage.
  */
 
 function said(...lines: string[]): string[] {
@@ -327,7 +328,7 @@ test("a regex literal is checked when the script compiles, with an explanation",
   const cases: [string, string, string][] = [
     [
       "/a/g",
-      "A regex has no 'g' flag: it is not needed. Finding every match will be findAll, which comes later, and replace and split with text already handle every occurrence.",
+      "A regex has no 'g' flag: it is not needed. findAll finds every match, and replace and split handle every occurrence.",
       "g",
     ],
     ["/a/u", "A regex has no 'u' flag: a regex always matches Unicode characters.", "u"],
@@ -381,36 +382,259 @@ test("a regex literal is checked when the script compiles, with an explanation",
   assert.deepEqual(diagnostics(`let r = /${"(a)".repeat(MAX_REGEX_GROUPS)}/\nexit`), []);
 });
 
-test("findAll and a regex in split, replace, and lastIndexOf are compile errors that say they come later", () => {
-  const later = (method: string, parameter: string) =>
-    `${method}() does not take a regex yet: that comes later. Give text for '${parameter}' instead.`;
-  assert.deepEqual(diagnostics('let parts = "a,b".split(/,/)\nexit'), [
-    ["TSV043", later("split", "separator"), "/,/"],
-  ]);
-  assert.deepEqual(diagnostics('let tidy = "a  b".replace(/ +/, " ")\nexit'), [
-    ["TSV043", later("replace", "search"), "/ +/"],
-  ]);
-  assert.deepEqual(diagnostics('let at = "aba".lastIndexOf(/a/)\nexit'), [
-    ["TSV043", later("lastIndexOf", "part"), "/a/"],
-  ]);
-  assert.deepEqual(diagnostics('let all = "a1b2".findAll(/\\d/)\nexit'), [
+test("findAll gives every match in order, also empty ones one character apart", () => {
+  assert.deepEqual(
+    said(
+      'say "1980-2026-10-14".findAll(/\\d+/)',
+      'say "Ab aB".findAll(/ab/i)\nsay "abc".findAll(/x/)',
+      // An empty match counts, also right after a match, and the next search starts one character later.
+      'say "ab".findAll(/x*/)\nsay "a".findAll(/a*/)\nsay "".findAll(/x*/)',
+      // Characters are code points, also between the halves of an emoji's surrogate pair.
+      'say "😀a😀".findAll(/./)\nsay "😀😀".findAll(/x*/)',
+      // Groups do not change the result, and `^` with `m` matches at each line.
+      'say "a=1\\nb=2".findAll(/^(\\w)=/m)',
+    ),
+    [
+      '["1980", "2026", "10", "14"]',
+      '["Ab", "aB"]',
+      "[]",
+      '["", "", ""]',
+      '["a", ""]',
+      '[""]',
+      '["😀", "a", "😀"]',
+      '["", "", ""]',
+      '["a=", "b="]',
+    ],
+  );
+});
+
+test("split by a regex keeps the parts between separators and never inserts groups", () => {
+  assert.deepEqual(
+    said(
+      'say "a, b;c".split(/[,;]\\s*/)\nsay "a,b,".split(/(,)/)\nsay ",a".split(/,/)',
+      'say "abc".split(/x/)\nsay "".split(/,/)',
+      // A separator that matches no text separates nothing at either end, right after another separator, or in
+      // empty text.
+      'say "ab".split(/x*/)\nsay "a  b".split(/ */)\nsay "".split(/x*/)\nsay "😀a".split(/x*/)',
+    ),
+    [
+      '["a", "b", "c"]',
+      '["a", "b", ""]',
+      '["", "a"]',
+      '["abc"]',
+      '[""]',
+      '["a", "b"]',
+      '["a", "b"]',
+      "[]",
+      '["😀", "a"]',
+    ],
+  );
+});
+
+test("replace with a regex replaces every match, and $0, $1, $<name>, and $$ insert the match, a group, and $", () => {
+  assert.deepEqual(
+    said(
+      'say "2026-10-14".replace(/(\\d+)-(\\d+)-(\\d+)/, "$3.$2.$1")',
+      'say "Ann Lee".replace(/(?<first>\\w+) (?<last>\\w+)/, "$<last>, $<first>")',
+      'say "5 USD".replace(/(\\d+) USD/, "$$$1")\nsay "a1".replace(/\\d/, "[$0]")',
+      // A group that did not take part inserts nothing, and every digit after `$` counts.
+      'say "ab".replace(/(x)?b/, "<$1>")',
+      'say "abcdefghijk".replace(/(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)/, "$10$01$11")',
+      // Any other `$` is text, and so is an unclosed `$<`.
+      'say "ab".replace(/b/, "$x $ $<y")',
+      // Interpolation comes first, and a text search replaces literally.
+      'let suffix = "!"\nsay "Ann".replace(/(?<n>\\w+)/, "$<n>${suffix}")\nsay "a$1".replace("a", "$1")',
+      // Empty matches are replaced too, one character apart.
+      'say "ab".replace(/x*/, "-")\nsay "a".replace(/a*/, "-")\nsay "😀".replace(/x*/, "-")',
+      // RE2 keeps the name of a group that a repeat of zero times precedes.
+      'say "b".replace(/(a){0}(?<v>b)/, "<$<v>$2>")',
+    ),
+    [
+      "14.10.2026",
+      "Lee, Ann",
+      "$5",
+      "a[1]",
+      "a<>",
+      "jak",
+      "a$x $ $<y",
+      "Ann!",
+      "$1$1",
+      "-a-b-",
+      "--",
+      "-😀-",
+      "<bb>",
+    ],
+  );
+});
+
+test("a replacement that refers to a group the regex does not have is a compile or runtime error", () => {
+  assert.deepEqual(diagnostics('let t = "ab".replace(/(a)/, "$2")\nexit'), [
     [
       "TSV043",
-      "Text has no method 'findAll' yet: it comes later. Use find(...) for the first match.",
-      "findAll",
+      "'$2' in the replacement refers to group 2, but this regex has 1 group. Write '$0' for the whole match or '$1' for its group, or '$$' for a '$'.",
+      '"$2"',
     ],
   ]);
-  // The text forms stay as they are.
+  assert.equal(
+    firstDiagnostic('let t = "ab".replace(/(a)(b)/, "$<x>")\nexit')?.[1],
+    "'$<x>' in the replacement refers to a group named 'x', but this regex has no group of that name. Name a group with '(?<x>...)', or write '$$' for a '$'.",
+  );
+  // The text after interpolation counts.
+  assert.equal(
+    firstDiagnostic('let t = "ab".replace(/a/, "${"$"}1")\nexit')?.[1],
+    "'$1' in the replacement refers to group 1, but this regex has no groups. Write '$0' for the whole match, or '$$' for a '$'.",
+  );
+  // A replacement or regex the compiler cannot know fails when it runs, also when nothing matches.
+  for (const source of [
+    'let t = "ab".replace(/x(y)/, replacement)\nexit',
+    'let r = toRegex("x", default: null)\nif r != null {\n  let t = "ab".replace(r, "$1")\n}\nexit',
+  ]) {
+    const runtime = runWithGlobals(source, { replacement: "$2" });
+    assert.equal(runtime.snapshot.failure?.code, "TSR057", source);
+    assert.match(
+      runtime.snapshot.failure!.message,
+      /^'\$[12]' in the replacement refers to group/u,
+    );
+  }
+});
+
+test("lastIndexOf with a regex gives the start of the last match, as findAll finds them", () => {
   assert.deepEqual(
-    said('say "a,b".split(",")\nsay "a  b".replace("  ", " ")\nsay "aba".lastIndexOf("a")'),
-    ['["a", "b"]', "a b", "2"],
+    said(
+      'say "2026-10-14".lastIndexOf(/\\d+/)\nsay "abc".lastIndexOf(/x/)\nsay "abc".lastIndexOf(/x*/)',
+      // Matches do not overlap, unlike the occurrences of text.
+      'say "${"ababa".lastIndexOf(/aba/)} ${"ababa".lastIndexOf("aba")}"',
+      'say "😀a😀b".lastIndexOf(/\\p{So}/)',
+    ),
+    ["8", "null", "3", "0 2", "2"],
   );
-  // Where only the runtime knows the value, it fails the same way.
-  const runtime = runValidSource(
-    'let separators: list = [/,/]\nlet parts = "a,b".split(separators[0])\nexit',
+});
+
+test("the regex operations check their arguments", () => {
+  assert.deepEqual(diagnostics('let all = "a".findAll("a")\nexit'), [
+    [
+      "TSV043",
+      "findAll() needs a regex for 'pattern', not text (string). Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...).",
+      '"a"',
+    ],
+  ]);
+  assert.equal(
+    firstDiagnostic('let t = "a".replace("", "b")\nexit')?.[1],
+    "replace() needs non-empty text for 'search'.",
   );
+  assert.equal(
+    firstDiagnostic('let at = "a".lastIndexOf(4)\nexit')?.[1],
+    "lastIndexOf() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+  );
+  // A regex that matches empty text is a valid search.
+  assert.deepEqual(diagnostics('let t = "a".replace(/x*/, "")\nexit'), []);
+  const runtime = runWithGlobals('let all = "a,b".split(separator)\nexit', { separator: 4 });
   assert.equal(runtime.snapshot.failure?.code, "TSR057");
-  assert.equal(runtime.snapshot.failure?.message, later("split", "separator"));
+  assert.equal(
+    runtime.snapshot.failure?.message,
+    "split() needs text (string) or a regex for 'separator', not a number. Convert it with toString(...).",
+  );
+});
+
+/** The outcome of `say expression` when regex operations may use at most `limit` units of work. */
+function sayWithin(limit: number, expression: string): string {
+  return withRegexWorkLimit(limit, () => {
+    const result = runValidSource(`say ${expression}\nexit`);
+    if (result.snapshot.failure === null) return sayTexts(result).join("\n");
+    assert.deepEqual(sayTexts(result), [], expression);
+    return `${result.snapshot.failure.code} ${result.snapshot.failure.message}`;
+  });
+}
+
+const TOO_MUCH_WORK =
+  "TSR087 This regex needed too much work for this text. Use a simpler pattern or a shorter text.";
+
+test("every regex operation stops at its work limit, at the same count each time", () => {
+  // The exact counts are a regression oracle of the current unit metric (docs/RESOURCE-LIMITS.md), which makes a limit
+  // stop the same operation at the same point on every host; an intended change of the metric updates them.
+  const cases: [string, string, number][] = [
+    ['"a1b22".matches(/[a-z0-9]+/)', "true", 131],
+    ['"a1b22".contains(/2/)', "true", 48],
+    ['"a1b22".find(/\\d+/)', "1", 92],
+    ['"a1b22".capture(/(\\d)(\\d)?/)', '["1", "1", null]', 353],
+    ['"a1b22".indexOf(/\\d\\d/)', "3", 133],
+    ['"a1b22".findAll(/\\d+/)', '["1", "22"]', 200],
+    ['"😀a😀".findAll(/x*/)', '["", "", "", ""]', 170],
+    ['"a1b22".split(/\\d/)', '["a", "b", "", ""]', 183],
+    ['"a1b22".replace(/(\\d)/, "<$1>")', "a<1>b<2><2>", 459],
+    ['"a1b22".lastIndexOf(/\\d+/)', "3", 195],
+  ];
+  for (const [expression, said, units] of cases) {
+    assert.equal(sayWithin(units, expression), said, expression);
+    assert.equal(sayWithin(units - 1, expression), TOO_MUCH_WORK, expression);
+    // A search stopped in the middle leaves nothing behind that changes the next count.
+    assert.equal(sayWithin(units, expression), said, expression);
+  }
+});
+
+test("the work limit stops repeated searches, long texts, and large results", () => {
+  // Each search for `a.*b` reads the rest of the text: 200 characters pass, and 2,000 need too much work.
+  assert.equal(sayWithin(MAX_REGEX_WORK, '"a".repeat(200).findAll(/a.*b|a/).length'), "200");
+  assert.equal(
+    sayWithin(MAX_REGEX_WORK, '"a".repeat(2000).findAll(/a.*b|a/).length'),
+    TOO_MUCH_WORK,
+  );
+  // Single searches count too.
+  assert.equal(sayWithin(MAX_REGEX_WORK, '"a".repeat(1000000).contains(/x/)'), TOO_MUCH_WORK);
+  // What a replace builds counts, so a few matches cannot make a huge text.
+  assert.equal(
+    sayWithin(MAX_REGEX_WORK, '"ab".replace(/./, "x".repeat(2600000)).length'),
+    TOO_MUCH_WORK,
+  );
+  assert.equal(
+    sayWithin(MAX_REGEX_WORK, '"ab".replace("a", "x".repeat(2600000)).length'),
+    "2600001",
+  );
+});
+
+test("a search through a long chain of lazy repeats stops at a fixed depth, not at the host's stack limit", () => {
+  // Each `a??` nests one more call of re2js's NFA as it adds the states after it: 499 of them and the start fit.
+  assert.equal(sayWithin(MAX_REGEX_WORK, '"zz".contains(/(?:a??){499}/)'), "true");
+  for (const method of ["contains", "matches", "find", "capture", "indexOf", "findAll"])
+    assert.equal(
+      sayWithin(MAX_REGEX_WORK, `"zz".${method}(/(?:a??){500}/)`),
+      TOO_MUCH_WORK,
+      method,
+    );
+  // Ten times as deep passes the stack limit of V8 hosts, and stops the same way.
+  assert.equal(
+    sayWithin(MAX_REGEX_WORK, '"zz".contains(/(?:a??b??c??d??e??){999}/)'),
+    TOO_MUCH_WORK,
+  );
+});
+
+test("a run that needed too much regex work fails the same way when it is restored or replayed", () => {
+  withRegexWorkLimit(400, () => {
+    const source = [
+      'let words = "a1 b2 c3"',
+      "wait 1 s",
+      "say words.findAll(/\\d/)",
+      "say words.split(/ /)",
+      'let all = words.replace(/(\\w)(\\d)/, "$2$1")',
+      "say all",
+      "exit",
+    ].join("\n");
+    const result = assertRuntimeResumeEquivalent(source, { ending: "failed" });
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ['["1", "2", "3"]', '["a1", "b2", "c3"]'],
+    );
+    const failure = result.finalSnapshot.failure;
+    assert.deepEqual([failure?.code, failure?.message], TOO_MUCH_WORK.split(/(?<=^\S+) /u));
+    // The replace, on the fifth line, counted from 0.
+    assert.equal(failure?.span.start.line, 4);
+    // The failed session restores from its checkpoint as it was.
+    const plan = compileValidPlan(source);
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(plan, result.finalSnapshot)),
+    );
+    assert.deepEqual(restored.snapshot.failure, failure);
+  });
 });
 
 test("the regex methods and a regex's members are checked", () => {
