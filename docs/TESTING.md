@@ -589,17 +589,18 @@ node tools/player-browser-smoke.mjs
 `Scenario`; the technical playground is `playground`); an unknown name fails and lists the known ones.
 
 It covers the technical playground and, on the built `/player/` route with trusted input, plays `examples/demo/` to its
-end without console errors, also over plain HTTP: a typed answer, buttons, Space and presses that skip pacing only on
-unused space, Stage images, audible sounds, and smart follow with Return to latest. It also opens fixture packages by
-URL in the Player, playground, and editor, including one that does not compile; checks script storage, a session kept
-across a reload with an image the script asked for, saved data exported and imported into a fresh profile, the debug
-export after a script error, the rewind history's IndexedDB store, readable text once photo colours and the vignette
-have settled, the reading position while messages change and enter, and the camera with Chromium's fake camera. Firefox
-captures camera frames differently: after `npm run build`, `npm run test:player:firefox-camera` drives Firefox's fake
-camera through `playwright-cli` and a Playwright-managed Firefox, and skips explicitly when either is missing. Neither
-route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium paths and then
-the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium executable is an
-explicit skip; an available browser must pass the configured smoke checks.
+end without console errors: a typed answer, buttons, Space and presses that skip pacing only on unused space, Stage
+images, audible sounds, and smart follow with Return to latest; it also starts over plain HTTP on a local-network name.
+It also opens fixture packages by URL in the Player, playground, and editor, including one that does not compile; checks
+script storage, a session kept across a reload with an image the script asked for, saved data exported and imported into
+a fresh profile, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo
+colours and the vignette have settled, the reading position while messages change and enter, and the camera with
+Chromium's fake camera. Firefox captures camera frames differently: after `npm run build`, `npm run
+test:player:firefox-camera` drives Firefox's fake camera through `playwright-cli` and a Playwright-managed Firefox, and
+skips explicitly when either is missing. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is
+tried before the `/usr/bin` Chromium paths and then the newest Playwright-managed Chromium; an unusable value falls back
+to them. An unavailable Chromium executable is an explicit skip; an available browser must pass the configured smoke
+checks.
 
 The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
 `tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to

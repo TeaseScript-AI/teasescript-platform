@@ -1407,7 +1407,8 @@ async function keptSessionScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the Stage photo colours the Player, and the empty Stage after `hideImage` gives
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, and the empty Stage after
+ * `hideImage` gives
  * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
  * in both modes and in Standard and High contrast.
  */
@@ -1463,6 +1464,7 @@ async function photoColourScenario(cdp, origin, profile) {
   await navigate(cdp, `${origin}/player/?package=photo-colour`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   const theme = await value(cdp, roles);
+  const themeBackground = await value(cdp, background);
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
   assertEqual(
@@ -1472,6 +1474,11 @@ async function photoColourScenario(cdp, origin, profile) {
   );
   await waitFor(cdp, `document.querySelectorAll('.transcript-entry').length >= 3`);
   await readable("The first photo");
+  assertEqual(
+    (await value(cdp, background)) === themeBackground,
+    false,
+    "The photo left the painted background unchanged",
+  );
   await switchMode("dark");
   await readable("Dark mode");
   await chooseContrast("high");
