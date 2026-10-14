@@ -1,3 +1,4 @@
+import { isSha256Hex } from "../sha256.js";
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import {
   invalidAnswerMessage,
@@ -96,6 +97,17 @@ export function resolveInteractionCompletion(
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "exportText completion requires { kind: 'close' } only." };
   }
+  // askPassword: the Player answers with the SHA-256 of the typed text, never the text (V30 §20).
+  if (action.interactionKind === "password")
+    return payload.kind === "submittedPassword" &&
+      Object.keys(payload).length === 2 &&
+      isSha256Hex(payload.hash)
+      ? { ok: true, result: payload.hash, transcriptText: null }
+      : {
+          ok: false,
+          message:
+            "Password completion requires { kind: 'submittedPassword', hash } with the SHA-256 of the typed text as 64 lowercase hexadecimal digits.",
+        };
   if (action.interactionKind === "text") {
     if (
       payload.kind !== "submittedText" ||

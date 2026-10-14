@@ -1,4 +1,4 @@
-import type { Expression, Program } from "./ast.js";
+import type { Expression, InteractionExpression, Program } from "./ast.js";
 
 /**
  * Whether an expression is the accepted `takePhoto()` call. It looks like an ordinary call, but it waits for the
@@ -62,6 +62,16 @@ export function isLockCall(expression: Expression): boolean {
     expression.callee.kind === "identifier" &&
     LOCK_CALLS.has(expression.callee.name)
   );
+}
+
+/**
+ * The `askPassword(...)` written directly as the `password:` of a lock call, also in parentheses, or `null` (V30 §13). It
+ * asks in the Player's own password field, so the typed text is the password and never becomes a script value.
+ */
+export function directPasswordField(expression: Expression): InteractionExpression | null {
+  let node = expression;
+  while (node.kind === "parenthesizedExpression") node = node.expression;
+  return node.kind === "interactionExpression" && node.interactionKind === "password" ? node : null;
 }
 
 /** Whether any of the programs takes a photo with `tags:`, which joins the image catalog at runtime (ADR 0023). */

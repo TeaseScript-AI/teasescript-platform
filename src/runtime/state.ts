@@ -133,7 +133,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 85;
+export const RUNTIME_SNAPSHOT_VERSION = 86;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -936,7 +936,11 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
       files: action.files.map((file) => ({ ...file })),
       references: [...action.references],
     };
-  if (action.kind === "lock") return { ...action };
+  if (action.kind === "lock")
+    return {
+      ...action,
+      passwordField: action.passwordField === null ? null : { ...action.passwordField },
+    };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -1040,6 +1044,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
     };
   if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
   if (ui.kind === "form") return cloneFormUi(ui, accessibleName);
+  if (ui.kind === "password") return { kind: "password", hint: ui.hint, accessibleName };
   return {
     kind: ui.kind,
     hint: ui.hint,

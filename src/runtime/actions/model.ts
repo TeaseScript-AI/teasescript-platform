@@ -313,8 +313,13 @@ export interface RuntimeLockActionSnapshot {
    * answer the `work` step after it locks with; empty for any other step.
    */
   readonly choices: readonly RuntimeLockChoice[];
-  /** The `ask` action whose dialog the player answered just before this `work` step, or `null`. */
+  /** The `ask` action whose dialog or password field the player answered just before this `work` step, or `null`. */
   readonly dialogActionId: number | null;
+  /**
+   * The call's `password: askPassword(...)`: the Player's password field, with its `hint:` or none, asks in the `ask`
+   * step, and the `work` step uses what was typed in it. `null` for any other call.
+   */
+  readonly passwordField: { readonly hint: string | null } | null;
   /** Why the unlock dialog asks again, or `null`. */
   readonly notice: RuntimeLockNotice | null;
   /**

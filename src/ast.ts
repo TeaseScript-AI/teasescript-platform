@@ -696,6 +696,7 @@ export interface InteractionExpression {
     | "date"
     | "time"
     | "datetime"
+    | "password"
     | "boolean"
     | "choice"
     | "form"

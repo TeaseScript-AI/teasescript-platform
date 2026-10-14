@@ -257,6 +257,7 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askPassword", "password"],
   ["askBoolean", "boolean"],
   ["askForm", "form"],
   ["askBooleans", "booleans"],
@@ -303,7 +304,8 @@ export function askOptionNames(kind: InteractionExpression["interactionKind"]): 
  */
 function removedPrefillName(kind: InteractionExpression["interactionKind"]): string | null {
   if (kind === "booleans") return "defaults";
-  return kind === "choice" || kind === "form" ? null : "default";
+  // askPassword came after the rename and never had one.
+  return kind === "choice" || kind === "form" || kind === "password" ? null : "default";
 }
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
@@ -4227,6 +4229,7 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askPassword") ||
       this.#checkIdentifier("askBoolean") ||
       this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("askBooleans") ||
