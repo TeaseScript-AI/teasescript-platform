@@ -1156,7 +1156,7 @@ async function packageScenario(cdp, origin) {
       `(() => {
         const image = document.querySelector('.stage-media');
         return !!image && image.complete && image.naturalWidth > 0 &&
-          image.getAttribute('src') === '/dev-package/house/files/images/hall.svg' &&
+          image.dataset.stageSource === '/dev-package/house/files/images/hall.svg' &&
           [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Welcome to the house, guest.'));
       })()`,
       8_000,
@@ -1490,7 +1490,7 @@ async function photoColourScenario(cdp, origin, profile) {
   await press("Next");
   await waitFor(
     cdp,
-    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/red.svg'); })()`,
+    `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.dataset.stageSource.endsWith('/red.svg'); })()`,
     5_000,
     "The next photo did not show",
   );

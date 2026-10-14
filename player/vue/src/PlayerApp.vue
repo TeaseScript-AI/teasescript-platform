@@ -51,6 +51,8 @@ import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
+import { prepareStagePhoto } from "./stagePhotos";
+import { useStagePhoto } from "./useStagePhoto";
 
 // Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
 // overlay only through these props and slots; production builds do not import it.
@@ -411,22 +413,29 @@ useResizeObserver(stageElement, ([entry]) => {
 });
 
 // Photo colours (PLAYER-UI "Stage and media presentation"): the photo the Stage shows colours the
-// Player; while a new image loads, the previous photo's colour stays. Without a photo, also after an
-// image failed, the theme's colours apply. Whether the accent follows the photo is an A/B test.
-const photoSource = ref<string | null>(null);
-watch(stageMedia, (media) => {
-  if (!media) photoSource.value = null;
+// Player. A new photo and its colour arrive together; while the photo is prepared, the previous photo
+// and its colour stay. Without a photo, also after an image failed, the theme's colours apply. Whether
+// the accent follows the photo is an A/B test.
+const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
+const shownMedia = computed(() => {
+  const photo = stagePhoto.shown.value;
+  return photo === null ? undefined : { ...photo.media, src: photo.url, source: photo.media.src };
 });
+const failedPhoto = ref<string | null>(null);
 function stageImageLoaded(src: string | null) {
   props.player.stageImageLoad(src);
-  if (src !== null) photoSource.value = src;
 }
 function stageImageFailed(src: string | null) {
   props.player.stageImageFailure(src);
-  if (src !== null) photoSource.value = null;
+  failedPhoto.value = src;
 }
 const photoColours = usePhotoColour(
-  photoSource,
+  stagePhoto.shown,
+  computed(() =>
+    stagePhoto.shown.value === null || stagePhoto.shown.value.media.src === failedPhoto.value
+      ? null
+      : stagePhoto.swatches.value,
+  ),
   computed(() => themeIntent.value.mode),
   { canvas: computed(() => toolsShell.value?.$el as HTMLElement | undefined), stage: stageElement },
 );
@@ -534,7 +543,7 @@ async function toggleFullscreen() {
           <Stage
             ref="stage"
             v-model:camera-mirrored="viewfinderMirrored"
-            :media="stageMedia"
+            :media="shownMedia"
             :camera="stageCamera"
             :preview="imagePreview"
             @media-aspect="mediaAspect = $event"
