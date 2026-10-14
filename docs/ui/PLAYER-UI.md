@@ -916,14 +916,15 @@ keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text fi
 date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
 through 9999; a prefill in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
-new field. `askPassword` masks the composer's field, with an eye button, "Show password" or "Hide password", that shows
-the text while the person typing chooses to, and "Caps Lock is on" under it while a key event reports Caps Lock; an
-empty field answers nothing, and the answer adds no line to the chat; after a block interrupted it, the field is empty
-again. The password field of `password: askPassword(...)`
-in an encrypt or decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field on a line of
-its own, to which Enter in the first moves, and Send or Enter there locks only when both match, else the composer notice
-says "The passwords do not match", the repeat empties, and the password is selected. While the Player locks or opens,
-the fields are read-only. The field starts empty each time it shows, also after a block interrupted it, and takes the
+new field. `askPassword` masks the composer's field, which keeps its one line, with an eye button at its end, "Show
+password" or "Hide password", that shows the text while the person typing chooses to, and "Caps Lock is on" under it
+while a key event reports Caps Lock; an empty field answers nothing, and the answer adds no line to the chat; after a
+block interrupted it, the field is empty again. The password field of `password: askPassword(...)` in an encrypt or
+decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field below it, past a dividing line,
+with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
+or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
+empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
+match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty each time it shows, also after a block interrupted it, and takes the
 focus back when the player was typing in the composer before it; nothing typed in it is kept. A prefill starts as the
 composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
 restore the composer shows the prefill again, and unsent edits are not kept.
