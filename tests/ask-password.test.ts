@@ -180,10 +180,23 @@ test("a password field that a block interrupted counts its return, also after a 
     serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
   ).snapshot;
   assert.deepEqual(validateRuntimeSnapshot(restored, plan).errors, []);
-  // Another kind of interaction keeps no count.
-  const text = { ...again, interactionKind: "text", ui: { ...again.ui, kind: "text" } };
+  assert.equal(passwordStep(restored).resumes, 1);
+  // Another kind of interaction keeps no count: askText's state is valid without one, and not with one.
+  const answered = run(
+    plan,
+    completeAction(plan, restored, {
+      actionId: again.actionId,
+      actionKind: "interaction",
+      interactionKind: "password",
+      payload: { kind: "submittedPassword", hash: sha256("corner") },
+    }).snapshot,
+  ).snapshot;
+  const text = answered.foregroundAction;
+  assert.ok(text?.kind === "interaction" && text.interactionKind === "text");
+  assert.deepEqual(validateRuntimeSnapshot(answered, plan).errors, []);
   assert.notDeepEqual(
-    validateRuntimeSnapshot({ ...restored, foregroundAction: text }, plan).errors,
+    validateRuntimeSnapshot({ ...answered, foregroundAction: { ...text, resumes: 1 } }, plan)
+      .errors,
     [],
   );
 });

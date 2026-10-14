@@ -452,7 +452,8 @@ hidden until a session is shown. A script that does not compile cannot start: in
 diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
 audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
 
-The Player keeps the session in this browser: at each interaction it newly presents, when it ends, and when the page
+The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
+too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
 save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
