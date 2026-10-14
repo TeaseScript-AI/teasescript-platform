@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useElementBounding } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
@@ -14,9 +14,10 @@ import type { LockDialog, LockDialogInput } from "../../lock-service.js";
 // The lock dialog asks how an encrypt call that wrote no opener locks: the moment its time lock opens by itself,
 // suggested 7 days from now, which the player may move but not remove, and an optional password, typed twice. The
 // unlock dialog shows what opens a decrypt call's lock: a password field where a password does, and the moment of its
-// time lock; Cancel gives the call's default. What is typed stays in the Player; while the Player locks or opens with
-// it (`busy`), the dialog takes no input. As for a popup, a click beside it does not close it, and while Debug runs it
-// is not modal and stands in the middle of the session's `area`.
+// time lock; Cancel gives the call's default. What is typed stays in the Player. While the Player locks or opens with it
+// (`busy`), the dialog takes no input but keeps focus where it is, and the control that started the work says so. As
+// for a popup, a click beside it does not close it, a key held down since before it opened does nothing, and while
+// Debug runs it is not modal and stands in the middle of the session's `area`.
 const props = defineProps<{
   dialog: LockDialog;
   busy: boolean;
@@ -40,7 +41,9 @@ const placement = computed(() =>
 const password = ref("");
 const repeated = ref("");
 const passwordField = ref<InstanceType<typeof PasswordField> | null>(null);
-const momentField = ref<InstanceType<typeof Input> | null>(null);
+const cancelButton = ref<InstanceType<typeof Button> | null>(null);
+/** Which control started the work the dialog is busy with: Try again, or else Lock or Unlock. */
+const retrying = ref(false);
 
 /** A moment as the `datetime-local` field shows it, in this browser's time zone, to the minute. */
 function localText(moment: number): string {
@@ -55,29 +58,46 @@ const chosenMs = computed(() => {
   const value = new Date(moment.value).getTime();
   return moment.value === "" || Number.isNaN(value) ? null : value;
 });
-const future = computed(() => chosenMs.value !== null && chosenMs.value > Date.now());
-const mismatch = computed(() => repeated.value !== "" && repeated.value !== password.value);
+/** Whether the chosen moment is in the future; checked again when the player locks, as time passes meanwhile. */
+const future = ref(true);
+const checkFuture = () => (future.value = chosenMs.value !== null && chosenMs.value > Date.now());
+checkFuture();
+watch(moment, checkFuture);
+/** The repeat no longer matches the password as typed so far. */
+const mismatch = computed(
+  () => repeated.value !== "" && !password.value.startsWith(repeated.value),
+);
 const canLock = computed(
-  () => future.value && (password.value === "" || repeated.value === password.value),
+  () => chosenMs.value !== null && (password.value === "" || repeated.value === password.value),
 );
 
-const shownMoments = computed(() =>
-  props.dialog.kind === "unlock"
-    ? props.dialog.moments.map((value) =>
-        new Intl.DateTimeFormat(undefined, {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        }).format(value),
-      )
-    : [],
+const now = Date.now();
+const momentFormat = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+/** The moments to show: a passed one only when the dialog does not say that the time has passed. */
+const shownMoments = computed(() => {
+  const dialog = props.dialog;
+  if (dialog.kind !== "unlock") return [];
+  return dialog.moments
+    .filter((value) => dialog.notice !== "unreachable" || value > now)
+    .map((value) => momentFormat.format(value));
+});
+/** Busy without a button of the dialog having started it, as when a time lock opens by itself. */
+const openingByItself = computed(
+  () => props.busy && props.dialog.kind === "unlock" && !props.dialog.password && !retrying.value,
 );
 
 function lock() {
   if (props.busy || !canLock.value) return;
+  checkFuture();
+  if (!future.value) return;
+  retrying.value = false;
   emit("submit", {
     password: password.value === "" ? null : password.value,
     openAtMs: chosenMs.value,
@@ -85,19 +105,23 @@ function lock() {
 }
 function unlock() {
   if (props.busy || password.value === "") return;
+  retrying.value = false;
   emit("submit", { password: password.value, openAtMs: null });
 }
 function tryAgain() {
-  if (!props.busy) emit("submit", { password: null, openAtMs: null });
+  if (props.busy) return;
+  retrying.value = true;
+  emit("submit", { password: null, openAtMs: null });
 }
 function cancel() {
   if (!props.busy) emit("cancel");
 }
 
+// The password field takes focus, or else Cancel, so the dialog always has it.
 function focusFirst(event: Event) {
   event.preventDefault();
-  if (props.dialog.kind === "unlock" && props.dialog.password) passwordField.value?.focus();
-  else (momentField.value?.$el as HTMLElement | undefined)?.focus();
+  if (props.dialog.kind === "lock" || props.dialog.password) passwordField.value?.focus();
+  else (cancelButton.value?.$el as HTMLElement | undefined)?.focus();
 }
 // Opened by the script, the dialog has no trigger to return focus to; the next interaction takes it.
 function keepFocus(event: Event) {
@@ -112,6 +136,10 @@ function escape(event: KeyboardEvent) {
     (props.modal || document.activeElement?.closest("[data-lock-dialog]"))
   )
     cancel();
+}
+// A repeated Enter would submit the form, and a repeated Space would arm a button for the key's release.
+function heldKey(event: KeyboardEvent) {
+  if (event.repeat) event.preventDefault();
 }
 </script>
 
@@ -132,50 +160,64 @@ function escape(event: KeyboardEvent) {
       <DialogHeader>
         <DialogTitle>{{ dialog.kind === "lock" ? "Lock" : "Unlock" }}</DialogTitle>
       </DialogHeader>
-      <form v-if="dialog.kind === 'lock'" class="grid gap-3" novalidate @submit.prevent="lock">
+      <form
+        v-if="dialog.kind === 'lock'"
+        class="grid gap-3"
+        novalidate
+        @keydown="heldKey"
+        @submit.prevent="lock"
+      >
         <div class="grid gap-1.5">
           <label for="lock-dialog-moment" class="text-sm font-medium">Opens by itself at</label>
           <Input
             id="lock-dialog-moment"
-            ref="momentField"
             v-model="moment"
             type="datetime-local"
             required
             :min="earliest"
-            :disabled="busy"
+            :readonly="busy"
             :aria-invalid="future ? undefined : 'true'"
+            aria-describedby="lock-dialog-moment-hint"
             data-lock-moment
           />
-          <p class="min-h-5 text-sm text-muted-foreground" data-lock-moment-hint>
+          <p
+            id="lock-dialog-moment-hint"
+            role="status"
+            class="min-h-5 text-sm text-destructive"
+            data-lock-moment-hint
+          >
             {{ future ? "" : "Choose a moment in the future." }}
           </p>
         </div>
         <PasswordField
+          ref="passwordField"
           v-model="password"
           label="Password (optional)"
-          autocomplete="new-password"
-          :disabled="busy"
+          :busy="busy"
           data-lock-password
         />
         <PasswordField
           v-if="password !== ''"
           v-model="repeated"
           label="Repeat password"
-          autocomplete="new-password"
-          :disabled="busy"
-          :invalid="mismatch"
+          :busy="busy"
+          :error="mismatch ? 'The passwords do not match' : null"
           data-lock-repeat
         />
-        <p v-if="password !== ''" role="status" class="min-h-5 text-sm" data-lock-mismatch>
-          {{ mismatch ? "The passwords do not match" : "" }}
-        </p>
         <div class="flex flex-wrap justify-end gap-2">
-          <Button type="submit" class="min-h-11" :disabled="busy || !canLock" data-lock-submit>
+          <Button
+            type="submit"
+            class="min-h-11"
+            :disabled="!busy && !canLock"
+            :aria-disabled="busy ? 'true' : undefined"
+            :class="{ 'opacity-50': busy }"
+            data-lock-submit
+          >
             {{ busy ? "Locking…" : "Lock" }}
           </Button>
         </div>
       </form>
-      <form v-else class="grid gap-3" novalidate @submit.prevent="unlock">
+      <form v-else class="grid gap-3" novalidate @keydown="heldKey" @submit.prevent="unlock">
         <p v-for="(shown, index) in shownMoments" :key="index" class="text-sm" data-unlock-moment>
           Opens by itself at {{ shown }}
         </p>
@@ -185,38 +227,32 @@ function escape(event: KeyboardEvent) {
             type="button"
             variant="outline"
             class="min-h-11 justify-self-start"
-            :disabled="busy"
+            :aria-disabled="busy ? 'true' : undefined"
+            :class="{ 'opacity-50': busy }"
             data-unlock-retry
             @click="tryAgain"
           >
-            Try again
+            {{ busy && retrying ? "Opening…" : "Try again" }}
           </Button>
         </div>
-        <template v-if="dialog.password">
-          <PasswordField
-            ref="passwordField"
-            v-model="password"
-            label="Password"
-            autocomplete="current-password"
-            :disabled="busy"
-            :invalid="dialog.notice === 'wrongPassword'"
-            data-unlock-password
-          />
-          <p
-            v-if="dialog.notice === 'wrongPassword'"
-            role="status"
-            class="text-sm text-destructive"
-            data-unlock-wrong
-          >
-            That password does not open it.
-          </p>
-        </template>
+        <PasswordField
+          v-if="dialog.password"
+          ref="passwordField"
+          v-model="password"
+          label="Password"
+          :busy="busy"
+          :error="dialog.notice === 'wrongPassword' ? 'That password does not open it.' : null"
+          data-unlock-password
+        />
+        <p v-if="openingByItself" role="status" class="text-sm" data-unlock-opening>Opening…</p>
         <div class="flex flex-wrap justify-end gap-2">
           <Button
+            ref="cancelButton"
             type="button"
             variant="outline"
             class="min-h-11"
-            :disabled="busy"
+            :aria-disabled="busy ? 'true' : undefined"
+            :class="{ 'opacity-50': busy }"
             data-unlock-cancel
             @click="cancel"
           >
@@ -226,10 +262,12 @@ function escape(event: KeyboardEvent) {
             v-if="dialog.password"
             type="submit"
             class="min-h-11"
-            :disabled="busy || password === ''"
+            :disabled="!busy && password === ''"
+            :aria-disabled="busy ? 'true' : undefined"
+            :class="{ 'opacity-50': busy }"
             data-unlock-submit
           >
-            {{ busy ? "Opening…" : "Unlock" }}
+            {{ busy && !retrying ? "Opening…" : "Unlock" }}
           </Button>
         </div>
       </form>

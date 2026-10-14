@@ -5,17 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 // A password field (V30 §13 and §20): masked, with an eye button that shows the text while the person typing chooses
-// to, and a warning while Caps Lock is on. What it holds never leaves the Player's memory as typed.
+// to, a warning while Caps Lock is on, and the field's error under it, which the field names as its description. What it
+// holds never leaves the Player's memory as typed. While the Player works with it (`busy`) it is read-only but keeps
+// focus, so the busy state is read where the person is.
 const props = defineProps<{
   label: string;
-  /** `new-password` where a password is chosen, `current-password` where one is given. */
-  autocomplete: "new-password" | "current-password";
-  disabled?: boolean;
-  invalid?: boolean;
+  busy?: boolean;
+  /** Why the field's text does not do, shown under it, or none. */
+  error?: string | null;
 }>();
 const model = defineModel<string>({ required: true });
 
 const id = useId();
+const statusId = useId();
 const shown = ref(false);
 const capsLock = ref(false);
 const input = ref<InstanceType<typeof Input> | null>(null);
@@ -34,14 +36,16 @@ defineExpose({ focus });
   <div class="grid gap-1.5" data-password-field>
     <label :for="id" class="text-sm font-medium">{{ props.label }}</label>
     <div class="flex items-center gap-2">
+      <!-- No saved or suggested passwords: a lock password typed on the player's device must not stay in its browser. -->
       <Input
         :id="id"
         ref="input"
         v-model="model"
         :type="shown ? 'text' : 'password'"
-        :autocomplete="props.autocomplete"
-        :disabled="props.disabled"
-        :aria-invalid="props.invalid ? 'true' : undefined"
+        autocomplete="off"
+        :readonly="props.busy"
+        :aria-invalid="props.error ? 'true' : undefined"
+        :aria-describedby="statusId"
         autocapitalize="off"
         spellcheck="false"
         data-password-input
@@ -55,17 +59,23 @@ defineExpose({ focus });
         size="icon"
         class="size-11 shrink-0"
         :aria-label="shown ? 'Hide password' : 'Show password'"
-        :aria-pressed="shown"
-        :disabled="props.disabled"
+        :title="shown ? 'Hide password' : 'Show password'"
+        :aria-disabled="props.busy ? 'true' : undefined"
         data-password-toggle
-        @click="shown = !shown"
+        @click="props.busy || (shown = !shown)"
       >
         <EyeOff v-if="shown" />
         <Eye v-else />
       </Button>
     </div>
-    <p role="status" class="min-h-5 text-sm text-muted-foreground" data-password-caps-lock>
-      {{ capsLock ? "Caps Lock is on" : "" }}
+    <!-- One line stays reserved for the field's error and the Caps Lock warning, so nothing moves when one appears. -->
+    <p :id="statusId" role="status" class="min-h-5 text-sm" data-password-status>
+      <span v-if="props.error" class="block text-destructive" data-password-error>{{
+        props.error
+      }}</span>
+      <span v-if="capsLock" class="block text-muted-foreground" data-password-caps-lock
+        >Caps Lock is on</span
+      >
     </p>
   </div>
 </template>
