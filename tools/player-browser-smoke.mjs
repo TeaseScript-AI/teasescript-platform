@@ -1271,9 +1271,10 @@ async function key(cdp, name, { modifiers = 0, commands } = {}) {
 
 /**
  * A person chooses an option of a closed `<select>`: once it is in reach and pressable it takes focus, and typing the
- * option's label (its first word) picks that option directly, firing one change, as a choice from its list does; what
- * the Player then does with the choice is the caller's to check. Chrome forgets typed letters after a second, so a
- * choice right after another waits that long.
+ * option's label (its first word, until the choice is made) picks that option directly, firing one change, as a choice
+ * from its list does. The option chosen is read as the change happens, before the Player handles it; what the Player
+ * then does with the choice is the caller's to check. An option already chosen is left alone. Chrome forgets typed
+ * letters after a second, so a choice right after another waits that long.
  */
 async function chooseOption(cdp, selector, optionValue) {
   await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector);
@@ -1281,19 +1282,29 @@ async function chooseOption(cdp, selector, optionValue) {
     cdp,
     `const select = document.querySelector(${JSON.stringify(selector)});
     select.focus({ preventScroll: true });
-    window.smokeChosen = select.value === ${JSON.stringify(optionValue)};
-    if (!window.smokeChosen) select.addEventListener('change', () => { window.smokeChosen = true; }, { once: true });
+    window.smokeChoice = select.value === ${JSON.stringify(optionValue)} ? select.value : null;
+    if (window.smokeChoice === null)
+      select.addEventListener('change', (event) => { window.smokeChoice = event.target.value; }, { capture: true, once: true });
     return [...select.options].find((option) => option.value === ${JSON.stringify(optionValue)})?.label ?? null;`,
   );
   if (label === null) throw new Error(`${selector} offers no ${optionValue}`);
+  if (await value(cdp, `window.smokeChoice !== null`)) return;
   await delay(Math.max(0, lastChoice.at + 1_100 - Date.now()));
-  for (const letter of /^[0-9A-Za-z]+/u.exec(label)[0]) await key(cdp, letter);
+  for (const letter of /^[0-9A-Za-z]+/u.exec(label)[0]) {
+    if (await value(cdp, `window.smokeChoice !== null`)) break;
+    await key(cdp, letter);
+  }
   lastChoice.at = Date.now();
   await waitFor(
     cdp,
-    `window.smokeChosen === true`,
+    `window.smokeChoice !== null`,
     2_000,
     `Typing ${JSON.stringify(label)} did not choose it in ${selector}`,
+  );
+  assertEqual(
+    await value(cdp, `window.smokeChoice`),
+    optionValue,
+    `Typing ${JSON.stringify(label)} chose another option in ${selector}`,
   );
 }
 
@@ -6612,7 +6623,7 @@ async function formFieldsScenario(cdp, origin) {
     "An answer outside the bounds was not refused",
   );
   assertEqual(await value(cdp, `${composer}.value`), "11", "The refused text was not kept");
-  await evaluate(cdp, `${composer}.select()`);
+  await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
   await cdp.call("Input.insertText", { text: "7" });
   await pressEnter();
   await waitFor(
@@ -6675,7 +6686,7 @@ async function formFieldsScenario(cdp, origin) {
     8_000,
     "The text being typed was lost, or not focused, after a block asked a form",
   );
-  await evaluate(cdp, `${composer}.select()`);
+  await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
   await cdp.call("Input.insertText", { text: "Cy" });
   await delay(100);
   await pressPermanentButton("Pause");
