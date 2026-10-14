@@ -119,6 +119,21 @@ const PRESSABLE = `const pressable = (element) => {
 };`;
 
 /**
+ * In-page `exposed(element)`: whether a person sees the element and could press it somewhere to give it focus: it is
+ * rendered visibly and its centre, a point a quarter in, or a point just inside an edge is in the window and hits it.
+ * Keyboard input needs no more than that.
+ */
+const EXPOSED = `const exposed = (element) => {
+  if (!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+  const box = element.getBoundingClientRect();
+  const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+  return [[x, y], [box.left + box.width / 4, y], [box.right - box.width / 4, y], [x, box.top + box.height / 4],
+    [x, box.bottom - box.height / 4], [box.left + 2, y], [box.right - 2, y], [x, box.top + 2], [x, box.bottom - 2]]
+    .some(([px, py]) => px >= 0 && py >= 0 && px <= innerWidth && py <= innerHeight &&
+      element.contains(document.elementFromPoint(px, py)));
+};`;
+
+/**
  * In-page `uncovered(element)`: whether a person sees the whole element and can press it, wherever it sits: it is
  * rendered, not transparent or hidden, and its centre and a point just inside the middle of each edge are in the window
  * and hit the element, not something above it.
@@ -1205,13 +1220,19 @@ async function smartFollowCheck(cdp) {
 /**
  * Where a person presses the element `expression` evaluates to: its centre once it no longer moves in (a control that
  * live play just showed enters the conversation for a moment, as do the messages it glides up with), is brought into
- * reach, and is pressable there, within two seconds. Only `{ hidden: true }`, for a control that stays hidden until a
- * first press on its place reveals it, presses that place without seeing the control.
+ * reach, and is pressable there, within two seconds. `{ keys: true }`, for keyboard input, needs it only exposed
+ * somewhere. Only `{ hidden: true }`, for a control that stays hidden until a first press on its place reveals it,
+ * presses that place without seeing the control.
  */
-async function pressPoint(cdp, expression, what = expression, { hidden = false } = {}) {
+async function pressPoint(
+  cdp,
+  expression,
+  what = expression,
+  { hidden = false, keys = false } = {},
+) {
   const point = await evaluate(
     cdp,
-    `${REACH} ${PRESSABLE}
+    `${REACH} ${PRESSABLE} ${EXPOSED}
     return new Promise((resolve) => {
       const target = () => ${expression};
       const deadline = performance.now() + 2_000;
@@ -1224,7 +1245,8 @@ async function pressPoint(cdp, expression, what = expression, { hidden = false }
         const waiting = performance.now() < deadline;
         if (target() && entering() && waiting) return setTimeout(check, 16);
         if (target()) reach(target());
-        if (target() && (${hidden} || pressable(target()))) return resolve(reach(target()));
+        if (target() && (${hidden} || (${keys} ? exposed(target()) : pressable(target()))))
+          return resolve(reach(target()));
         if (waiting) return setTimeout(check, 16);
         resolve(null);
       };
@@ -1280,10 +1302,10 @@ function clickLabelled(cdp, label, scope = "button") {
 
 /**
  * Keyboard focus on the element `expression` evaluates to, as Tab gives it: only once a person can see it and could press
- * it where it is, without the press itself, which would act (a press on the conversation skips pacing).
+ * it somewhere, without the press itself, which would act (a press on the conversation skips pacing).
  */
 async function focusSeen(cdp, expression, options = {}) {
-  await pressPoint(cdp, expression);
+  await pressPoint(cdp, expression, expression, { keys: true });
   await evaluate(cdp, `(${expression}).focus(${JSON.stringify(options)})`);
 }
 
@@ -1314,7 +1336,9 @@ async function key(cdp, name, { modifiers = 0, commands } = {}) {
  * letters after a second, so a choice right after another waits that long.
  */
 async function chooseOption(cdp, selector, optionValue) {
-  await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector);
+  await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector, {
+    keys: true,
+  });
   const label = await evaluate(
     cdp,
     `const select = document.querySelector(${JSON.stringify(selector)});

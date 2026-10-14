@@ -41,7 +41,8 @@ async function cli(...args) {
 async function checks(page, url) {
   const context = page.context();
   // A person only presses or focuses what they see and can reach: each such input first brings its element into view
-  // and waits until it is rendered visibly with its centre hitting it; Playwright's own checks then apply.
+  // and waits until it is rendered visibly. A click then relies on Playwright's own check of the point it presses;
+  // focus needs some exposed point of the element (its centre, or a point a quarter in or just inside an edge).
   const locatorPrototype = Object.getPrototypeOf(page.locator("body"));
   for (const name of ["click", "focus"]) {
     const act = locatorPrototype[name];
@@ -49,19 +50,31 @@ async function checks(page, url) {
       const deadline = Date.now() + 5000;
       const reachable = async () => {
         await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-        return this.evaluate((element) => {
+        return this.evaluate((element, exposed) => {
           if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
             return false;
+          if (!exposed) return true;
           const box = element.getBoundingClientRect();
           const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-          return (
-            x >= 0 &&
-            y >= 0 &&
-            x <= innerWidth &&
-            y <= innerHeight &&
-            element.contains(document.elementFromPoint(x, y))
+          return [
+            [x, y],
+            [box.left + box.width / 4, y],
+            [box.right - box.width / 4, y],
+            [x, box.top + box.height / 4],
+            [x, box.bottom - box.height / 4],
+            [box.left + 2, y],
+            [box.right - 2, y],
+            [x, box.top + 2],
+            [x, box.bottom - 2],
+          ].some(
+            ([px, py]) =>
+              px >= 0 &&
+              py >= 0 &&
+              px <= innerWidth &&
+              py <= innerHeight &&
+              element.contains(document.elementFromPoint(px, py)),
           );
-        });
+        }, name === "focus");
       };
       while (!(await reachable())) {
         if (Date.now() > deadline)

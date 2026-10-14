@@ -1079,7 +1079,13 @@ async function choiceLayoutChecks(page) {
     await page.setViewportSize({ width, height: 900 });
     // The conversation lays itself out again for the new width; it is judged once it has come to rest.
     check(
-      await page.evaluate(() => playerChecks.atRest()),
+      await page.evaluate(() =>
+        playerChecks.settled([
+          "[data-foreground-controls] .player-action-button",
+          ".transcript-entry:last-child [data-slot='bubble-content']",
+          "[data-composer-shell]",
+        ]),
+      ),
       `${width}px: the conversation did not come to rest`,
     );
     const state = await layout();
@@ -1109,7 +1115,17 @@ async function topBarChecks(page) {
   // false), which covers the bar as a modal sheet, its own toggle stays reachable.
   const visible = async (tools, barShown = true) => {
     // Judged once the bar, or a drawer sliding in, has come to rest after the last change.
-    check(await page.evaluate(() => playerChecks.atRest()), "The top bar did not come to rest");
+    check(
+      await page.evaluate(() =>
+        playerChecks.settled([
+          ".player-top-bar-actions button",
+          ".player-top-bar-title > :is(span, button)",
+          '[data-sidebar="trigger"]',
+          ".tools-drawer",
+        ]),
+      ),
+      "The top bar did not come to rest",
+    );
     // The title's pill; its row around it passes input through to the Stage.
     const boxes = await Promise.all([
       tools.boundingBox(),
@@ -1394,7 +1410,14 @@ async function contentContainmentChecks(page) {
   const verify = async (label) => {
     // Viewport and tool changes re-lay out the Player asynchronously; it is judged once it has come to rest.
     check(
-      await page.evaluate(() => playerChecks.atRest()),
+      await page.evaluate(() =>
+        playerChecks.settled([
+          ".stage-media",
+          ".transcript .transcript-entry",
+          '[data-slot="sidebar"] > .fixed',
+          ".tools-drawer",
+        ]),
+      ),
       `${label}: the Player did not come to rest`,
     );
     const problems = await page.evaluate(hidden);
@@ -1636,7 +1659,20 @@ async function backgroundControlPlacementChecks(page) {
   // The Player lays itself out again for the new window; it is judged once it has come to rest.
   const settle = async (width, height) => {
     await page.setViewportSize({ width, height });
-    if (!(await page.evaluate(() => playerChecks.atRest())))
+    // Main judged 300 ms after the resize.
+    if (
+      !(await page.evaluate(() =>
+        playerChecks.settled(
+          [
+            ".stage-right-rail .timer-display",
+            ".stage-right-rail button",
+            ".stage-right-rail-controls",
+            ".transcript .transcript-entry",
+          ],
+          300,
+        ),
+      ))
+    )
       throw new Error(`The Player did not come to rest at ${width}×${height}`);
     return placement();
   };
@@ -1933,7 +1969,12 @@ async function noticeChecks(page) {
       return problems;
     });
   // Judged once the toasts have come to rest.
-  check(await page.evaluate(() => playerChecks.atRest()), "The toasts did not come to rest");
+  check(
+    await page.evaluate(() =>
+      playerChecks.settled(["[data-sonner-toast]", ".player-top-bar-actions button"]),
+    ),
+    "The toasts did not come to rest",
+  );
   const blocked = await toastProblems();
   check(blocked.length === 0, `Toasts must stay in view beside the top controls: ${blocked}`);
   check(
@@ -3104,43 +3145,46 @@ async function runGroup(browserPage, run, url, artifacts) {
       };
     }
   }
-  // A person only presses, types into, focuses or points at what they see and can reach: every input on a locator first
-  // brings its element into view and waits until it is rendered visibly (not transparent or hidden) with its centre in
-  // the window hitting it, not something above it; Playwright's own checks then apply. (A check that a hidden element
-  // refuses focus calls `focus()` in the page on purpose.)
+  // A person only acts on what they see and can reach. Every input on a locator first brings its element into view and
+  // waits until it is rendered visibly (not transparent or hidden). A pointer action then relies on Playwright's own
+  // check that the point it presses hits the element; a keyboard action (focus, press, fill, selectOption) needs some
+  // exposed point of the element, its centre, a point a quarter in or just inside an edge, where a person could press
+  // it. (A check that a hidden element refuses focus calls `focus()` in the page on purpose.)
   const locatorPrototype = Object.getPrototypeOf(browserPage.locator("body"));
   if (!locatorPrototype.playerActsOnWhatIsSeen) {
     locatorPrototype.playerActsOnWhatIsSeen = true;
-    for (const name of [
-      "click",
-      "dblclick",
-      "tap",
-      "check",
-      "uncheck",
-      "selectOption",
-      "fill",
-      "hover",
-      "press",
-      "focus",
-    ]) {
+    const keyboard = ["focus", "press", "fill", "selectOption"];
+    for (const name of ["click", "dblclick", "tap", "check", "uncheck", "hover", ...keyboard]) {
       const act = locatorPrototype[name];
       locatorPrototype[name] = async function (...args) {
         const deadline = Date.now() + 5000;
         const reachable = async () => {
           await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-          return this.evaluate((element) => {
+          return this.evaluate((element, exposed) => {
             if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
               return false;
+            if (!exposed) return true;
             const box = element.getBoundingClientRect();
             const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-            return (
-              x >= 0 &&
-              y >= 0 &&
-              x <= innerWidth &&
-              y <= innerHeight &&
-              element.contains(document.elementFromPoint(x, y))
+            return [
+              [x, y],
+              [box.left + box.width / 4, y],
+              [box.right - box.width / 4, y],
+              [x, box.top + box.height / 4],
+              [x, box.bottom - box.height / 4],
+              [box.left + 2, y],
+              [box.right - 2, y],
+              [x, box.top + 2],
+              [x, box.bottom - 2],
+            ].some(
+              ([px, py]) =>
+                px >= 0 &&
+                py >= 0 &&
+                px <= innerWidth &&
+                py <= innerHeight &&
+                element.contains(document.elementFromPoint(px, py)),
             );
-          });
+          }, keyboard.includes(name));
         };
         while (!(await reachable())) {
           if (Date.now() > deadline)
@@ -3159,7 +3203,7 @@ async function runGroup(browserPage, run, url, artifacts) {
   // comparing boxes, which may be transparent wrappers: `pressable` (rendered visibly, its centre in the window hits
   // it), `uncovered` (also a point just inside the middle of each edge), `hides(cover, element)` (any of those points
   // hits `cover`), `textPoints` (points every 8 px along the text lines under a root), `imagePoints` (those points of an
-  // image inside its box as `object-fit` fits it), and `atRest`. Hit tests find covers that take input; opaque paint
+  // image inside its box as `object-fit` fits it), and `settled`. Hit tests find covers that take input; opaque paint
   // from a layer that passes input through is left to the scoped visual check.
   await context.addInitScript(() => {
     const around = (box) => {
@@ -3177,25 +3221,33 @@ async function runGroup(browserPage, run, url, artifacts) {
     const visible = (element) =>
       !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
     window.playerChecks = {
-      // The page is at rest: for a few frames in a row no finite animation or transition runs, also none still waiting
-      // out its delay, within `timeout` ms. Checks judge the state after it, once, so a healthy moment before a motion
-      // that ends badly cannot stand in for the result.
-      atRest: (timeout = 5000) =>
+      // The elements a judgement involves have settled: no earlier than `minimum` ms after the change being judged (the
+      // wait main used at that point, so a change the Player makes later is judged as before), their boxes unchanged
+      // for five frames in a row; false after `timeout` ms. Motion of anything else does not delay the judgement.
+      settled: (selectors, minimum = 0, timeout = 5000) =>
         new Promise((resolve) => {
-          const deadline = performance.now() + timeout;
-          let quiet = 0;
+          const start = performance.now();
+          let [last, still] = [null, 0];
+          const giveUp = setTimeout(() => resolve(false), timeout + 200);
           const frame = () => {
-            const moving = document
-              .getAnimations()
-              .some(
-                (animation) =>
-                  (animation.playState === "running" || animation.pending) &&
-                  animation.effect?.getComputedTiming().endTime !== Infinity,
-              );
-            quiet = moving ? 0 : quiet + 1;
-            if (quiet >= 5) resolve(true);
-            else if (performance.now() > deadline) resolve(false);
-            else requestAnimationFrame(frame);
+            const boxes = JSON.stringify(
+              selectors.flatMap((selector) =>
+                [...document.querySelectorAll(selector)].map((element) => {
+                  const box = element.getBoundingClientRect();
+                  return [box.left, box.top, box.width, box.height].map(Math.round);
+                }),
+              ),
+            );
+            still = boxes === last ? still + 1 : 0;
+            last = boxes;
+            const waited = performance.now() - start;
+            if (waited >= minimum && still >= 5) {
+              clearTimeout(giveUp);
+              resolve(true);
+            } else if (waited > timeout) {
+              clearTimeout(giveUp);
+              resolve(false);
+            } else requestAnimationFrame(frame);
           };
           requestAnimationFrame(frame);
         }),
