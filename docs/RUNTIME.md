@@ -148,6 +148,9 @@ Completion semantics are:
   more than one, is `invalidPayload` with a message the Player shows the player, such as those above
   ([V30 §20](specifications/accepted-syntaxes-v30.md#invalid-input-handling)); a payload of the wrong shape or over the
   byte limit gets a message for the host instead;
+- `askPassword` is a `password` interaction, without a prefill: the host answers `{ kind: "submittedPassword", hash }`
+  with the SHA-256 of the typed text as 64 lowercase hexadecimal digits, which it returns as `string`, never the text,
+  and the completion adds nothing to the transcript;
 - `askImage(...)` is an `image` interaction whose answer is an image the trusted host stored; see
   [Image input](#image-input);
 - a form is a `form` interaction whose fields the player edits before submitting; see [Forms](#forms);
@@ -1648,14 +1651,17 @@ whose required `default:` (decrypt only, `TSV020`) runs after it, only when it i
 `TSV022`, a value the compiler knows is of the wrong type `TSV043`, an encrypt call that gives one of its openers but
 not each `TSV020`, one that writes each as `false` `TSV043`, and plan validation rejects them as ordinary calls, and an
 encrypt instruction with one opener only. They are not allowed in a parameter default, as they may ask the player. A
-decrypt call gives text or the default's type.
+decrypt call gives text or the default's type. `password: askPassword(...)` written directly, also in parentheses, is
+the instruction's `passwordField`, `{ hint }` with its `hint:` as a temporary or literal or `null`, instead of a
+`password` operand: the arguments before it are evaluated first, then its question is said as the ask's would be, and
+then the arguments after it.
 
 The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
 (`TSR059`, as for `fileToBase64`), `password:` text, for an encrypt call also `true` or `false`, and `timeLock:` an
 `absoluteDateTime`, `true`, or `false` (`TSR059`); an encrypt call whose openers are all `false` fails with `TSR059`. Its
 openers written `true`, or each when it writes none, are its `choices`, which the lock dialog asks for; a chosen time lock
-is suggested 7 days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives
-the default at once for text that is not Base64, read as `fromBase64` reads it. Otherwise it creates a foreground `lock`
+is suggested 7 days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text
+(`TSR059`), and gives the default at once for text that is not Base64, read as `fromBase64` reads it. Otherwise it creates a foreground `lock`
 action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the stored file), the written
 `password` text or `null`, the written time lock's `timeLockMs` (encrypt only), the `choices`, and a `phase`, and waits
 with the instruction itself as its continuation:
@@ -1663,7 +1669,9 @@ with the instruction itself as its continuation:
 - `work`: the Player locks or opens with what it has. Nothing interrupts it: a due block runs once it settles.
 - `ask`: the Player's dialog asks the player first. An encrypt call with `choices` starts here, with `timeLockMs` the
   moment the dialog suggests for a chosen time lock; a decrypt call without `password:` comes here when its `work`
-  step answers `ask`, with an optional `notice`. Like an interaction, a due expiry block interrupts it, also through a
+  step answers `ask`, with an optional `notice`. A call with a password field starts here too, its field asking before
+  an encrypt call's lock dialog: every step of it has `passwordField`, `{ hint }` with the hint as field text or `null`
+  (`null` for other calls). Like an interaction, a due expiry block interrupts it, also through a
   late time observation, and once the block returns the dialog asks again: the step's `resumes` counts these returns,
   so the Player shows the dialog anew, without what was typed, also after a block that returned at once.
 
@@ -1684,19 +1692,22 @@ The host answers through `completeAction`:
 A locked file is accepted only when `ActionCompletionOptions.capturedMedia.holds(file, "file")` vouches for it, and an
 opened file when it holds it with the kind of its type; both join `storedFiles`. `ask` comes only from a decrypt step
 without a written password, its `notice` `"unreachable"` (a passed time lock whose relays the Player cannot reach) or,
-after a dialog, `"wrongPassword"`; from an encrypt step it comes only after a dialog whose typed answer the Player no
-longer has, as after a reload. The completion retains the settlement, with its `outcome` and the stored file, as
+after a dialog, `"wrongPassword"`; from an encrypt step, and from a step after a password field, it comes only after a
+dialog or field whose typed answer the Player no longer has, as after a reload, and without a notice. A password
+field's `ask` step takes no `cancelled`. The completion retains the settlement, with its `outcome` and the stored file, as
 `lastSettlement`, and hands the answer off, a list of the outcome and its text, file, or notice. The instruction then
 runs again with it, before any block: it gives the lock or the opened text or file (`TSR084` for a text too long), the
 default for `notOpened` or `cancelled`, fails with `TSR085` for `unreadable` and `TSR086` for `failed`, or waits again
-in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the dialog, which locks with the
-call's own openers and, for its `choices`, what the player gave. The player's typed
-password stays in the Player and never reaches the engine; the engine records only each step's outcome and result, so a
+in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the dialog or field, which locks
+with the call's own openers and, for its password field and `choices`, what the player gave; a password field's decrypt
+call opens with the typed password alone, a wrong one giving the default. The player's typed password stays in the
+Player and never reaches the engine; the engine records only each step's outcome and result, so a
 restore or a replay of recorded completions needs neither the network, the store, nor a secret.
 
 The Player (`player/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
-file store, and shows each `ask` step's dialog ([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what
-the player typed it keeps in memory for the step after the dialog. A step it cannot do, as outside a secure context,
+file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field
+([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what the player typed it keeps in memory for the
+step after the dialog or field. A step it cannot do, as outside a secure context,
 where the browser has no `crypto.subtle`, it answers `failed`; a stored file it cannot read, `unreadable`. The technical
 playground answers each lock step as `failed`.
 
@@ -2007,9 +2018,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 98 | Encryption (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction runs `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`, with temporaries or literals as operands and a decrypt call's `defaultTemporary`, after which its default follows as for a `fileStore`, which plan validation previously rejected, and an unlowered call of one of them is invalid; previously such a call failed with `TSR011` or called a host built-in of that name. |
-| Runtime snapshot | 85 | Encryption (owner decisions, 2026-10-13 and 2026-10-14): a foreground `lock` action in its `work` or `ask` step, an `ask` step suspended by an expiry block, its settlement with its outcome and stored file, and its answer handoff; previously validation rejected them. |
-| Checkpoint | 121 | The encryption plan and snapshot contracts. |
+| Instruction plan | 99 | `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): an interaction may be of kind `password`, prepared from the temporary of its hint, which plan validation previously rejected; a `lock` instruction has `passwordField`, `null` or `{ hint }` with a temporary or literal hint, which it previously lacked. |
+| Runtime snapshot | 86 | `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): a foreground `password` interaction, which the hash of the typed text completes, `{ kind: "submittedPassword", hash }`, and its result handoff of that hash, 64 lowercase hexadecimal digits; a `lock` action has `passwordField`, `null` or `{ hint }`, which it previously lacked. |
+| Checkpoint | 122 | The `askPassword` plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2041,6 +2052,11 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 98: Encryption (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction runs `encryptText`,
+  `encryptFile`, `decryptText`, and `decryptFile`, with temporaries or literals as operands and a decrypt call's
+  `defaultTemporary`, after which its default follows as for a `fileStore`, which plan validation previously rejected,
+  and an unlowered call of one of them is invalid; previously such a call failed with `TSR011` or called a host built-in
+  of that name.
 - Revision 97: Lazy defaults (owner decision, 2026-10-16): the `default:` of a list or dict `get`, a conversion,
   `toRegex`, `fromJson`, or `fromBase64` call runs only when the call needs it, after the call's other arguments,
   instead of before the call. A default that runs instructions follows its call or `load` as a `storeTemporary` with
@@ -2229,6 +2245,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 85: Encryption (owner decisions, 2026-10-13 and 2026-10-14): a foreground `lock` action in its `work` or
+  `ask` step, an `ask` step suspended by an expiry block, its settlement with its outcome and stored file, and its
+  answer handoff; previously validation rejected them.
 - Revision 84: Angles with a unit (owner decision, 2026-10-16): a value may be an angle `{ kind: "angle", degrees }`
   with a finite `degrees`, also as a choice option value or answer, which validation previously rejected.
 - Revision 83: The player as a speaker (owner-approved plan, 2026-10-15): `account`, the person fields the host gave at
@@ -2377,6 +2396,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 121: the encryption plan and snapshot contracts.
 - Revision 120: the lazy-default plan contract.
 - Revision 119: the angle plan and snapshot contracts.
 - Revision 118: the player-as-speaker plan and snapshot contracts.
