@@ -314,6 +314,51 @@ test("a load into a variable that held only null gives it the loaded value's typ
   ]);
 });
 
+test("a store of a load checks the type that another load of its key declares", () => {
+  // That type may take values that the store's default does not, such as text where the default is a number: the store
+  // is checked as a store of the loaded value, as an argument or a returned load is.
+  const declared = 'let d: (integer | string)? = load("key", default: null)\n';
+  assert.deepEqual(
+    errors(
+      `function hide(value) {\n    return value\n}\n${declared}let xs: integer?[] | string?[] = hide(["a", null])\nxs[1] = load("key", default: null)\nexit`,
+    ),
+    [
+      [
+        "TSV041",
+        "'xs' holds integer? values (integer?[]), so it cannot contain a whole number (integer) or text (string) or null. Keep it in a variable and check it first, as in: if value is integer? { ... }",
+        'load("key", default: null)',
+      ],
+    ],
+  );
+  for (const store of [
+    'let ys: integer?[] = [1]\nys[0] = load("key", default: null)',
+    'let counts = dict{ a: 1 }\ncounts["a"] = load("key", default: 0)',
+    'let hero = { level: 1 }\nhero.level = load("key", default: 0)',
+    'let level = 1\nlevel = load("key", default: 0)',
+  ])
+    assert.deepEqual(codes(`${declared}${store}\nexit`), ["TSV041"], store);
+  // A place that no value decided yet takes the declared type, also one that a read saw before the load, which a first
+  // check that does not know the key's type yet must not decide by the default.
+  const decided = `${declared}let o = { v: null }\nlet seen = o.v\no.v = load("key", default: 0)\nlet xs = []\nif xs.length > 0 {\n    say "\${xs[0]}"\n}\nxs.add(load("key", default: 0))\nlet ys: (integer | string)?[] = [null]\nys[0] = load("key", default: null)\n`;
+  const compiled = plan(`${decided}say "\${o.v} \${xs[0]} \${ys[0]}"\nexit`);
+  const result = run(
+    compiled,
+    createImmediatePacingRuntimeSnapshot(compiled, { scriptStorage: [{ key: "key", value: "a" }] }),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["a a a"],
+  );
+  assert.deepEqual(errors(`${decided}let level: integer = o.v otherwise 0\nexit`), [
+    [
+      "TSV041",
+      "'level' is declared as integer, so it cannot start as a whole number (integer) or text (string). Keep it in a variable and check it first, as in: if value is integer { ... }",
+      "o.v otherwise 0",
+    ],
+  ]);
+});
+
 test("the plan gives each load its type and each key the type its saves fit", () => {
   const compiled = plan(
     [
