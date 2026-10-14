@@ -433,6 +433,31 @@ test("the lock dialog takes keyholders' public keys, and the unlock dialog sends
   assert.ok(!recorded.includes(key.trim()));
 });
 
+test("the lock dialog's time lock may be switched off with only a keyholder's public key, which then alone opens the lock", async () => {
+  const keyholder = x25519Identity();
+  const player = new Harness(
+    [
+      'let locked = encryptText("only hers")',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal((await player.dialog()).kind, "lock");
+  player.answer({ password: null, openAtMs: null, publicKeys: [keyholder.recipient] });
+  // Its unlock dialog sends the age file, has no password field and no moment, and waits for nothing by itself.
+  const unlock = await player.dialog();
+  assert.ok(unlock.kind === "unlock" && unlock.ageText !== null && !unlock.password);
+  assert.deepEqual(unlock.moments, []);
+  assert.deepEqual(player.wakes, []);
+  const key = new TextDecoder().decode(openAge(unarmored(unlock.ageText), keyholder)!);
+  player.answer({ password: null, openAtMs: null, key });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "only hers");
+  const read = readLock(bytesFromBase64(String(values.locked))!);
+  assert.deepEqual([read?.passwords.length, read?.times.length, read?.ages.length], [0, 0, 1]);
+});
+
 test("publicKey: written in the script locks for the keyholders, and key: opens, while a wrong key gives the default", async () => {
   const keyholder = sshIdentity();
   const locking = new Harness(
