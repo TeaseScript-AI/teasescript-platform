@@ -964,15 +964,20 @@ operations stay as they are.
   itself is not captured or validated again. An operation started while another operation of the same session runs, such
   as from a builtin, throws `RuntimeSessionError`; through a builtin that becomes the usual `TSR012` failure.
 - **Instruction observer.** `run`, `stepToEvent`, `executeInstruction`, and `resumeRandomDraw` also take
-  `instructionObserver: { before(instruction, call), after(instruction, next, call) }`, both optional, for a host that
-  follows execution in order, such as a coverage explorer. `call` is the ID of the call frame that runs the instruction,
-  0 outside every call. `before` is called once due blocks were dispatched, right before a planned instruction runs;
-  returning `true` ends the operation there, which leaves the state that executing the same instructions one at a time
-  leaves. `after` is called once the instruction completed, with `next`, where execution continues; an instruction that
-  fails gets none, and one that a paused draw undid gets only its `after`, from the `resumeRandomDraw` that completes
-  it. While a callback runs, the session's operation is under way: `scopeOf` may be called, any other session call
-  throws `RuntimeSessionError`, and a callback that throws ends the session like any error thrown during an operation.
-  An observer that never returns `true` changes no result, event, state, or trace.
+  `instructionObserver: { before(instruction, call), after(instruction, next, call), dispatch(block, call) }`, each
+  optional, for a host that follows execution in order, such as a coverage explorer. `call` is the ID of the call frame
+  that runs the instruction or block, 0 outside every call. `before` is called once due blocks were dispatched, right
+  before a planned instruction runs. `dispatch` is called right before a queued timer, media, or button block starts,
+  with `block`, its function ID; starting one counts as one executed instruction, in `instructionsExecuted` and the
+  instruction budget, so every instruction the runtime counts has a `before` or a `dispatch`. Returning `true` from
+  either ends the operation there, which leaves the state that executing the same instructions one at a time leaves.
+  `after` is called once the instruction completed, with `next`, where execution continues; an instruction that fails
+  gets none, and one that a paused draw undid gets only its `after`, from the `resumeRandomDraw` that completes it.
+  While a callback runs, the session's operation is under way: `scopeOf` and `callFrameIds` may be called, any other
+  session call throws `RuntimeSessionError`, and a callback that throws ends the session like any error thrown during
+  an operation. In `after`, `callFrameIds()` no longer holds the calls the instruction ended, also those that `goto`,
+  `end`, or `exit` ended without a return. An observer that never returns `true` changes no result, event, state, or
+  trace.
 - **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, `outcome`
   where the snapshot API has one, and `randomChoices` and `randomRefusal` when it has them, as deeply frozen copies that
   share nothing with the session's state. `view()` returns the operational state a host acts on, also detached and
@@ -983,8 +988,9 @@ operations stay as they are.
   `randomDraw`, the draw execution is paused at or `null`, and `forcedRandomChoices`. `stageProjection()`, `mediaPlaybackProjection()`, and
   `permanentButtonProjection()` give what the functions of those names give for a snapshot, also detached and frozen.
   `callReturnInstructions()` gives where each active call continues when it returns, outermost first, in work
-  proportional to the call depth. For a debugger, `callStack()` gives each active call's kind, function, call site,
-  return position, scope depth, and the kind of block that interrupted it, also in work proportional to the call depth;
+  proportional to the call depth, and `callFrameIds()` gives each one's ID likewise. For a debugger, `callStack()` gives
+  each active call's kind, function, call site, return position, scope depth, and the kind of block that interrupted
+  it, also in work proportional to the call depth;
   `variablePreviews()` gives the globals, scopes, and kept scopes with bounded previews of their values, and the current
   text of each message with a handle, in work proportional to the number of variables and those texts, not to the size
   of the values; `temporalPresentation()` gives the date and time presentation in force; and `scopeOf(name)` gives the
