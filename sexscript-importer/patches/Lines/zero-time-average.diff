@@ -1,0 +1,16 @@
+--- a/scripts/Lines/Ancilla.groovy
++++ b/scripts/Lines/Ancilla.groovy
+@@ -453,8 +453,11 @@
+ show("In total you typed "+counter+" lines during the duration of this task, but made "+mistakes+" mistakes.");
+ wait(10);
+ setImage("Mlines/Ancilla/3.jpg")
+-show("Which means you averaged "+String.format("%.1f", counter/(time/60))+" per minute.");
+-chance = chance + (counter-mistakes)*(counter/(time/60)) - (Difficulty*multiplier)
++// Legacy bug: the task time can come out as 0 (the random part 0 and the chest answer), so no line was typed and
++// 0/0 failed; with no time, the average is 0 lines a minute (patch zero-time-average).
++def perMinute = time > 0 ? counter/(time/60) : 0.0
++show("Which means you averaged "+String.format("%.1f", perMinute)+" per minute.");
++chance = chance + (counter-mistakes)*perMinute - (Difficulty*multiplier)
+ Dchance = Difficulty * (getRandom((5)+5)-(Times/2)) //?? RTimes
+ wait(10);
+ show("Now let's see if you have earned that orgasm for the day slave...")

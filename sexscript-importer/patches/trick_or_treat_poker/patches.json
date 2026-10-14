@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "wheel-conditions",
+      "layer": "source",
+      "category": "b",
+      "reason": "Groovy shared the wheel's maps by reference, so the setup loop for (def field: mistress['wheel']) removed the actions whose condition is not met from the stacks the mistress holds; a TeaseScript loop variable holds a copy (ADR 0014), whose change would be lost (SX_PARAMETER_LIST_WRITE). The loop goes over the wheel by position and removes the action where the wheel holds it, so the same actions are left.",
+      "diff": "wheel-conditions.diff"
+    }
+  ]
+}

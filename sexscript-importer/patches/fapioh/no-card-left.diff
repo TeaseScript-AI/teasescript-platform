@@ -1,0 +1,16 @@
+--- a/scripts/fapioh/fapioh.groovy
++++ b/scripts/fapioh/fapioh.groovy
+@@ -270,6 +270,13 @@
+ 		show("Your list of completed cards has been reset, because, you finished all cards of your activated categories.")
+ 		wait(10)
+ 		imgPath = "fapioh"+getImgTest();
++		// Legacy bug: with no category activated there is no card even after the reset, and ">>>" failed on the
++		// card name of "fapiohreset"; the game ends instead (patch no-card-left).
++		if (imgPath == "fapiohreset") {
++			show("There are no cards in your activated categories. Change your category settings the next time you play.")
++			showButton("Ok")
++			break;
++		}
+ 	}
+ 
+ 	setImage(imgPath);
