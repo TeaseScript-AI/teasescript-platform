@@ -491,6 +491,22 @@ test("a speaker's custom property is checked where a value the compiler cannot k
   assert.deepEqual(sayTexts(result), ["3 4 low"]);
 });
 
+test("a speaker's custom property that a store may reach unchecked is checked where a known place reads it", () => {
+  // A speaker that the compiler cannot tell apart may be any speaker, so what it stores is not checked against one.
+  const message = `'n' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  for (const [setup, store, read] of [
+    ["let s = vera", 's.level = "bad"', "vera.level"],
+    ['function put(s: speaker) {\n    s.level = "bad"\n}', "put(vera)", "vera.level"],
+    ['function put(s) {\n    s.level = "bad"\n}', "put(vera)", "vera.level"],
+    ["let team = [vera]", 'team[0].level = "bad"', "vera.level"],
+    ['function put(s: speaker) {\n    s.data.v = "bad"\n}', "put(vera)", "vera.data.v"],
+    ["speaker vera", 'say "${speaker.items.add("bad")}"', "vera.items[1]"],
+  ] as const) {
+    const source = `speaker vera {\n    level: 0\n    data: { v: 0 }\n    items: [0]\n}\n${setup}\n${store}\nlet n: integer = ${read}\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, read], source);
+  }
+});
+
 test("values that fit their place pass the runtime check unchanged", () => {
   const result = runValidSource(
     PICK +

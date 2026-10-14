@@ -1200,6 +1200,24 @@ test("a speaker's custom property keeps the type of its first value like an obje
     ),
     [],
   );
+  // A store through a speaker that the compiler cannot tell apart leaves only that property without a type.
+  assert.deepEqual(
+    codes(
+      [
+        "speaker vera {",
+        "    level: 0",
+        "    mood: 0",
+        "}",
+        "function calm(s: speaker) {",
+        '    s.mood = "calm"',
+        "}",
+        "calm(vera)",
+        'vera.level = "high"',
+        "exit",
+      ].join("\n"),
+    ),
+    [["TSV041", '"high"']],
+  );
 });
 
 test("a function's result type comes from its return values, and returns of different types are an error", () => {

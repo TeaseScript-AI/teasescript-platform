@@ -334,6 +334,8 @@ export function checkTypes(
   const decided: Decided = new Map();
   const copies: Copies = new Map();
   const kept: KeptFallbacks = new Set();
+  // Likewise, a check that finds a custom speaker property that a store reaches unchecked starts again without its type.
+  const unchecked: UncheckedProperties = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
   // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
@@ -348,6 +350,7 @@ export function checkTypes(
       decided,
       copies,
       kept,
+      unchecked,
       storage,
       programs.length,
       onFile,
@@ -381,6 +384,7 @@ export function checkTypes(
       !checker.widenedMore &&
       !checker.decidedMore &&
       !checker.keptMore &&
+      !checker.uncheckedMore &&
       (!storageChanged || (!storageRead && !checker.copiedMore));
     let followed = false;
     if (last && storageChanged) {
@@ -446,6 +450,14 @@ type Copies = Map<Declaration, Map<string, string>>;
  * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
  */
 type KeptFallbacks = Set<Expression>;
+
+/**
+ * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
+ * as a parameter or the speaker of a message, or through a value of unknown type. Such a store is not checked, so no
+ * speaker keeps a type for a property of that name: its reads stay of unknown type, which a known place checks when the
+ * script runs (ADR 0021 rule 1.7), and stores into it are not checked.
+ */
+type UncheckedProperties = Set<string>;
 
 /** The type that decided a slot, and the store that decided it. */
 interface Decision {
@@ -1114,6 +1126,11 @@ class TypeChecker {
 
   readonly #kept: KeptFallbacks;
 
+  /** Whether this check found a custom speaker property that earlier checks did not (see {@link UncheckedProperties}). */
+  uncheckedMore = false;
+
+  readonly #unchecked: UncheckedProperties;
+
   /** The fallbacks of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
 
@@ -1268,6 +1285,7 @@ class TypeChecker {
     decided: Decided,
     copies: Copies,
     kept: KeptFallbacks,
+    unchecked: UncheckedProperties,
     storage: ReadonlyMap<string, StorageKeyType>,
     files: number,
     private readonly onFile: (file: number) => void,
@@ -1279,6 +1297,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#kept = kept;
+    this.#unchecked = unchecked;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
     this.#scriptCatalog =
@@ -1452,11 +1471,12 @@ class TypeChecker {
       return;
     }
     // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
-    // declaration stands for. A built-in property follows its own rules (see `#checkSpeakerProperty`).
+    // declaration stands for, which takes its parts' origins and earlier checks' widenings once it has them all. A
+    // built-in property follows its own rules (see `#checkSpeakerProperty`).
     const properties = new PropertyTable();
     const custom: Variable = {
       name: declaration.name.name,
-      type: this.#ownType(declaration, { kind: "object", properties }),
+      type: { kind: "object", properties },
       declaration,
       shared: false,
     };
@@ -1467,15 +1487,25 @@ class TypeChecker {
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
-      if (!BUILT_IN_SPEAKER_PROPERTIES.has(name))
-        this.#addProperty(properties, { root: declaration, path: [] }, name, property.value, type);
+      if (!this.#keepsType(name)) continue;
+      properties.set(
+        name,
+        decidedSlot(this.#newPlaceType(property.value, type), property.value.span),
+      );
+      this.#follow({ root: declaration, path: [name] }, type, property.value.span);
     }
+    this.#ownType(declaration, custom.type);
+  }
+
+  /** Whether a declared speaker keeps a type for its property `name`: a custom one that no store reaches unchecked. */
+  #keepsType(name: string): boolean {
+    return !BUILT_IN_SPEAKER_PROPERTIES.has(name) && !this.#unchecked.has(name);
   }
 
   /**
-   * The object of a declared speaker's custom properties when `receiver`, of type `type`, names that speaker and `name`
-   * is not one of its built-in properties; a speaker that the compiler cannot tell apart, such as a parameter, has
-   * properties of unknown type.
+   * The object of a declared speaker's custom properties when `receiver`, of type `type`, names that speaker and its
+   * property `name` keeps a type; a speaker that the compiler cannot tell apart, such as a parameter, has properties of
+   * unknown type.
    */
   #customProperties(
     receiver: Expression,
@@ -1484,32 +1514,32 @@ class TypeChecker {
     scope: Scope,
   ): StaticType | undefined {
     const node = unwrap(receiver);
-    if (
-      type.kind !== "speaker" ||
-      node.kind !== "identifier" ||
-      BUILT_IN_SPEAKER_PROPERTIES.has(name)
-    )
+    if (type.kind !== "speaker" || node.kind !== "identifier" || !this.#keepsType(name))
       return undefined;
     const entry = scope.resolve(node.name);
     return entry?.kind === "speaker" ? entry.custom.type : undefined;
   }
 
   /**
-   * Adds the property `name` to an object's `properties`, where a store of `expression` first gives it a value of type
-   * `assigned`, which it then keeps (rule 1.4); `owner` is where the object is inside a variable.
+   * Notes the custom speaker properties that a store into `target`, or an element added to it, may reach unchecked:
+   * a property read from a value that may be a speaker the compiler cannot tell apart, or of unknown type, on the way
+   * to `target` (see {@link UncheckedProperties}).
    */
-  #addProperty(
-    properties: PropertyTable,
-    owner: PlacePath | undefined,
-    name: string,
-    expression: Expression,
-    assigned: StaticType,
-  ): void {
-    const added = decidedSlot(this.#newPlaceType(expression, assigned), expression.span);
-    properties.set(name, added);
-    if (owner === undefined) return;
-    this.#follow(extendPath(owner, name), assigned, expression.span);
-    this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
+  #noteUncheckedStore(target: Expression, scope: Scope): void {
+    for (let node = unwrap(target); ;) {
+      if (node.kind === "propertyAccessExpression") {
+        const receiver = unwrap(node.object);
+        const named =
+          receiver.kind === "identifier" && scope.resolve(receiver.name)?.kind === "speaker";
+        const name = node.property.name;
+        if (!named && !this.#unchecked.has(name) && mayBe(this.#typeOf(receiver), "speaker")) {
+          this.#unchecked.add(name);
+          this.uncheckedMore = true;
+        }
+        node = receiver;
+      } else if (node.kind === "indexExpression") node = unwrap(node.object);
+      else return;
+    }
   }
 
   /**
@@ -2244,6 +2274,7 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
+      this.#noteUncheckedStore(target, scope);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
         this.#checkIndex(object, target.object, index, target.index);
@@ -2316,14 +2347,18 @@ class TypeChecker {
           }
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
-          if (statement.operator === "=")
-            this.#addProperty(
-              value.properties,
-              this.#pathOf(target.object, scope),
-              name,
-              statement.value,
-              assigned,
+          if (statement.operator === "=") {
+            const added = decidedSlot(
+              this.#newPlaceType(statement.value, assigned),
+              statement.value.span,
             );
+            value.properties.set(name, added);
+            const owner = this.#pathOf(target.object, scope);
+            if (owner !== undefined) {
+              this.#follow(extendPath(owner, name), assigned, statement.value.span);
+              this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
+            }
+          }
           // `+=` and `-=` read the property first; a speaker's missing property is a runtime error.
           else if (custom === undefined) this.#noteMissingAccess(target, receiver);
           return;
@@ -2892,8 +2927,8 @@ class TypeChecker {
     const root =
       entry?.kind === "variable"
         ? entry.variable.declaration
-        : // A speaker that receives a custom property stands for the object of its custom properties.
-          entry?.kind === "speaker" && !BUILT_IN_SPEAKER_PROPERTIES.has(steps.at(-1) ?? "")
+        : // A speaker that receives a property that keeps a type stands for the object of its custom properties.
+          entry?.kind === "speaker" && (steps.length === 0 || this.#keepsType(steps.at(-1)!))
           ? entry.custom.declaration
           : undefined;
     return root === undefined ? undefined : { root, path: steps.reverse() };
@@ -5670,6 +5705,7 @@ class TypeChecker {
     )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
+    if (method === "add" || method === "addAll") this.#noteUncheckedStore(callee.object, scope);
     // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
     if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
@@ -8915,7 +8951,9 @@ const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remain
 /** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
 function mayBe(
   type: StaticType,
-  ...kinds: ("timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list")[]
+  ...kinds: (
+    "timer" | "media" | "camera" | "messageHandle" | "permanentButton" | "list" | "speaker"
+  )[]
 ): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
@@ -9277,7 +9315,7 @@ const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
 
 /**
  * A speaker's built-in properties (V30 §37), which the runtime checks where it uses them; any other property is a custom
- * one, which keeps its type.
+ * one, which keeps its type unless a store reaches it unchecked (see {@link UncheckedProperties}).
  */
 const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
   ...SPEAKER_TEXT_PROPERTIES,
