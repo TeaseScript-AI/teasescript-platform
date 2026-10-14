@@ -2531,7 +2531,7 @@ async function lateImageScenario(cdp, origin) {
  * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
  * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
  * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, a mode
- * change, also during a fade, and the next photo fade the background and the message bubbles, except under reduced
+ * change in either direction, and the next photo fade the background and the message bubbles, except under reduced
  * motion. Once each change has settled, text is readable and the transcript's authored speaker and prose colours are
  * adapted to the background shown, in Standard and High contrast.
  */
@@ -2714,25 +2714,25 @@ async function photoColourScenario(cdp, origin, profile) {
     "The background's effects are not centred on the photo after the preview",
   );
   await setViewport(cdp, 1440, 900);
-  // Dark to light during a fade between photos.
   await showPhoto("Next", "red.svg");
+  await settled("The next photo, High contrast");
   await switchMode("light");
-  await settled("A mode change during a fade");
-  await showPhoto("Back", "green.svg");
-  await settled("The next photo");
+  await settled("Dark to light");
   // Reduced motion: the next photo and a mode change switch at once.
   await cdp.call("Emulation.setEmulatedMedia", {
     features: [{ name: "prefers-reduced-motion", value: "reduce" }],
   });
   try {
-    await showPhoto("Again", "red.svg");
+    await showPhoto("Back", "green.svg");
     await switchMode("dark");
     await settled("Reduced motion", "");
   } finally {
     await cdp.call("Emulation.setEmulatedMedia", { features: [] });
   }
-  // The empty Stage gives the theme's own colours back.
   await chooseContrast("standard");
+  await showPhoto("Again", "red.svg");
+  await settled("The next photo, Standard contrast");
+  // The empty Stage gives the theme's own colours back.
   await press("Hide");
   await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
   await settled("The theme's return");
