@@ -219,60 +219,97 @@ async function main() {
     try {
       await cdp.call("Page.enable");
       await cdp.call("Runtime.enable");
-      await navigate(cdp, `${origin}/`);
-      await setViewport(cdp, 1440, 900);
-      await selectPlayerExample(cdp);
-      await pointerScenario(cdp);
-      await selectPlayerExample(cdp);
-      await desktopScenario(cdp);
-      await constrainedChoicesScenario(cdp);
-      await replacedCheckpointScenario(cdp);
-      await setViewport(cdp, 390, 844);
-      await selectPlayerExample(cdp);
-      await narrowScenario(cdp);
-      await scriptStorageScenario(cdp, origin);
-      await demoScenario(cdp, origin);
-      await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
-      await packageScenario(cdp, origin);
-      await titleBarScenario(cdp, origin);
-      await keptSessionScenario(cdp, origin, profile);
-      await debugRoomScenario(cdp, origin);
-      await randomPickerScenario(cdp, origin);
-      await largeRandomPickerScenario(cdp, origin);
-      await askImageScenario(cdp, origin, profile);
-      const exported = await savedDataExportScenario(cdp, origin, profile);
-      await savedDataImportScenario(debugPort, origin, exported);
-      await debugExportScenario(cdp, origin, profile);
-      await developmentTimeScenario(cdp, origin);
-      await debugCountdownScenario(cdp, origin);
-      await debugNowScenario(cdp, origin);
-      await debugStorageScenario(cdp, origin, profile);
-      await debugStorageEditScenario(cdp, origin);
-      await debugHistoryStorageScenario(cdp, origin);
-      await debugRewindScenario(cdp, origin);
-      await sessionEndScenario(cdp, origin);
-      await wakeLockScenario(cdp, origin);
-      await errorCallPathScenario(cdp, origin);
-      await heldPressScenario(cdp, origin);
-      await missingMediaScenario(cdp, origin);
-      await audioOverlapScenario(cdp, origin);
-      await lateImageScenario(cdp, origin);
-      await photoColourScenario(cdp, origin, profile);
-      await photoVignetteScenario(cdp, origin);
-      await messageUpdatesScenario(cdp, origin);
-      await entrancesScenario(cdp, origin);
-      await askImageCameraScenario(cdp, origin, profile);
-      await cameraScenario(cdp, origin);
-      await viewfinderScenario(cdp, origin);
-      await permanentButtonsScenario(cdp, origin);
-      await formsScenario(cdp, origin);
-      await preselectScenario(cdp, origin);
-      await popupScenario(cdp, origin);
-      await openUrlScenario(cdp, origin, debugPort);
-      await exportTextScenario(cdp, origin, profile);
-      await formFieldsScenario(cdp, origin);
+      // The scenarios in the order they run. `PLAYER_SMOKE_ONLY=photoColour,viewfinder` runs only those named (each
+      // scenario's name without "Scenario"; the technical playground's steps are `playground`), in this order, with
+      // the ones they need: savedDataExport lists the saved data of keptSession's scripts too, and savedDataImport
+      // imports savedDataExport's file. Unset, everything runs.
+      let exported;
+      const scenarios = [
+        [
+          "playground",
+          async () => {
+            await navigate(cdp, `${origin}/`);
+            await setViewport(cdp, 1440, 900);
+            await selectPlayerExample(cdp);
+            await pointerScenario(cdp);
+            await selectPlayerExample(cdp);
+            await desktopScenario(cdp);
+            await constrainedChoicesScenario(cdp);
+            await replacedCheckpointScenario(cdp);
+            await setViewport(cdp, 390, 844);
+            await selectPlayerExample(cdp);
+            await narrowScenario(cdp);
+          },
+        ],
+        ["scriptStorage", () => scriptStorageScenario(cdp, origin)],
+        ["demo", () => demoScenario(cdp, origin)],
+        ["insecureOrigin", () => insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`)],
+        ["package", () => packageScenario(cdp, origin)],
+        ["titleBar", () => titleBarScenario(cdp, origin)],
+        ["keptSession", () => keptSessionScenario(cdp, origin, profile)],
+        ["debugRoom", () => debugRoomScenario(cdp, origin)],
+        ["randomPicker", () => randomPickerScenario(cdp, origin)],
+        ["largeRandomPicker", () => largeRandomPickerScenario(cdp, origin)],
+        ["askImage", () => askImageScenario(cdp, origin, profile)],
+        [
+          "savedDataExport",
+          async () => {
+            exported = await savedDataExportScenario(cdp, origin, profile);
+          },
+        ],
+        ["savedDataImport", () => savedDataImportScenario(debugPort, origin, exported)],
+        ["debugExport", () => debugExportScenario(cdp, origin, profile)],
+        ["developmentTime", () => developmentTimeScenario(cdp, origin)],
+        ["debugCountdown", () => debugCountdownScenario(cdp, origin)],
+        ["debugNow", () => debugNowScenario(cdp, origin)],
+        ["debugStorage", () => debugStorageScenario(cdp, origin, profile)],
+        ["debugStorageEdit", () => debugStorageEditScenario(cdp, origin)],
+        ["debugHistoryStorage", () => debugHistoryStorageScenario(cdp, origin)],
+        ["debugRewind", () => debugRewindScenario(cdp, origin)],
+        ["sessionEnd", () => sessionEndScenario(cdp, origin)],
+        ["wakeLock", () => wakeLockScenario(cdp, origin)],
+        ["errorCallPath", () => errorCallPathScenario(cdp, origin)],
+        ["heldPress", () => heldPressScenario(cdp, origin)],
+        ["missingMedia", () => missingMediaScenario(cdp, origin)],
+        ["audioOverlap", () => audioOverlapScenario(cdp, origin)],
+        ["lateImage", () => lateImageScenario(cdp, origin)],
+        ["photoColour", () => photoColourScenario(cdp, origin, profile)],
+        ["photoVignette", () => photoVignetteScenario(cdp, origin)],
+        ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
+        ["entrances", () => entrancesScenario(cdp, origin)],
+        ["askImageCamera", () => askImageCameraScenario(cdp, origin, profile)],
+        ["camera", () => cameraScenario(cdp, origin)],
+        ["viewfinder", () => viewfinderScenario(cdp, origin)],
+        ["permanentButtons", () => permanentButtonsScenario(cdp, origin)],
+        ["forms", () => formsScenario(cdp, origin)],
+        ["preselect", () => preselectScenario(cdp, origin)],
+        ["popup", () => popupScenario(cdp, origin)],
+        ["openUrl", () => openUrlScenario(cdp, origin, debugPort)],
+        ["exportText", () => exportTextScenario(cdp, origin, profile)],
+        ["formFields", () => formFieldsScenario(cdp, origin)],
+      ];
+      const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean);
+      const unknown = named.filter((name) => !scenarios.some(([known]) => known === name));
+      if (unknown.length > 0)
+        throw new Error(
+          `PLAYER_SMOKE_ONLY names no scenario: ${unknown.join(", ")}. Known: ${scenarios.map(([name]) => name).join(", ")}`,
+        );
+      const needs = { savedDataExport: ["keptSession"], savedDataImport: ["savedDataExport"] };
+      const selected = new Set();
+      const select = (name) => {
+        for (const need of needs[name] ?? []) select(need);
+        selected.add(name);
+      };
+      named.forEach(select);
+      for (const [name, run] of scenarios)
+        if (selected.size === 0 || selected.has(name)) await run();
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their use beside the timer rail on a short screen, and the dialog X, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, colours that follow the Stage photo, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
+        selected.size > 0
+          ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, the title bar's title and author with its controls' look, their use beside the timer rail on a short screen, and the dialog X, the start page, no composer focus after Continue on touch, and a session kept across a reload, the debug room with its copy and Reload and Reset session, the random draw picker, also with a file of thousands of lines, askImage by picker, drop, camera steps, and Skip, saved-data export and import from Settings, the error dialog with the failing line and call path and its debug export after a script error, the end dialog with its review placeholder and the start page after it, the screen wake lock while the session plays, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, a held press, missing, late and overlapping media, colours that follow the Stage photo, messages changed in place, entering messages and controls, and the camera, viewfinder, permanent buttons, askForm toggle, cycle, and typed-field, preselected-button, popup, openUrl, and exportText scenarios",
       );
     } finally {
       cdp.close();

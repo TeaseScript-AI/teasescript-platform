@@ -586,6 +586,10 @@ The playground and the Player's repository demo have a reproducible Chromium smo
 node tools/player-browser-smoke.mjs
 ```
 
+`PLAYER_SMOKE_ONLY=photoColour,viewfinder` runs only the named scenarios (each scenario function's name without
+`Scenario`; the technical playground is `playground`), in their usual order and with the scenarios they need; an
+unknown name fails and lists the known ones. Without it, everything runs.
+
 It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
 gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
 playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
