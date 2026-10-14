@@ -554,13 +554,15 @@ async function complete(
     suppressComposerRefocus = false;
   }
 }
-// The skippable pacing gate settles from Space in the empty composer or a stationary primary
-// click/tap on unused Player space. Controls, message text and selections keep their own behavior.
-const pacingSkipExclusions = [
+// The Player's controls and fields, which keep their own clicks and keys.
+const playerControls = [
   "button, a, input, textarea, select, label, summary, [contenteditable]",
   "[role=button], [role=link], [role=menuitem], [role=separator], [role=slider], [role=tab]",
-  "[data-slot=bubble], .prose, .session-event, [data-slot=scroll-area-scrollbar]",
 ].join(", ");
+// The skippable pacing gate settles from Space in the empty composer or a stationary primary click/tap on Player space
+// that is no control, such as a message, its avatar or unused space. Controls, the composer, the scrollbar and
+// selections keep their own behavior.
+const pacingSkipExclusions = `${playerControls}, .composer-container, [data-slot=scroll-area-scrollbar]`;
 function textSelected() {
   const selection = document.getSelection();
   return !!selection && !selection.isCollapsed;

@@ -801,9 +801,14 @@ async function demoScenario(cdp, origin) {
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
 
-// A skippable message's pacing settles from a primary press on unused Player space or from Space in the empty
-// composer. A Player control, a press on message text, and Space while the composer holds text keep their own behavior.
-// It runs as the demo's session message starts its 7.8 s default pacing, so within it only a skip shows the next one.
+/** The latest message in the conversation. */
+function latestMessage() {
+  return `[...document.querySelectorAll('[data-slot=bubble], .prose')].at(-1)`;
+}
+
+// A skippable message's pacing settles from a primary press on a message or unused Player space, or from Space in the
+// empty composer. A Player control and Space while the composer holds text keep their own behavior. It runs as the
+// demo's session message starts its 7.8 s default pacing, so within it only a skip shows the next one.
 async function pacingInputOwnershipCheck(cdp) {
   const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   const gate = await value(cdp, messageCount);
@@ -818,17 +823,6 @@ async function pacingInputOwnershipCheck(cdp) {
   await unchanged("Activating a Player control also skipped the message's pacing");
   await physicalClick(cdp, "[data-theme-mode-control]");
   await waitFor(cdp, `${theme} === ${JSON.stringify(initialTheme)}`);
-  // Message text is not unused space: a stationary press on it is reading, not a skip.
-  const latestMessage = `[...document.querySelectorAll('[data-slot=bubble], .prose')].at(-1)`;
-  const messagePoint = await pressPoint(cdp, latestMessage, "the latest message");
-  for (const type of ["mousePressed", "mouseReleased"])
-    await cdp.call("Input.dispatchMouseEvent", {
-      type,
-      ...messagePoint,
-      button: "left",
-      clickCount: 1,
-    });
-  await unchanged("A press on message text skipped the message's pacing");
   const input = `document.querySelector('[data-composer-input]')`;
   await focusSeen(cdp, input);
   await cdp.call("Input.insertText", { text: "x" });
@@ -836,12 +830,12 @@ async function pacingInputOwnershipCheck(cdp) {
   await unchanged("Space in a composer holding text skipped pacing");
   assertEqual(await value(cdp, `${input}.value`), "x ", "Space in the composer must type a space");
   await typeInto(cdp, "[data-composer-input]", "");
-  await physicalClick(cdp, ".player-stage");
+  await physicalClickOn(cdp, latestMessage(), "the latest message");
   await waitFor(
     cdp,
     `${messageCount} > ${gate}`,
     1_000,
-    "A press on unused space did not skip pacing",
+    "A press on a message did not skip pacing",
   );
 }
 
