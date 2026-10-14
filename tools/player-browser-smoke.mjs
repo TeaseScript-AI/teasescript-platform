@@ -1421,8 +1421,8 @@ async function keptSessionScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, a Next option in the A/B tests
- * panel changes the Player's colours, and the empty Stage after `hideImage` gives
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, the Next options of the photo
+ * accent, fade time and blending A/B tests change the Player, and the empty Stage after `hideImage` gives
  * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
  * in both modes and in Standard and High contrast.
  */
@@ -1508,6 +1508,24 @@ async function photoColourScenario(cdp, origin, profile) {
   );
   await physicalClick(cdp, nextAccent);
   await waitFor(cdp, `JSON.stringify(${roles}) === ${JSON.stringify(beforeVariant)}`);
+  // The photo colour fade's two tests change the Player too: the fade time its duration, the blending its colours.
+  const fadeDuration = `document.documentElement.style.getPropertyValue('--photo-fade-duration')`;
+  for (const [test, changed] of [
+    ["Photo colour fade time", fadeDuration],
+    ["Photo colour blending", `JSON.stringify(${roles})`],
+  ]) {
+    const next = `[aria-label="Next option: ${test}"]`;
+    const before = await value(cdp, changed);
+    await physicalClick(cdp, next);
+    await waitFor(
+      cdp,
+      `${changed} !== ${JSON.stringify(before)}`,
+      3_000,
+      `The ${test} Next option left the Player as it was`,
+    );
+    await physicalClick(cdp, next);
+    await waitFor(cdp, `${changed} === ${JSON.stringify(before)}`);
+  }
   await physicalClick(cdp, abTests);
   await waitFor(cdp, `!document.querySelector('[data-tool="A/B tests"]')`);
   await switchMode("dark");

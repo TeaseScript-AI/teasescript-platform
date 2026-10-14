@@ -283,8 +283,9 @@ available in every build to every user. It currently offers:
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
   - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
     photo from which a swatch counts as large enough (default 3 %);
-  - **Photo colour transition:** A, 0.6 s blended in Oklab (default), or B, 0.3 s blended in sRGB
-    ([Stage and media presentation](#stage-and-media-presentation)).
+  - **Photo colour fade time:** A, 0.6 s (default), or B, 0.3 s, for the photo colour fade
+    ([Stage and media presentation](#stage-and-media-presentation));
+  - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
 
 Apart from the Debug menu, these settings and the A/B test choices are presentation preferences, not canonical runtime
 state. The Player keeps them in this browser's local storage
@@ -644,8 +645,9 @@ the previous photo's colour stays; a camera view or an image request's preview o
 Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
 colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
 a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
-message bubbles, the buttons, the accent, and the composer. The Photo colour transition A/B test sets the fade: A, the
-default, 0.6 s blended in Oklab; B, as in Milovana's player, 0.3 s blended in sRGB. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+message bubbles, the buttons, the accent, and the composer. Two A/B tests set the fade, each B as in Milovana's player:
+Photo colour fade time, 0.6 s (A, the default) or 0.3 s (B), and Photo colour blending, in Oklab (A, the default) or in
+sRGB (B). Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content

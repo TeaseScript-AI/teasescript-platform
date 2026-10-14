@@ -6,11 +6,12 @@ import { photoColours, type PhotoColourChoice } from "../../theme/photo-theme.js
 // Photo colours (PLAYER-UI.md "Stage and media presentation"): the Stage photo colours the Player.
 
 /**
- * How long the Player's colours take to fade to a new photo's colour, per the Photo colour transition A/B test: A, 0.6 s
- * blended in Oklab, or B, 0.3 s blended in sRGB like Milovana's player (`usePlayerTheme.ts` writes the colours for it).
+ * How long the Player's colours take to fade to a new photo's colour, in milliseconds, per the Photo colour fade time A/B
+ * test: A, 0.6 s, or B, 0.3 s like Milovana's player. The Photo colour blending A/B test sets how the colours blend
+ * (`usePlayerTheme.ts`).
  */
-const PHOTO_TRANSITIONS = { oklab: 600, srgb: 300 } as const;
-export type PhotoTransition = keyof typeof PHOTO_TRANSITIONS;
+const PHOTO_FADE_TIMES = { "0.6s": 600, "0.3s": 300 } as const;
+export type PhotoFadeTime = keyof typeof PHOTO_FADE_TIMES;
 
 /** The Stage's photo, not an image request's preview over it. */
 function stageImage(stage: HTMLElement | undefined) {
@@ -72,7 +73,7 @@ export function usePhotoColour(
   mode: Readonly<Ref<"light" | "dark">>,
   /** The swatch family the colours come from; another choice maps the same swatches again, without measuring. */
   choice: Readonly<Ref<PhotoColourChoice>>,
-  transition: Readonly<Ref<PhotoTransition>>,
+  fadeTime: Readonly<Ref<PhotoFadeTime>>,
   elements: {
     readonly canvas: Readonly<Ref<HTMLElement | undefined>>;
     readonly stage: Readonly<Ref<HTMLElement | undefined>>;
@@ -90,14 +91,14 @@ export function usePhotoColour(
   watch(colours, () => {
     clearTimeout(fadeTimer);
     fading.value = true;
-    fadeTimer = setTimeout(() => (fading.value = false), PHOTO_TRANSITIONS[transition.value] + 100);
+    fadeTimer = setTimeout(() => (fading.value = false), PHOTO_FADE_TIMES[fadeTime.value] + 100);
   });
   watchEffect(() => {
     const vignette = colours.value?.vignette;
     root.toggleAttribute("data-photo-colour", vignette !== undefined);
     if (vignette === undefined) root.style.removeProperty("--photo-vignette");
     else root.style.setProperty("--photo-vignette", String(vignette));
-    root.style.setProperty("--photo-fade-duration", `${PHOTO_TRANSITIONS[transition.value]}ms`);
+    root.style.setProperty("--photo-fade-duration", `${PHOTO_FADE_TIMES[fadeTime.value]}ms`);
     root.toggleAttribute("data-photo-fade", fading.value);
   });
   onBeforeUnmount(() => {
