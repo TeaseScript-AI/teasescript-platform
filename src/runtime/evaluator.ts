@@ -1294,10 +1294,19 @@ export class Evaluator {
           )
         );
       }
-      if (isSpeakerReference(location.binding.value)) {
+      // A speaker's own global names it for the whole session, so the compiler rejects an assignment to it (TSV004). A
+      // variable that holds a speaker is an ordinary variable.
+      const held = location.binding.value;
+      if (
+        location.frame.id === GLOBAL_SCOPE_ID &&
+        isSpeakerReference(held) &&
+        held.identifier === target.name
+      ) {
         throw fault(
           "TSR034",
-          `Cannot replace speaker '${target.name}': a speaker stays the same for the whole session. Change its properties instead, such as '${target.name}.name'.`,
+          internalFault(
+            `The plan assigns to speaker '${target.name}', whose name always refers to that speaker.`,
+          ),
           target.span,
         );
       }

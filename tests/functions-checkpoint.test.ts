@@ -650,6 +650,57 @@ test("restores prepared speaker aliases before and after nested identity mutatio
   );
 });
 
+test("restores a prepared receiver that follows its speaker after a call replaces its holder", () => {
+  const speakers = [
+    "speaker vera { items: [1] }",
+    "speaker anna { items: [2] }",
+    "speaker dora { roles: dict{ boss: vera } }",
+  ];
+  const throughValues = [
+    "let box = { who: dora }",
+    "function change { box = { who: anna }\ndora.roles.clear()\nwait 1 s\nreturn 5 }",
+  ];
+  const scenarios: readonly (readonly [readonly string[], string])[] = [
+    [
+      [
+        "let current = vera",
+        "function change { wait 1 s\ncurrent = anna\nwait 1 s\nreturn 5 }",
+        "current.items.add(change())",
+      ],
+      "[1,5] [2]",
+    ],
+    [[...throughValues, "box.who.roles.values[0].items.add(change())"], "[1,5] [2]"],
+    // The receiver is vera itself, so it keeps vera's reference.
+    [[...throughValues, "box.who.roles.values[0].items = [change()]"], "[5] [2]"],
+  ];
+  // Whether each receiver that follows vera's global keeps a copy of its root, as the plan decides.
+  const keptRoots = new Set<boolean>();
+  for (const [statements, said] of scenarios) {
+    const { boundaries, events } = assertRuntimeResumeEquivalent(
+      [
+        ...speakers,
+        ...statements,
+        'say "${toJson(vera.items)} ${toJson(anna.items)}"',
+        "exit",
+      ].join("\n"),
+    );
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      [said],
+    );
+    for (const snapshot of boundaries)
+      for (const frame of snapshot.callFrames)
+        for (const temporary of frame.callerTemporaries)
+          if (
+            serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+            serializedObjectProperty(temporary.value, "rootName") === "vera" &&
+            serializedObjectProperty(temporary.value, "detached") === false
+          )
+            keptRoots.add(serializedObjectProperty(temporary.value, "capturedRoot") !== undefined);
+  }
+  assert.deepEqual([...keptRoots].sort(), [false, true]);
+});
+
 test("restores retained prepared list items across structural index shifts", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(
     [
