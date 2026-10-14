@@ -1,7 +1,15 @@
 import { helperDefinitionOrder } from "./helpers.ts";
-import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
+import type { IrExpression, IrFunctionParameter, IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
+
+type IrNode = IrStatement | IrExpression;
+/** What declares a variable: a `let`, a parameter, or a loop. */
+type Owner = IrStatement | IrFunctionParameter | { loop: string };
+
+function isIrNode(value: unknown): value is IrNode {
+  return typeof value === "object" && value !== null && "kind" in value;
+}
 
 /**
  * Legacy Unix time as TeaseScript's time model (owner decision 2026-10-13). Legacy getTime() gave the Unix seconds and
@@ -22,7 +30,7 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * files, and the keys a computed key may name.
  */
 export function withNativeTime(programs: readonly TimeProgram[]): IrStatement[][] {
-  const variables = new Map<object, Variable>();
+  const variables = new Map<Owner, Variable>();
   const declared = new Map<IrStatement, Variable>();
   const keys = new Map<string, Variable>();
   const open = computedKeyPrefixes(programs.map((program) => program.statements));
@@ -148,7 +156,7 @@ class Scope {
 }
 
 /** `getAbsoluteDateTime().toSeconds()` or `.toMilliseconds()`: the legacy clock, in its unit. */
-function clockUnit(value: IrExpression): Unit | null {
+function clockUnit(value: IrNode): Unit | null {
   if (
     value.kind !== "methodCall" ||
     value.arguments.length !== 0 ||
@@ -163,7 +171,7 @@ function clockUnit(value: IrExpression): Unit | null {
 function mentionsClock(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(mentionsClock);
   if (typeof value !== "object" || value === null) return false;
-  if ("kind" in value && clockUnit(value as IrExpression) !== null) return true;
+  if (isIrNode(value) && clockUnit(value) !== null) return true;
   return Object.values(value).some(mentionsClock);
 }
 
@@ -171,7 +179,7 @@ function mentionsKey(value: unknown, keys: ReadonlyMap<string, Variable>): boole
   if (Array.isArray(value)) return value.some((item) => mentionsKey(item, keys));
   if (typeof value !== "object" || value === null) return false;
   if ("kind" in value) {
-    const key = storedKey(value as IrStatement & IrExpression);
+    const key = isIrNode(value) ? storedKey(value) : null;
     if (key !== null && timeOf(keys.get(key)) !== null) return true;
   }
   return Object.values(value).some((item) => mentionsKey(item, keys));
@@ -185,14 +193,14 @@ const NUMBER_LOADS = new Set([
 ]);
 
 /** The key a save, a deletion, a read, or a number-reading helper names, or undefined. */
-function keyExpression(value: IrStatement | IrExpression): IrExpression | undefined {
+function keyExpression(value: IrNode): IrExpression | undefined {
   if (value.kind === "save" || value.kind === "delete" || value.kind === "load") return value.key;
   if (value.kind === "call" && NUMBER_LOADS.has(value.name)) return value.positional[0];
   return undefined;
 }
 
 /** The written key a save, a deletion, a read, or a number-reading helper names, or null. */
-function storedKey(value: IrStatement | IrExpression): string | null {
+function storedKey(value: IrNode): string | null {
   const key = keyExpression(value);
   return key?.kind === "literal" && typeof key.value === "string" ? key.value : null;
 }
@@ -222,8 +230,8 @@ function computedKeyPrefixes(programs: readonly IrStatement[][]): string[] | nul
     if (Array.isArray(value)) return value.forEach(visit);
     if (typeof value !== "object" || value === null) return;
     // A generated helper reads the key its caller gives.
-    if ("kind" in value && helperDefinitionOrder(value as IrStatement) >= 0) return;
-    const key = "kind" in value ? keyExpression(value as IrStatement | IrExpression) : undefined;
+    if (isIrNode(value) && value.kind === "function" && helperDefinitionOrder(value) >= 0) return;
+    const key = isIrNode(value) ? keyExpression(value) : undefined;
     if (key !== undefined && !(key.kind === "literal" && typeof key.value === "string")) {
       const prefix = writtenPrefix(key);
       if (prefix === "") any = true;
@@ -423,8 +431,8 @@ function comparable(operator: string, left: Kind, right: Kind): boolean {
   if (left === "null" || right === "null") return operator === "==" || operator === "!=";
   if (typeof left === "object" && typeof right === "object")
     return left.kind === right.kind && left.unit === right.unit;
-  const time = typeof left === "object" ? left : (right as Time);
-  return time.kind === "duration";
+  const time = typeof left === "object" ? left : typeof right === "object" ? right : null;
+  return time?.kind === "duration";
 }
 
 /** The variables and keys of a value that hold a time, which keep their numbers where the value cannot be a time. */
@@ -449,13 +457,13 @@ function demote(value: IrExpression, scope: Scope): void {
 function analyse(
   statements: IrStatement[],
   shared: boolean,
-  variables: Map<object, Variable>,
+  variables: Map<Owner, Variable>,
   declared: Map<IrStatement, Variable>,
   keys: KeyFor,
 ): void {
   const root = new Scope(null, keys);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
-  const variableFor = (key: object, name: string, native: boolean): Variable => {
+  const variableFor = (key: Owner, name: string, native: boolean): Variable => {
     let variable = variables.get(key);
     if (variable === undefined) {
       variable = { name, native, time: null, writes: [] };
@@ -542,7 +550,7 @@ function analyse(
       return;
     }
     if (momentMethod(value, scope)) {
-      operands((value as Extract<IrExpression, { kind: "methodCall" }>).target, scope);
+      if (value.kind === "methodCall") operands(value.target, scope);
       return;
     }
     mapChildren(value, (child) => {
@@ -624,9 +632,12 @@ function analyse(
       case "for": {
         plain(item.collection, scope);
         const loop = new Scope(scope);
-        loop.names.set(item.variable, variableFor({}, item.variable, false));
+        loop.names.set(item.variable, variableFor({ loop: item.variable }, item.variable, false));
         if (item.valueVariable !== undefined)
-          loop.names.set(item.valueVariable, variableFor({}, item.valueVariable, false));
+          loop.names.set(
+            item.valueVariable,
+            variableFor({ loop: item.valueVariable }, item.valueVariable, false),
+          );
         walk(item.body, loop);
         return;
       }
@@ -659,7 +670,7 @@ function analyse(
 /** A program's statements with the times the analysis settled written as moments and durations. */
 function rewrite(
   statements: IrStatement[],
-  variables: Map<object, Variable>,
+  variables: Map<Owner, Variable>,
   declared: Map<IrStatement, Variable>,
   keys: KeyFor,
   diagnostics: MigrationDiagnostic[],
@@ -699,7 +710,8 @@ function rewrite(
     if (value.kind === "binary" && ARITHMETIC.has(value.operator)) {
       const left = kindOf(value.left, scope);
       const right = kindOf(value.right, scope);
-      const unit = typeof left === "object" ? left.unit : (right as Time).unit;
+      const unit =
+        typeof left === "object" ? left.unit : typeof right === "object" ? right.unit : "s";
       const side = (part: IrExpression, kind: Kind): IrExpression =>
         typeof kind === "object"
           ? time(part, scope)
