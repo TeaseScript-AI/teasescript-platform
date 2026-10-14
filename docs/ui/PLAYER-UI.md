@@ -602,10 +602,11 @@ Standard image/video-like presentation:
 - places the Stage and the transcript in one background: a single layer behind both, in which the media and the chat
   both sit. The background has no separate Stage or chat colour and no fade that marks where the Stage ends.
   Media-derived colour and decorative effects, such as a glow or vignette, belong to that one background, centred on
-  or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. An accepted
-  author/media capability may still provide an explicit stage/background presentation. Tool panels and Player
-  controls keep their own materials. Stage and transcript remain separate regions with separate content and
-  scrolling ownership;
+  or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. Readable contrast is
+  required once a change has settled; a short colour transition, such as the 0.6 s photo fade, may pass through lower
+  contrast. An accepted author/media capability may still provide an explicit stage/background presentation. Tool
+  panels and Player controls keep their own materials. Stage and transcript remain separate regions with separate
+  content and scrolling ownership;
 - uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
   scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
