@@ -156,8 +156,8 @@ Player goes offline later.
   later.
 - **Offline locking** works once the time lock's code is loaded, which a script's session does at its start.
 - **The owner of the private key learns the lock's key.** The unlock key they send back opens that lock for whoever
-  reads it, as a password would; sending it through a chat that others read gives it to them too. A public key the player pastes may belong to
-  someone else than they think; the Player cannot tell.
+  reads it, as a password would; sending it through a chat that others read gives it to them too. A public key the
+  player pastes may belong to someone else than they think; the Player cannot tell.
 - **AES-GCM is not key-committing.** Whoever makes a lock could give its openers different keys that open different
   content; that protects nothing anyone else locked, so it is no weakness here.
 - **A plain HTTP Player cannot encrypt.** Browsers offer WebCrypto only in a secure context; there every call fails with

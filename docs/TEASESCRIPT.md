@@ -150,8 +150,8 @@ All basic interactions are mandatory and blocking, with no cancellation result. 
 `boolean`; `askDate`, `askTime`, and
 `askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls; `askPassword` returns the
 SHA-256 of the password typed in a masked field, as `hashText` gives it, and asks for the password itself when written
-directly as the `password:` of an encrypt or decrypt call. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
-optional `timeout:` ends the wait without a chat message; see
+directly as the `password:` of an encrypt or decrypt call. `showButton` used as a value returns the elapsed waiting
+time as a `duration`, and an optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction, whose timeout stands still meanwhile; handler `exit` discards its
 instruction without producing a result or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
