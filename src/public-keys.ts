@@ -1,4 +1,4 @@
-// A keyholder's public key as a lock takes it (V30 §13): an age X25519 recipient, `age1…` in Bech32, or an OpenSSH
+// A public key as a lock takes it (V30 §13): an age X25519 recipient, `age1…` in Bech32, or an OpenSSH
 // Ed25519 key, `ssh-ed25519 AAAA… comment`. Pure and synchronous, so the compiler checks a written key and the engine a
 // key the script computes; the Player reads the same bytes to lock with them.
 

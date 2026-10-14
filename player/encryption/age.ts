@@ -1,5 +1,5 @@
 // The public key opener's age file (https://age-encryption.org/v1): a standard age v1 file whose content is the lock's
-// content key, which the keyholder opens with the `age` tool and their own identity. X25519, HKDF-SHA-256, HMAC-SHA-256,
+// content key, which the owner of a private key opens with the `age` tool and that key. X25519, HKDF-SHA-256, HMAC-SHA-256,
 // and randomness are the browser's WebCrypto; ChaCha20-Poly1305, which WebCrypto lacks, comes from Noble. An
 // `ssh-ed25519` recipient's X25519 form is read with the key (`src/public-keys.ts`). The Player loads this module only
 // when a script locks.

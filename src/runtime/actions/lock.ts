@@ -252,7 +252,7 @@ function startLock(
   // the password field of `password: askPassword(...)` asked for its password.
   if (openers.choices.length > 0 || passwordField !== null)
     return dialogStep(call, text, openers, passwordField, snapshot, span);
-  return workStep(text, openers.password, openers.timeLockMs, openers);
+  return workStep(text, openers.password, openers.timeLockMs, keys);
 }
 
 /**

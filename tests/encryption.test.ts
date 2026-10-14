@@ -113,7 +113,10 @@ class FakePlayer {
           : action.timeLockMs,
       };
       const text = this.#lock(lock);
-      this.publicKeys.set(text, typed === null ? action.publicKeys : (typed.publicKeys ?? []));
+      this.publicKeys.set(
+        text,
+        action.choices.includes("publicKey") ? (typed?.publicKeys ?? []) : action.publicKeys,
+      );
       this.keys.set(text, `key ${this.keys.size + 1}`);
       return action.call === "encryptText"
         ? { kind: "locked", text }
@@ -255,7 +258,7 @@ const asked = (played: Played) =>
 test("encryptText locks with a written password and no time lock, and decryptText opens it", () => {
   const played = play(
     [
-      'let locked = encryptText("corner time", password: "corner", timeLock: false)',
+      'let locked = encryptText("corner time", password: "corner", publicKey: false, timeLock: false)',
       'let opened = decryptText(locked, password: "corner", default: null)',
       'let wrong = decryptText(locked, password: "Corner", default: "no")',
       "exit",
@@ -278,9 +281,9 @@ test("timeLock: gives the time lock's moment, and false leaves an opener out", (
   const played = play(
     [
       'let friday = toAbsoluteDateTime("2026-10-16T18:00:00Z")',
-      'let timed = encryptText("a", password: false, timeLock: getAbsoluteDateTime() + 3 days)',
-      'let both = encryptText("b", password: "p", timeLock: friday)',
-      'let passwordOnly = encryptText("c", password: "p", timeLock: false)',
+      'let timed = encryptText("a", password: false, publicKey: false, timeLock: getAbsoluteDateTime() + 3 days)',
+      'let both = encryptText("b", password: "p", publicKey: false, timeLock: friday)',
+      'let passwordOnly = encryptText("c", password: "p", publicKey: false, timeLock: false)',
       "exit",
     ].join("\n"),
   );
@@ -300,7 +303,7 @@ test("a time lock opens without asking once its moment passed, and the unlock di
   player.dialogs.push("cancel");
   const played = play(
     [
-      'let locked = encryptText("later", password: false, timeLock: getAbsoluteDateTime() + 1 hour)',
+      'let locked = encryptText("later", password: false, publicKey: false, timeLock: getAbsoluteDateTime() + 1 hour)',
       'let early = decryptText(locked, default: "not yet")',
       "wait 2 h",
       'let late = decryptText(locked, default: "not yet")',
@@ -341,7 +344,7 @@ test("without any opener written the lock dialog asks for each, suggesting 7 day
     password: "typed",
     timeLockMs: null,
   });
-  const both = ["timeLock", "password"];
+  const both = ["timeLock", "password", "publicKey"];
   assert.deepEqual(asked(played), [
     ["encryptText", "ask", null, WALL_CLOCK_MS + 7 * DAY_MS, false, null, both],
     ["encryptText", "work", null, null, true, null, both],
@@ -363,10 +366,10 @@ test("an opener written true is chosen in the lock dialog, which asks for those 
   );
   const played = play(
     [
-      'let a = encryptText("a", password: "given", timeLock: true)',
-      'let b = encryptText("b", password: true, timeLock: toAbsoluteDateTime("2026-10-16T18:00:00Z"))',
+      'let a = encryptText("a", password: "given", publicKey: false, timeLock: true)',
+      'let b = encryptText("b", password: true, publicKey: false, timeLock: toAbsoluteDateTime("2026-10-16T18:00:00Z"))',
       "let wanted = 1 < 2",
-      'let c = encryptText("c", password: wanted, timeLock: false)',
+      'let c = encryptText("c", password: wanted, publicKey: false, timeLock: false)',
       "exit",
     ].join("\n"),
     player,
@@ -395,7 +398,7 @@ test("a wrong password in the unlock dialog asks again with a notice, and a canc
   player.dialogs.push({ password: "wrong" }, "cancel");
   const played = play(
     [
-      'let locked = encryptText("secret", password: "right", timeLock: false)',
+      'let locked = encryptText("secret", password: "right", publicKey: false, timeLock: false)',
       'let opened = decryptText(locked, default: "closed")',
       "exit",
     ].join("\n"),
@@ -451,7 +454,7 @@ test("password: askPassword(...) asks in the password field, says its question, 
   );
   const played = play(
     [
-      'let locked = encryptText("corner time", password: askPassword("Choose a code", hint: "The code"), timeLock: getAbsoluteDateTime() + 7 days)',
+      'let locked = encryptText("corner time", password: askPassword("Choose a code", hint: "The code"), publicKey: false, timeLock: getAbsoluteDateTime() + 7 days)',
       'let opened = decryptText(locked, password: askPassword "Your code?", default: null)',
       'let wrong = decryptText(locked, password: (askPassword("Again?")), default: "no")',
       "exit",
@@ -504,9 +507,10 @@ test("a password field and the openers written true ask in one step, and the loc
   const player = new FakePlayer();
   player.dialogs.push({ password: "typed words", timeLockMs: WALL_CLOCK_MS + 2 * DAY_MS });
   const played = play(
-    ['let both = encryptText("both", password: askPassword("Code?"), timeLock: true)', "exit"].join(
-      "\n",
-    ),
+    [
+      'let both = encryptText("both", password: askPassword("Code?"), publicKey: false, timeLock: true)',
+      "exit",
+    ].join("\n"),
     player,
   );
   assert.deepEqual(player.locks.get(String(variables(played).both)), {
@@ -524,7 +528,7 @@ test("a password field and the openers written true ask in one step, and the loc
   );
   // The password is the field's, so the dialog never chooses it, and the step keeps its field.
   const plan = compileValidPlan(
-    'let both = encryptText("both", password: askPassword("Code?"), timeLock: true)\nexit',
+    'let both = encryptText("both", password: askPassword("Code?"), publicKey: false, timeLock: true)\nexit',
   );
   const started = run(
     plan,
@@ -547,7 +551,7 @@ test("a password field says its question where password: stands, and asks again 
     "    return text",
     "}",
     'let opened = decryptText(shown("bG9jaw=="), password: askPassword(shown("Code?")), default: shown("none"))',
-    'let locked = encryptText("x", password: askPassword("New code"), timeLock: false)',
+    'let locked = encryptText("x", password: askPassword("New code"), publicKey: false, timeLock: false)',
     "exit",
   ].join("\n");
   /** Forgets the first password typed, and keeps the second. */
@@ -605,15 +609,21 @@ test("a password field says its question where password: stands, and asks again 
   });
 });
 
-test("publicKey: takes one key or a list, and key: opens with the key a keyholder sent back", () => {
+test("publicKey: takes one key, a list, or true for the dialog, and key: opens with the unlock key sent back", () => {
   const player = new FakePlayer();
-  player.dialogs.push({ password: "" }, { key: "key 9" }, { key: "key 3" });
+  player.dialogs.push(
+    { password: "" },
+    { publicKeys: [SSH_KEY] },
+    { key: "key 9" },
+    { key: "key 3" },
+  );
   const played = play(
     [
-      `let one = encryptText("one", publicKey: "${AGE_KEY}")`,
+      `let one = encryptText("one", password: false, publicKey: "${AGE_KEY}", timeLock: getAbsoluteDateTime() + 7 days)`,
       `let keys = ["${AGE_KEY}", "  ${SSH_KEY}  "]`,
-      'let both = encryptText("both", publicKey: keys, openAt: null)',
+      'let both = encryptText("both", password: false, publicKey: keys, timeLock: false)',
       'let dialog = encryptText("by the dialog")',
+      'let chosen = encryptText("chosen", password: "p", publicKey: true, timeLock: false)',
       'let opened = decryptText(both, key: "key 2", default: null)',
       'let wrong = decryptText(both, key: "key 1", default: "closed")',
       'let asked = decryptText(dialog, default: "closed")',
@@ -621,21 +631,25 @@ test("publicKey: takes one key or a list, and key: opens with the key a keyholde
     ].join("\n"),
     player,
   );
-  const { one, both, opened, wrong, asked: byKey } = variables(played);
+  const { one, both, chosen, opened, wrong, asked: byKey } = variables(played);
   assert.deepEqual([opened, wrong, byKey], ["both", "closed", "by the dialog"]);
-  // The public keys as written, each trimmed, with the default time lock unless `openAt:` says otherwise.
+  // The public keys as written, each trimmed; a public key written true is chosen in the dialog.
   assert.deepEqual(
     played.steps
       .filter((step) => step.call === "encryptText")
-      .map((step) => [step.phase, step.publicKeys, step.openAtMs]),
+      .map((step) => [step.phase, step.publicKeys, step.timeLockMs, step.choices]),
     [
-      ["work", [AGE_KEY], WALL_CLOCK_MS + 7 * DAY_MS],
-      ["work", [AGE_KEY, SSH_KEY], null],
-      ["ask", [], WALL_CLOCK_MS + 7 * DAY_MS],
-      ["work", [], null],
+      ["work", [AGE_KEY], WALL_CLOCK_MS + 7 * DAY_MS, []],
+      ["work", [AGE_KEY, SSH_KEY], null, []],
+      ["ask", [], WALL_CLOCK_MS + 7 * DAY_MS, ["timeLock", "password", "publicKey"]],
+      ["work", [], null, ["timeLock", "password", "publicKey"]],
+      ["ask", [], null, ["publicKey"]],
+      ["work", [], null, ["publicKey"]],
     ],
   );
   assert.deepEqual(player.publicKeys.get(String(one)), [AGE_KEY]);
+  assert.deepEqual(player.publicKeys.get(String(chosen)), [SSH_KEY]);
+  assert.deepEqual(player.locks.get(String(chosen))?.password, "p");
   assert.deepEqual(player.keys.get(String(both)), "key 2");
   // A written key is tried alone; the dialog's wrong key asks again with a notice.
   assert.deepEqual(
@@ -654,17 +668,17 @@ test("publicKey: takes one key or a list, and key: opens with the key a keyholde
   );
 });
 
-test("the option labels stay ordinary names: a script may name its own values password, publicKey, key, or openAt", () => {
+test("the option labels stay ordinary names: a script may name its own values password, publicKey, key, or timeLock", () => {
   assert.deepEqual(
     diagnostics(
       [
         "let publicKey = null",
         'let password = "p"',
         'let key = "k"',
-        "let openAt = getAbsoluteDateTime()",
-        'let locked = encryptText("x", password: password, openAt: openAt)',
+        "let timeLock = getAbsoluteDateTime()",
+        'let locked = encryptText("x", password: password, publicKey: false, timeLock: timeLock)',
         "let opened = decryptText(locked, key: key, default: publicKey)",
-        "let fields = { password: 1, publicKey: 2, key: 3, openAt: 4 }",
+        "let fields = { password: 1, publicKey: 2, key: 3, timeLock: 4 }",
       ].join("\n"),
     ),
     [],
@@ -673,73 +687,84 @@ test("the option labels stay ordinary names: a script may name its own values pa
 
 test("public keys and keys are checked when they compile and when they run", () => {
   const problems = [
-    'let a = encryptText("x", publicKey: "age1nothing")',
-    `let a = encryptText("x", publicKey: ["${AGE_KEY}", "ssh-rsa AAAAB3NzaC1yc2E"])`,
-    'let a = encryptText("x", publicKey: [("age1nothing")])',
-    'let a = encryptText("x", publicKey: 4)',
+    'let a = encryptText("x", password: false, publicKey: "age1nothing", timeLock: false)',
+    `let a = encryptText("x", password: false, publicKey: ["${AGE_KEY}", "ssh-rsa AAAAB3NzaC1yc2E"], timeLock: false)`,
+    'let a = encryptText("x", password: false, publicKey: [("age1nothing")], timeLock: false)',
+    'let a = encryptText("x", password: false, publicKey: 4, timeLock: false)',
     'let a = decryptText("x", key: 4, default: null)',
     'let a = decryptText("x", publicKey: "k", default: null)',
+    'let a = encryptText("x", password: false, publicKey: false, timeLock: false)',
   ].map((source) => diagnostics(source).map(([, message]) => message));
   assert.deepEqual(problems, [
     [
-      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
     ],
     [
-      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
     ],
     [
-      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
     ],
-    ["'publicKey:' takes a public key (string) or a list of them, not a whole number (integer)."],
-    ["'key:' takes the key from a keyholder as text (string), not a whole number (integer)."],
+    [
+      "'publicKey:' takes a public key (string), a list of them, true, or false, not a whole number (integer).",
+    ],
+    ["'key:' takes an unlock key as text (string), not a whole number (integer)."],
     [
       "decryptText(...) has no parameter 'publicKey'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
+    [
+      "encryptText(...) has no way to open, because 'password:', 'publicKey:', and 'timeLock:' are all false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
+    ],
   ]);
-  // A public key alone is a way to open.
-  assert.deepEqual(
-    diagnostics(`let a = encryptText("x", publicKey: "${SSH_KEY}", openAt: null)`),
-    [],
-  );
+  // A public key alone is a way to open, and so is one the player chooses.
+  for (const publicKey of [`"${SSH_KEY}"`, "true"])
+    assert.deepEqual(
+      diagnostics(
+        `let a = encryptText("x", password: false, publicKey: ${publicKey}, timeLock: false)`,
+      ),
+      [],
+    );
   const failures = [
     [
       'let saved = fromJson("[\\"age1nothing\\"]", default: null)',
-      'let a = encryptText("x", publicKey: saved)',
+      'let a = encryptText("x", password: false, publicKey: saved, timeLock: false)',
     ],
-    ['let saved = fromJson("[4]", default: null)', 'let a = encryptText("x", publicKey: saved)'],
+    [
+      'let saved = fromJson("[4]", default: null)',
+      'let a = encryptText("x", password: false, publicKey: saved, timeLock: false)',
+    ],
     [
       'let saved = fromJson("4", default: null)',
       'let a = decryptText("AAAA", key: saved, default: 1)',
     ],
     [
       'let saved = fromJson("[]", default: null)',
-      'let a = encryptText("x", publicKey: saved, openAt: null)',
+      'let a = encryptText("x", password: false, publicKey: saved, timeLock: false)',
     ],
     [
       "let keys: string[] = []",
       `for index in 1..=595 {\n    keys.add("${AGE_KEY}")\n}`,
-      'let a = encryptText("x", publicKey: keys)',
+      'let a = encryptText("x", password: false, publicKey: keys, timeLock: false)',
     ],
   ].map((lines) => failure(play([...lines, "exit"].join("\n"))));
   assert.deepEqual(failures, [
     {
       code: "TSR059",
-      message: `'publicKey:' of encryptText(...) takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
+      message: `'publicKey:' of encryptText(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
     },
     {
       code: "TSR059",
       message:
-        "'publicKey:' of encryptText(...) takes a public key (string) or a list of them, but its list holds a number.",
+        "'publicKey:' of encryptText(...) takes a public key (string), a list of them, true, or false, but its list holds a number.",
+    },
+    {
+      code: "TSR059",
+      message: "'key:' of decryptText(...) takes an unlock key as text (string), not a number.",
     },
     {
       code: "TSR059",
       message:
-        "'key:' of decryptText(...) takes the key from a keyholder as text (string), not a number.",
-    },
-    {
-      code: "TSR059",
-      message:
-        "encryptText(...) has no way to open, because 'openAt:' is null and there is no 'password:' or public key. Give a 'password:', a 'publicKey:', or a moment in 'openAt:'.",
+        "encryptText(...) has no way to open, because 'publicKey:' holds no key and 'password:' and 'timeLock:' are false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
     },
     {
       code: "TSR059",
@@ -755,7 +780,7 @@ test("encryptFile locks a stored file into a locked file, and decryptFile opens 
   const played = play(
     [
       `let photo = "${photo}"`,
-      'let locked = encryptFile(photo, password: "p", timeLock: false)',
+      'let locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)',
       'let opened = decryptFile(locked, password: "p", default: null)',
       'let wrong = decryptFile(locked, password: "q", default: null)',
       "exit",
@@ -776,7 +801,7 @@ test("decryptText of text that is no Base64 gives the default at once, and a loc
   const player = new FakePlayer();
   const played = play(
     [
-      'let locked = encryptText("spaced", password: "p", timeLock: false)',
+      'let locked = encryptText("spaced", password: "p", publicKey: false, timeLock: false)',
       'let spaced = locked.replace("=", "") + " \\n"',
       'let opened = decryptText(spaced, password: "p", default: null)',
       'let none = decryptText("not base64!", password: "p", default: "default")',
@@ -832,15 +857,15 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
   const problems = [
     'let a = encryptText("x", key: "k")',
     'let a = decryptText("x", timeLock: getAbsoluteDateTime(), default: null)',
-    'let a = encryptText("x", password: 4, timeLock: false)',
-    'let a = encryptText("x", password: false, timeLock: toDateTime("2026-10-16T18:00"))',
-    'let a = encryptText("x", password: "p", timeLock: null)',
+    'let a = encryptText("x", password: 4, publicKey: false, timeLock: false)',
+    'let a = encryptText("x", password: false, publicKey: false, timeLock: toDateTime("2026-10-16T18:00"))',
+    'let a = encryptText("x", password: "p", publicKey: false, timeLock: null)',
     'let a = decryptText("x", password: true, default: null)',
     'let a = encryptText("x", password: "p")',
-    'let a = encryptFile("x", timeLock: true)',
-    'let a = encryptText("x", password: false, timeLock: (false))',
+    'let a = encryptFile("x", publicKey: false, timeLock: true)',
+    'let a = encryptText("x", password: false, publicKey: false, timeLock: (false))',
     "let a = encryptText(4)",
-    'let a = encryptFile(4, password: "p", timeLock: false)',
+    'let a = encryptFile(4, password: "p", publicKey: false, timeLock: false)',
     'let a = encryptText("x", "y")',
     'function f(a: string = encryptText("x")) {\n}',
   ].map((source) => diagnostics(source).map(([, message]) => message));
@@ -856,13 +881,13 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
     ["'timeLock:' takes a moment (absoluteDateTime), true, or false, not null."],
     ["'password:' takes text (string), not true or false (boolean)."],
     [
-      "encryptText(...) gives 'password:' but not 'timeLock:'. Once a call gives one of 'password:' and 'timeLock:', it must give each, so no way to open it is left out by mistake. Add 'timeLock:' with a value, true to let the player choose, or false to leave it out.",
+      "encryptText(...) gives 'password:' but not 'publicKey:' or 'timeLock:'. Once a call gives one of 'password:', 'publicKey:', and 'timeLock:', it must give each, so no way to open it is left out by mistake. Add 'publicKey:' and 'timeLock:', each with a value, true to let the player choose, or false to leave it out.",
     ],
     [
-      "encryptFile(...) gives 'timeLock:' but not 'password:'. Once a call gives one of 'password:' and 'timeLock:', it must give each, so no way to open it is left out by mistake. Add 'password:' with a value, true to let the player choose, or false to leave it out.",
+      "encryptFile(...) gives 'publicKey:' and 'timeLock:' but not 'password:'. Once a call gives one of 'password:', 'publicKey:', and 'timeLock:', it must give each, so no way to open it is left out by mistake. Add 'password:' with a value, true to let the player choose, or false to leave it out.",
     ],
     [
-      "encryptText(...) has no way to open, because 'password:' and 'timeLock:' are both false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
+      "encryptText(...) has no way to open, because 'password:', 'publicKey:', and 'timeLock:' are all false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
     ],
     problems[9]!,
     problems[10]!,
@@ -879,8 +904,8 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
       [
         'let saved = fromJson("{}", default: null)',
         "let wanted = 1 < 2",
-        'let a = encryptText("x", password: saved, timeLock: saved)',
-        'let b = encryptText("x", password: wanted, timeLock: false)',
+        'let a = encryptText("x", password: saved, publicKey: false, timeLock: saved)',
+        'let b = encryptText("x", password: wanted, publicKey: false, timeLock: false)',
         'let c = decryptText(a, password: saved, default: "")',
       ].join("\n"),
     ),
@@ -892,25 +917,28 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
   const failures = [
     [
       'let off = fromJson("false", default: true)',
-      'let a = encryptText("x", password: off, timeLock: off)',
+      'let a = encryptText("x", password: off, publicKey: false, timeLock: off)',
       "exit",
     ],
     [
       'let amount = fromJson("4", default: null)',
-      'let a = encryptText("x", password: amount, timeLock: false)',
+      'let a = encryptText("x", password: amount, publicKey: false, timeLock: false)',
       "exit",
     ],
     [
       'let amount = fromJson("4", default: null)',
-      'let a = encryptText("x", password: false, timeLock: amount)',
+      'let a = encryptText("x", password: false, publicKey: false, timeLock: amount)',
       "exit",
     ],
     [
       'let nothing = fromJson("null", default: 1)',
-      'let a = encryptText("x", password: "p", timeLock: nothing)',
+      'let a = encryptText("x", password: "p", publicKey: false, timeLock: nothing)',
       "exit",
     ],
-    ['let a = encryptFile("images/a.jpg", password: "p", timeLock: false)', "exit"],
+    [
+      'let a = encryptFile("images/a.jpg", password: "p", publicKey: false, timeLock: false)',
+      "exit",
+    ],
     ['let a = decryptFile("images/a.jpg", default: null)', "exit"],
     // A value of no known type that is not text is a wrong argument, not a lock that does not open.
     [
@@ -954,7 +982,11 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
   // Only a time lock the player chooses needs the clock, to suggest its moment.
   assert.deepEqual(
     failure(
-      play('let a = encryptText("x", password: "p", timeLock: true)\nexit', new FakePlayer(), {}),
+      play(
+        'let a = encryptText("x", password: "p", publicKey: false, timeLock: true)\nexit',
+        new FakePlayer(),
+        {},
+      ),
     ),
     {
       code: "TSR064",
@@ -964,7 +996,11 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
   );
   assert.equal(
     typeof variables(
-      play('let a = encryptText("x", password: "p", timeLock: false)\nexit', new FakePlayer(), {}),
+      play(
+        'let a = encryptText("x", password: "p", publicKey: false, timeLock: false)\nexit',
+        new FakePlayer(),
+        {},
+      ),
     ).a,
     "string",
   );
@@ -1011,7 +1047,7 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
   const working = compileValidPlan(
     [
       'timer async 1 s { say "Time is up", instant }',
-      'let locked = encryptText("x", password: "p", timeLock: false)',
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
       "exit",
     ].join("\n"),
   );
@@ -1040,7 +1076,7 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
   const asking = compileValidPlan(
     [
       'timer async 1 s { say "Time is up", instant\n wait 2 s }',
-      'let locked = encryptText("x", password: askPassword("Code?"), timeLock: false)',
+      'let locked = encryptText("x", password: askPassword("Code?"), publicKey: false, timeLock: false)',
       "exit",
     ].join("\n"),
   );
@@ -1063,7 +1099,7 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
 
 test("a lock completion must fit its call and step, and its handoff is checked on restore", () => {
   const plan = compileValidPlan(
-    'let a = encryptText("x", password: "p", timeLock: false)\nlet b = decryptText(a, default: null)\nexit',
+    'let a = encryptText("x", password: "p", publicKey: false, timeLock: false)\nlet b = decryptText(a, default: null)\nexit',
   );
   const started = run(
     plan,
@@ -1151,7 +1187,7 @@ test("a lock completion must fit its call and step, and its handoff is checked o
 
 test("a lock dialog's choices fit the call's openers, and are checked on restore", () => {
   const plan = compileValidPlan(
-    'let a = encryptText("x", password: "given", timeLock: true)\nlet b = encryptText("y")\nexit',
+    'let a = encryptText("x", password: "given", publicKey: false, timeLock: true)\nlet b = encryptText("y")\nexit',
   );
   const started = run(
     plan,
@@ -1175,7 +1211,7 @@ test("a lock dialog's choices fit the call's openers, and are checked on restore
     { choices: ["timeLock", "timeLock"] },
     { choices: ["timeLock", "password"] },
     { timeLockMs: null },
-    { choices: ["publicKey"] },
+    { choices: ["publicKey", "timeLock"] },
   ])
     assert.notDeepEqual(tampered(started.snapshot, change), [], JSON.stringify(change));
   // The step after the dialog takes the chosen time lock from the player's answer.
@@ -1200,7 +1236,7 @@ test("a lock dialog's choices fit the call's openers, and are checked on restore
       payload: { kind: "locked", text: "AAAA" },
     }).snapshot,
   ).snapshot;
-  assert.deepEqual(lockStep(next).choices, ["timeLock", "password"]);
+  assert.deepEqual(lockStep(next).choices, ["timeLock", "password", "publicKey"]);
   assert.deepEqual(tampered(next, {}), []);
   assert.notDeepEqual(tampered(next, { choices: ["timeLock"] }), []);
 });

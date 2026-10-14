@@ -52,7 +52,7 @@ test("a public key lock holds an age file that each keyholder opens to the conte
   const keyholders = [x25519Identity(), sshIdentity()];
   const made = await lock(
     CONTENT,
-    { password: null, publicKeys: keyholders.map(publicKey), openAtMs: null },
+    { password: null, publicKeys: keyholders.map(publicKey), timeLockMs: null },
     services,
   );
   const read = readLock(made.bytes)!;
@@ -110,7 +110,11 @@ test("an OpenSSH key is taken only when it is an Ed25519 point, in the X25519 fo
 test("a lock holds as many public keys as the engine allows within its opener's 65,535 bytes", async () => {
   // An OpenSSH key's stanza is the longest, 110 bytes, besides the age file's own 147.
   const keys = Array.from({ length: 594 }, () => publicKey(sshIdentity()));
-  const made = await lock(CONTENT, { password: null, publicKeys: keys, openAtMs: null }, services);
+  const made = await lock(
+    CONTENT,
+    { password: null, publicKeys: keys, timeLockMs: null },
+    services,
+  );
   const read = readLock(made.bytes)!;
   assert.equal(read.ages[0]!.length, 147 + 594 * 110);
 });
@@ -141,7 +145,7 @@ test("the age tool opens a lock's age file with an age identity and with an Open
     const ssh = parsePublicKey(readFileSync(`${sshFile}.pub`, "utf8"))!;
     const made = await lock(
       CONTENT,
-      { password: null, publicKeys: [publicKey(identity), ssh], openAtMs: null },
+      { password: null, publicKeys: [publicKey(identity), ssh], timeLockMs: null },
       services,
     );
     const read = readLock(made.bytes)!;

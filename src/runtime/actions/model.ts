@@ -331,7 +331,7 @@ export interface RuntimeLockActionSnapshot {
   readonly passwordField: { readonly hint: string | null } | null;
   /** An encrypt call's written public keys, each trimmed; empty for any other call. */
   readonly publicKeys: readonly string[];
-  /** A decrypt call's written `key:`, the content key a keyholder sent back, or `null`. */
+  /** A decrypt call's written `key:`, the unlock key sent back for a public key opener, or `null`. */
   readonly key: string | null;
   /** Why the unlock dialog asks again, or `null`. */
   readonly notice: RuntimeLockNotice | null;

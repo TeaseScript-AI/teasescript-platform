@@ -46,7 +46,8 @@ export type LockDialog =
       /** Whether a password opens it. */
       readonly password: boolean;
       /**
-       * The ASCII armor of its age file for the keyholders, whose key opens it, or `null` without a public key opener.
+       * The ASCII armor of its age file, the unlock request for the owners of its private keys, or `null` without a
+       * public key opener.
        */
       readonly ageText: string | null;
       /** The moments its time locks open at, in epoch milliseconds. */

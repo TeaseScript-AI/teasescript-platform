@@ -10,7 +10,7 @@
 //   1, password: PBKDF2 iterations (uint32 BE) | salt (16) | AES-256-GCM(KEK, zero nonce, K) (48), where the KEK is
 //      PBKDF2-HMAC-SHA-256 of "teasescript-lock-password:" and the password's UTF-8
 //   2, time:     round (uint64 BE) | drand tlock IBE ciphertext of K for quicknet (160)
-//   3, public key: an age v1 file for the keyholders' public keys, whose content is K in standard Base64 and a line feed
+//   3, public key: an age v1 file for the lock's public keys, whose content is K in standard Base64 and a line feed
 
 import {
   fetchBeacon,
@@ -67,7 +67,7 @@ export interface LockServices {
   readonly nowMs: () => number;
 }
 
-/** The openers of a lock to make: a password, keyholders' public keys, and a moment the time lock opens at. */
+/** The openers of a lock to make: a password, public keys, and a moment the time lock opens at. */
 export interface LockOpeners {
   readonly password: string | null;
   readonly publicKeys?: readonly PublicKey[];
@@ -140,7 +140,7 @@ export async function lock(
 export interface ReadLock {
   readonly passwords: readonly PasswordOpener[];
   readonly times: readonly TimeOpener[];
-  /** The age file of the public key opener, which only a keyholder opens, or none. */
+  /** The age file of the public key opener, which only a matching private key opens, or none. */
   readonly ages: readonly Uint8Array[];
   readonly header: Uint8Array<ArrayBuffer>;
   readonly nonce: Uint8Array<ArrayBuffer>;
@@ -232,7 +232,7 @@ export async function openWithPassword(
 }
 
 /**
- * The content that the key a keyholder sent back opens: K in standard Base64, as their `age` gives it, with any white
+ * The content that the unlock key sent back opens: K in standard Base64, as `age` gives it, with any white
  * space around it; `null` for text that is not such a key, a key that does not open it, or a lock that was changed.
  */
 export async function openWithKey(read: ReadLock, text: string): Promise<Uint8Array | null> {
@@ -244,7 +244,7 @@ export async function openWithKey(read: ReadLock, text: string): Promise<Uint8Ar
   );
 }
 
-/** The ASCII armor of a lock's age file, which a keyholder's `age -d` reads like the binary file. */
+/** The ASCII armor of a lock's age file, the unlock request, which `age -d` reads like the binary file. */
 export function armoredAge(file: Uint8Array): string {
   const lines = base64(file).match(/.{1,64}/gu) ?? [];
   return `-----BEGIN AGE ENCRYPTED FILE-----\n${lines.join("\n")}\n-----END AGE ENCRYPTED FILE-----\n`;
@@ -365,7 +365,7 @@ function opener(kind: number, ...body: Uint8Array[]): Uint8Array {
   return concat(new Uint8Array([kind, joined.length >> 8, joined.length & 0xff]), joined);
 }
 
-/** K as the text a keyholder's `age` gives: standard Base64. */
+/** K as the text that `age -d` gives the owner of the private key: standard Base64. */
 function keyText(key: Uint8Array): string {
   return base64(key);
 }
