@@ -39,6 +39,20 @@ const FOLDS_APART = "a letter that RE2 matches with other characters when it ign
 const PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/u;
 
 /**
+ * How a pattern may end: after a single character or class that may match \r or \n, repeated at least `min` times and
+ * maybe without a limit, after a group, or at a start (of the pattern, a group, or an alternative).
+ */
+type Ending = { cr: boolean; lf: boolean; min: number; unbounded: boolean } | "group" | "start";
+
+function single(cr: boolean, lf: boolean): Ending {
+  return { cr, lf, min: 1, unbounded: false };
+}
+
+function repeated(ending: Ending, min: number, unbounded: boolean): Ending {
+  return typeof ending === "object" ? { ...ending, min: ending.min * min, unbounded } : ending;
+}
+
+/**
  * `within` says how the regex is used: `whole` for a match of the whole text (==~, matches()), `find` for a test of a
  * match anywhere (=~ as a condition), where a match may take one more character, but no match's text is used.
  */
@@ -70,18 +84,9 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   let groups = 0;
   let copies = 0;
   // What the last token lets a quantifier repeat: a single character or class, a group, or nothing.
-  let last = null as "atom" | "group" | null;
-  // How the pattern so far may end: after a single character or class that may match \r or \n, repeated at least `min`
-  // times and maybe without a limit, after a group, or at a start (of the pattern, a group, or an alternative).
-  let ending = "start" as
-    { cr: boolean; lf: boolean; min: number; unbounded: boolean } | "group" | "start";
-  const atom = (cr: boolean, lf: boolean): void => {
-    last = "atom";
-    ending = { cr, lf, min: 1, unbounded: false };
-  };
-  const repeat = (min: number, unbounded: boolean): void => {
-    if (typeof ending === "object") ending = { ...ending, min: ending.min * min, unbounded };
-  };
+  let last: "atom" | "group" | null = null;
+  // How the pattern so far may end (Ending).
+  let ending: Ending = "start";
   // An escape after `\` outside a class, or why it does not convert.
   const escape = (character: string | undefined): string | { reason: string } => {
     if (character === undefined) return { reason: "a trailing backslash" };
@@ -109,10 +114,12 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       const text = escape(escaped);
       if (typeof text !== "string") return text;
       out.push(text);
-      atom("rDWs".includes(escaped!), "nDWs".includes(escaped!));
+      last = "atom";
+      ending = single("rDWs".includes(escaped!), "nDWs".includes(escaped!));
     } else if (character === ".") {
       out.push(dotAll ? "." : `[^${LINE_TERMINATORS}]`);
-      atom(dotAll, dotAll);
+      last = "atom";
+      ending = single(dotAll, dotAll);
     } else if (character === "^") {
       if (index !== 1) return fail("^ after the start of the pattern");
       out.push("^");
@@ -159,7 +166,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       const quantified = quantifier(character);
       if (typeof quantified !== "string") return quantified;
       out.push(quantified);
-      repeat(character === "+" ? 1 : 0, character !== "?");
+      ending = repeated(ending, character === "+" ? 1 : 0, character !== "?");
       last = null;
     } else if (character === "{") {
       const end = characters.indexOf("}", index);
@@ -182,19 +189,21 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       );
       if (typeof quantified !== "string") return quantified;
       out.push(quantified);
-      repeat(low, bounds[2] !== undefined && high === null);
+      ending = repeated(ending, low, bounds[2] !== undefined && high === null);
       last = null;
     } else if (character === "[") {
       const set = characterClass();
       if ("reason" in set) return set;
       out.push(set.text);
-      atom(set.cr, set.lf);
+      last = "atom";
+      ending = single(set.cr, set.lf);
     } else {
       if (foldsApart(character)) return fail(FOLDS_APART);
       const text = literal(character);
       if (text === null) return fail("a lone surrogate");
       out.push(text);
-      atom(character === "\r", character === "\n");
+      last = "atom";
+      ending = single(character === "\r", character === "\n");
     }
   }
   if (depth !== 0) return fail("an unbalanced parenthesis");
