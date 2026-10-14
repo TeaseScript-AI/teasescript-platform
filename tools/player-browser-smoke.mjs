@@ -1130,6 +1130,8 @@ async function smartFollowCheck(cdp) {
 // A click at the element's centre once it no longer moves in: a control that live play just showed enters the
 // conversation for a moment, as do the messages it glides up with.
 async function physicalClick(cdp, selector) {
+  // A target whose centre is out of view, outside the window or a scrolling ancestor, is scrolled into view first, as a
+  // person scrolls to it, for example a control low in the scrolling Player Settings; a target in view never moves.
   const point = await evaluate(
     cdp,
     `return new Promise((resolve) => {
@@ -1142,6 +1144,16 @@ async function physicalClick(cdp, selector) {
           animation.effect?.target?.contains(target));
       const check = () => {
         if (entering() && performance.now() < deadline) return setTimeout(check, 16);
+        const shown = target.getBoundingClientRect();
+        const [x, y] = [shown.left + shown.width / 2, shown.top + shown.height / 2];
+        let clipped = x < 0 || y < 0 || x > innerWidth || y > innerHeight;
+        for (let node = target.parentElement; node !== null && !clipped; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+          const area = node.getBoundingClientRect();
+          clipped = x < area.left || x > area.right || y < area.top || y > area.bottom;
+        }
+        if (clipped) target.scrollIntoView({ block: "nearest", inline: "nearest" });
         const rect = target.getBoundingClientRect();
         resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       };
