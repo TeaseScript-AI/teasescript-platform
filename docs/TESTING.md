@@ -681,8 +681,8 @@ neither hides that image nor is reported. Its `photo-colour` package's green Sta
 the background, the theme's surfaces in both modes, and the accent; the photo accent A/B test's B changes only the
 accent back to the theme's; the background's effects stay centred on the photo after the window shrank behind an image
 request's preview; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
-theme's return, and a mode change switch at once; a fade between photos keeps the background's luminance, and switching
-light/dark during it keeps text readable in both directions; afterwards the authored speaker and prose colours are
+theme's return, a mode change in either direction, and the next photo fade the background and message bubbles, except
+under reduced motion; once each change has settled, text is readable and the authored speaker and prose colours are
 adapted to the background shown, in Standard and High contrast. Its `photo-vignette` package's authored text low at the
 side of a wide Stage photo, where the vignette is strong (prose, inline code with its fill, an inline colour, a link,
 and a coloured speaker's bubble with code), meets the authored-colour treatment's targets on the background as painted
