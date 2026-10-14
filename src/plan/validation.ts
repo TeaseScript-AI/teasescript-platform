@@ -1303,8 +1303,9 @@ function validateFileStoreInstruction(
 
 /**
  * A `lock` instruction runs again with each answer of the Player, so each operand is a temporary or a literal, which
- * reads the same every time. An encrypt call writes both `password:`, also as a password field, and `timeLock:`, or
- * neither; a decrypt call has no `timeLock:`, and its required `default:` follows it.
+ * reads the same every time. An encrypt call writes each of `password:`, also as a password field, `publicKey:`, and
+ * `timeLock:`, or none; a decrypt call has its required `default:`, which follows it, and may have `key:`, which an
+ * encrypt call has not.
  */
 function validateLockInstruction(
   value: Record<string, unknown>,
@@ -1319,6 +1320,8 @@ function validateLockInstruction(
       "value",
       "password",
       "passwordField",
+      "publicKey",
+      "key",
       "timeLock",
       "defaultTemporary",
       "destinationTemporary",
@@ -1351,6 +1354,8 @@ function validateLockInstruction(
       temporaryCount,
       errors,
     );
+  if (!decrypts && value.key !== null)
+    errors.push(planError("TSC002", `${call}(...) takes no key:.`, `${path}.key`));
   // A password field asks for the password, so the call has no written password besides it.
   const field = value.passwordField;
   if (
@@ -1361,15 +1366,18 @@ function validateLockInstruction(
       planError("TSC002", "The password field of a lock is invalid.", `${path}.passwordField`),
     );
   const passwordWritten = value.password !== null || field !== null;
-  if (decrypts ? value.timeLock !== null : passwordWritten !== (value.timeLock !== null))
-    errors.push(
-      planError("TSC002", `The timeLock: of ${call}(...) is invalid.`, `${path}.timeLock`),
-    );
+  for (const name of ["publicKey", "timeLock"] as const)
+    if (decrypts ? value[name] !== null : passwordWritten !== (value[name] !== null))
+      errors.push(
+        planError("TSC002", `The ${name}: of ${call}(...) is invalid.`, `${path}.${name}`),
+      );
   const hint = isRecord(field) && field.hint !== null ? field.hint : null;
   for (const [name, operand] of [
     ["value", value.value],
     ["password", value.password],
     ["passwordField.hint", hint],
+    ["publicKey", value.publicKey],
+    ["key", value.key],
     ["timeLock", value.timeLock],
   ] as const) {
     if (operand === null && name !== "value") continue;

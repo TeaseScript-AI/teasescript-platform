@@ -270,11 +270,14 @@ export function fileStoreOperation(
   return call === "hashFile" ? "hash" : "read";
 }
 
-/** Why the unlock dialog asks again: the typed password did not open, or the passed time lock could not be fetched. */
-export type RuntimeLockNotice = "wrongPassword" | "unreachable";
+/**
+ * Why the unlock dialog asks again: the typed password or key did not open, or the passed time lock could not be
+ * fetched.
+ */
+export type RuntimeLockNotice = "wrongPassword" | "wrongKey" | "unreachable";
 
 /** An opener the player chooses in the lock dialog: written `true`, or each without any written (V30 §13). */
-export type RuntimeLockChoice = "timeLock" | "password";
+export type RuntimeLockChoice = "timeLock" | "password" | "publicKey";
 
 /**
  * How a step of a lock ended: `locked` or `opened` with the result, `notOpened` (the default), `unreadable` or `failed`
@@ -326,6 +329,10 @@ export interface RuntimeLockActionSnapshot {
    * step, and the `work` step uses what was typed in it. `null` for any other call.
    */
   readonly passwordField: { readonly hint: string | null } | null;
+  /** An encrypt call's written public keys, each trimmed; empty for any other call. */
+  readonly publicKeys: readonly string[];
+  /** A decrypt call's written `key:`, the content key a keyholder sent back, or `null`. */
+  readonly key: string | null;
   /** Why the unlock dialog asks again, or `null`. */
   readonly notice: RuntimeLockNotice | null;
   /**

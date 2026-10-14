@@ -31,6 +31,10 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
  */
 
 const WALL_CLOCK_MS = Date.UTC(2026, 9, 14, 12, 0, 0);
+/** Keyholders' public keys: an age recipient and an OpenSSH Ed25519 key. */
+const AGE_KEY = "age1szy34zwzdlhaxywum5gj5pvjp9z5auwqjl9m3kmv3gmz7t5tg9uqx4gu67";
+const SSH_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEa/HNw9HfBfxM2AimkF4iqPUNEnLALWhpLl/NrvV/61 keyholder";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -40,12 +44,22 @@ interface FakeLock {
   readonly timeLockMs: number | null;
 }
 
-type DialogAnswer = { readonly password?: string; readonly timeLockMs?: number } | "cancel";
+type DialogAnswer =
+  | {
+      readonly password?: string;
+      readonly timeLockMs?: number;
+      readonly publicKeys?: readonly string[];
+      readonly key?: string;
+    }
+  | "cancel";
 
 /** The Player's store and its locks, as the engine meets them. */
 class FakePlayer {
   readonly files = new Map<string, { readonly kind: StoredFileKind; readonly content: string }>();
   readonly locks = new Map<string, FakeLock>();
+  /** Each lock's public keys, and its content key as a keyholder sends it back: `key 1` for the first lock. */
+  readonly publicKeys = new Map<string, readonly string[]>();
+  readonly keys = new Map<string, string>();
   /** What the dialogs answer, in order: what the player typed, or a cancel. */
   readonly dialogs: DialogAnswer[] = [];
   /** Whether the typed answer is lost before the step after the dialog, as on a reload. */
@@ -99,6 +113,8 @@ class FakePlayer {
           : action.timeLockMs,
       };
       const text = this.#lock(lock);
+      this.publicKeys.set(text, typed === null ? action.publicKeys : (typed.publicKeys ?? []));
+      this.keys.set(text, `key ${this.keys.size + 1}`);
       return action.call === "encryptText"
         ? { kind: "locked", text }
         : { kind: "locked", file: this.keep("application/octet-stream", text) };
@@ -109,18 +125,23 @@ class FakePlayer {
       action.call === "decryptText" ? action.value : this.files.get(action.value)?.content;
     const lock = text === undefined ? undefined : this.locks.get(text);
     if (lock === undefined) return { kind: "notOpened" };
+    // A written password or key gives the default, also a password from the password field; so does a lock with
+    // nothing else to try. The dialog gives a key or a password.
+    const written =
+      action.password !== null || action.key !== null || action.passwordField !== null;
+    const key = action.key ?? typed?.key ?? null;
     const password = typed?.password ?? action.password;
     const passed = lock.timeLockMs !== null && lock.timeLockMs <= this.nowMs(action);
-    const opens = password !== null ? password === lock.password : passed;
+    const lockKey = text === undefined ? undefined : this.keys.get(text);
+    if (key !== null && key !== lockKey && !written) return { kind: "ask", notice: "wrongKey" };
+    const opens =
+      key !== null && key === lockKey
+        ? true
+        : password !== null
+          ? password === lock.password
+          : key === null && passed;
     if (!opens) {
-      // A written password gives the default, also one from the password field; so does a lock with nothing else to
-      // try.
-      if (
-        action.password !== null ||
-        action.passwordField !== null ||
-        (lock.password === null && passed)
-      )
-        return { kind: "notOpened" };
+      if (written || (lock.password === null && passed)) return { kind: "notOpened" };
       return password === null ? { kind: "ask" } : { kind: "ask", notice: "wrongPassword" };
     }
     return action.call === "decryptText"
@@ -584,6 +605,146 @@ test("a password field says its question where password: stands, and asks again 
   });
 });
 
+test("publicKey: takes one key or a list, and key: opens with the key a keyholder sent back", () => {
+  const player = new FakePlayer();
+  player.dialogs.push({ password: "" }, { key: "key 9" }, { key: "key 3" });
+  const played = play(
+    [
+      `let one = encryptText("one", publicKey: "${AGE_KEY}")`,
+      `let keys = ["${AGE_KEY}", "  ${SSH_KEY}  "]`,
+      'let both = encryptText("both", publicKey: keys, openAt: null)',
+      'let dialog = encryptText("by the dialog")',
+      'let opened = decryptText(both, key: "key 2", default: null)',
+      'let wrong = decryptText(both, key: "key 1", default: "closed")',
+      'let asked = decryptText(dialog, default: "closed")',
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  const { one, both, opened, wrong, asked: byKey } = variables(played);
+  assert.deepEqual([opened, wrong, byKey], ["both", "closed", "by the dialog"]);
+  // The public keys as written, each trimmed, with the default time lock unless `openAt:` says otherwise.
+  assert.deepEqual(
+    played.steps
+      .filter((step) => step.call === "encryptText")
+      .map((step) => [step.phase, step.publicKeys, step.openAtMs]),
+    [
+      ["work", [AGE_KEY], WALL_CLOCK_MS + 7 * DAY_MS],
+      ["work", [AGE_KEY, SSH_KEY], null],
+      ["ask", [], WALL_CLOCK_MS + 7 * DAY_MS],
+      ["work", [], null],
+    ],
+  );
+  assert.deepEqual(player.publicKeys.get(String(one)), [AGE_KEY]);
+  assert.deepEqual(player.keys.get(String(both)), "key 2");
+  // A written key is tried alone; the dialog's wrong key asks again with a notice.
+  assert.deepEqual(
+    played.steps
+      .filter((step) => step.call === "decryptText")
+      .map((step) => [step.phase, step.key, step.notice]),
+    [
+      ["work", "key 2", null],
+      ["work", "key 1", null],
+      ["work", null, null],
+      ["ask", null, null],
+      ["work", null, null],
+      ["ask", null, "wrongKey"],
+      ["work", null, null],
+    ],
+  );
+});
+
+test("the option labels stay ordinary names: a script may name its own values password, publicKey, key, or openAt", () => {
+  assert.deepEqual(
+    diagnostics(
+      [
+        "let publicKey = null",
+        'let password = "p"',
+        'let key = "k"',
+        "let openAt = getAbsoluteDateTime()",
+        'let locked = encryptText("x", password: password, openAt: openAt)',
+        "let opened = decryptText(locked, key: key, default: publicKey)",
+        "let fields = { password: 1, publicKey: 2, key: 3, openAt: 4 }",
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
+test("public keys and keys are checked when they compile and when they run", () => {
+  const problems = [
+    'let a = encryptText("x", publicKey: "age1nothing")',
+    `let a = encryptText("x", publicKey: ["${AGE_KEY}", "ssh-rsa AAAAB3NzaC1yc2E"])`,
+    'let a = encryptText("x", publicKey: 4)',
+    'let a = decryptText("x", key: 4, default: null)',
+    'let a = decryptText("x", publicKey: "k", default: null)',
+  ].map((source) => diagnostics(source).map(([, message]) => message));
+  assert.deepEqual(problems, [
+    [
+      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+    ],
+    [
+      `'publicKey:' takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+    ],
+    ["'publicKey:' takes a public key (string) or a list of them, not a whole number (integer)."],
+    ["'key:' takes the key from a keyholder as text (string), not a whole number (integer)."],
+    [
+      "decryptText(...) has no parameter 'publicKey'. Its named arguments are 'password:', 'key:', and 'default:'.",
+    ],
+  ]);
+  // A public key alone is a way to open.
+  assert.deepEqual(
+    diagnostics(`let a = encryptText("x", publicKey: "${SSH_KEY}", openAt: null)`),
+    [],
+  );
+  const failures = [
+    [
+      'let saved = fromJson("[\\"age1nothing\\"]", default: null)',
+      'let a = encryptText("x", publicKey: saved)',
+    ],
+    ['let saved = fromJson("[4]", default: null)', 'let a = encryptText("x", publicKey: saved)'],
+    [
+      'let saved = fromJson("4", default: null)',
+      'let a = decryptText("AAAA", key: saved, default: 1)',
+    ],
+    [
+      'let saved = fromJson("[]", default: null)',
+      'let a = encryptText("x", publicKey: saved, openAt: null)',
+    ],
+    [
+      "let keys: string[] = []",
+      `for index in 1..=595 {\n    keys.add("${AGE_KEY}")\n}`,
+      'let a = encryptText("x", publicKey: keys)',
+    ],
+  ].map((lines) => failure(play([...lines, "exit"].join("\n"))));
+  assert.deepEqual(failures, [
+    {
+      code: "TSR059",
+      message: `'publicKey:' of encryptText(...) takes keyholders' public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
+    },
+    {
+      code: "TSR059",
+      message:
+        "'publicKey:' of encryptText(...) takes a public key (string) or a list of them, but its list holds a number.",
+    },
+    {
+      code: "TSR059",
+      message:
+        "'key:' of decryptText(...) takes the key from a keyholder as text (string), not a number.",
+    },
+    {
+      code: "TSR059",
+      message:
+        "encryptText(...) has no way to open, because 'openAt:' is null and there is no 'password:' or public key. Give a 'password:', a 'publicKey:', or a moment in 'openAt:'.",
+    },
+    {
+      code: "TSR059",
+      message:
+        "'publicKey:' of encryptText(...) has 595 public keys, but a lock holds at most 594.",
+    },
+  ]);
+});
+
 test("encryptFile locks a stored file into a locked file, and decryptFile opens it into a file of its type", () => {
   const player = new FakePlayer();
   const photo = player.keep("image/png", "PNG bytes");
@@ -681,10 +842,10 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
   ].map((source) => diagnostics(source).map(([, message]) => message));
   assert.deepEqual(problems, [
     [
-      "encryptText(...) has no parameter 'key'. Its named arguments are 'password:' and 'timeLock:'.",
+      "encryptText(...) has no parameter 'key'. Its named arguments are 'password:', 'publicKey:', and 'timeLock:'.",
     ],
     [
-      "decryptText(...) has no parameter 'timeLock'. Its named arguments are 'password:' and 'default:'.",
+      "decryptText(...) has no parameter 'timeLock'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
     ["'password:' takes text (string), true, or false, not a whole number (integer)."],
     ["'timeLock:' takes a moment (absoluteDateTime), true, or false, not a date and time."],
@@ -758,7 +919,7 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
     {
       code: "TSR059",
       message:
-        "encryptText(...) has no way to open, because 'password:' and 'timeLock:' are both false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
+        "encryptText(...) has no way to open, because 'password:', 'publicKey:', and 'timeLock:' are all false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
     },
     {
       code: "TSR059",
