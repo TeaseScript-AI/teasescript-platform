@@ -560,19 +560,24 @@ export function explore2(
     }
     return callers;
   };
-  /** The innermost function (by ID) whose body an instruction is in, or -1. */
+  /** Per instruction, the innermost function (by ID) whose body it is in, or -1; worked out when first needed. */
+  let functionsAt: Int32Array | null = null;
   const functionAt = (index: number): number => {
-    let found = -1;
-    let size = Infinity;
-    for (const declared of list(plan.functions)) {
-      const entry = Number(declared.entryInstruction);
-      const end = Number(declared.endInstruction);
-      if (entry <= index && index <= end && end - entry < size) {
-        found = Number(declared.id);
-        size = end - entry;
-      }
+    if (functionsAt === null) {
+      const found = new Int32Array(instructions.length).fill(-1);
+      // Outermost first, so that a function inside another one's span overwrites it.
+      const declared = list(plan.functions).sort(
+        (left, right) =>
+          Number(right.endInstruction) -
+          Number(right.entryInstruction) -
+          (Number(left.endInstruction) - Number(left.entryInstruction)),
+      );
+      for (const each of declared)
+        for (let at = Number(each.entryInstruction); at <= Number(each.endInstruction); at += 1)
+          if (at >= 0 && at < found.length) found[at] = Number(each.id);
+      functionsAt = found;
     }
-    return found;
+    return functionsAt[index] ?? -1;
   };
   /** Where a decision's way goes on. */
   const wayStart = (instruction: number, way: number): number =>
@@ -696,23 +701,37 @@ export function explore2(
    */
   const goOn =
     (parent: Played | null) => (interaction: Played["interactions"][number], step: number) => {
-      const offered = (input: ExplorerInput) =>
-        interaction.options.some((option) => sameInput(option, input));
+      // At the parent's place, its wait goes on to the deadline offered now (it moved with the clock; a photo it asked
+      // for stays asked for), and a text it typed stays typed, also one no heuristic offers (a code the solver found,
+      // such as 121 for "more than 120").
+      const waitNow = interaction.options.find((option) => option.kind === "wait");
+      const carried = (input: ExplorerInput): ExplorerInput | undefined =>
+        input.kind === "wait"
+          ? waitNow?.kind === "wait"
+            ? { ...input, untilMs: waitNow.untilMs }
+            : undefined
+          : input.kind === "text" && interaction.options.some((option) => option.kind === "text")
+            ? input
+            : interaction.options.some((option) => sameInput(option, input))
+              ? input
+              : undefined;
+      const offered = (input: ExplorerInput) => carried(input) !== undefined;
       const before = parent?.inputs[step];
       if (
         before !== undefined &&
         parent?.interactions[step]?.instruction === interaction.instruction &&
         offered(before)
       )
-        return before;
+        return carried(before)!;
       const there =
         parent === null
           ? undefined
           : placesOf(parent)
               .get(interaction.instruction)
               ?.find((input) => offered(input));
-      if (there !== undefined) return there;
-      if (before !== undefined && offered(before)) return before;
+      if (there !== undefined) return carried(there)!;
+      if (before !== undefined && interaction.options.some((option) => sameInput(option, before)))
+        return before;
       return (
         interaction.options.find((option) => option.kind !== "wait") ??
         interaction.options[0] ??

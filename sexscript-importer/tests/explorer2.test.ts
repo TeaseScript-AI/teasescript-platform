@@ -180,6 +180,10 @@ test(
         'let n = 0\nrepeat 8 {\n  let unused = askChoice a: "A", b: "B", c: "C", d: "D", e: "E"\n  let r = 999\n' +
         '  if n >= 7 {\n    r = randomInteger(0..=1000)\n  }\n  gate(r)\n  noop(0)\n  if n >= 7 {\n    say "Reward"\n  }\n' +
         "  n += 1\n}\nexit\n",
+      // An opened address and a closed export dialog go on to the code after them.
+      dialogs:
+        'openUrl("https://example.com")\nexportText("hello", fileName: "x.txt")\nlet again = askBoolean "Again?"\n' +
+        'if again {\n  say "Yes."\n}\nexit\n',
       // A helper called three times in one step: the middle call is the one a draw can make it take its other way at.
       middle:
         'global function check(n) {\n  if n == 617 {\n    say "Reward"\n  }\n}\nlet a = randomInteger(0..=1)\n' +

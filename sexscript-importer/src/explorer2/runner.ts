@@ -74,6 +74,8 @@ type SessionOperation = (typeof SESSION_OPERATIONS)[number];
 /** A runtime session as the repository build makes it, read field by field. */
 type RawSession = Record<SessionOperation, (...args: unknown[]) => Data> & {
   callReturnInstructions: () => number[];
+  /** The scope a name refers to where execution stands, as `DebugContext.variableRecord` takes it. */
+  scopeOf: (name: string) => number | "global" | null;
   exportTaggedSnapshot: () => TaggedSnapshot;
   mediaPlaybackProjection: () => Data[];
   permanentButtonProjection: () => Data[];
@@ -89,6 +91,8 @@ interface DebugContext {
   status: () => Data;
   record: (id: number) => Data | null;
   variableRecord: (scope: number | "global", name: string) => number | null;
+  /** Drops the records up to `upTo`, which V2 has read (their IDs stay valid: later records still name them). */
+  release: (upTo: number) => void;
 }
 
 /**
@@ -120,6 +124,9 @@ function rawSession(session: unknown): RawSession {
     run: operation("run"),
     exportTrustedSnapshot: operation("exportTrustedSnapshot"),
     exportSnapshot: operation("exportSnapshot"),
+    scopeOf: callOf(session, "scopeOf", (value) =>
+      typeof value === "number" || value === "global" ? value : null,
+    ),
     callReturnInstructions: callOf(session, "callReturnInstructions", (value) =>
       Array.isArray(value)
         ? value.filter((entry): entry is number => typeof entry === "number")
@@ -157,11 +164,13 @@ export async function loadRuntime2(): Promise<Runtime2> {
       const variable = callOf(handle, "variableRecord", (value) =>
         typeof value === "number" ? value : null,
       );
+      const release = callOf(handle, "release", () => undefined);
       return {
         handle,
         status: () => status(),
         record: (id) => entry(id),
         variableRecord: (scope, name) => variable(scope, name),
+        release: (upTo) => release(upTo),
       };
     },
     randomDrawAlternatives: (draw, limit) => alternatives(draw, limit),
@@ -336,39 +345,18 @@ export interface PlayOptions {
   readonly patience?: number;
 }
 
-/**
- * Instructions after which every name is still bound in the same scope (V2 reads the scopes again after any other):
- * evaluating, storing a temporary, assigning, and branching.
- */
-const KEEPS_SCOPES = new Set([
-  "storeTemporary",
-  "clearTemporary",
-  "clearTemporaries",
-  "assign",
-  "evaluate",
-  "jumpIfFalse",
-  "jump",
-  "say",
-  "wait",
-  "validateAssignmentTarget",
-  "prepareReference",
-  "prepareSayText",
-  "prepareSaySpeaker",
-  "prepareSayContextualSpeaker",
-  "prepareInteractionSpeaker",
-  "interaction",
-  "storageWrite",
-  "showImage",
-  "playMedia",
-]);
+/** Calls with temporaries a traced play keeps before it looks which calls are still under way (see `Runner.play`). */
+const MAX_CALL_TEMPORARIES = 64;
 
-/** The instructions a call binds its parameters with, in the scope it starts (their records name the bindings). */
-const BINDS_PARAMETERS = new Set([
-  "beginFunctionDefaults",
-  "prepareParameterDefault",
-  "bindSuppliedParameter",
-  "bindDefaultParameter",
-  "enterFunctionBody",
+/** The instructions whose records or decisions a traced play takes in after they ran (see `Runner.play`). */
+const OBSERVED = new Set([
+  "storeTemporary",
+  "end",
+  "callFunction",
+  "returnValue",
+  "returnVoid",
+  "jumpIfFalse",
+  "loopStart",
 ]);
 
 /** The work of an instruction run one at a time with the trace, against one run without (measured: 6.6–9 µs vs 1.1). */
@@ -396,6 +384,15 @@ interface Reads {
 /** The records, and the bytes they account for, a traced play's debug trace keeps at most (it drops the oldest). */
 const TRACE_RECORDS = 4_000_000;
 const TRACE_BYTES = 1 << 30;
+/** The dependencies a record keeps at most: all (a value summed from forty draws depends on each). */
+const TRACE_DEPENDENCIES = Infinity;
+/**
+ * Whether a traced play lets the trace drop the records it has read (see `release` in `Runner.play`): a long replay's
+ * peak memory falls (BanjoGameHub 825 → 669 MB), the median rises by a few MB. `SX_V2_RELEASE=0` keeps every record.
+ */
+const RELEASE_TRACE = process.env.SX_V2_RELEASE !== "0";
+/** Records between two releases. */
+const RELEASE_EVERY = 20_000;
 
 /** A record's origins kept with it, at most (see `originsOfRecord`). */
 const MAX_RECORD_ORIGINS = 256;
@@ -459,66 +456,6 @@ function list(value: unknown): Data[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-/**
- * The scope each visible variable name is bound in, in a snapshot, as the running code sees it (V1's `bindingsOf`). With
- * the blocks the current call entered since its own (or the file's) first, outermost first, as `Runner.play` tracks them
- * as it enters them: per block, the names it declares and the scopes they had before. A loop's round is a block of the
- * state but not of that tracking: its declarations count as the block it runs in, and the blocks entered when it began
- * are in `loopDepths`.
- */
-function scopesOf(snapshot: Data): {
-  scopes: Map<string, number | "global">;
-  declaredIn: [string, number | "global" | undefined][][];
-  loopDepths: Map<number, number>;
-} {
-  const scopes = new Map<string, number | "global">();
-  const declaredIn: [string, number | "global" | undefined][][] = [];
-  const loopDepths = new Map<number, number>();
-  for (const binding of list(snapshot.globals))
-    if (typeof binding.name === "string") scopes.set(binding.name, "global");
-  const frames = list(snapshot.frames);
-  const take = (scope: Data | undefined, block?: [string, number | "global" | undefined][]) => {
-    for (const binding of list(scope?.bindings))
-      if (typeof binding.name === "string" && typeof scope?.id === "number") {
-        block?.push([binding.name, scopes.get(binding.name)]);
-        scopes.set(binding.name, scope.id);
-      }
-  };
-  const call = list(snapshot.callFrames).at(-1);
-  let first = 0;
-  if (call !== undefined) {
-    const byId = new Map(
-      [...frames, ...list(snapshot.retainedScopes)].map((scope) => [scope.id, scope]),
-    );
-    take(byId.get(call.rootScopeId));
-    for (const capture of list(call.captures))
-      if (typeof capture.name === "string" && typeof capture.scopeId === "number")
-        scopes.set(capture.name, capture.scopeId);
-    first = Number(call.scopeBaseDepth) || 0;
-  }
-  // The rounds of the loops under way in this call, by the depth of their scope.
-  const rounds = new Map<number, number>();
-  for (const loop of list(snapshot.loopFrames))
-    if (
-      (loop.callFrameId ?? null) === (call?.id ?? null) &&
-      typeof loop.scopeDepth === "number" &&
-      typeof loop.loopId === "number"
-    )
-      rounds.set(loop.scopeDepth, loop.loopId);
-  frames.forEach((frame, depth) => {
-    if (depth < first) return;
-    if (depth === first) return take(frame);
-    const loop = rounds.get(depth);
-    if (loop === undefined) {
-      declaredIn.push([]);
-      return take(frame, declaredIn.at(-1));
-    }
-    loopDepths.set(loop, declaredIn.length);
-    take(frame, declaredIn.at(-1));
-  });
-  return { scopes, declaredIn, loopDepths };
-}
-
 /** The identifiers and temporaries an expression reads, and the constant fields it reads of each identifier. */
 function readsOf(expression: unknown): {
   readonly names: ReadonlySet<string>;
@@ -576,6 +513,8 @@ export class Runner {
   readonly #runtime: Runtime2;
   readonly #plan: Data;
   readonly #instructions: readonly Data[];
+  /** The first instructions of the blocks the runtime starts by itself: timer expiries, media cues, buttons. */
+  readonly #handlerEntries: ReadonlySet<number>;
   readonly #seed: number;
   readonly #options: Session;
   /** V1's data flow of the plan, which V2's solver asks for the values conditions compare. */
@@ -599,6 +538,11 @@ export class Runner {
     this.#runtime = runtime;
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
+    this.#handlerEntries = new Set(
+      list(plan.functions)
+        .filter((declared) => declared.handler !== null && declared.handler !== undefined)
+        .map((declared) => Number(declared.entryInstruction)),
+    );
     this.#seed = seed;
     this.#options = new Session(engine, plan, seed);
     // The answers V1 offers: with compared answers on, as V1's search sets them up.
@@ -628,6 +572,9 @@ export class Runner {
       ? this.#runtime.createDebugContext({
           maxRecords: TRACE_RECORDS,
           maxAccountedBytes: TRACE_BYTES,
+          maxDependencies: TRACE_DEPENDENCIES,
+          // V2 reads no values from the trace, only where they came from.
+          previews: false,
         })
       : undefined;
     const traced = trace === undefined ? {} : { debugTrace: trace.handle };
@@ -725,12 +672,18 @@ export class Runner {
     const resumes: Resume[] = parent?.resumes.slice(0, at) ?? [];
     let instructions = 0;
     let lastNew = at;
-    // Origins of temporaries as stored, by call depth and temporary ID; and of accepted inputs by action ID.
-    const temporaryOrigins = new Map<string, Set<Origin>>();
+    // Origins of temporaries as stored, by call (the runtime's call ID, 0 outside calls) and temporary ID; and of accepted
+    // inputs by action ID.
+    const temporaryOrigins = new Map<number, Map<number, Set<Origin>>>();
+    const setTemporary = (call: number, temporary: number, origins: Set<Origin>) => {
+      let ofCall = temporaryOrigins.get(call);
+      if (ofCall === undefined) {
+        ofCall = new Map();
+        temporaryOrigins.set(call, ofCall);
+      }
+      ofCall.set(temporary, origins);
+    };
     const inputOf = new Map<number, Origin>();
-    let depth = 0;
-    /** The temporaries the calls under way return into (null for none), innermost last. */
-    const destinations: (number | null)[] = [];
     let inputCount = at;
     // Records with no origin, or one, share their sets (a long traced replay works out a million records' origins).
     const emptyRecordOrigins = new Set<Origin>();
@@ -746,9 +699,18 @@ export class Runner {
       }
       return shared;
     };
-    // Per record, its origins, or past `MAX_RECORD_ORIGINS` what they are worked out from (see `Large`).
-    const recordOrigins = new Map<number, Set<Origin> | Large>();
-    const recordDataOrigins = new Map<number, Set<Origin> | Large>();
+    // Per record by ID, its origins, or past `MAX_RECORD_ORIGINS` what they are worked out from (see `Large`).
+    const recordOrigins: (Set<Origin> | Large | undefined)[] = [];
+    const recordDataOrigins: (Set<Origin> | Large | undefined)[] = [];
+    const remember = (
+      memo: (Set<Origin> | Large | undefined)[],
+      id: number,
+      kept: Set<Origin> | Large,
+    ) => {
+      // Filled in order, so that the array stays one block (record IDs grow by one).
+      while (memo.length < id) memo.push(undefined);
+      memo[id] = kept;
+    };
     // The whole sets of those worked out so far, within `MAX_WHOLE_ORIGINS` origins (the oldest go: every version of a
     // count raised by a draw in each round, asked for as it is decided, would keep ever larger sets).
     const wholeOrigins = new Map<Large, Set<Origin>>();
@@ -780,10 +742,8 @@ export class Runner {
         const state = detail.stateBefore;
         const draw = typeof state === "number" ? drawsById.get(state) : undefined;
         if (draw !== undefined) found.add(`d${draw.occurrence}`);
-      } else if (entry.kind === "load" && typeof detail.key === "string") {
+      } else if (entry.kind === "load" && typeof detail.key === "string")
         found.add(`k${detail.key}`);
-        this.readKeys.add(detail.key);
-      }
       return found;
     };
     const dependenciesOf = (entry: Data | null, control: boolean): number[] =>
@@ -801,11 +761,10 @@ export class Runner {
      * larger sets), whose whole set is worked out when asked for. A part of such a history that a walk went through
      * before is kept whole once another walk comes to it (many values derived from one long count).
      */
-    const originsOfRecord = (id: number, control = true): Set<Origin> => {
+    const memoOf = (id: number, control: boolean): Set<Origin> | Large | undefined => {
       const memo = control ? recordOrigins : recordDataOrigins;
-      let known = memo.get(id);
-      if (known === undefined) {
-        if (trace === undefined) return new Set();
+      const known = memo[id];
+      if (known === undefined && trace !== undefined) {
         const path: { id: number; entry: Data | null; dependencies: number[]; next: number }[] = [];
         const onPath = new Set<number>();
         const enter = (each: number) => {
@@ -820,7 +779,7 @@ export class Runner {
             const dependency = top.dependencies[top.next]!;
             top.next += 1;
             // One on the path already is a cycle, which adds nothing.
-            if (!memo.has(dependency) && !onPath.has(dependency)) enter(dependency);
+            if (memo[dependency] === undefined && !onPath.has(dependency)) enter(dependency);
             continue;
           }
           path.pop();
@@ -829,7 +788,7 @@ export class Runner {
           const parts: Set<Origin>[] = [own];
           const larger: Large[] = [];
           for (const dependency of top.dependencies) {
-            const part = memo.get(dependency);
+            const part = memo[dependency];
             if (part instanceof Large) {
               if (!larger.includes(part)) larger.push(part);
             } else if (part !== undefined) parts.push(part);
@@ -837,7 +796,8 @@ export class Runner {
           if (larger.length > 0) {
             // Through one larger record and what it has already, its `Large` (a long count raised by one).
             const adds = parts.filter((part) => part.size > 0);
-            memo.set(
+            remember(
+              memo,
               top.id,
               larger.length === 1 && adds.every((part) => larger[0]!.sets.includes(part))
                 ? larger[0]!
@@ -847,12 +807,13 @@ export class Runner {
           }
           const largest = parts.reduce((most, part) => (part.size > most.size ? part : most));
           if (parts.every((part) => part === largest || within(part, largest))) {
-            memo.set(top.id, largest === own ? shareOrigins(own) : largest);
+            remember(memo, top.id, largest === own ? shareOrigins(own) : largest);
             continue;
           }
           const found = new Set<Origin>();
           for (const part of parts) for (const origin of part) found.add(origin);
-          memo.set(
+          remember(
+            memo,
             top.id,
             found.size > MAX_RECORD_ORIGINS
               ? new Large(
@@ -862,8 +823,12 @@ export class Runner {
               : shareOrigins(found),
           );
         }
-        known = memo.get(id)!;
       }
+      return memo[id];
+    };
+    const originsOfRecord = (id: number, control = true): Set<Origin> => {
+      const known = memoOf(id, control);
+      if (known === undefined) return new Set();
       if (!(known instanceof Large)) return known;
       // Its own sets and those of the records it reaches; where it comes to one an earlier walk went through, that one's
       // whole set is worked out (once, without going on so) and kept.
@@ -900,39 +865,26 @@ export class Runner {
       keepWhole(known, found);
       return found;
     };
-    /** The records made from `first` on. */
-    const recordsSince = (first: number): number[] => {
-      const last = trace === undefined ? null : record(trace.status()).lastRecord;
-      if (typeof last !== "number") return [];
-      return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => first + index);
-    };
-    /** Where a condition's values come from as it is decided: what to work its origins out from, then or later. */
-    const readsAt = (expression: unknown, first: number): Reads => {
+    /**
+     * Where an expression's values come from as it is read: the records the instruction made (`made`, first and last), the
+     * versions of the names it reads in the scopes they refer to there, and the origins of the temporaries of the call it
+     * runs in (`call`). Its origins are worked out from that then or later.
+     */
+    const readsAt = (expression: unknown, made: readonly [number, number], call: number): Reads => {
       const reads = readsOf(expression);
-      const last = trace === undefined ? null : record(trace.status()).lastRecord;
       const names: { id: number; fields: Iterable<string> }[] = [];
-      if (trace !== undefined && reads.names.size > 0) {
-        if (scopes === null || (partial && [...reads.names].some((name) => !scopes!.has(name)))) {
-          // With the blocks the call entered so far, as if entered here: leaving one shows the names it hid again.
-          const known = scopesOf(session.exportTrustedSnapshot());
-          scopes = known.scopes;
-          partial = false;
-          declaredIn.splice(0, declaredIn.length, ...known.declaredIn);
-          loopDepths.clear();
-          for (const [loop, depth] of known.loopDepths) loopDepths.set(loop, depth);
-        }
+      if (trace !== undefined)
         for (const name of reads.names) {
           this.readNames.add(name);
-          const scope = scopes.get(name);
-          const id = scope === undefined ? null : trace.variableRecord(scope, name);
+          const scope = session.scopeOf(name);
+          const id = scope === null ? null : trace.variableRecord(scope, name);
           if (id !== null) names.push({ id, fields: reads.fields.get(name) ?? [] });
         }
-      }
       return {
-        made: typeof last === "number" ? [first, last] : [first, first - 1],
+        made,
         names,
         temporaries: [...reads.temporaries].flatMap((temporary) => {
-          const origins = temporaryOrigins.get(`${depth}:${temporary}`);
+          const origins = temporaryOrigins.get(call)?.get(temporary);
           return origins === undefined ? [] : [origins];
         }),
       };
@@ -965,6 +917,10 @@ export class Runner {
         }
       return { origins, data, fields };
     };
+    /** The stored keys of the loads a set of origins names: the keys whose values tell states apart. */
+    const learnKeys = (origins: ReadonlySet<Origin>) => {
+      for (const origin of origins) if (origin.startsWith("k")) this.readKeys.add(origin.slice(1));
+    };
     const originsOfDecision = (reads: Reads, clock: boolean) => {
       const { origins, data, fields } = originsOfReads(reads);
       // The trace has no clock reads: the data flow tells whether the condition reads the clock.
@@ -972,6 +928,8 @@ export class Runner {
         origins.add(CLOCK);
         data.add(CLOCK);
       }
+      learnKeys(origins);
+      learnKeys(data);
       return { origins, dataOrigins: data, fields };
     };
     /** This state as a resume point, with the origins of the variables named like ones a condition read so far. */
@@ -983,8 +941,12 @@ export class Runner {
           if (typeof binding.name !== "string" || !this.readNames.has(binding.name)) return;
           const id = trace.variableRecord(scope, binding.name);
           if (id === null) return;
-          origins.set(`${String(scope)}:${binding.name}`, originsOfRecord(id));
-          dataOrigins.set(`${String(scope)}:${binding.name}`, originsOfRecord(id, false));
+          const control = originsOfRecord(id);
+          const data = originsOfRecord(id, false);
+          learnKeys(control);
+          learnKeys(data);
+          origins.set(`${String(scope)}:${binding.name}`, control);
+          dataOrigins.set(`${String(scope)}:${binding.name}`, data);
         };
         for (const binding of list(snapshot.globals)) name("global", binding);
         for (const scope of [...list(snapshot.frames), ...list(snapshot.retainedScopes)])
@@ -1048,241 +1010,168 @@ export class Runner {
       status.truncated === true ||
       Number(status.records) >= TRACE_RECORDS * 0.75 ||
       Number(status.accountedBytes) >= TRACE_BYTES * 0.75;
-    // The scope of each visible name, read from a snapshot when needed and kept until an instruction changes scopes. A
-    // block's scope and its declarations update it as they come (a loop's body enters one per round): per block entered
-    // since, the names it declared and the scopes they had before.
-    let scopes: Map<string, number | "global"> | null = null;
-    /** Whether `scopes` holds only the names the current call declared so far: another one is looked up when read. */
-    let partial = false;
-    /** The function whose parameters the call V2 saw last is binding, until its body starts. */
-    let binding: number | null = null;
-    const declaredIn: [string, number | "global" | undefined][][] = [];
-    /** The blocks entered when each loop last started: a `break` or `continue` leaves the ones entered since. */
-    const loopDepths = new Map<number, number>();
-    const forgetScopes = () => {
-      scopes = null;
-      partial = false;
-      binding = null;
-      declaredIn.length = 0;
-      loopDepths.clear();
-    };
-    /**
-     * The callers' scopes, blocks, and loops, kept while their calls run, with the calls under way and the instruction
-     * each returns to (a return elsewhere, such as a timer block's, is not theirs).
-     */
-    const callers: {
-      readonly depth: number;
-      readonly stack: string;
-      readonly returnsTo: number;
-      readonly scopes: Map<string, number | "global"> | null;
-      readonly partial: boolean;
-      readonly binding: number | null;
-      readonly declaredIn: [string, number | "global" | undefined][][];
-      readonly loopDepths: Map<number, number>;
-    }[] = [];
-    /** Leaves the innermost block entered: its declarations no longer hide the names' earlier scopes. */
-    const leaveBlock = (): void => {
-      const left = declaredIn.pop();
-      if (left === undefined || scopes === null) forgetScopes();
-      else
-        for (const [name, before] of left.reverse())
-          if (before === undefined) scopes.delete(name);
-          else scopes.set(name, before);
-    };
     let stepInstructions = 0;
     let end: Played["end"] | null = null;
-    const executeOne = (next: unknown): boolean => {
-      const status = trace === undefined ? null : record(trace.status());
-      const first = typeof status?.lastRecord === "number" ? status.lastRecord + 1 : 1;
-      if (!eager && status !== null && nearLimits(status)) {
-        eager = true;
-        settleLatest();
+    /** Per call under way (by call ID), the call it returns to and the temporary its result goes to there. */
+    const returnsTo = new Map<number, { call: number; destination: number | null }>();
+    /** A call just made, until its function's first instruction names the new call. */
+    let entering: { call: number; destination: number | null; entry: number } | null = null;
+    /** The current instruction's first record, and the origins of the arguments it passes (read before it runs). */
+    let first = 1;
+    let argumentOrigins: Set<Origin> | null = null;
+    /** Whether the step's instruction cap ended the current run. */
+    let capped = false;
+    /**
+     * Calls with temporaries past which a run stops to let go of those of calls no longer under way (a goto or an `end`
+     * leaves calls without returning from them), and whether it stopped for that.
+     */
+    let sweepAbove = MAX_CALL_TEMPORARIES;
+    let sweep = false;
+    const letGoOfEndedCalls = (): void => {
+      const live = new Set([
+        0,
+        ...list(session.exportTrustedSnapshot().callFrames).map((frame) => Number(frame.id)),
+      ]);
+      for (const each of temporaryOrigins.keys())
+        if (!live.has(each)) temporaryOrigins.delete(each);
+      for (const each of returnsTo.keys()) if (!live.has(each)) returnsTo.delete(each);
+      sweepAbove = Math.max(MAX_CALL_TEMPORARIES, 2 * temporaryOrigins.size);
+    };
+    /** The highest call ID the play saw (call IDs only grow): a higher one is a new call. */
+    let highestCall = 0;
+    /** The records up to this one the trace no longer has. */
+    let released = 0;
+    /**
+     * Lets the trace drop the records up to `upTo`. Each gets its origins first (a later record, a variable's version,
+     * or a latest decision may name any of them), and the latest decisions theirs.
+     */
+    const release = (upTo: number): void => {
+      settleLatest();
+      for (let id = released + 1; id <= upTo; id += 1) {
+        memoOf(id, true);
+        memoOf(id, false);
       }
-      // A call's arguments read in the caller's scope, before the call leaves it (a value's records keep only so many
-      // dependencies, so the names they read count too).
-      const call = typeof next === "number" ? this.#instructions[next] : undefined;
-      const argumentOrigins =
-        call?.kind === "callFunction" && typeof call.destinationTemporary === "number"
-          ? originsOfReads(readsAt(call.arguments, first)).origins
-          : null;
-      if (call?.kind === "callFunction") {
-        const stack = session.callReturnInstructions();
-        callers.push({
-          depth: stack.length,
-          stack: JSON.stringify(stack),
-          returnsTo: Number(call.returnInstruction),
-          scopes,
-          partial,
-          binding,
-          declaredIn: [...declaredIn],
-          loopDepths: new Map(loopDepths),
-        });
-      }
-      const result = session.executeInstruction({ ...traced, instructionTrace: true });
-      if (result.randomRefusal !== undefined) end = "diverged";
-      const executed = record(result.instructionTrace);
-      instructions += 1;
-      stepInstructions += 1;
-      const declared: string[] = [];
-      let declares = false;
-      for (const index of Array.isArray(executed.instructions) ? executed.instructions : []) {
-        if (typeof index !== "number") continue;
-        visited.add(index);
-        if (options.known !== undefined && options.known[index] !== 1) lastNew = step;
-        const instruction = this.#instructions[index]!;
-        if (instruction.kind === "enterScope") declaredIn.push([]);
-        else if (instruction.kind === "leaveScope") leaveBlock();
-        else if (instruction.kind === "declareBinding" && typeof instruction.name === "string") {
-          declared.push(instruction.name);
-          declares = true;
-        } else if (instruction.kind === "loopStart") {
-          loopDepths.set(Number(instruction.loopId), declaredIn.length);
-          declares = true;
-        } else if (instruction.kind === "loopControl") {
-          const depth = loopDepths.get(Number(instruction.loopId));
-          if (depth === undefined || depth > declaredIn.length) forgetScopes();
-          else while (scopes !== null && declaredIn.length > depth) leaveBlock();
-        } else if (instruction.kind === "callFunction") {
-          // A call starts with the names it declares (its parameters, by their records); another is looked up when read.
-          forgetScopes();
-          scopes = new Map();
-          partial = true;
-          declares = true;
-          binding = Number(instruction.functionId);
-        } else if (BINDS_PARAMETERS.has(String(instruction.kind))) {
-          // Only for the function the call V2 saw starts: one the runtime starts by itself (a timer's expiry, which sees
-          // the variables it captured) is looked up.
-          if (Number(instruction.functionId) === binding) declares = true;
-          else forgetScopes();
-          if (instruction.kind === "enterFunctionBody") binding = null;
-        } else if (!KEEPS_SCOPES.has(String(instruction.kind))) forgetScopes();
-        if (options.origins && instruction.kind === "storeTemporary") {
-          const { origins } = originsOfReads(readsAt(instruction.value, first));
-          temporaryOrigins.set(`${depth}:${String(instruction.temporaryId)}`, origins);
+      trace!.release(upTo);
+      released = upTo;
+    };
+    /**
+     * A traced play runs the script with an observer: before each instruction, the step's cap, the first record it will
+     * make, and the origins of a call's arguments, read in the caller's scope; after it, what it made and read: the
+     * temporaries a condition may read, a call's result, and each decision with what its condition read.
+     */
+    const observer = {
+      before: (index: number, call: number): boolean => {
+        // The calls under way are known outside the observer only: the run stops here, and goes on after them.
+        if (temporaryOrigins.size > sweepAbove) {
+          sweep = true;
+          return true;
         }
-        // A call's result, which a condition may read from its temporary, has the origins of the arguments it was given.
-        if (
-          options.origins &&
-          instruction.kind === "callFunction" &&
-          typeof instruction.destinationTemporary === "number"
-        ) {
-          // And the records the call made.
-          const origins = new Set<Origin>(argumentOrigins ?? []);
-          for (const id of recordsSince(first))
-            for (const origin of originsOfRecord(id)) origins.add(origin);
-          temporaryOrigins.set(`${depth}:${instruction.destinationTemporary}`, origins);
-        }
-        // A function's result also has the origins of what it returns, and of the decisions it returned under: the
-        // records the return made (the step ran it, so the callee's names are out of scope by now).
-        if (options.origins && instruction.kind === "returnValue" && depth > 0) {
-          const destination = destinations[destinations.length - 1];
-          if (destination !== undefined && destination !== null) {
-            const key = `${depth - 1}:${destination}`;
-            const origins = new Set(temporaryOrigins.get(key) ?? []);
-            for (const id of recordsSince(first))
-              for (const origin of originsOfRecord(id)) origins.add(origin);
-            temporaryOrigins.set(key, origins);
+        if (call > highestCall) {
+          highestCall = call;
+          if (entering !== null && index === entering.entry) {
+            returnsTo.set(call, { call: entering.call, destination: entering.destination });
+            entering = null;
+          } else if (this.#handlerEntries.has(index)) {
+            // A block the runtime started by itself (a timer's expiry, a cue, a button): its start counts as one
+            // instruction for the step's cap, as the runtime's budget counts it. (A file call's frame starts at its
+            // file's code, and a resumed play's frames at where they stood.)
+            instructions += 1;
+            stepInstructions += 1;
           }
         }
-        if (instruction.kind === "callFunction") {
-          depth += 1;
-          destinations.push(
+        if (stepInstructions >= options.maxStepInstructions) {
+          capped = true;
+          return true;
+        }
+        instructions += 1;
+        stepInstructions += 1;
+        // A failing instruction gets no `after`: it is visited all the same.
+        visited.add(index);
+        if (options.known !== undefined && options.known[index] !== 1) lastNew = step;
+        const status = record(trace!.status());
+        first = Number(status.nextRecord);
+        if (!eager && nearLimits(status)) {
+          eager = true;
+          settleLatest();
+        }
+        if (RELEASE_TRACE && first - 1 - released >= RELEASE_EVERY) release(first - 1);
+        const instruction = this.#instructions[index];
+        argumentOrigins =
+          instruction?.kind === "callFunction" &&
+          typeof instruction.destinationTemporary === "number"
+            ? originsOfReads(readsAt(instruction.arguments, [first, first - 1], call)).origins
+            : null;
+        return false;
+      },
+      after: (index: number, next: number, call: number): void => {
+        const instruction = this.#instructions[index]!;
+        const kind = instruction.kind;
+        if (!OBSERVED.has(String(kind))) return;
+        const made: [number, number] = [first, Number(record(trace!.status()).nextRecord) - 1];
+        if (kind === "storeTemporary") {
+          const { origins } = originsOfReads(readsAt(instruction.value, made, call));
+          setTemporary(call, Number(instruction.temporaryId), origins);
+        } else if (kind === "end") {
+          // A called file's frame ends with its file.
+          temporaryOrigins.delete(call);
+        } else if (kind === "callFunction") {
+          // A call's result, which a condition may read from its temporary, has the origins of the arguments it was
+          // given, and of the records the call made.
+          const destination =
             typeof instruction.destinationTemporary === "number"
               ? instruction.destinationTemporary
-              : null,
+              : null;
+          if (destination !== null) {
+            const origins = new Set<Origin>(argumentOrigins ?? []);
+            for (let id = made[0]; id <= made[1]; id += 1)
+              for (const origin of originsOfRecord(id)) origins.add(origin);
+            setTemporary(call, destination, origins);
+          }
+          entering = { call, destination, entry: next };
+        } else if (kind === "returnValue" || kind === "returnVoid") {
+          // A function's result also has the origins of what it returns, and of the decisions it returned under: the
+          // records the return made.
+          const back = returnsTo.get(call);
+          returnsTo.delete(call);
+          // The call's own temporaries end with it.
+          temporaryOrigins.delete(call);
+          if (kind === "returnValue" && back !== undefined && back.destination !== null) {
+            const origins = new Set(temporaryOrigins.get(back.call)?.get(back.destination) ?? []);
+            for (let id = made[0]; id <= made[1]; id += 1)
+              for (const origin of originsOfRecord(id)) origins.add(origin);
+            setTemporary(back.call, back.destination, origins);
+          }
+        } else {
+          const way: 0 | 1 = next === index + 1 ? 0 : 1;
+          const key = `${step}:${index}`;
+          const nth = decisionCount.get(key) ?? 0;
+          decisionCount.set(key, nth + 1);
+          // Past the first few at one instruction in one step, a play keeps the first decision each way took there and
+          // the latest (a long replay decides a million times). Only the latest has origins (a counter tested at each
+          // round of a loop has the most behind it at its last test): what it read is kept as it is decided, and its
+          // origins worked out as the play ends (working out every round's would double the cost of a long replay). A
+          // decision whose other way is covered gets them too: a later target's dependency-closed prefix needs them.
+          const firstWay = !waysAt.has(`${key}:${way}`);
+          if (firstWay) waysAt.add(`${key}:${way}`);
+          const reads = readsAt(
+            instruction.condition ?? instruction.expression ?? instruction.source,
+            made,
+            call,
           );
+          const clock = this.readsClock(index);
+          if (nth < ORIGINS_PER_INSTRUCTION) {
+            addDecision({ instruction: index, way, step, nth, ...originsOfDecision(reads, clock) });
+            return;
+          }
+          const previous = latestAt.get(key);
+          if (previous !== undefined && !previous.firstWay) decisions[previous.index] = undefined;
+          else if (previous !== undefined)
+            decisions[previous.index] = { ...decisions[previous.index]!, ...NO_ORIGINS };
+          const at = addDecision({ instruction: index, way, step, nth, ...NO_ORIGINS });
+          latestAt.set(key, { index: at, firstWay, reads, clock });
+          if (eager) settleLatest();
         }
-        if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
-          depth = Math.max(0, depth - 1);
-          destinations.pop();
-        }
-      }
-      // The bindings declared (also a loop's variables), in the scopes the trace names; one it does not name is looked up
-      // again.
-      if (declares && scopes !== null && trace !== undefined) {
-        const known: Map<string, number | "global"> = scopes;
-        for (const id of recordsSince(first)) {
-          const entry = trace.record(id);
-          const variable = record(entry?.variable);
-          if (
-            entry === null ||
-            !["declaration", "loopValue", "parameter"].includes(String(entry.kind)) ||
-            typeof variable.name !== "string" ||
-            (typeof variable.scope !== "number" && variable.scope !== "global")
-          )
-            continue;
-          declaredIn.at(-1)?.push([variable.name, known.get(variable.name)]);
-          known.set(variable.name, variable.scope);
-          const at = declared.indexOf(variable.name);
-          if (at >= 0) declared.splice(at, 1);
-        }
-        if (declared.length > 0) forgetScopes();
-      }
-      // Back in a caller, its scopes are as they were (a call that did not come back, or not as V2 saw it, forgets them).
-      const kinds = (Array.isArray(executed.instructions) ? executed.instructions : []).map(
-        (index) => this.#instructions[Number(index)]?.kind,
-      );
-      // A transfer to another file leaves every call under way.
-      if (kinds.includes("transfer")) callers.length = 0;
-      if (kinds.some((kind) => kind === "returnValue" || kind === "returnVoid" || kind === "end")) {
-        const now = session.callReturnInstructions();
-        while (callers.length > 0 && callers.at(-1)!.depth > now.length) callers.pop();
-        const back = callers.at(-1);
-        if (
-          back !== undefined &&
-          back.stack === JSON.stringify(now) &&
-          back.returnsTo === session.view().nextInstruction &&
-          kinds.at(-1) !== "end"
-        ) {
-          callers.pop();
-          forgetScopes();
-          scopes = back.scopes;
-          partial = back.partial;
-          binding = back.binding;
-          declaredIn.push(...back.declaredIn);
-          for (const [loop, depth] of back.loopDepths) loopDepths.set(loop, depth);
-        } else forgetScopes();
-      }
-      for (const branch of Array.isArray(executed.branches) ? executed.branches : []) {
-        if (!Array.isArray(branch)) continue;
-        const [from, to]: unknown[] = branch;
-        if (typeof from !== "number" || typeof to !== "number") continue;
-        const instruction = this.#instructions[from];
-        if (instruction?.kind !== "jumpIfFalse" && instruction?.kind !== "loopStart") continue;
-        const way: 0 | 1 = to === from + 1 ? 0 : 1;
-        const key = `${step}:${from}`;
-        const nth = decisionCount.get(key) ?? 0;
-        decisionCount.set(key, nth + 1);
-        // Past the first few at one instruction in one step, a play keeps the first decision each way took there and the
-        // latest (a long replay decides a million times). Only the latest has origins (a counter tested at each round of a
-        // loop has the most behind it at its last test): what it read is kept as it is decided, and its origins worked
-        // out as the play ends (working out every round's would double the cost of a long replay). A decision whose other
-        // way is covered gets them too: a later target's dependency-closed prefix needs them.
-        const firstWay = !waysAt.has(`${key}:${way}`);
-        if (firstWay) waysAt.add(`${key}:${way}`);
-        const reads = options.origins
-          ? readsAt(instruction.condition ?? instruction.expression ?? instruction.source, first)
-          : null;
-        const clock = this.readsClock(from);
-        if (nth < ORIGINS_PER_INSTRUCTION) {
-          addDecision({
-            instruction: from,
-            way,
-            step,
-            nth,
-            ...(reads === null ? NO_ORIGINS : originsOfDecision(reads, clock)),
-          });
-          continue;
-        }
-        const previous = latestAt.get(key);
-        if (previous !== undefined && !previous.firstWay) decisions[previous.index] = undefined;
-        else if (previous !== undefined)
-          decisions[previous.index] = { ...decisions[previous.index]!, ...NO_ORIGINS };
-        const index = addDecision({ instruction: from, way, step, nth, ...NO_ORIGINS });
-        latestAt.set(key, { index, firstWay, reads, clock });
-        if (eager) settleLatest();
-      }
-      return true;
+      },
     };
     /**
      * Without origins: runs the script until it waits, in one call, recording each way its decisions took once. A run
@@ -1366,8 +1255,25 @@ export class Runner {
         runStart = stepInstructions;
         measuredWays.clear();
         while (view.runnable === true) {
-          if (options.origins) executeOne(view.nextInstruction);
-          else if (options.measure?.instruction !== undefined && step === options.measure.at) {
+          if (options.origins) {
+            capped = false;
+            const result = session.run({
+              ...traced,
+              instructionObserver: observer,
+              // The observer stops the run at the step's cap, before the runtime's budget would.
+              instructionBudget: options.maxStepInstructions - stepInstructions + 1024,
+            });
+            if (result.randomRefusal !== undefined) end = "diverged";
+            if (end !== null) return;
+            if (sweep) {
+              sweep = false;
+              letGoOfEndedCalls();
+            }
+            if (capped) {
+              end = "stuck";
+              return;
+            }
+          } else if (options.measure?.instruction !== undefined && step === options.measure.at) {
             measureOne(view.nextInstruction);
             if (end !== null) return;
             // As for a whole run: the step's cap counts once the run is over, and not after one that failed.
@@ -1498,9 +1404,10 @@ export class Runner {
       }
       if (action.kind === "interaction" && typeof action.actionId === "number")
         inputOf.set(action.actionId, `i${inputCount}`);
-      if (typeof action.destinationTemporary === "number")
-        temporaryOrigins.set(
-          `${depth}:${action.destinationTemporary}`,
+      if (options.origins && typeof action.destinationTemporary === "number")
+        setTemporary(
+          Number(action.ownerCallFrameId ?? 0),
+          action.destinationTemporary,
           new Set([`i${inputCount}`]),
         );
       inputCount += 1;
@@ -1631,6 +1538,11 @@ export class Runner {
         result = complete({ kind: "selectedOption", optionIndex: input.index });
         break;
       case "button":
+        // As V1: an openUrl opens its address, and an exportText dialog closes, each in one way only.
+        if (action.interactionKind === "url" || action.interactionKind === "export") {
+          result = complete({ kind: action.interactionKind === "url" ? "opened" : "close" });
+          break;
+        }
         if (input.afterMs !== undefined) {
           const until = Number(view.observedSessionTimeMs) + input.afterMs;
           const observed = session.observeTime(until, mediaReports(session, view, until), traced);
