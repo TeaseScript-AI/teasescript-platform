@@ -106,6 +106,19 @@ const REACH = `const reach = (target) => {
 };`;
 
 /**
+ * In-page `pressable(element)`: whether a person sees the element and can press it at its centre, wherever it sits: it
+ * is rendered, not transparent or hidden, and its centre is in the window and hits the element, not something above it.
+ * Every pointer and touch input of the smoke waits for it.
+ */
+const PRESSABLE = `const pressable = (element) => {
+  if (!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+  const box = element.getBoundingClientRect();
+  const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+  return box.width > 0 && box.height > 0 && x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight &&
+    element.contains(document.elementFromPoint(x, y));
+};`;
+
+/**
  * In-page `uncovered(element)`: whether a person sees the whole element and can press it, wherever it sits: it is
  * rendered, not transparent or hidden, and its centre and a point just inside the middle of each edge are in the window
  * and hit the element, not something above it.
@@ -712,7 +725,7 @@ async function scriptStorageScenario(cdp, origin) {
       true,
       "Saved data cannot be cleared when storage is session-local",
     );
-    await physicalClick(cdp, "[data-settings-trigger]");
+    await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
     await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
     await physicalClick(cdp, start);
     await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
@@ -968,15 +981,7 @@ async function pacingInputOwnershipCheck(cdp) {
   await waitFor(cdp, `${theme} === ${JSON.stringify(initialTheme)}`);
   // Message text is not unused space: a stationary press on it is reading, not a skip.
   const latestMessage = `[...document.querySelectorAll('[data-slot=bubble], .prose')].at(-1)`;
-  const messagePoint = await reachPoint(cdp, latestMessage);
-  assertEqual(
-    await value(
-      cdp,
-      `${latestMessage}.contains(document.elementFromPoint(${messagePoint.x}, ${messagePoint.y}))`,
-    ),
-    true,
-    "Something covers the latest message, so a press cannot reach it",
-  );
+  const messagePoint = await pressPoint(cdp, latestMessage, "the latest message");
   for (const type of ["mousePressed", "mouseReleased"])
     await cdp.call("Input.dispatchMouseEvent", {
       type,
@@ -1039,7 +1044,7 @@ async function buttonNameCheck(cdp, label) {
 // message's pacing on release (the gesture belongs to the message presented at press time).
 async function staleSkipGestureCheck(cdp) {
   const point = (selector) =>
-    reachPoint(cdp, `[...document.querySelectorAll(${JSON.stringify(selector)})].at(-1)`);
+    pressPoint(cdp, `[...document.querySelectorAll(${JSON.stringify(selector)})].at(-1)`, selector);
   // The transcript is virtualized, so count messages through its list size rather than rendered entries.
   const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   // Read back in the transcript first, so new messages do not scroll it while the button is held.
@@ -1154,43 +1159,51 @@ async function smartFollowCheck(cdp) {
   );
   await waitFor(
     cdp,
-    `(() => {
-      const latest = document.querySelector('.transcript-entry[aria-posinset="' + ${count} + '"]')?.getBoundingClientRect();
-      const view = ${viewport};
-      const composer = document.querySelector('[data-composer-shell]').getBoundingClientRect();
-      const covered = latest && latest.left < composer.right && composer.left < latest.right && latest.top < composer.bottom - 1 && composer.top < latest.bottom - 1;
-      return !!latest && latest.height > 0 && latest.top >= view.top - 1 && latest.bottom <= view.bottom + 1 && !covered;
-    })()`,
+    `(() => { ${UNCOVERED} const latest = document.querySelector('.transcript-entry[aria-posinset="' + ${count} + '"]'); return !!latest && uncovered(latest); })()`,
     2_000,
-    "After Return to latest, the next message was not shown clear of the composer",
+    "After Return to latest, the next message was not shown whole and uncovered",
   );
 }
 
-/** The centre of the element `expression` evaluates to, once it is in reach. */
-async function reachPoint(cdp, expression) {
-  return evaluate(cdp, `${REACH} return reach(${expression});`);
-}
-
-// A click at the element's centre once it no longer moves in and is in reach: a control that live play just showed
-// enters the conversation for a moment, as do the messages it glides up with.
-async function physicalClick(cdp, selector) {
+/**
+ * Where a person presses the element `expression` evaluates to: its centre once it no longer moves in (a control that
+ * live play just showed enters the conversation for a moment, as do the messages it glides up with), is brought into
+ * reach, and is pressable there, within two seconds. Only `{ hidden: true }`, for a control that stays hidden until a
+ * first press on its place reveals it, presses that place without seeing the control.
+ */
+async function pressPoint(cdp, expression, what = expression, { hidden = false } = {}) {
   const point = await evaluate(
     cdp,
-    `${REACH}
+    `${REACH} ${PRESSABLE}
     return new Promise((resolve) => {
-      const target = document.querySelector(${JSON.stringify(selector)});
+      const target = () => ${expression};
       const deadline = performance.now() + 2_000;
       const entering = () =>
         document.getAnimations().some((animation) =>
           animation.playState === "running" &&
           animation.effect?.getComputedTiming().endTime !== Infinity &&
-          animation.effect?.target?.contains(target));
+          animation.effect?.target?.contains(target()));
       const check = () => {
-        if (entering() && performance.now() < deadline) return setTimeout(check, 16);
-        resolve(reach(target));
+        const waiting = performance.now() < deadline;
+        if (target() && entering() && waiting) return setTimeout(check, 16);
+        if (target()) reach(target());
+        if (target() && (${hidden} || pressable(target()))) return resolve(reach(target()));
+        if (waiting) return setTimeout(check, 16);
+        resolve(null);
       };
       check();
     })`,
+  );
+  if (point === null) throw new Error(`A person cannot see and press ${what}`);
+  return point;
+}
+
+// A click where a person presses the element.
+async function physicalClick(cdp, selector) {
+  const point = await pressPoint(
+    cdp,
+    `document.querySelector(${JSON.stringify(selector)})`,
+    selector,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
@@ -1259,12 +1272,11 @@ async function settledClick(cdp, selector, timeout = 5_000) {
   await physicalClick(cdp, selector);
 }
 
-// Waits until the element, brought into reach, has held its position for three animation frames with nothing covering
-// its centre.
+// Waits until the element, brought into reach, has held its position for three animation frames while pressable.
 async function settle(cdp, selector, timeout = 5_000) {
   const settled = await evaluate(
     cdp,
-    `${REACH}
+    `${REACH} ${PRESSABLE}
     return new Promise((resolve) => {
       const deadline = performance.now() + ${timeout};
       let previous = null;
@@ -1274,9 +1286,7 @@ async function settle(cdp, selector, timeout = 5_000) {
         if (target) reach(target);
         const rect = target?.getBoundingClientRect();
         const position = rect ? [rect.left, rect.top, rect.width, rect.height].join() : null;
-        const centre = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        const uncovered = !!centre && target.contains(centre);
-        stillFrames = position !== null && position === previous && uncovered ? stillFrames + 1 : 0;
+        stillFrames = position !== null && position === previous && pressable(target) ? stillFrames + 1 : 0;
         previous = position;
         if (stillFrames >= 3) resolve(true);
         else if (performance.now() > deadline) resolve(false);
@@ -1285,7 +1295,8 @@ async function settle(cdp, selector, timeout = 5_000) {
       requestAnimationFrame(check);
     })`,
   );
-  if (!settled) throw new Error(`${selector} did not come to rest uncovered`);
+  if (!settled)
+    throw new Error(`${selector} did not come to rest where a person can see and press it`);
 }
 
 // A real Space key: unless a handler prevents its default, it types a space into the focused field.
@@ -1558,7 +1569,7 @@ async function keptSessionScenario(cdp, origin, profile) {
   await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
   // The choice appears as soon as Continue leaves the page. On a touch device the composer takes no focus then, so no
   // software keyboard opens. (A desktop with a mouse gives it focus, but this headless browser reports no hover.)
-  const point = await reachPoint(cdp, `document.querySelector('${start}')`);
+  const point = await pressPoint(cdp, `document.querySelector('${start}')`);
   await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   try {
     await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
@@ -1814,7 +1825,7 @@ async function randomPickerScenario(cdp, origin) {
       "0",
       "The code's tools showed without the pointer over it",
     );
-    const block = await reachPoint(
+    const block = await pressPoint(
       cdp,
       `document.querySelector('[data-random-draw-source] [data-code-block]')`,
     );
@@ -2084,10 +2095,11 @@ async function largeRandomPickerScenario(cdp, origin) {
     await value(
       cdp,
       `(() => {
-        // The last character of the long line, where it is drawn, and the code's and the line's visible areas.
+        // The last character of the long line, where it is drawn: inside the code's visible area and clipped by
+        // nothing between them.
         const block = ${block};
-        const line = block.querySelector('[data-code-line="2"]');
-        const walker = document.createTreeWalker(line.querySelector('.code-block-text'), NodeFilter.SHOW_TEXT);
+        const text = block.querySelector('[data-code-line="2"] .code-block-text');
+        const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
         let last = null;
         while (walker.nextNode()) if (walker.currentNode.textContent.trim()) last = walker.currentNode;
         const end = last.textContent.trimEnd().length;
@@ -2097,8 +2109,14 @@ async function largeRandomPickerScenario(cdp, origin) {
         const glyph = range.getBoundingClientRect();
         const area = block.getBoundingClientRect();
         const [left, right] = [area.left + block.clientLeft, area.left + block.clientLeft + block.clientWidth];
-        const row = line.getBoundingClientRect();
-        return glyph.width > 0 && glyph.left >= left && glyph.right <= right && glyph.right <= row.right + 1;
+        let clipped = glyph.width === 0 || glyph.left < left || glyph.right > right;
+        for (let node = text; node !== block && !clipped; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+          const box = node.getBoundingClientRect();
+          clipped = glyph.left < box.left - 1 || glyph.right > box.right + 1;
+        }
+        return !clipped;
       })()`,
     ),
     true,
@@ -2251,19 +2269,17 @@ async function titleBarScenario(cdp, origin) {
   );
 
   // On a short screen the default bar's display controls stay visible and usable without a timer rail and beside one:
-  // nothing covers them, and what the rail shows (its timer and buttons) is not drawn over them.
+  // nothing covers them, and they do not cover what the rail shows (its timers and buttons).
   const reachable = async (situation) => {
     const blocked = await evaluate(
       cdp,
       `${UNCOVERED}
-      const shown = [...document.querySelectorAll('.stage-right-rail :is(.timer-display, button)')]
-        .filter((element) => element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
-        .map((element) => element.getBoundingClientRect());
-      const meets = (box) => shown.some((part) => box.left < part.right && part.left < box.right && box.top < part.bottom && part.top < box.bottom);
       const controls = [...document.querySelectorAll('.player-top-bar-actions button')];
-      return controls.length === 0 ? ['no control'] : controls
-        .filter((control) => !uncovered(control) || meets(control.getBoundingClientRect()))
-        .map((control) => control.getAttribute('aria-label'));`,
+      const rail = [...document.querySelectorAll('.stage-right-rail :is(.timer-display, button)')].filter((element) =>
+        element.checkVisibility({ opacityProperty: true, visibilityProperty: true }));
+      return controls.length === 0 ? ['no control'] : [...controls, ...rail]
+        .filter((element) => !uncovered(element))
+        .map((element) => element.getAttribute('aria-label') ?? element.className);`,
     );
     assertEqual(blocked.join(", "), "", `The short screen's bar hid display controls ${situation}`);
     const theme = `document.documentElement.dataset.playerTheme`;
@@ -2344,7 +2360,8 @@ async function titleBarScenario(cdp, origin) {
       6_000,
       "The auto-hide bar did not start hidden with a cut-off title",
     );
-    await touchTap(cdp, "[data-player-title-full]");
+    // The bar is hidden until this tap, which a person makes where it sits.
+    await touchTap(cdp, "[data-player-title-full]", { hidden: true });
     await waitFor(
       cdp,
       `document.querySelector('[data-player-top-bar]').hasAttribute('data-revealed')`,
@@ -2363,9 +2380,14 @@ async function titleBarScenario(cdp, origin) {
   }
 }
 
-/** A touch tap at the middle of the first element `selector` matches, once it is in reach. */
-async function touchTap(cdp, selector) {
-  const point = await reachPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`);
+/** A touch tap at the middle of the first element `selector` matches, where a person presses it. */
+async function touchTap(cdp, selector, options = {}) {
+  const point = await pressPoint(
+    cdp,
+    `document.querySelector(${JSON.stringify(selector)})`,
+    selector,
+    options,
+  );
   await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: true });
   try {
     await cdp.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
@@ -3207,7 +3229,7 @@ async function messageUpdatesScenario(cdp, origin) {
   );
   assertEqual(await value(cdp, entries), 43, "A changed message added an entry");
   // Scroll up step by step past the changed counter: the text in view moves exactly as far as each step.
-  const rect = await reachPoint(cdp, viewport);
+  const rect = await pressPoint(cdp, viewport);
   const tops = `Object.fromEntries([...document.querySelectorAll('.transcript-entry')].map((row) => [row.dataset.messageId, row.getBoundingClientRect().top]))`;
   let passed = false;
   let observed = 0;
@@ -5366,11 +5388,9 @@ async function debugExportScenario(cdp, origin, profile) {
     `(() => {
       const scroller = document.querySelector('.transcript-scroll');
       scroller.scrollTop = scroller.scrollHeight;
+      ${UNCOVERED}
       const entries = document.querySelectorAll('.transcript-entry');
-      const last = entries[entries.length - 1].getBoundingClientRect();
-      const card = document.querySelector('[data-runtime-failure]').getBoundingClientRect();
-      const covered = last.left < card.right && card.left < last.right && last.top < card.bottom && card.top < last.bottom;
-      return !covered && document.getAnimations().every((animation) => animation.playState !== 'running');
+      return uncovered(entries[entries.length - 1]) && document.getAnimations().every((animation) => animation.playState !== 'running');
     })()`,
     8_000,
     "The error line covers the transcript's last message",
@@ -6417,7 +6437,7 @@ async function formsScenario(cdp, origin) {
   // Following the latest content shows the submit button, which stays in view, clear of the composer, while the fields
   // scroll to their last toggle.
   const submit = `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "OK")`;
-  const submitShown = `(() => { ${UNCOVERED} const composer = document.querySelector('[data-composer-input]').getBoundingClientRect(); const box = ${submit}.getBoundingClientRect(); return uncovered(${submit}) && !(box.left < composer.right && composer.left < box.right && box.top < composer.bottom && composer.top < box.bottom); })()`;
+  const submitShown = `(() => { ${UNCOVERED} return uncovered(${submit}) && uncovered(document.querySelector('[data-composer-input]')); })()`;
   assertEqual(
     await value(cdp, submitShown),
     true,
@@ -7088,7 +7108,7 @@ async function heldPressScenario(cdp, origin) {
   const steady = async (label) => {
     const look = `(() => { const button = document.querySelector('[data-smoke-press]'); const rect = button.getBoundingClientRect(); const style = getComputedStyle(button); return JSON.stringify([rect.x, rect.y, rect.width, rect.height, style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor, style.borderTopWidth, style.outlineStyle, style.transform]); })()`;
     await settle(cdp, "[data-smoke-press]");
-    const point = await reachPoint(cdp, `document.querySelector('[data-smoke-press]')`);
+    const point = await pressPoint(cdp, `document.querySelector('[data-smoke-press]')`);
     const idle = await value(cdp, look);
     await cdp.call("Input.dispatchMouseEvent", {
       type: "mousePressed",
