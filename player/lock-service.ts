@@ -114,6 +114,12 @@ export class LockService {
   #answer: { readonly key: string; readonly promise: Promise<PlayerLockAnswer> } | null = null;
   /** What the player typed, by `generation:actionId` of the `ask` step whose dialog they answered. */
   readonly #typed = new Map<string, LockDialogInput>();
+  /**
+   * An encrypt call's lock dialog, for the openers the player chooses, that follows its password field in the same step,
+   * and then the password typed in that field, by the step's key.
+   */
+  #followUp: { readonly key: string; readonly dialog: LockDialog; password: string | null } | null =
+    null;
   #dialog: LockDialog | null = null;
   #busy = false;
   #preparing: string | null = null;
@@ -147,6 +153,7 @@ export class LockService {
   reset(): void {
     this.#answer = null;
     this.#typed.clear();
+    this.#followUp = null;
     this.#showDialog(null);
   }
 
@@ -154,7 +161,18 @@ export class LockService {
   submit(input: LockDialogInput): void {
     const dialog = this.#dialog;
     if (dialog === null || this.#answer?.key === dialog.key) return;
-    this.#typed.set(`${this.#host.generation()}:${dialog.actionId}`, input);
+    const followUp = this.#followUp?.key === dialog.key ? this.#followUp : null;
+    // The password field's password waits, in memory, for the lock dialog that follows it.
+    if (followUp !== null && dialog.kind === "password") {
+      followUp.password = input.password;
+      this.#showDialog(followUp.dialog);
+      return;
+    }
+    this.#followUp = null;
+    this.#typed.set(
+      `${this.#host.generation()}:${dialog.actionId}`,
+      followUp === null ? input : { ...input, password: followUp.password },
+    );
     this.#answer = { key: dialog.key, promise: Promise.resolve({ kind: "submitted" }) };
     this.#showDialog(dialog, true);
     this.request();
@@ -247,6 +265,11 @@ export class LockService {
     }
     const encrypts = action.call === "encryptText" || action.call === "encryptFile";
     if (action.passwordField !== null) {
+      // The password field asks first, and the lock dialog for the openers the player chooses after it.
+      this.#followUp =
+        encrypts && action.choices.length > 0
+          ? { key, dialog: lockDialog(action, key), password: null }
+          : null;
       this.#showDialog(
         {
           kind: "password",
@@ -260,21 +283,7 @@ export class LockService {
       return;
     }
     if (encrypts) {
-      const timed = action.choices.includes("timeLock");
-      this.#showDialog(
-        {
-          kind: "lock",
-          key,
-          actionId: action.actionId,
-          choices: action.choices,
-          suggestedTimeLockMs: timed ? action.timeLockMs : null,
-          given: {
-            password: action.password !== null,
-            timeLock: !timed && action.timeLockMs !== null,
-          },
-        },
-        false,
-      );
+      this.#showDialog(lockDialog(action, key), false);
       return;
     }
     this.#preparing = key;
@@ -325,7 +334,8 @@ export class LockService {
   }
 
   #showDialog(dialog: LockDialog | null, busy = false): void {
-    if (this.#dialog?.key === dialog?.key && this.#busy === busy) return;
+    // The lock dialog after a password field is the same step's: the same key, another dialog.
+    if (this.#dialog === dialog && this.#busy === busy) return;
     if (this.#dialog?.key !== dialog?.key || busy) {
       this.#cancelRetry?.();
       this.#cancelRetry = null;
@@ -436,6 +446,25 @@ export class LockService {
     );
     return { kind: "opened", file: entry.reference, type };
   }
+}
+
+/**
+ * The lock dialog of an encrypt step, for the openers the player chooses: a chosen time lock suggests the step's moment,
+ * and the call's own openers, also its password field's, are given.
+ */
+function lockDialog(action: RuntimeLockActionSnapshot, key: string): LockDialog {
+  const timed = action.choices.includes("timeLock");
+  return {
+    kind: "lock",
+    key,
+    actionId: action.actionId,
+    choices: action.choices,
+    suggestedTimeLockMs: timed ? action.timeLockMs : null,
+    given: {
+      password: action.password !== null || action.passwordField !== null,
+      timeLock: !timed && action.timeLockMs !== null,
+    },
+  };
 }
 
 /** The first bytes of a file, as the one-byte characters that `fileType` reads. */

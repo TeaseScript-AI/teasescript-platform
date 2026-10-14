@@ -809,7 +809,7 @@ function submit(source: "input" | "button") {
       return;
     }
     // The fields keep what was typed, read-only, while the Player locks or opens with it; they empty once it is done.
-    props.lock?.submit({ password: draft.value, openAtMs: null });
+    props.lock?.submit({ password: draft.value, timeLockMs: null });
     return;
   }
   void complete(

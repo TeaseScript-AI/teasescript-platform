@@ -479,6 +479,46 @@ test("password: askPassword(...) asks in the password field, says its question, 
   assert.ok(!kept.includes("s3cret") && !kept.includes("xyzzy"));
 });
 
+test("a password field and the openers written true ask in one step, and the lock takes both answers", () => {
+  const player = new FakePlayer();
+  player.dialogs.push({ password: "typed words", timeLockMs: WALL_CLOCK_MS + 2 * DAY_MS });
+  const played = play(
+    ['let both = encryptText("both", password: askPassword("Code?"), timeLock: true)', "exit"].join(
+      "\n",
+    ),
+    player,
+  );
+  assert.deepEqual(player.locks.get(String(variables(played).both)), {
+    content: "both",
+    password: "typed words",
+    timeLockMs: WALL_CLOCK_MS + 2 * DAY_MS,
+  });
+  assert.deepEqual(asked(played), [
+    ["encryptText", "ask", null, WALL_CLOCK_MS + 7 * DAY_MS, false, null, ["timeLock"]],
+    ["encryptText", "work", null, null, true, null, ["timeLock"]],
+  ]);
+  assert.deepEqual(
+    played.steps.map((step) => step.passwordField),
+    [{ hint: null }, { hint: null }],
+  );
+  // The password is the field's, so the dialog never chooses it, and the step keeps its field.
+  const plan = compileValidPlan(
+    'let both = encryptText("both", password: askPassword("Code?"), timeLock: true)\nexit',
+  );
+  const started = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  ).snapshot;
+  const step = lockStep(started);
+  for (const change of [{ choices: ["timeLock", "password"] }, { passwordField: null }])
+    assert.notDeepEqual(
+      validateRuntimeSnapshot({ ...started, foregroundAction: { ...step, ...change } }, plan)
+        .errors,
+      [],
+      JSON.stringify(change),
+    );
+});
+
 test("a password field says its question where password: stands, and asks again for a password the Player lost", () => {
   const source = [
     "function shown(text: string): string {",
@@ -835,7 +875,7 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
   const asking = compileValidPlan(
     [
       'timer async 1 s { say "Time is up", instant\n wait 2 s }',
-      'let locked = encryptText("x", password: askPassword("Code?"))',
+      'let locked = encryptText("x", password: askPassword("Code?"), timeLock: false)',
       "exit",
     ].join("\n"),
   );
