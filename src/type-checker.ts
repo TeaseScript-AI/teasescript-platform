@@ -841,7 +841,8 @@ function placeRead(type: StaticType): PlaceRead {
 
 type Entry =
   | { readonly kind: "variable"; readonly variable: Variable }
-  | { readonly kind: "speaker" }
+  /** A declared speaker, with its custom properties as the object of a variable (V30 §37). */
+  | { readonly kind: "speaker"; readonly custom: Variable }
   | { readonly kind: "function"; readonly fn: FunctionType };
 
 class Scope {
@@ -1450,12 +1451,65 @@ class TypeChecker {
       this.#rejectRandomSelection(declaration.initial);
       return;
     }
-    this.#project.declare(declaration.name.name, { kind: "speaker" });
+    // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
+    // declaration stands for. A built-in property follows its own rules (see `#checkSpeakerProperty`).
+    const properties = new PropertyTable();
+    const custom: Variable = {
+      name: declaration.name.name,
+      type: this.#ownType(declaration, { kind: "object", properties }),
+      declaration,
+      shared: false,
+    };
+    this.#declared.set(declaration, custom);
+    this.#project.declare(declaration.name.name, { kind: "speaker", custom });
     for (const property of declaration.properties) {
+      const name = property.name.name;
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
-      this.#checkSpeakerProperty(property.name.name, property.value, type);
+      this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
+      if (!BUILT_IN_SPEAKER_PROPERTIES.has(name))
+        this.#addProperty(properties, { root: declaration, path: [] }, name, property.value, type);
     }
+  }
+
+  /**
+   * The object of a declared speaker's custom properties when `receiver`, of type `type`, names that speaker and `name`
+   * is not one of its built-in properties; a speaker that the compiler cannot tell apart, such as a parameter, has
+   * properties of unknown type.
+   */
+  #customProperties(
+    receiver: Expression,
+    type: StaticType,
+    name: string,
+    scope: Scope,
+  ): StaticType | undefined {
+    const node = unwrap(receiver);
+    if (
+      type.kind !== "speaker" ||
+      node.kind !== "identifier" ||
+      BUILT_IN_SPEAKER_PROPERTIES.has(name)
+    )
+      return undefined;
+    const entry = scope.resolve(node.name);
+    return entry?.kind === "speaker" ? entry.custom.type : undefined;
+  }
+
+  /**
+   * Adds the property `name` to an object's `properties`, where a store of `expression` first gives it a value of type
+   * `assigned`, which it then keeps (rule 1.4); `owner` is where the object is inside a variable.
+   */
+  #addProperty(
+    properties: PropertyTable,
+    owner: PlacePath | undefined,
+    name: string,
+    expression: Expression,
+    assigned: StaticType,
+  ): void {
+    const added = decidedSlot(this.#newPlaceType(expression, assigned), expression.span);
+    properties.set(name, added);
+    if (owner === undefined) return;
+    this.#follow(extendPath(owner, name), assigned, expression.span);
+    this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
   }
 
   /**
@@ -2243,12 +2297,14 @@ class TypeChecker {
           read = elementType(object);
         }
       } else {
-        const value = resolved(nonNullType(object));
         const name = target.property.name;
+        const custom = this.#customProperties(target.object, object, name, scope);
+        const receiver = custom ?? object;
+        const value = resolved(nonNullType(receiver));
         // A new property takes its type from its first value, by the same rule as `let` (rule 1.4).
         if (value.kind === "object" && value.properties !== null && !value.properties.has(name)) {
           // A receiver that may be null needs a check first, also for a new property (owner decision on #504 Q1).
-          const receivers = members(object);
+          const receivers = members(receiver);
           if (receivers.some((member) => member.kind === "null")) {
             this.#reportMayBe(
               target.object,
@@ -2260,41 +2316,37 @@ class TypeChecker {
           }
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
-          if (statement.operator === "=") {
-            const added = decidedSlot(
-              this.#newPlaceType(statement.value, assigned),
-              statement.value.span,
+          if (statement.operator === "=")
+            this.#addProperty(
+              value.properties,
+              this.#pathOf(target.object, scope),
+              name,
+              statement.value,
+              assigned,
             );
-            value.properties.set(name, added);
-            const owner = this.#pathOf(target.object, scope);
-            if (owner !== undefined) {
-              this.#follow(extendPath(owner, name), assigned, statement.value.span);
-              this.#rewiden(owner.root, { path: [...owner.path, name], part: added });
-            }
-          }
-          // `+=` and `-=` read the property first.
-          else this.#noteMissingAccess(target, object);
+          // `+=` and `-=` read the property first; a speaker's missing property is a runtime error.
+          else if (custom === undefined) this.#noteMissingAccess(target, receiver);
           return;
         }
         const before = this.diagnostics.length;
-        place = this.#propertyPlace(object, target.object, target.property, scope);
-        const speakers = members(nonNullType(object)).map(
+        place = this.#propertyPlace(receiver, target.object, target.property, scope);
+        const speakers = members(nonNullType(receiver)).map(
           (member) => resolved(member).kind === "speaker",
         );
         if (speakers.includes(true)) speakerProperty = name;
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
-        handle = mayBe(object, "timer", "media", "camera");
+        handle = mayBe(receiver, "timer", "media", "camera");
         // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
         // previous message's pacing.
-        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
-        if (name === "placement" && mayBe(object, "camera")) {
+        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
+        if (name === "placement" && mayBe(receiver, "camera")) {
           this.#suspend();
-          this.#checkCameraPlacement(object, statement);
+          this.#checkCameraPlacement(receiver, statement);
         }
         if (name === "text" && statement.operator === "=")
-          this.#checkMessageText(object, statement);
+          this.#checkMessageText(receiver, statement);
       }
     }
     const loaded = unwrap(statement.value);
@@ -2837,7 +2889,13 @@ class TypeChecker {
       node = unwrap(node.object);
     }
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
-    const root = entry?.kind === "variable" ? entry.variable.declaration : undefined;
+    const root =
+      entry?.kind === "variable"
+        ? entry.variable.declaration
+        : // A speaker that receives a custom property stands for the object of its custom properties.
+          entry?.kind === "speaker" && !BUILT_IN_SPEAKER_PROPERTIES.has(steps.at(-1) ?? "")
+          ? entry.custom.declaration
+          : undefined;
     return root === undefined ? undefined : { root, path: steps.reverse() };
   }
 
@@ -3666,7 +3724,11 @@ class TypeChecker {
       }
       case "propertyAccessExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
-        return this.#propertyType(object, expression);
+        const name = expression.property.name;
+        const custom = this.#customProperties(expression.object, object, name, scope);
+        if (custom === undefined) return this.#propertyType(object, expression);
+        // A custom property that no store gave the speaker yet is of unknown type, and missing ones fail when read.
+        return placeRead(memberPropertyType(custom, name) ?? UNKNOWN_TYPE);
       }
       case "indexExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
@@ -9211,6 +9273,23 @@ const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
   "shortTitle",
   "firstName",
   "lastName",
+]);
+
+/**
+ * A speaker's built-in properties (V30 §37), which the runtime checks where it uses them; any other property is a custom
+ * one, which keeps its type.
+ */
+const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
+  ...SPEAKER_TEXT_PROPERTIES,
+  "alias",
+  "gender",
+  "color",
+  "font",
+  "avatar",
+  "presentation",
+  "bubble",
+  "prose",
+  "defaultSaySkippable",
 ]);
 
 /** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */

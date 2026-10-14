@@ -1133,6 +1133,75 @@ test("an object property keeps the type of its first value, and assignment may a
   );
 });
 
+test("a speaker's custom property keeps the type of its first value like an object property (V30 §37)", () => {
+  assert.deepEqual(
+    mismatches(
+      'speaker vera { level: 0 }\nvera.level = "high"\nvera.mood = "calm"\nvera.mood = 5\nexit',
+    ),
+    [
+      [
+        "TSV041",
+        "'vera.level' holds a whole number (integer) since line 1, so it cannot be set to text (string). Use a separate property for a value of another type.",
+        '"high"',
+      ],
+      [
+        "TSV041",
+        "'vera.mood' holds text (string) since line 3, so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
+        "5",
+      ],
+    ],
+  );
+  // Inside a property, through its elements, by a compound assignment, a value of type object, and in a read.
+  assert.deepEqual(
+    codes(
+      [
+        "speaker vera {",
+        "    data: { v: 0 }",
+        "    items: [0]",
+        "    scores: dict{ a: 0 }",
+        "    level: 0",
+        "}",
+        "let b: object = { v: 1 }",
+        'vera.data.v = "x"',
+        'vera.items[0] = "x"',
+        'vera.items.add("x")',
+        'vera.scores["a"] = "x"',
+        'vera.level += "x"',
+        "vera.level = b",
+        "let shown: string = vera.level",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      ["TSV041", '"x"'],
+      ["TSV041", '"x"'],
+      ["TSV041", '"x"'],
+      ["TSV041", '"x"'],
+      ["TSV041", '"x"'],
+      ["TSV041", "b"],
+      ["TSV041", "vera.level"],
+    ],
+  );
+  // A number widens a property that took whole numbers, two speakers keep their own types, and built-in properties keep
+  // their own rules, such as null for a presentation default.
+  assert.deepEqual(
+    mismatches(
+      [
+        "speaker vera {",
+        "    level: 0",
+        '    bubble: { background: "#334455" }',
+        "}",
+        'speaker cora { level: "high" }',
+        "vera.level = 2.5",
+        "vera.bubble = null",
+        'cora.level = "low"',
+        "exit",
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
 test("a function's result type comes from its return values, and returns of different types are an error", () => {
   assert.deepEqual(codes('function name {\n    return "Ada"\n}\nlet n = name()\nn = 5\nexit'), [
     ["TSV041", "5"],

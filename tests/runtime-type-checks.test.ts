@@ -405,6 +405,92 @@ test("a value of type object is checked against the known properties of its plac
   assert.deepEqual(sayTexts(result), ["6", "stored"]);
 });
 
+test("a speaker's custom property is checked where a value the compiler cannot know is stored in it", () => {
+  const level = `Property 'vera.level' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  const element = `An element of 'vera.items' holds a whole number (integer), so it cannot take text (string) "bad".`;
+  for (const [setup, store, message, span] of [
+    ["speaker vera { level: 0 }", 'vera.level = pick("bad")', level, 'pick("bad")'],
+    // A property that a store declares keeps that store's type, as one in the speaker's block does.
+    [
+      'speaker vera { title: "Miss" }\nvera.mood = 0',
+      'vera.mood = pick("bad")',
+      `Property 'vera.mood' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    [
+      "speaker vera { level: 0 }",
+      "vera.level += pick(0.5)",
+      "Property 'vera.level' holds a whole number (integer), so it cannot take 0.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "vera.level += pick(0.5)",
+    ],
+    [
+      "speaker vera { data: { v: 0 } }",
+      'vera.data.v = pick("bad")',
+      `Property 'vera.data.v' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    ["speaker vera { items: [0] }", 'vera.items[0] = pick("bad")', element, 'pick("bad")'],
+    [
+      "speaker vera { scores: dict{ a: 0 } }",
+      'vera.scores["a"] = pick("bad")',
+      `A value of 'vera.scores' holds a whole number (integer), so it cannot take text (string) "bad".`,
+      'pick("bad")',
+    ],
+    ["speaker vera { items: [0] }", 'vera.items.add(pick("bad"))', element, 'pick("bad")'],
+    ["speaker vera { items: [0] }", 'vera.items.addAll(pick(["bad"]))', element, 'pick(["bad"])'],
+    [
+      "speaker vera { level: 0 }",
+      'vera.level = fromJson("\\"bad\\"", default: null)',
+      level,
+      'fromJson("\\"bad\\"", default: null)',
+    ],
+    [
+      'speaker vera { level: 0 }\nlet n = 1\nsave "bad" as "level1"',
+      'vera.level = load("level${n}", default: 0)',
+      level,
+      'load("level${n}", default: 0)',
+    ],
+    [
+      "speaker vera { level: 0 }\nfunction put(x) {\n    vera.level = x\n}",
+      'put("bad")',
+      level,
+      "x",
+    ],
+    // A value of type object is checked against the properties the place knows (V30 §13).
+    [
+      "speaker vera { data: { v: 0 } }\nfunction put(x: object) {\n    vera.data = x\n}",
+      'put({ v: "bad" })',
+      `Property 'vera.data' holds an object, so it cannot take an object with text (string) "bad" at .v.`,
+      "x",
+    ],
+  ] as const) {
+    const source = `${PICK}${setup}\n${store}\nexit`;
+    assert.deepEqual(failure(source), ["TSR058", message, span], source);
+  }
+  // Values that fit pass: a number widens a property that took whole numbers, an object needs only the properties it
+  // has, and two speakers keep their own types for a property of the same name.
+  const result = runValidSource(
+    PICK +
+      [
+        "speaker vera {",
+        "    level: 0",
+        "    data: { v: 0 }",
+        "    items: [0]",
+        "}",
+        'speaker cora { level: "high" }',
+        "vera.level = pick(2)",
+        "vera.level = vera.level * 1.5",
+        'vera.data = pick({ w: "other" })',
+        "vera.items.add(pick(4))",
+        'cora.level = pick("low")',
+        'say "${vera.level} ${vera.items[1]} ${cora.level}"',
+        "exit",
+      ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["3 4 low"]);
+});
+
 test("values that fit their place pass the runtime check unchanged", () => {
   const result = runValidSource(
     PICK +

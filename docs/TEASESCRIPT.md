@@ -401,7 +401,8 @@ with that method takes them; a method that no value has is `TSV043` also on a re
 of a speaker; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
-list and set elements, dict values, object properties, parameters, and function results keep one type, including types
+list and set elements, dict values, object properties, the custom properties that a speaker's name reaches (V30 §37),
+parameters, and function results keep one type, including types
 decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
 variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
 `number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
