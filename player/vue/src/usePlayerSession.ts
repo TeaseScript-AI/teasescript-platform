@@ -26,7 +26,7 @@ import {
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import { FileStoreService } from "../../stored-files.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
-import { loadTlock, type LockServices } from "../../encryption/lock.js";
+import type { LockServices } from "../../encryption/lock.js";
 import {
   activePlayerRuntimeInteraction,
   beginPlayerRuntimeRecording,
@@ -580,12 +580,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
   });
   watch(servicedSession, () => locks.request());
-  // A script that locks or opens loads the time lock's code while the Player is online, so locking works offline later.
+  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later.
   watch(
     () => servicedSession.value?.plan,
     (plan) => {
-      if (plan?.instructions.some((instruction) => instruction.kind === "lock") === true)
-        void (options.lockServices?.tlock ?? loadTlock)().catch(() => {});
+      if (plan?.instructions.some((instruction) => instruction.kind === "lock") !== true) return;
+      void import("../../encryption/lock.js").catch(() => {});
+      void (options.lockServices?.tlock ?? (() => import("../../encryption/tlock.js")))().catch(
+        () => {},
+      );
     },
   );
   // A session that ended releases its camera.

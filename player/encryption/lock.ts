@@ -51,12 +51,6 @@ export interface LockServices {
   readonly nowMs: () => number;
 }
 
-export const browserLockServices: LockServices = {
-  tlock: loadTlock,
-  fetch: (input, init) => fetch(input, init),
-  nowMs: () => Date.now(),
-};
-
 /** The openers of a lock to make: a password, and a moment the time lock opens at. */
 export interface LockOpeners {
   readonly password: string | null;

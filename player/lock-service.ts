@@ -5,16 +5,7 @@ import {
   type RuntimeLockActionSnapshot,
   type RuntimeLockNotice,
 } from "../src/index.js";
-import {
-  browserLockServices,
-  lock,
-  openWithPassword,
-  openWithTime,
-  readLock,
-  timeLockMoments,
-  type LockServices,
-  type ReadLock,
-} from "./encryption/lock.js";
+import type { LockServices, ReadLock } from "./encryption/lock.js";
 import {
   activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
@@ -74,6 +65,17 @@ export interface LockServiceHost {
   /** The time lock's code, the relays, and the device clock; the browser's by default. */
   readonly crypto?: LockServices;
 }
+
+/** The lock code, which the Player loads only when a script locks or opens; locking works offline once it is loaded. */
+function lockCode() {
+  return import("./encryption/lock.js");
+}
+
+const browserLockServices: LockServices = {
+  tlock: () => import("./encryption/tlock.js"),
+  fetch: (input, init) => fetch(input, init),
+  nowMs: () => Date.now(),
+};
 
 /** A dialog's time lock that has passed by the device clock, but whose beacon was not out yet, is tried this often. */
 const LATE_RETRY_MS = 30_000;
@@ -200,6 +202,7 @@ export class LockService {
               reason: "unavailable",
             }).session,
           );
+        else this.#showDialog(null);
         return;
       }
       if (result.outcome.kind === "completed") this.#host.publish(result.session);
@@ -247,7 +250,7 @@ export class LockService {
       this.request();
       return;
     }
-    const moments = timeLockMoments(read);
+    const moments = (await lockCode()).timeLockMoments(read);
     this.#showDialog(
       {
         kind: "unlock",
@@ -291,7 +294,7 @@ export class LockService {
       action.call === "decryptText"
         ? bytesFromBase64(action.value)
         : await this.#file(action.value);
-    return bytes === null ? "unreadable" : readLock(bytes);
+    return bytes === null ? "unreadable" : (await lockCode()).readLock(bytes);
   }
 
   async #file(reference: string): Promise<Uint8Array | null> {
@@ -319,7 +322,7 @@ export class LockService {
             ? new TextEncoder().encode(action.value)
             : await this.#file(action.value);
         if (content === null) return { kind: "failed", reason: "unreadable" };
-        const made = await lock(content, openers, this.#crypto);
+        const made = await (await lockCode()).lock(content, openers, this.#crypto);
         if (action.call === "encryptText")
           return { kind: "locked", text: base64FromBytes(made.bytes) };
         const entry = this.#host.media.add("file", new Blob([made.bytes], { type: OCTET_STREAM }));
@@ -330,14 +333,14 @@ export class LockService {
       if (read === null) return { kind: "notOpened" };
       const password = action.password ?? typed?.password ?? null;
       if (password !== null) {
-        const content = await openWithPassword(read, password);
+        const content = await (await lockCode()).openWithPassword(read, password);
         if (content !== null) return this.#opened(action, content);
         // A password written in the call gives the default; one typed in the dialog asks again.
         return action.password !== null
           ? { kind: "notOpened" }
           : { kind: "ask", notice: "wrongPassword" };
       }
-      const timed = await openWithTime(read, this.#crypto);
+      const timed = await (await lockCode()).openWithTime(read, this.#crypto);
       if (timed.kind === "opened") return this.#opened(action, timed.content);
       const other = read.passwords.length > 0;
       if (timed.kind === "notYet") return { kind: "ask" };
