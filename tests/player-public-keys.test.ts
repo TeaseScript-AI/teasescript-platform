@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { ed25519 } from "@noble/curves/ed25519.js";
+
 import {
   armoredAge,
   loadAge,
@@ -78,6 +80,33 @@ test("a public key lock holds an age file that each keyholder opens to the conte
   assert.deepEqual(fromBase64(armorLines.slice(1, -1).join("")), read.ages[0]);
 });
 
+test("an OpenSSH key is taken only when it is an Ed25519 point, in the X25519 form that Noble gives it", () => {
+  for (let index = 0; index < 64; index += 1) {
+    const key = ed25519.getPublicKey(ed25519.utils.randomSecretKey());
+    const parsed = parsePublicKey(sshText(key));
+    assert.ok(parsed?.kind === "ssh-ed25519");
+    assert.deepEqual(parsed.montgomery, ed25519.utils.toMontgomery(key));
+  }
+  // Random bytes are a point about half the time; the others, and a y beyond the field, are no key.
+  let refused = 0;
+  for (let index = 0; index < 64; index += 1) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    let point = true;
+    try {
+      ed25519.Point.fromBytes(bytes);
+    } catch {
+      point = false;
+    }
+    if (!point) refused += 1;
+    assert.equal(parsePublicKey(sshText(bytes)) !== null, point);
+  }
+  assert.ok(refused > 0);
+  const beyond = new Uint8Array(32).fill(0xff);
+  beyond[0] = 0xed;
+  beyond[31] = 0x7f;
+  assert.equal(parsePublicKey(sshText(beyond)), null);
+});
+
 test("a lock holds as many public keys as the engine allows within its opener's 65,535 bytes", async () => {
   // An OpenSSH key's stanza is the longest, 110 bytes, besides the age file's own 147.
   const keys = Array.from({ length: 594 }, () => publicKey(sshIdentity()));
@@ -127,3 +156,8 @@ test("the age tool opens a lock's age file with an age identity and with an Open
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+function sshText(key: Uint8Array): string {
+  const wire = Uint8Array.from([0, 0, 0, 11, ...text.encode("ssh-ed25519"), 0, 0, 0, 32, ...key]);
+  return `ssh-ed25519 ${base64(wire)}`;
+}

@@ -1,11 +1,10 @@
 // The public key opener's age file (https://age-encryption.org/v1): a standard age v1 file whose content is the lock's
 // content key, which the keyholder opens with the `age` tool and their own identity. X25519, HKDF-SHA-256, HMAC-SHA-256,
-// and randomness are the browser's WebCrypto; ChaCha20-Poly1305, which only some browsers have, and the conversion of an
-// Ed25519 key to X25519 for an `ssh-ed25519` recipient come from Noble. The Player loads this module only when a lock has
-// a public key opener.
+// and randomness are the browser's WebCrypto; ChaCha20-Poly1305, which WebCrypto lacks, comes from Noble. An
+// `ssh-ed25519` recipient's X25519 form is read with the key (`src/public-keys.ts`). The Player loads this module only
+// when a script locks.
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { ed25519 } from "@noble/curves/ed25519.js";
 import type { PublicKey } from "../../src/public-keys.js";
 
 const text = new TextEncoder();
@@ -48,7 +47,7 @@ async function stanza(recipient: PublicKey, fileKey: Uint8Array): Promise<string
     return `-> X25519 ${base64NoPadding(ephemeralPublic)}\n${body(wrapKey, fileKey)}`;
   }
   // age's SSH Ed25519 recipient: the key as X25519, and the shared secret tweaked with a key the wire encoding gives.
-  const peer = ed25519.utils.toMontgomery(recipient.key);
+  const peer = recipient.montgomery;
   const shared = await x25519(ephemeral.privateKey, peer);
   const tweak = await hkdf(new Uint8Array(), recipient.wire, SSH_LABEL);
   const tweaked = await x25519(await privateX25519(tweak), shared);

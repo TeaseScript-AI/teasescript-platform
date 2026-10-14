@@ -11,10 +11,28 @@ export type PublicKey =
       readonly wire: Uint8Array;
       /** The Ed25519 public key. */
       readonly key: Uint8Array;
+      /** The key as an X25519 public key, the Montgomery form of its point, which its stanza is made for. */
+      readonly montgomery: Uint8Array;
     };
+
+/**
+ * Keys read before, by their text, as checking an Ed25519 point takes a while and a waiting lock's keys are checked again
+ * with each state: a cache outside any state, emptied when it is full.
+ */
+const read = new Map<string, PublicKey | null>();
+const MAX_READ_KEYS = 4096;
 
 /** The public key `text` holds, or `null` when it is neither an `age1…` recipient nor an `ssh-ed25519` key. */
 export function parsePublicKey(text: string): PublicKey | null {
+  const known = read.get(text);
+  if (known !== undefined) return known;
+  if (read.size >= MAX_READ_KEYS) read.clear();
+  const key = readPublicKey(text);
+  read.set(text, key);
+  return key;
+}
+
+function readPublicKey(text: string): PublicKey | null {
   const trimmed = text.trim();
   if (trimmed.startsWith("ssh-ed25519 ")) {
     const encoded = trimmed.slice("ssh-ed25519 ".length).trim().split(/\s+/u)[0] ?? "";
@@ -23,11 +41,69 @@ export function parsePublicKey(text: string): PublicKey | null {
     // string "ssh-ed25519", then string of the 32-byte key, each with a 4-byte big-endian length.
     const name = [0, 0, 0, 11, ...new TextEncoder().encode("ssh-ed25519"), 0, 0, 0, 32];
     if (name.some((byte, index) => wire[index] !== byte)) return null;
-    return { kind: "ssh-ed25519", wire, key: wire.slice(19) };
+    const key = wire.slice(19);
+    const montgomery = montgomeryForm(key);
+    return montgomery === null ? null : { kind: "ssh-ed25519", wire, key, montgomery };
   }
   const decoded = bech32(trimmed);
   if (decoded === null || decoded.prefix !== "age" || decoded.data.length !== 32) return null;
   return { kind: "x25519", key: decoded.data };
+}
+
+/** The prime of Curve25519's field, 2^255 - 19. */
+const P = (1n << 255n) - 19n;
+/** Edwards25519's d, -121665/121666. */
+const D = mod(-121665n * inverse(121666n));
+/** A square root of -1. */
+const SQRT_M1 = power(2n, (P - 1n) / 4n);
+
+/**
+ * The Montgomery u of an Ed25519 public key, `(1 + y) / (1 - y)` (RFC 7748, section 4.1), as 32 little-endian bytes, or
+ * `null` when the bytes are not a point of Edwards25519 (RFC 8032, section 5.1.3), so that no key is taken that nobody
+ * holds.
+ */
+function montgomeryForm(key: Uint8Array): Uint8Array | null {
+  let y = 0n;
+  for (let index = 31; index >= 0; index -= 1) y = (y << 8n) | BigInt(key[index]!);
+  const sign = y >> 255n;
+  y &= (1n << 255n) - 1n;
+  if (y >= P) return null;
+  // x² = (y² - 1) / (d y² + 1) must have a root, and x = 0 has no negative.
+  const u = mod(y * y - 1n);
+  const v = mod(D * y * y + 1n);
+  let x = mod(u * power(v, 3n) * power(u * power(v, 7n), (P - 5n) / 8n));
+  if (mod(v * x * x) !== u) {
+    if (mod(v * x * x) !== mod(-u)) return null;
+    x = mod(x * SQRT_M1);
+  }
+  if (x === 0n && sign === 1n) return null;
+  if (y === 1n) return null;
+  let montgomery = mod((1n + y) * inverse(mod(1n - y)));
+  const bytes = new Uint8Array(32);
+  for (let index = 0; index < 32; index += 1) {
+    bytes[index] = Number(montgomery & 0xffn);
+    montgomery >>= 8n;
+  }
+  return bytes;
+}
+
+function mod(value: bigint): bigint {
+  const result = value % P;
+  return result < 0n ? result + P : result;
+}
+
+function power(base: bigint, exponent: bigint): bigint {
+  let result = 1n;
+  let square = mod(base);
+  for (let rest = exponent; rest > 0n; rest >>= 1n) {
+    if (rest & 1n) result = (result * square) % P;
+    square = (square * square) % P;
+  }
+  return result;
+}
+
+function inverse(value: bigint): bigint {
+  return power(value, P - 2n);
 }
 
 const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";

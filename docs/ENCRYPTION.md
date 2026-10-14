@@ -98,7 +98,8 @@ else: each lock has its own.
 randomness. Browsers have no pairing cryptography, so `player/encryption/tlock.ts` uses `@noble/curves` and
 `@noble/hashes`, both 2.4.0 (MIT; curves' only dependency is hashes). `player/encryption/age.ts` writes the public key
 opener's age file with WebCrypto's X25519, HKDF, and HMAC, and with `@noble/ciphers` 2.4.0 (MIT, no dependencies) for
-ChaCha20-Poly1305, which WebCrypto lacks, and `@noble/curves` for an Ed25519 key's X25519 form. The Player loads these
+ChaCha20-Poly1305, which WebCrypto lacks; `src/public-keys.ts` checks that an `ssh-ed25519` key is an Ed25519 point
+(RFC 8032, section 5.1.3) and maps it to its X25519 form (RFC 7748, section 4.1). The Player loads these
 modules with `import()`: a Player start without encryption loads none, and a session whose script locks or opens loads
 the lock and time lock code at its start, and the age code too when it locks, so that locking still works when the
 Player goes offline later.
