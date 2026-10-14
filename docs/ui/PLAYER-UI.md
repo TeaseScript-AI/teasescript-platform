@@ -619,10 +619,10 @@ too; B keeps the theme's accent, as does a photo with too little colour. A grey 
 same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a new image loads,
 and when the browser does not let the Player read an image's pixels, the previous photo's colour stays; a camera view or
 an image request's preview over the Stage does not change it. The Player follows a new photo once it has shown briefly
-and reuses recent image measurements. From one photo's colour to the next in the same mode it fades the background and
-message bubbles, which keep their lightness; the first photo's colour, the theme's return, and a mode change switch at
-once, together with the text on them. Reduced motion removes the fade. The colours are measured as node-vibrant measures
-its swatches (`player/theme/node-vibrant/`).
+and reuses recent image measurements. The background and message bubbles fade in 0.6 s whenever the photo colour
+changes: to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with a mode
+change. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+(`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
 without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed

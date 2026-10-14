@@ -2530,10 +2530,10 @@ async function lateImageScenario(cdp, origin) {
  * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
  * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
  * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
- * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, and a
- * mode change switch at once; from one photo to the next in a mode the background fades at the same luminance, and
- * switching light/dark during that fade keeps text readable, in both directions. Afterwards the transcript's authored
- * speaker and prose colours are adapted to the background shown, in Standard and High contrast.
+ * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, a mode
+ * change, also during a fade, and the next photo fade the background and the message bubbles, except under reduced
+ * motion. Once each change has settled, text is readable and the transcript's authored speaker and prose colours are
+ * adapted to the background shown, in Standard and High contrast.
  */
 async function photoColourScenario(cdp, origin, profile) {
   await setViewport(cdp, 1440, 900);
@@ -2547,7 +2547,6 @@ async function photoColourScenario(cdp, origin, profile) {
   // WCAG relative luminance of a colour as the screen shows it.
   const luminance = `const luminance = (colour) => { const context = document.createElement('canvas').getContext('2d'); context.fillStyle = colour; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => { const v = value / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0); };`;
   const background = `getComputedStyle(document.querySelector('.player-viewport-canvas')).backgroundColor`;
-  const backgroundLuminance = `(() => { ${luminance} return luminance(${background}); })()`;
   // The lower WCAG contrast of the text on the background and of a message bubble's text, as the screen shows them now.
   const contrast = `(() => {
     ${luminance}
@@ -2581,6 +2580,16 @@ async function photoColourScenario(cdp, origin, profile) {
   };
   const fading = `document.documentElement.hasAttribute('data-photo-fade')`;
   const photo = `document.documentElement.hasAttribute('data-photo-colour')`;
+  // What faded to its end since the last change settled: the background, a message bubble.
+  const recordFades = `window.smokeFades = new Set(); document.addEventListener('transitionend', (event) => { if (event.target.matches('.player-viewport-canvas') && event.propertyName === '--player-field') window.smokeFades.add('background'); if (event.target.matches('.message-speaker') && event.propertyName === 'background-color') window.smokeFades.add('bubbles'); });`;
+  const takeFades = `(() => { const faded = [...window.smokeFades].sort().join(', '); window.smokeFades.clear(); return faded; })()`;
+  // Once a change has settled: what faded, the text's contrast, and the authored colours.
+  const settled = async (label, faded = "background, bubbles") => {
+    await waitFor(cdp, `!${fading}`, 3_000, `${label}: the colours did not settle`);
+    assertEqual(await value(cdp, takeFades), faded, `${label}: what faded`);
+    await readable(label);
+    await adapted(label);
+  };
   const stageShows = (name) =>
     `(() => { const image = document.querySelector('img.stage-media'); return !!image && image.complete && image.getAttribute('src').endsWith('/${name}'); })()`;
   const press = async (label) => {
@@ -2590,24 +2599,15 @@ async function photoColourScenario(cdp, origin, profile) {
     );
     await physicalClick(cdp, "[data-foreground-controls] button");
   };
-  // Shows the next photo and waits for its colour to start fading in; the background keeps its luminance meanwhile.
-  const fadeTo = async (name) => {
-    const settled = await value(cdp, backgroundLuminance);
+  // Shows the next photo and waits for its colour to apply.
+  const showPhoto = async (label, name) => {
+    await press(label);
     await waitFor(
       cdp,
       `${stageShows(name)} && ${fading}`,
       5_000,
-      `The colour of ${name} did not fade in`,
+      `The colour of ${name} did not apply`,
     );
-    for (let sample = 0; sample < 3; sample += 1) {
-      const now = await value(cdp, backgroundLuminance);
-      assertEqual(
-        Math.abs(now - settled) / settled < 0.05,
-        true,
-        `The background's luminance changed during a fade between photos: ${settled.toFixed(3)} to ${now.toFixed(3)}`,
-      );
-      await delay(60);
-    }
   };
   const accent = (name) => /^--(theme-(accent|text-on-accent)|story-accent)/.test(name);
   const differing = (first, second) =>
@@ -2645,15 +2645,15 @@ async function photoColourScenario(cdp, origin, profile) {
   await navigate(cdp, `${origin}/player/?package=photo-colour`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   const theme = await value(cdp, roles);
+  await evaluate(cdp, recordFades);
   photoColourRequests.count = 0;
   await physicalClick(cdp, "[data-session-activation] button");
   await waitFor(cdp, photo, 8_000, "The Stage photo did not colour the Player");
-  assertEqual(await value(cdp, fading), false, "The first photo's colour faded in");
   // The Player reads the colours from the Stage's own image: the photo is downloaded once, though the server forbids
   // caching it.
   assertEqual(photoColourRequests.count, 1, "Requests for the Stage photo");
   await waitFor(cdp, `document.querySelectorAll('.transcript-entry').length >= 3`);
-  await adapted("The first photo");
+  await settled("The first photo");
   const withPhoto = await value(cdp, roles);
   for (const [name, colour] of [
     ["background", background],
@@ -2684,13 +2684,12 @@ async function photoColourScenario(cdp, origin, profile) {
   );
   await chooseContrast("high");
   await switchMode("dark");
-  assertEqual(await value(cdp, fading), false, "A mode change faded");
+  await settled("Dark mode, High contrast");
   assertEqual(
     green(await value(cdp, hue(`'var(--theme-surface-canvas)'`))),
     true,
     "The dark canvas is not green",
   );
-  await adapted("Dark mode, High contrast");
   // The window shrinks while an image request's preview hides the photo; once answered, the photo shows again in its
   // new box, and the background's effects are centred on it.
   await waitFor(cdp, visible("[data-composer-attach]"));
@@ -2715,31 +2714,28 @@ async function photoColourScenario(cdp, origin, profile) {
     "The background's effects are not centred on the photo after the preview",
   );
   await setViewport(cdp, 1440, 900);
-  // Dark to light during a fade between photos: the background switches together with its text.
-  await press("Next");
-  await fadeTo("red.svg");
-  await readable("During a fade between photos");
+  // Dark to light during a fade between photos.
+  await showPhoto("Next", "red.svg");
   await switchMode("light");
-  await readable("Dark to light during a fade");
-  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
-  await adapted("A mode change during a fade");
-  // A fade between photos ends with the authored colours adapted to the new background.
-  await press("Back");
-  await fadeTo("green.svg");
-  await waitFor(cdp, `!${fading}`, 2_000, "The fade did not end");
-  await adapted("After a fade between photos");
-  // Light to dark during a fade between photos.
-  await press("Again");
-  await fadeTo("red.svg");
-  await switchMode("dark");
-  await readable("Light to dark during a fade");
-  assertEqual(await value(cdp, fading), false, "A mode change kept fading");
-  // The empty Stage gives the theme's own colours back at once.
+  await settled("A mode change during a fade");
+  await showPhoto("Back", "green.svg");
+  await settled("The next photo");
+  // Reduced motion: the next photo and a mode change switch at once.
+  await cdp.call("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  try {
+    await showPhoto("Again", "red.svg");
+    await switchMode("dark");
+    await settled("Reduced motion", "");
+  } finally {
+    await cdp.call("Emulation.setEmulatedMedia", { features: [] });
+  }
+  // The empty Stage gives the theme's own colours back.
   await chooseContrast("standard");
   await press("Hide");
   await waitFor(cdp, `!${photo}`, 5_000, "The empty Stage kept the photo's colours");
-  assertEqual(await value(cdp, fading), false, "The theme's colours faded in");
-  await adapted("The theme's return");
+  await settled("The theme's return");
   await switchMode("light");
   assertEqual(
     differing(theme, await value(cdp, roles)).join(", "),
@@ -2817,9 +2813,12 @@ async function photoVignetteScenario(cdp, origin) {
     await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
     await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
   };
+  // The background fades to a new colour; the text is read once it has settled.
+  const settled = `!document.documentElement.hasAttribute('data-photo-fade')`;
   const switchMode = async (mode) => {
     await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
     await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
+    await waitFor(cdp, settled, 3_000, `The ${mode} colours did not settle`);
   };
   await navigate(cdp, `${origin}/player/?package=photo-vignette`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -2830,6 +2829,7 @@ async function photoVignetteScenario(cdp, origin) {
     8_000,
     "The wide photo did not colour the Player",
   );
+  await waitFor(cdp, settled, 3_000, "The photo's colours did not settle");
   await delay(300);
   await readable("Light, Standard", false);
   await switchMode("dark");

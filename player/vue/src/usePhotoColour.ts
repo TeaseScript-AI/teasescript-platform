@@ -80,8 +80,8 @@ function usePhotoGeometry(
 /**
  * The Player's photo colours for the photo the Stage shows (`source`, `null` without one): `null` keeps the theme's own
  * colours. While they apply, the document root has `data-photo-colour` and the vignette strength `--photo-vignette`;
- * for a moment after one photo's colour follows another's it has `data-photo-fade`, during which `style.css` fades the
- * background and the message bubbles.
+ * for a moment after they change it has `data-photo-fade`, during which `style.css` fades the background and the message
+ * bubbles.
  */
 export function usePhotoColour(
   source: Readonly<Ref<string | null>>,
@@ -103,14 +103,12 @@ export function usePhotoColour(
   const root = document.documentElement;
   const fading = ref(false);
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
-  // Between two photos in one mode the surfaces keep their tones, so they fade without changing the contrast of anything
-  // on them. Any other change, such as the first photo, the theme's return, or another mode, changes how light the
-  // surfaces are: it switches at once, together with the text and the authored colours drawn on them.
-  watch(colours, (next, previous) => {
+  // Every change fades: the first photo, the next one, the theme's return, and another mode. The text on the surfaces
+  // switches at once, so it can lack contrast during the fade; it is readable once the fade has settled.
+  watch(colours, () => {
     clearTimeout(fadeTimer);
-    fading.value =
-      next !== null && previous !== null && next.surfaces.tones === previous.surfaces.tones;
-    if (fading.value) fadeTimer = setTimeout(() => (fading.value = false), FADE_MS + 100);
+    fading.value = true;
+    fadeTimer = setTimeout(() => (fading.value = false), FADE_MS + 100);
   });
   watchEffect(() => {
     const vignette = colours.value?.vignette;
