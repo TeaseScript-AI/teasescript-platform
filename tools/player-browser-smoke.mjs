@@ -82,9 +82,10 @@ const photoColourRequests = { count: 0 };
 
 /**
  * In-page `reach(element)`: brings the element into reach as a person does and returns its centre. A target whose centre
- * is out of view, outside the window or a scrolling ancestor, is scrolled into view first, for example a control low in
- * the scrolling Player Settings; a target in view never moves. Every pointer and touch input of the smoke aims through
- * it, so no step depends on where the Player lays a control out.
+ * is out of view, outside the window or a scrolling ancestor, or under something else, such as a control low in the
+ * scrolling Player Settings or one the composer overlays at the conversation's bottom, is scrolled to the middle of its
+ * view first; a target in view and uncovered never moves. Every pointer and touch input of the smoke aims through it, so
+ * no step depends on where the Player lays a control out.
  */
 const REACH = `const reach = (target) => {
   const centre = () => {
@@ -99,15 +100,18 @@ const REACH = `const reach = (target) => {
     const area = node.getBoundingClientRect();
     clipped = x < area.left || x > area.right || y < area.top || y > area.bottom;
   }
-  if (clipped) target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (clipped || !target.contains(document.elementFromPoint(x, y)))
+    target.scrollIntoView({ block: "center", inline: "center" });
   return centre();
 };`;
 
 /**
- * In-page `uncovered(element)`: whether a person sees the whole element and can press it, wherever it sits: its centre
- * and a point just inside the middle of each edge are in the window and hit the element, not something above it.
+ * In-page `uncovered(element)`: whether a person sees the whole element and can press it, wherever it sits: it is
+ * rendered, not transparent or hidden, and its centre and a point just inside the middle of each edge are in the window
+ * and hit the element, not something above it.
  */
 const UNCOVERED = `const uncovered = (element) => {
+  if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
   const box = element.getBoundingClientRect();
   if (box.width < 4 || box.height < 4) return false;
   const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
@@ -1199,6 +1203,31 @@ async function physicalClick(cdp, selector) {
   }
 }
 
+/**
+ * A physical click on the element `expression` evaluates to, such as a control found by its text: it is marked for the
+ * click, brought into reach, and pressed once it stands still and uncovered.
+ */
+async function physicalClickOn(cdp, expression, what = expression) {
+  const found = await evaluate(
+    cdp,
+    `document.querySelectorAll('[data-smoke-target]').forEach((element) => element.removeAttribute('data-smoke-target'));
+    const target = ${expression};
+    target?.setAttribute('data-smoke-target', '');
+    return !!target;`,
+  );
+  if (!found) throw new Error(`Nothing to click: ${what}`);
+  await settledClick(cdp, "[data-smoke-target]");
+}
+
+/** A physical click on the button whose text is `label`, among the elements `scope` matches. */
+function clickLabelled(cdp, label, scope = "button") {
+  return physicalClickOn(
+    cdp,
+    `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
+    `the ${JSON.stringify(label)} button`,
+  );
+}
+
 // A physical click beside the open dialog `selector`, on its backdrop: in the middle of the widest margin the dialog
 // leaves in the window, wherever the dialog sits.
 async function backdropClick(cdp, selector) {
@@ -2045,18 +2074,37 @@ async function largeRandomPickerScenario(cdp, origin) {
     LARGE_FILE_LINES.slice(Math.min(...linesInView) - 1, Math.max(...linesInView)).join("\n"),
     "Copy did not copy the lines in view",
   );
-  // The code scrolls sideways as far as its widest line needs, also where that line is far from view and not rendered:
-  // scrolling to it changes nothing sideways.
-  const sideways = await value(cdp, `${block}.scrollWidth`);
+  // The code scrolls sideways as far as its widest line needs, also while that line is far from view and not rendered:
+  // scrolled fully sideways at the draw's line, the far long line shows its end once scrolled up to it.
   const reading = await value(cdp, `${block}.scrollTop`);
+  await evaluate(cdp, `${block}.scrollLeft = ${block}.scrollWidth`);
   await evaluate(cdp, `${block}.scrollTop = 0`);
   await waitFor(cdp, inView(2), 5_000, "The file's second line did not scroll into view");
   assertEqual(
-    await value(cdp, `${block}.scrollWidth`),
-    sideways,
-    "The code scrolled sideways only as far as the lines near view",
+    await value(
+      cdp,
+      `(() => {
+        // The last character of the long line, where it is drawn, and the code's and the line's visible areas.
+        const block = ${block};
+        const line = block.querySelector('[data-code-line="2"]');
+        const walker = document.createTreeWalker(line.querySelector('.code-block-text'), NodeFilter.SHOW_TEXT);
+        let last = null;
+        while (walker.nextNode()) if (walker.currentNode.textContent.trim()) last = walker.currentNode;
+        const end = last.textContent.trimEnd().length;
+        const range = document.createRange();
+        range.setStart(last, end - 1);
+        range.setEnd(last, end);
+        const glyph = range.getBoundingClientRect();
+        const area = block.getBoundingClientRect();
+        const [left, right] = [area.left + block.clientLeft, area.left + block.clientLeft + block.clientWidth];
+        const row = line.getBoundingClientRect();
+        return glyph.width > 0 && glyph.left >= left && glyph.right <= right && glyph.right <= row.right + 1;
+      })()`,
+    ),
+    true,
+    "Scrolled fully sideways at the draw's line, the code did not show the end of its widest line",
   );
-  await evaluate(cdp, `${block}.scrollTop = ${reading}`);
+  await evaluate(cdp, `${block}.scrollLeft = 0; ${block}.scrollTop = ${reading}`);
   await waitFor(cdp, drawShown, 5_000, "Scrolling back did not show the draw's line");
   // Wrapping the lines above the draw's keeps the draw's line shown and still in every frame from the click, and so
   // does unwrapping them, also after scrolling the wrapped lines.
@@ -2203,13 +2251,15 @@ async function titleBarScenario(cdp, origin) {
   );
 
   // On a short screen the default bar's display controls stay visible and usable without a timer rail and beside one:
-  // the rail neither covers nor overlaps them.
+  // nothing covers them, and what the rail shows (its timer and buttons) is not drawn over them.
   const reachable = async (situation) => {
     const blocked = await evaluate(
       cdp,
       `${UNCOVERED}
-      const rail = document.querySelector('.stage-right-rail')?.getBoundingClientRect();
-      const meets = (box) => !!rail && rail.width > 0 && box.left < rail.right && rail.left < box.right && box.top < rail.bottom && rail.top < box.bottom;
+      const shown = [...document.querySelectorAll('.stage-right-rail :is(.timer-display, button)')]
+        .filter((element) => element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+        .map((element) => element.getBoundingClientRect());
+      const meets = (box) => shown.some((part) => box.left < part.right && part.left < box.right && box.top < part.bottom && part.top < box.bottom);
       const controls = [...document.querySelectorAll('.player-top-bar-actions button')];
       return controls.length === 0 ? ['no control'] : controls
         .filter((control) => !uncovered(control) || meets(control.getBoundingClientRect()))
@@ -3969,11 +4019,7 @@ async function cameraScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
   };
-  const takeNewPhoto = () =>
-    evaluate(
-      cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take another, Mistress').click()`,
-    );
+  const takeNewPhoto = () => clickLabelled(cdp, "Take another, Mistress");
   const photoColors = quadrantColors(decodedPhoto);
   const savedItem = JSON.stringify('player-storage:["development-camera","camera.photo"]');
   const savedPhoto = `JSON.parse(localStorage.getItem(${savedItem}) ?? 'null')?.value ?? null`;
@@ -4115,20 +4161,12 @@ async function viewfinderScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
   };
-  const takePhoto = () =>
-    evaluate(
-      cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === "I'm ready, Mistress").click()`,
-    );
+  const takePhoto = () => clickLabelled(cdp, "I'm ready, Mistress");
   const video = `document.querySelector('[data-viewfinder] video')`;
   const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
   const place = `(() => { const box = document.querySelector('[data-floating-viewfinder]').getBoundingClientRect(); return [box.left, box.top, box.width].map(Math.round).join(); })()`;
   const sidebarVisible = `document.querySelector('#player-shell').dataset.sidebarVisible`;
-  const clickButton = (cdp, label) =>
-    evaluate(
-      cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
-    );
+  const clickButton = (cdp, label) => clickLabelled(cdp, label);
 
   await setViewport(cdp, 1440, 900);
   await cdp.call("Browser.setPermission", {
@@ -4158,7 +4196,7 @@ async function viewfinderScenario(cdp, origin) {
   // sidebar does not move it from where they put it.
   const initial = await value(cdp, place);
   await evaluate(cdp, `document.querySelector('[data-floating-viewfinder]').focus()`);
-  for (const key of ["ArrowLeft", "ArrowLeft", "ArrowUp", "ArrowUp"])
+  for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "ArrowDown"])
     for (const type of ["keyDown", "keyUp"])
       await cdp.call("Input.dispatchKeyEvent", { type, key, code: key });
   await waitFor(
@@ -4169,15 +4207,16 @@ async function viewfinderScenario(cdp, origin) {
   );
   const shown = await value(cdp, place);
   for (const expected of ["false", "true"]) {
-    await evaluate(
+    await physicalClickOn(
       cdp,
-      `[...document.querySelectorAll('[data-sidebar=trigger]')].find((trigger) => trigger.offsetParent !== null).click()`,
+      `[...document.querySelectorAll('[data-sidebar=trigger]')].find((trigger) => trigger.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && !trigger.closest('[inert]'))`,
+      "the shown sidebar toggle",
     );
     await waitFor(cdp, `${sidebarVisible} === ${JSON.stringify(expected)}`);
     assertEqual(await value(cdp, place), shown, "Toggling the sidebar moved the viewfinder");
   }
   // The player's mirroring choice follows the view from the window to the Stage.
-  await click(cdp, "[data-floating-viewfinder] [data-viewfinder-mirror]");
+  await physicalClick(cdp, "[data-floating-viewfinder] [data-viewfinder-mirror]");
   assertEqual(
     await value(cdp, `getComputedStyle(${video}).transform`),
     "none",
@@ -4216,11 +4255,11 @@ async function viewfinderScenario(cdp, origin) {
     "none",
     "The Stage view lost the window's mirroring choice",
   );
-  // On a narrow screen the view over the Stage stays whole: inside the Stage's frame and playing.
+  // On a narrow screen the view over the Stage stays whole: shown, uncovered and playing.
   await setViewport(cdp, 390, 844);
   await waitFor(
     cdp,
-    `(() => { const camera = document.querySelector('[data-stage-camera] [data-viewfinder]').getBoundingClientRect(); const frame = document.querySelector('.stage-media-frame').getBoundingClientRect(); return camera.width > 0 && camera.height > 0 && camera.left >= frame.left - 1 && camera.right <= frame.right + 1 && camera.top >= frame.top - 1 && camera.bottom <= frame.bottom + 1 && !${video}.paused; })()`,
+    `(() => { ${UNCOVERED} return uncovered(document.querySelector('[data-stage-camera] [data-viewfinder]')) && !${video}.paused; })()`,
     8_000,
     "The camera view over a narrow Stage is cut off or stopped",
   );
@@ -5785,11 +5824,7 @@ async function permanentButtonsScenario(cdp, origin) {
   const rail = `[...document.querySelectorAll('.stage-right-rail [data-permanent-button]')].map((button) => button.textContent.trim() + (button.getAttribute('aria-disabled') === 'true' ? ' (inactive)' : '')).join('|')`;
   const button = (id) => `[data-permanent-button="${id}"]`;
   const said = (text) => `document.body.innerText.split(${JSON.stringify(text)}).length - 1`;
-  const clickButton = (label) =>
-    evaluate(
-      cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
-    );
+  const clickButton = (label) => clickLabelled(cdp, label);
   await waitFor(cdp, `${rail} === "Count one|Give me a hint|Pause|Stop"`);
   await waitFor(cdp, `document.body.innerText.includes("Done counting")`);
 
@@ -6402,7 +6437,7 @@ async function formsScenario(cdp, origin) {
     true,
     "Reaching the last toggle hid the submit button or put it under the composer",
   );
-  await evaluate(cdp, `${submit}.click()`);
+  await physicalClickOn(cdp, submit, "the form's OK");
   // Submitting adds one answer listing every toggle with its state, one per line; screen readers read its plain text.
   const summary = `document.querySelector('[data-form-summary]')`;
   await waitFor(cdp, `!!${summary}`, 8_000, "Submitting did not add the form's summary");
@@ -6440,8 +6475,8 @@ async function formsScenario(cdp, origin) {
   const width = (button) => `${button}.getBoundingClientRect().width`;
   const low = await value(cdp, fill);
   const widths = [await value(cdp, width(intensity)), await value(cdp, width(access))];
-  await evaluate(cdp, `${intensity}.click()`);
-  await evaluate(cdp, `${access}.click()`);
+  await physicalClickOn(cdp, intensity, "the Intensity cycle");
+  await physicalClickOn(cdp, access, "the Access toggle");
   await waitFor(
     cdp,
     `${intensity}.innerText.includes("Intensity: Medium") && ${access}.innerText.includes("Access: On")`,
@@ -6465,17 +6500,14 @@ async function formsScenario(cdp, origin) {
   );
   await buttonNameCheck(cdp, "Intensity: Medium");
   await buttonNameCheck(cdp, "Access: On");
-  await evaluate(cdp, `${access}.click()`);
+  await physicalClickOn(cdp, access, "the Access toggle");
   await waitFor(
     cdp,
     `${access}.innerText.includes("Access: Off")`,
     8_000,
     "The toggle did not turn off",
   );
-  await evaluate(
-    cdp,
-    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
-  );
+  await clickLabelled(cdp, "Continue", "[data-form-actions] button");
   await waitFor(
     cdp,
     `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
@@ -6552,11 +6584,7 @@ async function formFieldsScenario(cdp, origin) {
   await physicalClick(cdp, '[data-form-field="weight"]');
   await waitFor(cdp, `document.activeElement === ${composer}`);
   await cdp.call("Input.insertText", { text: "2.5" });
-  const pressButton = (scope, text) =>
-    evaluate(
-      cdp,
-      `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(text)}).click()`,
-    );
+  const pressButton = (scope, text) => clickLabelled(cdp, text, scope);
   const buttonShown = (scope, text) =>
     `[...document.querySelectorAll(${JSON.stringify(scope)})].some((button) => button.textContent.trim() === ${JSON.stringify(text)})`;
   const pressPermanentButton = async (text) => {
@@ -6825,8 +6853,23 @@ async function debugRewindScenario(cdp, origin) {
     true,
     "The bar runs off a narrow screen",
   );
-  // The narrow tools drawer may cover the chat, so this press goes to the control itself.
-  await evaluate(cdp, `document.querySelector('[data-rewind-return]').click()`);
+  // The narrow tools drawer may cover the chat; a person closes it first, then presses Return.
+  if (await value(cdp, visible(".tools-drawer"))) {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+    await waitFor(
+      cdp,
+      `!document.querySelector('.tools-drawer')`,
+      5_000,
+      "Escape left the drawer open",
+    );
+  }
+  await settledClick(cdp, "[data-rewind-return]");
   await waitFor(
     cdp,
     `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
