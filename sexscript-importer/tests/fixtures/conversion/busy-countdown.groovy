@@ -19,7 +19,8 @@ def waitFor = { limit ->
 }
 waitFor(2)
 waitFor(-1)
-// A variable that starts as null takes the clock's seconds, so the time between two readings is a number.
+// A variable that starts as null and then takes the clock holds a moment, so the time between two readings is a
+// duration.
 def before = null
 before = getTime()
 def after = getTime()

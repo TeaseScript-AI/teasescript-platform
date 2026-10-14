@@ -47,13 +47,13 @@ function addPoints {
 }
 addPoints()
 say prose "Points ${points}", instant
-// A Date reads its milliseconds as a number, so a variable it sets starts at 0.
-let started = 0
+// A Date's milliseconds are a moment, so a variable that starts as null and then takes them holds the moment.
+let started = getAbsoluteDateTime()
 function mark {
-  started = getAbsoluteDateTime().toMilliseconds()
+  started = getAbsoluteDateTime()
 }
 mark()
-say prose "Took ${getAbsoluteDateTime().toMilliseconds() - started}", instant
+say prose "Took ${round((getAbsoluteDateTime() - started) / 1 ms)}", instant
 // A function's own counter starts at 0 too, also where another function names a text the same.
 function fill(n) {
   let i = 0

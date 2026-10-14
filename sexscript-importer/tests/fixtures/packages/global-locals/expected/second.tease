@@ -1,9 +1,9 @@
-let lastTime = getAbsoluteDateTime().toSeconds()
+let lastTime = getAbsoluteDateTime()
 function elapsed {
-  return getAbsoluteDateTime().toSeconds() - lastTime
+  return round((getAbsoluteDateTime() - lastTime) / 1 s)
 }
 function remember {
-  let lastTimeValue = getAbsoluteDateTime().toSeconds()
+  let lastTimeValue = getAbsoluteDateTime()
   save lastTimeValue as "demo.lastTime"
 }
 remember()

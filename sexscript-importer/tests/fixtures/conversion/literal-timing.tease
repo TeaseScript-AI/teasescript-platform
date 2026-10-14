@@ -185,10 +185,10 @@ breaths += 1
 wait 2 s
 // A clock reading between a text and its wait.
 say prose "Keep holding until the wait is over.", instant
-let started = getAbsoluteDateTime().toSeconds()
+let started = getAbsoluteDateTime()
 wait 2 s
-let elapsed = getAbsoluteDateTime().toSeconds() - started
-if elapsed < 2 {
+let elapsed = getAbsoluteDateTime() - started
+if elapsed < 2 s {
   say prose "Too soon", instant
 } else {
   say prose "Held", instant

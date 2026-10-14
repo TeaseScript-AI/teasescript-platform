@@ -47,6 +47,7 @@ import { renameConflictingIdentifiers } from "./naming.ts";
 import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
 import { withNullDefaults } from "./null-defaults.ts";
+import { withNativeTime } from "./native-time.ts";
 import {
   expressionType,
   functionResultTypes,
@@ -1119,8 +1120,10 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const moduleFiles = withModuleFiles(noted, files);
-  const withClasses = withBooleanResultTruths(
-    noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
+  const withClasses = withTimeModel(
+    withBooleanResultTruths(
+      noted.map((program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program),
+    ),
   );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
@@ -1225,6 +1228,26 @@ export function lowerPackage(
     main: legacyMain !== null ? { file: legacyMain } : { menu: main! },
     paths,
   };
+}
+
+/**
+ * The package's legacy Unix time as moments and durations (native-time.ts), over all its files at once, which share the
+ * keys of storage; a module's script variables may be used by other files, so they keep their numbers.
+ */
+function withTimeModel(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const diagnostics = programs.map((program) => [...program.diagnostics]);
+  const statements = withNativeTime(
+    programs.map((program, index) => ({
+      statements: program.statements,
+      shared: program.module !== undefined,
+      diagnostics: diagnostics[index]!,
+    })),
+  );
+  return programs.map((program, index) => ({
+    ...program,
+    statements: statements[index]!,
+    diagnostics: diagnostics[index]!,
+  }));
 }
 
 /**

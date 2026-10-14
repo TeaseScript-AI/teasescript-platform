@@ -28,7 +28,7 @@ def addPoints = { ->
 }
 addPoints()
 show("Points ${points}")
-// A Date reads its milliseconds as a number, so a variable it sets starts at 0.
+// A Date's milliseconds are a moment, so a variable that starts as null and then takes them holds the moment.
 def started
 def mark = { -> started = new Date().getTime() }
 mark()
