@@ -616,7 +616,7 @@ test("a choice that returns text and numbers needs a place declared with a union
   assert.deepEqual(message('function pick {\n    return askChoice "None", 5\n}\nexit'), [
     [
       "TSV044",
-      "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the result type, as in 'function pick(...): string | integer'.",
+      "This askChoice returns text (string) or a whole number (integer). A place keeps one type. To keep both, declare the result type, as in 'function pick: string | integer'.",
     ],
   ]);
   assert.deepEqual(

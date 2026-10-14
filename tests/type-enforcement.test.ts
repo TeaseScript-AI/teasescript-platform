@@ -374,10 +374,145 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('for step in 1..=3 {\n    step = "x"\n}\nexit'), [
     [
       "TSV041",
-      "'step' holds a whole number (integer), so it cannot be set to text (string). To allow both, declare it as 'let step: integer | string = ...'.",
+      // No type can be written for a loop variable.
+      "'step' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
       '"x"',
     ],
   ]);
+});
+
+test("a fix writes another type where the place declares its type, and the code it suggests compiles", () => {
+  // A parameter is declared in its function's parameter list (V30 §11), with its default, also after another default.
+  assert.deepEqual(
+    mismatches(
+      [
+        "function f(xs = [1], n = 1, m = null) {",
+        '    xs.add("a")',
+        "    n = null",
+        '    xs = xs + ["b"]',
+        '    m = askChoice 1, "c"',
+        "}",
+        "f()",
+        "function g(xs: integer[], a = 1, k: integer = 2) {",
+        "    k = 2.5",
+        "}",
+        'g(["d"])',
+        "g([1], 1, 3.5)",
+        'global gs: integer[] = ["e"]',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV041",
+        "'gs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare it as 'global gs: (integer | string)[] = ...'.",
+        '"e"',
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare the parameter as 'xs: (integer | string)[] = ...'.",
+        '"a"',
+      ],
+      [
+        "TSV041",
+        "'n' holds a whole number (integer), so it cannot be set to null. To allow null, declare the parameter as 'n: integer? = 1'.",
+        "null",
+      ],
+      [
+        "TSV044",
+        "'+' would mix a whole number (integer) and text (string). A list holds one type. To keep both, declare the parameter as 'xs: (integer | string)[] = ...'.",
+        'xs + ["b"]',
+      ],
+      [
+        "TSV044",
+        "This askChoice returns a whole number (integer) or text (string). A place keeps one type. To keep both, declare the parameter as 'm: integer | string = ...'.",
+        'askChoice 1, "c"',
+      ],
+      [
+        "TSV041",
+        "'k' holds a whole number (integer), so it cannot be set to a number. Round it with floor(...), round(...), or ceil(...), or declare the parameter as 'k: number = 2'.",
+        "2.5",
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare the parameter as 'xs: (integer | string)[]'.",
+        '"d"',
+      ],
+      [
+        "TSV041",
+        "'g' takes 'k' as a whole number (integer), so it cannot take a number. Round it with floor(...), round(...), or ceil(...), or declare the parameter as 'k: number = 2'.",
+        "3.5",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    codes(
+      [
+        'function f(xs: (integer | string)[] = [1], n: integer? = 1, m: integer | string = "") {',
+        '    xs.add("a")',
+        "    n = null",
+        '    xs = xs + ["b"]',
+        '    m = askChoice 1, "c"',
+        "}",
+        "f()",
+        "function g(xs: (integer | string)[], a = 1, k: number = 2) {",
+        "    k = 2.5",
+        "}",
+        'g(["d"])',
+        "g([1], 1, 3.5)",
+        'global gs: (integer | string)[] = ["e"]',
+        "exit",
+      ].join("\n"),
+    ),
+    [],
+  );
+  // A property has no written type (V30 §15, §37), so its first value gives it one; a loop variable has none either.
+  assert.deepEqual(
+    mismatches(
+      [
+        "let door = { keys: [1] }",
+        'door.keys.add("x")',
+        "speaker vera { items: [1] }",
+        'vera.items.add("x")',
+        "for xs in [[1]] {",
+        '    xs.add("y")',
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV041",
+        "'door.keys' holds integer values (integer[]), so it cannot contain text (string). To allow both, give 'door.keys' a first value of type (integer | string)[], such as a variable declared with that type.",
+        '"x"',
+      ],
+      [
+        "TSV041",
+        "'vera.items' holds integer values (integer[]), so it cannot contain text (string). To allow both, give 'vera.items' a first value of type (integer | string)[], such as a variable declared with that type.",
+        '"x"',
+      ],
+      [
+        "TSV041",
+        "'xs' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+        '"y"',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    sayTexts(
+      [
+        "let keys: (integer | string)[] = [1]",
+        "let door = { keys: keys }",
+        'door.keys.add("x")',
+        "global items: (integer | string)[] = [1]",
+        "speaker vera { items: items }",
+        'vera.items.add("x")',
+        'say "${door.keys.length} ${vera.items.length}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2 2"],
+  );
 });
 
 test("handles, speakers, and a typed load default keep their types", () => {

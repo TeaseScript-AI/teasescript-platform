@@ -810,12 +810,25 @@ interface Variable {
   readonly declaration?: Declaration | undefined;
   /** Whether a type is written for the variable: a `let` or parameter with a type annotation. */
   readonly annotated?: boolean;
+  /** For a parameter, its declaration in the parameter list, which a fix declares another type in. */
+  readonly parameter?: FunctionParameter;
   /**
    * Whether a function or a timer or media block may assign it or change its value in place, so a call or suspension
    * cancels its narrowing, or for a change in place only the narrowing that the change can undo.
    */
   readonly shared: Sharing | false;
 }
+
+/**
+ * Where a fix writes another type for a place: the `let` or `global` of a variable, a parameter in its function's
+ * parameter list, or for a property, whose type cannot be written, its first value. `null` for a place without any,
+ * such as a loop variable or an element.
+ */
+type Declared =
+  | { readonly kind: "let" | "global"; readonly name: string }
+  | { readonly kind: "parameter"; readonly parameter: FunctionParameter }
+  | { readonly kind: "property"; readonly label: string }
+  | null;
 
 /**
  * What a branch of the control flow changes: narrowed variable types that differ from where the branch began, with
@@ -946,6 +959,8 @@ interface Place {
   readonly inferred?: "variable" | "part" | undefined;
   /** The source spelling of the place, such as `items` or `door.locked`, when it has one. */
   readonly label: string | null;
+  /** Where a fix writes another type for the place, which also decides how a fix for its elements reads. */
+  readonly declared?: Declared;
   /** For the elements of a collection, the collection's spelling, so element properties can be named. */
   readonly elementOf?: string | null;
   /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
@@ -1092,8 +1107,8 @@ class TypeChecker {
   /** `askChoice` expressions whose buttons return values of different types, which only a declared union may keep. */
   readonly #mixedChoices = new Map<Expression, StaticType>();
 
-  /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
-  readonly #declaredBy = new Map<Expression, string>();
+  /** The unannotated `let` and `global` statements by initializer, for messages that suggest a declaration. */
+  readonly #declaredBy = new Map<Expression, Declared>();
 
   /**
    * The fields of each `askForm` with the type of the number that decides a field's kind, kept until every type is
@@ -1349,6 +1364,19 @@ class TypeChecker {
   /** The keyword that declares a variable of this name: `global` for a global, otherwise `let`. */
   #keyword(name: string | null): "global" | "let" {
     return name !== null && this.#project.resolve(name)?.kind === "variable" ? "global" : "let";
+  }
+
+  /** Where a fix writes another type for the collection or value that `expression` reads (see {@link Declared}). */
+  #declaredOf(expression: Expression, scope: Scope): Declared {
+    const node = unwrap(expression);
+    if (node.kind === "identifier") {
+      const entry = scope.resolve(node.name);
+      return entry?.kind === "variable"
+        ? variableDeclared(entry.variable, this.#keyword(node.name))
+        : null;
+    }
+    const label = node.kind === "propertyAccessExpression" ? expressionLabel(node) : null;
+    return label === null ? null : { kind: "property", label };
   }
 
   /** Continues in the source of `file`, returning the file to come back to. */
@@ -2155,7 +2183,8 @@ class TypeChecker {
     const keyword = statement.kind === "letStatement" ? "let" : "global";
     const written = statement.kind === "letStatement" ? statement.initializer : statement.initial;
     const initializer = unwrap(written);
-    if (statement.typeAnnotation === null) this.#declaredBy.set(initializer, name);
+    const declaration: Declared = { kind: keyword, name };
+    if (statement.typeAnnotation === null) this.#declaredBy.set(initializer, declaration);
     const declared =
       statement.typeAnnotation === null ? null : this.#annotationType(statement.typeAnnotation);
     if (declared !== null && initializer.kind === "loadExpression")
@@ -2186,9 +2215,10 @@ class TypeChecker {
       const place: Place = {
         type,
         label: name,
+        declared: declaration,
         subject: `'${name}' is declared as ${typeName(type)}`,
         verb: "start as",
-        fix: (rejected, expression) => typeFix(name, type, rejected, expression, keyword),
+        fix: (rejected, expression) => typeFix(declaration, type, rejected, expression),
       };
       const checked = this.#checkedValue(written);
       yield* compileChild(
@@ -2346,6 +2376,7 @@ class TypeChecker {
           const elements = elementPlace(
             { kind, element: store },
             label,
+            this.#declaredOf(target.object, scope),
             isNullable(object),
             this.#text,
             this.#inferredCollection(target.object, scope),
@@ -2510,7 +2541,7 @@ class TypeChecker {
           "list",
           first.element,
           second.element,
-          [target],
+          place.declared ?? null,
           statement.value.span,
           this.#copyNote(extendPath(place.widening, "[]"), first.element),
         );
@@ -2689,6 +2720,7 @@ class TypeChecker {
       const elements = elementPlace(
         kept,
         place.label,
+        place.declared ?? null,
         isNullable(place.type),
         this.#text,
         place.inferred !== undefined,
@@ -2744,11 +2776,9 @@ class TypeChecker {
       // A place without a written type, or whose type the value would decide, cannot keep a mixed `askChoice`.
       if (place.inferred !== undefined || members(place.type).some((member) => !isKnown(member)))
         this.#reportMixedChoice(expression, (written) =>
-          place.verb === "take" && place.label !== null
-            ? `to keep both, declare the parameter as '${place.label}: ${written}'`
-            : place.inferred === "variable" && place.label !== null
-              ? `to keep both, declare it as '${this.#keyword(place.label)} ${place.label}: ${written} = ...'`
-              : ONE_TYPE_FIX,
+          place.inferred === "variable" && place.declared
+            ? `to keep both, ${declareAs(place.declared, written)}`
+            : ONE_TYPE_FIX,
         );
       // Widening again repeats earlier work unless settling can add parts (only an undecided, union, collection, or
       // object type can) or this check recorded a widening for the variable since it last widened it again.
@@ -3049,7 +3079,19 @@ class TypeChecker {
     const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
       isCollection(member)
-        ? [elementPlace(member, label, nullable, this.#text, inferred, owner, verb, listed)]
+        ? [
+            elementPlace(
+              member,
+              label,
+              this.#declaredOf(collectionExpression, scope),
+              nullable,
+              this.#text,
+              inferred,
+              owner,
+              verb,
+              listed,
+            ),
+          ]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -3231,7 +3273,8 @@ class TypeChecker {
     scope: Scope,
   ): Place | undefined {
     const name = property.name;
-    const label = `${expressionLabel(objectExpression) ?? "this object"}.${name}`;
+    const objectLabel = expressionLabel(objectExpression);
+    const label = `${objectLabel ?? "this object"}.${name}`;
     const all = members(object).map(resolved);
     const targets = all.map((member) => assignableProperty(member, name));
     let type: StaticType | undefined;
@@ -3255,7 +3298,14 @@ class TypeChecker {
       all.length === 1 && all[0]!.kind === "object"
         ? this.#pathOf(objectExpression, scope)
         : undefined;
-    return propertyPlace(type, label, `'${label}'`, this.#text, extendPath(owner, name));
+    return propertyPlace(
+      type,
+      label,
+      `'${label}'`,
+      this.#text,
+      extendPath(owner, name),
+      objectLabel === null ? null : { kind: "property", label },
+    );
   }
 
   *#returnTask(
@@ -3302,7 +3352,7 @@ class TypeChecker {
     this.#reportMixedChoice(
       statement.value,
       (written) =>
-        `to keep both, declare the result type, as in 'function ${context.fn.declaration.name.name}(...): ${written}'`,
+        `to keep both, declare the result type, as in '${functionHead(context.fn.declaration)}: ${written}'`,
     );
     // The result is joined once the body is complete; a later statement may still change the place a value was read from.
     context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
@@ -3496,9 +3546,11 @@ class TypeChecker {
               {
                 type: declared,
                 label: name,
+                declared: { kind: "parameter", parameter },
                 subject: `Parameter '${name}' is declared as ${typeName(declared)}`,
                 verb: "default to",
-                fix: (rejected, expression) => parameterFix(name, declared, rejected, expression),
+                fix: (rejected, expression) =>
+                  parameterFix(parameter, declared, rejected, expression),
               },
               parameter.defaultValue,
               value,
@@ -3522,6 +3574,7 @@ class TypeChecker {
         shared: this.#sharedLocal(parameter),
         declaration,
         annotated: parameter.typeAnnotation !== null,
+        parameter,
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
       parameters.push(variable);
@@ -3587,18 +3640,10 @@ class TypeChecker {
         type: parameter.type,
         inferred: declaration.typeAnnotation === null ? "variable" : undefined,
         label: parameter.name,
+        declared: { kind: "parameter", parameter: declaration },
         subject: `'${name}' takes '${parameter.name}' as ${describeValue(parameter.type)}`,
         verb: "take",
-        fix: (rejected, value) =>
-          declaration.typeAnnotation === null && declaration.defaultValue !== null
-            ? parameterFix(
-                parameter.name,
-                parameter.type,
-                rejected,
-                value,
-                declaration.defaultValue,
-              )
-            : parameterFix(parameter.name, parameter.type, rejected, value),
+        fix: (rejected, value) => parameterFix(declaration, parameter.type, rejected, value),
       };
       yield* compileChild(this.#storeTask(place, argument.value, values[argumentIndex]!, false));
       // The argument does not change the parameter's type, but its objects reach the parameter (#845).
@@ -5149,13 +5194,17 @@ class TypeChecker {
           second.kind === "list" &&
           arithmeticType("+", first, second) === undefined
         ) {
-          const operands = [expression.left, expression.right];
+          // The fix declares the first operand that a declaration names.
+          const declared =
+            [expression.left, expression.right]
+              .map((operand) => this.#declaredOf(operand, scope))
+              .find((found) => found !== null && found.kind !== "property") ?? null;
           this.#reportMixedJoin(
             "'+'",
             "list",
             first.element,
             second.element,
-            operands,
+            declared,
             expression.span,
           );
           return { kind: "list", element: UNKNOWN_TYPE };
@@ -5904,7 +5953,7 @@ class TypeChecker {
           const kept = resolved(member);
           // A list or set checks its own methods, also `indexOf` and `lastIndexOf`, which take any value on a list.
           if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
-            return this.#collectionMethodType(method, kept, callee.property, expression);
+            return this.#collectionMethodType(method, kept, callee.property, expression, scope);
           // Its other methods, and a dict's in a union, take their arguments without names, in their number (V30 §16).
           if (isListOrSet(kept) || kept.kind === "dict")
             this.#reportProblems(positionalMethodProblems(method, expression, removable));
@@ -6049,6 +6098,7 @@ class TypeChecker {
     value: StaticType & { readonly kind: "list" | "set" },
     property: Identifier,
     expression: CallExpression,
+    scope: Scope,
   ): StaticType {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
@@ -6082,7 +6132,7 @@ class TypeChecker {
         return { kind: value.kind, element: UNKNOWN_TYPE };
       }
     }
-    return this.#setOperationType(method, value, expression, problems.length === 0);
+    return this.#setOperationType(method, value, expression, problems.length === 0, scope);
   }
 
   /**
@@ -6094,6 +6144,7 @@ class TypeChecker {
     receiver: StaticType & { readonly kind: "list" | "set" },
     expression: CallExpression,
     reportMix: boolean,
+    scope: Scope,
   ): StaticType {
     const own = copyType(receiver.element);
     const argumentExpression = expression.arguments[0]?.value;
@@ -6113,8 +6164,11 @@ class TypeChecker {
     if (element === undefined) {
       if (reportMix) {
         const callee = unwrap(expression.callee);
-        const target = callee.kind === "propertyAccessExpression" ? [callee.object] : [];
-        this.#reportMixedJoin("union()", receiver.kind, own, other, target, expression.span);
+        const declared =
+          callee.kind === "propertyAccessExpression"
+            ? this.#declaredOf(callee.object, scope)
+            : null;
+        this.#reportMixedJoin("union()", receiver.kind, own, other, declared, expression.span);
       }
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
@@ -6123,7 +6177,7 @@ class TypeChecker {
 
   /**
    * Reports an operation that would give a list or set the elements of two collections whose types mix, such as
-   * `union()` or `+`. As for a mixed literal, the fix declares the first of `targets` that is a variable with a union
+   * `union()` or `+`. As for a mixed literal, the fix declares the collection that `declared` names with a union
    * element type.
    */
   #reportMixedJoin(
@@ -6131,20 +6185,17 @@ class TypeChecker {
     kind: "list" | "set",
     own: StaticType,
     other: StaticType,
-    targets: readonly Expression[],
+    declared: Declared,
     span: SourceSpan,
     note = "",
   ): void {
-    const target = targets.map(unwrap).find((node) => node.kind === "identifier");
-    const name = target?.kind === "identifier" ? target.name : "values";
     const mixed: StaticType = { kind, element: union([own, other]) };
     const written = typeName(mixed);
     const property = misfitProperty(own, other);
     const fix =
       property !== undefined
         ? `give '${property.name}' one type in every element`
-        : (unnamedMixFix(mixed) ??
-          `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
+        : (unnamedMixFix(mixed) ?? keepBothFix(declared, written));
     this.#report(
       typeCode.mixedTypes,
       `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type. ${capitalize(fix)}.`,
@@ -7615,14 +7666,12 @@ class TypeChecker {
       const other = types.find((type) => joinTypes([first, type]) === undefined) ?? types[1]!;
       const mixed: StaticType = { kind, element: union(types) };
       const written = typeName(mixed);
-      const name = this.#declaredBy.get(literal);
       const property = misfitProperty(first, other);
       // A property type has no written form, so objects that disagree need one type for that property.
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : (unnamedMixFix(mixed) ??
-            `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`);
+          : (unnamedMixFix(mixed) ?? keepBothFix(this.#declaredBy.get(literal) ?? null, written));
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type. ${capitalize(fix)}.`,
@@ -8594,23 +8643,36 @@ function storageLabel(key: string): string {
 function variablePlace(variable: Variable, text: PlaceText): Place {
   const name = variable.name;
   const type = variable.type;
+  const declared = variableDeclared(variable, text.keyword(name));
   return {
     type,
     widening:
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
+    declared,
     get subject() {
       return `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`;
     },
     verb: "be set to",
-    fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
+    fix: (rejected, expression) => typeFix(declared, type, rejected, expression),
   };
 }
 
+/** Where a fix writes another type for a variable: its `let` or `global`, or its parameter, but not a loop variable. */
+function variableDeclared(variable: Variable, keyword: "global" | "let"): Declared {
+  if (variable.parameter !== undefined) return { kind: "parameter", parameter: variable.parameter };
+  const kind = variable.declaration?.kind;
+  return kind === "forStatement" || kind === "identifier"
+    ? null
+    : { kind: keyword, name: variable.name };
+}
+
+/** The elements of a collection that `name` spells, whose type a fix writes where `declared` says. */
 function elementPlace(
   collection: CollectionType,
   name: string | null,
+  declared: Declared,
   nullable: boolean,
   text: PlaceText,
   inferred = false,
@@ -8633,26 +8695,23 @@ function elementPlace(
     },
     verb,
     listed,
-    fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
+    fix: (value) => elementFix(declared, collection, value, nullable),
   };
 }
 
 /** The place of a property inside a stored object literal, named after the place that keeps the object. */
 function nestedPropertyPlace(type: StaticType, owner: Place, name: string, text: PlaceText): Place {
   const widening = extendPath(owner.widening, name);
-  if (owner.label !== null)
-    return propertyPlace(
-      type,
-      `${owner.label}.${name}`,
-      `'${owner.label}.${name}'`,
-      text,
-      widening,
-    );
+  if (owner.label !== null) {
+    const label = `${owner.label}.${name}`;
+    const declared: Declared = owner.declared ? { kind: "property", label } : null;
+    return propertyPlace(type, label, `'${label}'`, text, widening, declared);
+  }
   const subject =
     owner.elementOf === undefined || owner.elementOf === null
       ? `Property '${name}'`
       : `Property '${name}' of the elements of '${owner.elementOf}'`;
-  return propertyPlace(type, null, subject, text, widening);
+  return propertyPlace(type, null, subject, text, widening, null);
 }
 
 function propertyPlace(
@@ -8660,7 +8719,8 @@ function propertyPlace(
   label: string | null,
   name: string,
   text: PlaceText,
-  widening?: PlacePath,
+  widening: PlacePath | undefined,
+  declared: Declared,
 ): Place {
   return {
     type,
@@ -8668,6 +8728,7 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
+    declared,
     get subject() {
       return `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`;
     },
@@ -9961,55 +10022,75 @@ function checkFirstFix(
     : ` Check it first: if ${label} ${test} { ... }${or}`;
 }
 
-/** A short suggestion for the most common mismatches of a variable. */
+/**
+ * How a fix gives a place the type written as `type` where `declared` says: as in `declare it as 'let items: string[] =
+ * ...'`, `declare the parameter as 'count: number = 1'`, or for a property, through its first value.
+ */
+function declareAs(declared: NonNullable<Declared>, type: string): string {
+  switch (declared.kind) {
+    case "parameter": {
+      const { name, defaultValue } = declared.parameter;
+      const start = defaultValue === null ? "" : ` = ${sourceText(defaultValue) ?? "..."}`;
+      return `declare the parameter as '${name.name}: ${type}${start}'`;
+    }
+    case "property":
+      return `give '${declared.label}' a first value of type ${type}, such as a variable declared with that type`;
+    default:
+      return `declare it as '${declared.kind} ${declared.name}: ${type} = ...'`;
+  }
+}
+
+/** How a fix for a mixed collection declares a union element type: on the collection `declared` names, or on another. */
+function keepBothFix(declared: Declared, written: string): string {
+  if (declared?.kind === "parameter") return `to keep both, ${declareAs(declared, written)}`;
+  const head =
+    declared?.kind === "let" || declared?.kind === "global"
+      ? `${declared.kind} ${declared.name}`
+      : "let values";
+  return `to keep both, declare a union type, as in '${head}: ${written} = ...'`;
+}
+
+/** A short suggestion for the most common mismatches of a variable, which `declared` declares unless it is a loop's. */
 function typeFix(
-  name: string,
+  declared: Declared,
   target: StaticType,
   value: StaticType,
   expression: Expression | null,
-  keyword: "global" | "let" = "let",
 ): string {
   const nullable = isNullable(target);
   const kept = resolved(nonNullType(target));
   if (resolved(value).kind === "null" && !nullable)
-    return isAnnotatable(target)
-      ? ` To allow null, declare it as '${keyword} ${name}: ${typeName(target)}? = ...'.`
+    return declared !== null && isAnnotatable(target)
+      ? ` To allow null, ${declareAs(declared, `${typeName(target)}?`)}.`
       : " Use a separate variable for null.";
   if (isScalar(kept, "integer") && isScalar(value, "number"))
-    return `${ROUND_FIX}, or declare it as '${keyword} ${name}: number${nullable ? "?" : ""} = ...'.`;
+    return declared === null
+      ? `${ROUND_FIX}.`
+      : `${ROUND_FIX}, or ${declareAs(declared, `number${nullable ? "?" : ""}`)}.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
   const both = union([target, value]);
-  return isAnnotatable(both)
-    ? ` To allow both, declare it as '${keyword} ${name}: ${typeName(both)} = ...'.`
+  return declared !== null && isAnnotatable(both)
+    ? ` To allow both, ${declareAs(declared, typeName(both))}.`
     : " Use a separate variable for a value of another type.";
 }
 
-/** Like {@link typeFix}, for a parameter: a declaration in the function's parameter list. */
+/** Like {@link typeFix}, for an argument or default of a parameter: a declaration in the function's parameter list. */
 function parameterFix(
-  name: string,
+  parameter: FunctionParameter,
   target: StaticType,
   value: StaticType,
   expression: Expression | null,
-  defaultValue?: Expression,
 ): string {
+  const declared: Declared = { kind: "parameter", parameter };
   const kept = resolved(nonNullType(target));
-  if (isScalar(kept, "integer") && isScalar(value, "number")) {
-    const declaration =
-      defaultValue === undefined
-        ? `${name}: number`
-        : `${name}: number = ${sourceText(defaultValue) ?? "..."}`;
-    return `${ROUND_FIX}, or declare the parameter as '${declaration}'.`;
-  }
+  if (isScalar(kept, "integer") && isScalar(value, "number"))
+    return `${ROUND_FIX}, or ${declareAs(declared, "number")}.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
   const both = union([target, value]);
   if (!isAnnotatable(both)) return " Use a value of the parameter's type.";
-  const declaration =
-    defaultValue === undefined
-      ? `${name}: ${typeName(both)}`
-      : `${name}: ${typeName(both)} = ${sourceText(defaultValue) ?? "..."}`;
-  return ` To allow both, declare the parameter as '${declaration}'.`;
+  return ` To allow both, ${declareAs(declared, typeName(both))}.`;
 }
 
 function sourceText(expression: Expression): string | null {
@@ -10031,8 +10112,12 @@ function returnUnionFix(
   const both = union([earlier, other]);
   if (!isAnnotatable(both))
     return " A function returns one type. Use a separate function for values of another type.";
-  const parameters = declaration.parameters.length === 0 ? "" : "(...)";
-  return ` To return both, declare the result type, as in 'function ${declaration.name.name}${parameters}: ${typeName(both)}'.`;
+  return ` To return both, declare the result type, as in '${functionHead(declaration)}: ${typeName(both)}'.`;
+}
+
+/** The start of a function's declaration as a fix writes it: `function name`, with `(...)` when it has parameters. */
+function functionHead(declaration: FunctionDeclaration): string {
+  return `function ${declaration.name.name}${declaration.parameters.length === 0 ? "" : "(...)"}`;
 }
 
 /** How a function with a declared result may also return null. */
@@ -10042,21 +10127,24 @@ function optionalResultFix(declared: StaticType): string {
     : "";
 }
 
-/** How to make a value fit a list or set: allow fractions, or keep other values in a separate collection. */
+/**
+ * How to make a value fit a list or set: allow fractions or both where `declared` writes the collection's type, or keep
+ * other values in a separate collection.
+ */
 function elementFix(
-  variable: string | null,
+  declared: Declared,
   collection: CollectionType,
   value: StaticType,
   nullable: boolean,
-  keyword: "global" | "let",
 ): string {
-  if (variable !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return ` To allow fractions, declare it as '${keyword} ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
+  const optional = nullable ? "?" : "";
+  if (declared !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
+    return ` To allow fractions, ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
-  if (variable !== null && isAnnotatable(both))
-    return ` To allow both, declare it as '${keyword} ${variable}: ${typeName(both)}${nullable ? "?" : ""} = ...'.`;
+  if (declared !== null && isAnnotatable(both))
+    return ` To allow both, ${declareAs(declared, `${typeName(both)}${optional}`)}.`;
   return ` Use a separate ${collection.kind} for values of another type.`;
 }
 
