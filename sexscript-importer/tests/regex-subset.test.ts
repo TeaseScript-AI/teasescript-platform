@@ -50,31 +50,39 @@ test("patterns that a whole text matches by its end", () => {
 // letters only; features RE2 leaves out, or whose meaning differs, say why they do not convert (tests/fixtures/groovy-oracle/legacy-regex.groovy runs the converted ones).
 test("Java regular expressions as RE2 patterns", () => {
   const dot = String.raw`[^\n\r\x{85}\x{2028}\x{2029}]`;
-  assert.deepEqual(javaRegex(".{1,50}@x/y", "whole"), { pattern: `${dot}{1,50}@x\\/y`, flags: "" });
-  assert.deepEqual(javaRegex("(?s)a.b", "whole"), { pattern: "a.b", flags: "s" });
-  assert.deepEqual(javaRegex("(?si)\\.png", "whole"), { pattern: "\\.png", flags: "is" });
-  assert.deepEqual(javaRegex("[\\s,]\\S", "whole"), {
-    pattern: String.raw`[\t\n\x0B\f\r ,][^\t\n\x0B\f\r ]`,
-    flags: "",
-  });
-  assert.deepEqual(javaRegex("b$", "whole"), { pattern: "b$", flags: "" });
-  assert.deepEqual(javaRegex("b$", "find"), {
-    pattern: String.raw`b(?:\r\n|[\n\r\x{85}\x{2028}\x{2029}])?$`,
-    flags: "",
-  });
+  const converts = (
+    pattern: string,
+    within: "whole" | "find",
+    expected: string,
+    flags = "",
+  ): void => assert.deepEqual(javaRegex(pattern, within), { pattern: expected, flags }, pattern);
+  converts(".{1,50}@x/y", "whole", `${dot}{1,50}@x\\/y`);
+  converts("(?s)a.b", "whole", "a.b", "s");
+  converts("(?si)\\.png", "whole", "\\.png", "is");
+  converts("[\\s,]\\S", "whole", String.raw`[\t\n\x0B\f\r ,][^\t\n\x0B\f\r ]`);
+  // RE2 reads no leading zero in a count and has no empty literal.
+  converts("a{01,002}", "whole", "a{1,2}");
+  converts("", "whole", "(?:)");
+  converts("b$", "whole", "b$");
+  converts("b$", "find", String.raw`b(?:\r\n|[\n\r\x{85}\x{2028}\x{2029}])?$`);
+  converts("^\\s*$", "find", String.raw`^[\t\n\x0B\f\r ]*(?:\r\n|[\n\r\x{85}\x{2028}\x{2029}])?$`);
   for (const [pattern, reason] of [
     ["(a)\\1", "a backreference"],
-    ["a(?=b)", "a lookaround, an atomic group, or a mode inside the pattern"],
-    ["a(?i)b", "a lookaround, an atomic group, or a mode inside the pattern"],
+    ["a(?=b)", "a lookaround, a named or atomic group, or a mode inside the pattern"],
+    ["a(?i)b", "a lookaround, a named or atomic group, or a mode inside the pattern"],
     ["(?i)ok", "a letter that RE2 matches with other characters when it ignores case"],
     ["(?i)[a-c]", "a letter that RE2 matches with other characters when it ignores case"],
     ["\\bword", "a word boundary"],
     ["a++", "a possessive quantifier"],
     ["\\p{Lu}", "the escape \\p"],
+    ["\\uD83D\\uDE00", "the escape \\u"],
     ["[a-z&&[^b]]", "a class intersection"],
     ["[a[b]]", "a nested class"],
+    ["[\\s-a]", "a - between a class and another member"],
     ["a$|b", "$ before the end of the pattern"],
-    ["a{1001}", "a repetition over 1000"],
+    ["\\r$", "$ after a part that may end with a carriage return"],
+    ["a{1001}", "a repetition over 1000 or with its bounds reversed"],
+    ["(a{100}){11}", "a counted repetition of a group or of nothing"],
   ])
     assert.deepEqual(javaRegex(pattern!, "find"), { reason }, pattern);
 });

@@ -3,15 +3,20 @@
  * TeaseScript regex literals (V30 §8 "Regexes", RE2), where both mean the same: a pattern as RE2 writes it between the
  * slashes and its flags, or the reason it does not convert.
  *
+ * Only the plain part of Java's syntax that legacy scripts used converts: characters and escaped punctuation, `.`, the
+ * classes `\d \D \w \W \s \S`, and `\t \n \r \f`; character classes of characters, escaped punctuation, `\d \w \s`, and
+ * ranges of two characters; groups `(...)` and `(?:...)`; alternatives; the quantifiers `*`, `+`, and `?`, also lazy,
+ * and after a single character or class `{n}`, `{n,}`, and `{n,m}` up to RE2's limit of 1000; `^` at the start, `$` at
+ * the end, and the modes `(?i)` and `(?s)` at the start. Anything else, such as a backreference, lookaround, a word
+ * boundary, a property, or another escape, gives its reason.
+ *
  * Java's `.` matches no line terminator (\n, \r, U+0085, U+2028, U+2029), RE2's every character but \n: it becomes a
  * class without them, or stays with `(?s)`. Java's `\s` holds the vertical tab, RE2's does not: it becomes the class.
- * Java's `$` also matches before a line terminator at the end, which RE2's does not: it converts only as the pattern's
- * last character, for a test of a match anywhere as an optional terminator before the end. That test differs only
- * where Java's match had to end between a final \r and \n, which its `$` refused, as `\r$` in "a\r\n". Backreferences,
- * lookaround, atomic groups, possessive quantifiers, word boundaries (Unicode-aware in Java), Unicode and POSIX
- * properties (ASCII-only in Java), class intersections, and the m, x, and u modes have no exact RE2 form here; the i
- * mode has one only without the letters k and s, characters other than ASCII, and ranges, since Java ignores the case
- * of ASCII letters only, and RE2 also matches the Kelvin sign with k and the long s with s.
+ * Java's `$` also matches before a line terminator at the end, which RE2's does not: for a test of a match anywhere it
+ * becomes an optional terminator before the end, after a part that cannot end between a final \r and \n, where Java's
+ * `$` does not match. Java ignores the case of ASCII letters only, and RE2 also matches
+ * the Kelvin sign with k and the long s with s, so `(?i)` converts only without the letters k and s, characters other
+ * than ASCII, `\w`, and ranges.
  */
 export type JavaRegex = { pattern: string; flags: string } | { reason: string };
 
@@ -21,6 +26,9 @@ const LINE_TERMINATORS = String.raw`\n\r\x{85}\x{2028}\x{2029}`;
 const SPACES = String.raw`\t\n\x0B\f\r `;
 /** RE2's repetition limit. */
 const MAX_REPEAT = 1000;
+const FOLDS_APART = "a letter that RE2 matches with other characters when it ignores case";
+/** ASCII punctuation, which Java escapes as itself. */
+const PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/u;
 
 /**
  * `within` says how the regex is used: `whole` for a match of the whole text (==~, matches()), `find` for a test of a
@@ -29,195 +37,226 @@ const MAX_REPEAT = 1000;
 export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   // Modes at the start, `(?s)`, `(?i)`, or both, are the regex's flags.
   const modes = /^\(\?([is]+)\)/u.exec(source)?.[1] ?? "";
-  const pattern = source.slice(modes === "" ? 0 : modes.length + 3);
+  const characters = [...source.slice(modes === "" ? 0 : modes.length + 3)];
   const dotAll = modes.includes("s");
   const insensitive = modes.includes("i");
-  const out: string[] = [];
   const fail = (reason: string): JavaRegex => ({ reason });
-  // Java ignores the case of ASCII letters only, and RE2 also matches the Kelvin sign with k and the long s with s.
-  const FOLDS_APART = "a letter that RE2 matches with other characters when it ignores case";
   const foldsApart = (character: string): boolean =>
     insensitive && (/[ksKS]/u.test(character) || character.codePointAt(0)! > 0x7f);
-  // A raw character as RE2 literal text: a slash or a line break cannot stand in a literal.
-  const raw = (character: string): string => {
+  // A character as RE2 literal text: a metacharacter, the slash, and in a class `-` escaped, a control character or
+  // line break by its code, and null for a lone surrogate, which a TeaseScript pattern cannot hold.
+  const literal = (character: string, inClass = false): string | null => {
     const code = character.codePointAt(0)!;
-    if (character === "/") return "\\/";
+    if (code >= 0xd800 && code <= 0xdfff) return null;
+    if ("\\.+*?()|[]{}^$/".includes(character) || (inClass && character === "-"))
+      return `\\${character}`;
     if (code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029)
       return `\\x{${code.toString(16)}}`;
     return character;
   };
-  const characters = [...pattern];
+  const out: string[] = [];
   let index = 0;
-  const next = (): string | undefined => characters[index++];
-  // An escape after `\`, outside a class or in one, or why it has no exact RE2 form.
-  const escape = (inClass: boolean): string | { reason: string } => {
-    const character = next();
+  let depth = 0;
+  // What the last token lets a quantifier repeat: a single character or class, a group, or nothing.
+  let last = null as "atom" | "group" | null;
+  // How the pattern so far may end: after a single character or class that may match \r or \n, repeated at least `min`
+  // times and maybe without a limit, after a group, or at a start (of the pattern, a group, or an alternative).
+  let ending = "start" as
+    { cr: boolean; lf: boolean; min: number; unbounded: boolean } | "group" | "start";
+  const atom = (cr: boolean, lf: boolean): void => {
+    last = "atom";
+    ending = { cr, lf, min: 1, unbounded: false };
+  };
+  const repeat = (min: number, unbounded: boolean): void => {
+    if (typeof ending === "object") ending = { ...ending, min: ending.min * min, unbounded };
+  };
+  // An escape after `\` outside a class, or why it does not convert.
+  const escape = (character: string | undefined): string | { reason: string } => {
     if (character === undefined) return { reason: "a trailing backslash" };
-    if (/[1-9]/u.test(character) || character === "k") return { reason: "a backreference" };
-    if ("bB".includes(character) && !inClass) return { reason: "a word boundary" };
-    if ("wW".includes(character) && insensitive) return { reason: FOLDS_APART };
-    if ("dDwW".includes(character)) return `\\${character}`;
-    if (character === "s") return inClass ? SPACES : `[${SPACES}]`;
-    if (character === "S") return inClass ? { reason: "\\S in a class" } : `[^${SPACES}]`;
-    if ("tnrfa".includes(character)) return `\\${character}`;
-    if (character === "e") return "\\x{1b}";
-    if (character === "A" && !inClass) return "\\A";
-    if (character === "z" && !inClass) return "\\z";
-    if ((character === "x" || character === "u") && insensitive) return { reason: FOLDS_APART };
-    if (character === "x") {
-      if (characters[index] === "{") {
-        const end = characters.indexOf("}", index);
-        if (end < 0) return { reason: "an unfinished \\x{...}" };
-        const digits = characters.slice(index + 1, end).join("");
-        index = end + 1;
-        return /^[0-9a-fA-F]+$/u.test(digits) ? `\\x{${digits}}` : { reason: "a bad \\x{...}" };
-      }
-      const digits = characters.slice(index, index + 2).join("");
-      index += 2;
-      return /^[0-9a-fA-F]{2}$/u.test(digits) ? `\\x{${digits}}` : { reason: "a bad \\x" };
-    }
-    if (character === "u") {
-      const digits = characters.slice(index, index + 4).join("");
-      index += 4;
-      return /^[0-9a-fA-F]{4}$/u.test(digits) ? `\\x{${digits}}` : { reason: "a bad \\u" };
-    }
-    if (character === "Q") {
-      // Quoted text up to `\E`, each character literal.
-      let quoted = "";
-      while (index < characters.length) {
-        if (characters[index] === "\\" && characters[index + 1] === "E") {
-          index += 2;
-          return quoted;
-        }
-        const literal = characters[index++]!;
-        if (foldsApart(literal)) return { reason: FOLDS_APART };
-        quoted += /[A-Za-z0-9 ]/u.test(literal)
-          ? literal
-          : /[\x21-\x7e]/u.test(literal)
-            ? `\\${literal}`
-            : raw(literal);
-      }
-      return quoted;
-    }
-    // Escaped punctuation is the character itself in both.
-    if (/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/u.test(character)) return `\\${character}`;
+    if (/[1-9k]/u.test(character)) return { reason: "a backreference" };
+    if (character === "b" || character === "B") return { reason: "a word boundary" };
+    if ((character === "w" || character === "W") && insensitive) return { reason: FOLDS_APART };
+    if ("dDwWtnrf".includes(character)) return `\\${character}`;
+    if (character === "s") return `[${SPACES}]`;
+    if (character === "S") return `[^${SPACES}]`;
+    // Escaped punctuation is the character itself.
+    if (PUNCTUATION.test(character)) return literal(character)!;
     return { reason: `the escape \\${character}` };
   };
-  // A quantifier with its lazy form, or why a possessive one does not convert.
+  // A quantifier's lazy form, or why a possessive one does not convert.
   const quantifier = (text: string): string | { reason: string } => {
     if (characters[index] === "+") return { reason: "a possessive quantifier" };
-    if (characters[index] === "?") {
-      index += 1;
-      return `${text}?`;
-    }
-    return text;
+    if (characters[index] !== "?") return text;
+    index += 1;
+    return `${text}?`;
   };
   while (index < characters.length) {
-    const character = next()!;
+    const character = characters[index++]!;
     if (character === "\\") {
-      const escaped = escape(false);
-      if (typeof escaped !== "string") return escaped;
-      out.push(escaped);
-      continue;
-    }
-    if (character === ".") {
+      const escaped = characters[index++];
+      const text = escape(escaped);
+      if (typeof text !== "string") return text;
+      out.push(text);
+      atom("rDWs".includes(escaped!), "nDWs".includes(escaped!));
+    } else if (character === ".") {
       out.push(dotAll ? "." : `[^${LINE_TERMINATORS}]`);
-      continue;
-    }
-    if (character === "$") {
+      atom(dotAll, dotAll);
+    } else if (character === "^") {
+      if (index !== 1) return fail("^ after the start of the pattern");
+      out.push("^");
+      last = null;
+    } else if (character === "$") {
       if (index !== characters.length) return fail("$ before the end of the pattern");
-      // Java's `$` also matched before a line terminator at the end, which a test may take into the match.
-      out.push(within === "whole" ? "$" : `(?:\\r\\n|[${LINE_TERMINATORS}])?$`);
-      continue;
-    }
-    if (character === "(") {
-      if (characters[index] === "?") {
-        const after = characters.slice(index + 1, index + 3).join("");
-        if (after.startsWith(":")) {
-          out.push("(?:");
-          index += 2;
-          continue;
-        }
-        if (after.startsWith("<") && /[A-Za-z]/u.test(after[1] ?? "")) {
-          out.push("(?<");
-          index += 2;
-          continue;
-        }
-        return fail("a lookaround, an atomic group, or a mode inside the pattern");
+      // Java's `$` also matched before a line terminator at the end, which a test may take into the match: the same
+      // where no match ends between a final \r and \n, where Java's `$` did not match, so after a part whose last
+      // character is no \r, or that can take the \n as well.
+      if (within === "find") {
+        const safe =
+          ending === "start" ||
+          (typeof ending === "object" &&
+            ((ending.unbounded && ending.lf) || (!ending.cr && ending.min >= 1)));
+        if (!safe) return fail("$ after a part that may end with a carriage return");
       }
-      out.push("(");
-      continue;
-    }
-    if (character === "*" || character === "+" || character === "?") {
+      out.push(within === "whole" ? "$" : `(?:\\r\\n|[${LINE_TERMINATORS}])?$`);
+      last = null;
+    } else if (character === "(") {
+      let open = "(";
+      if (characters[index] === "?") {
+        if (characters[index + 1] !== ":")
+          return fail("a lookaround, a named or atomic group, or a mode inside the pattern");
+        index += 2;
+        open = "(?:";
+      }
+      out.push(open);
+      depth += 1;
+      last = null;
+      ending = "start";
+    } else if (character === ")") {
+      if (depth === 0) return fail("an unbalanced parenthesis");
+      out.push(")");
+      depth -= 1;
+      last = "group";
+      ending = "group";
+    } else if (character === "|") {
+      out.push("|");
+      last = null;
+      ending = "start";
+    } else if (character === "*" || character === "+" || character === "?") {
+      if (last === null) return fail("a quantifier without anything to repeat");
       const quantified = quantifier(character);
       if (typeof quantified !== "string") return quantified;
       out.push(quantified);
-      continue;
-    }
-    if (character === "{") {
+      repeat(character === "+" ? 1 : 0, character !== "?");
+      last = null;
+    } else if (character === "{") {
       const end = characters.indexOf("}", index);
-      const body = end < 0 ? "" : characters.slice(index, end).join("");
-      const bounds = /^(\d+)(,(\d*))?$/u.exec(body);
+      const bounds = /^(\d+)(?:(,)(\d*))?$/u.exec(
+        end < 0 ? "" : characters.slice(index, end).join(""),
+      );
       if (bounds === null) return fail("a brace that is no repetition");
-      if (
-        Number(bounds[1]) > MAX_REPEAT ||
-        (bounds[3] !== undefined && Number(bounds[3]) > MAX_REPEAT)
-      )
-        return fail(`a repetition over ${MAX_REPEAT}`);
+      // A count of a group repeats the counts inside it, which RE2 limits together.
+      if (last !== "atom") return fail("a counted repetition of a group or of nothing");
+      const low = Number(bounds[1]);
+      const high = bounds[3] === undefined || bounds[3] === "" ? null : Number(bounds[3]);
+      if (low > MAX_REPEAT || (high !== null && (high > MAX_REPEAT || high < low)))
+        return fail(`a repetition over ${MAX_REPEAT} or with its bounds reversed`);
       index = end + 1;
-      const quantified = quantifier(`{${body}}`);
+      // Written without leading zeros, which RE2 does not read as a count.
+      const quantified = quantifier(
+        bounds[2] === undefined ? `{${low}}` : `{${low},${high ?? ""}}`,
+      );
       if (typeof quantified !== "string") return quantified;
       out.push(quantified);
-      continue;
+      repeat(low, bounds[2] !== undefined && high === null);
+      last = null;
+    } else if (character === "[") {
+      const set = characterClass();
+      if ("reason" in set) return set;
+      out.push(set.text);
+      atom(set.cr, set.lf);
+    } else {
+      if (foldsApart(character)) return fail(FOLDS_APART);
+      const text = literal(character);
+      if (text === null) return fail("a lone surrogate");
+      out.push(text);
+      atom(character === "\r", character === "\n");
     }
-    if (character === "[") {
-      let set = "[";
-      if (characters[index] === "^") {
-        set += "^";
-        index += 1;
-      }
-      // A `]` right at the start is a character of the class.
-      if (characters[index] === "]") {
-        set += "\\]";
-        index += 1;
-      }
-      let closed = false;
-      while (index < characters.length) {
-        const member = next()!;
-        if (member === "]") {
-          closed = true;
-          break;
-        }
-        if (member === "[") return fail("a nested class");
-        if (member === "&" && characters[index] === "&") return fail("a class intersection");
-        // A range may hold such letters.
-        if (
-          foldsApart(member) ||
-          (insensitive && member === "-" && set.length > 1 && characters[index] !== "]")
-        )
-          return fail(FOLDS_APART);
-        if (member === "\\") {
-          const escaped = escape(true);
-          if (typeof escaped !== "string") return escaped;
-          set += escaped;
-          continue;
-        }
-        set += member === "/" ? "\\/" : raw(member);
-      }
-      if (!closed) return fail("an unclosed class");
-      out.push(`${set}]`);
-      continue;
-    }
-    if (character === ")" || character === "|" || character === "^") {
-      out.push(character);
-      continue;
-    }
-    if (character === "}" || character === "]") {
-      out.push(`\\${character}`);
-      continue;
-    }
-    if (foldsApart(character)) return fail(FOLDS_APART);
-    out.push(raw(character));
   }
-  return { pattern: out.join(""), flags: `${insensitive ? "i" : ""}${dotAll ? "s" : ""}` };
+  if (depth !== 0) return fail("an unbalanced parenthesis");
+  // RE2 has no empty literal.
+  const pattern = out.length === 0 ? "(?:)" : out.join("");
+  return { pattern, flags: `${insensitive ? "i" : ""}${dotAll ? "s" : ""}` };
+
+  // A character class after its `[`: single characters, escaped punctuation, `\d \w \s`, and ranges of two single
+  // characters; its `-` elsewhere only first or last.
+  function characterClass(): { text: string; cr: boolean; lf: boolean } | { reason: string } {
+    let set = "[";
+    const negated = characters[index] === "^";
+    if (negated) {
+      set += "^";
+      index += 1;
+    }
+    // The code points of its members, which tell whether it matches \r or \n.
+    const codes: Array<[number, number]> = [];
+    const code = (character: string): number => character.codePointAt(0)!;
+    const matches = (point: number): boolean =>
+      negated !== codes.some(([low, high]) => low <= point && point <= high);
+    if (characters[index] === "]") return { reason: "a class that starts with ]" };
+    let first = true;
+    // The last member, when it was a single character that may start a range.
+    let single: string | null = null;
+    while (index < characters.length) {
+      const member = characters[index++]!;
+      if (member === "]") return { text: `${set}]`, cr: matches(13), lf: matches(10) };
+      const leading = first;
+      first = false;
+      if (member === "[") return { reason: "a nested class" };
+      if (member === "&" && characters[index] === "&") return { reason: "a class intersection" };
+      if (member === "-" && single !== null && characters[index] !== "]") {
+        const end = characters[index++]!;
+        if (insensitive) return { reason: FOLDS_APART };
+        if (end === "\\" || end === "[" || end.codePointAt(0)! < single.codePointAt(0)!)
+          return { reason: "a range that is not of two characters in order" };
+        const text = literal(end, true);
+        if (text === null) return { reason: "a lone surrogate" };
+        set += `-${text}`;
+        codes.push([code(single), code(end)]);
+        single = null;
+        continue;
+      }
+      if (member === "-" && !leading && single === null && characters[index] !== "]")
+        return { reason: "a - between a class and another member" };
+      if (member === "\\") {
+        const escaped = characters[index++];
+        if (escaped === undefined) return { reason: "a trailing backslash" };
+        if (
+          (escaped === "w" && insensitive) ||
+          escaped === "W" ||
+          escaped === "D" ||
+          escaped === "S"
+        )
+          return { reason: escaped === "w" ? FOLDS_APART : `\\${escaped} in a class` };
+        if ("dwtnrf".includes(escaped)) set += `\\${escaped}`;
+        else if (escaped === "s") set += SPACES;
+        else if (PUNCTUATION.test(escaped)) {
+          set += literal(escaped, true)!;
+          codes.push([code(escaped), code(escaped)]);
+          single = escaped;
+          continue;
+        } else return { reason: `the escape \\${escaped} in a class` };
+        // Of these, \n, \r, and \s hold line breaks.
+        if (escaped === "n" || escaped === "s") codes.push([10, 10]);
+        if (escaped === "r" || escaped === "s") codes.push([13, 13]);
+        single = null;
+        continue;
+      }
+      if (foldsApart(member)) return { reason: FOLDS_APART };
+      const text = literal(member, true);
+      if (text === null) return { reason: "a lone surrogate" };
+      set += text;
+      codes.push([code(member), code(member)]);
+      single = member;
+    }
+    return { reason: "an unclosed class" };
+  }
 }
