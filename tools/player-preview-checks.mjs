@@ -412,7 +412,7 @@ async function composerMouseFocusChecks(page) {
 }
 
 // In the buttons scenario the first interaction appears as Start leaves the page. Focus then belongs to nothing, so
-// with a mouse the composer takes it, as for any other interaction.
+// with a mouse the composer takes it, as for any other interaction, and keeps it when a message is clicked.
 async function startComposerFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -436,7 +436,22 @@ async function startComposerFocusChecks(page) {
     (await page.locator("html").getAttribute("data-player-keyboard-focus")) === "false",
     "Focus after Start revealed a keyboard-navigation outline",
   );
-  return "PASS the composer takes focus when Start leaves the page for an interaction";
+  // A click on a message does not take typing focus, so Space presses the showButton, which is preselected.
+  await page.locator("[data-slot=bubble]").last().click();
+  await page
+    .waitForFunction(
+      () => document.activeElement?.matches("[data-composer-input]") === true,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "A click on a message took typing focus from the composer");
+  await page.keyboard.press("Space");
+  await page
+    .locator("[data-foreground-controls]")
+    .getByRole("button", { name: "Done counting", exact: true })
+    .waitFor({ state: "detached", timeout: 2000 });
+  return "PASS the composer takes and keeps focus, where Space presses the showButton";
 }
 
 async function composerSendFocusChecks(page) {

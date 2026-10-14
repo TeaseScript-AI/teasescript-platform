@@ -249,7 +249,7 @@ All arithmetic and deadline construction is checked. There is no extra product r
 
 A positive gate is an ADR 0016 `chatPacingGate` action: the message's reading time, which the script waits for as the foreground action, so the next statement runs after it (owner decision on #829, 2026-10-11). It uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
 
-A skippable gate may be completed by a primary click/tap on Player background or other unused Player space or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
+A skippable gate may be completed by a primary click/tap on a message, its speaker avatar, Player background, or other unused Player space, or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
 
 ### Standard UI and transcript conventions
 

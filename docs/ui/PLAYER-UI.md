@@ -1010,10 +1010,10 @@ unambiguous text of one field label or of the submit or cancel button activates 
 `askChoice`. A form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
-click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
-A click/tap settles only the gate presented when the press began; if that gate ended while the press was held, the
-release settles nothing. Actual interactive controls always take precedence and must not also fire the viewport-wide
-pacing shortcut.
+click/tap on a message, its speaker avatar, or Player background/unused space, or Space with the empty focused composer,
+may settle that gate under ADR 0018. A click/tap settles only the gate presented when the press began; if that gate
+ended while the press was held, the release settles nothing. Actual interactive controls and the composer always take
+precedence and must not also fire the viewport-wide pacing shortcut, and a press that selects text settles nothing.
 
 Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Player; it currently uses wrapping
 buttons.

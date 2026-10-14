@@ -589,8 +589,9 @@ node tools/player-browser-smoke.mjs
 `Scenario`; the technical playground is `playground`); an unknown name fails and lists the known ones.
 
 It covers the technical playground and, on the built `/player/` route with trusted input, plays `examples/demo/` to its
-end without console errors: a typed answer, buttons, Space and presses that skip pacing only on unused space, Stage
-images, audible sounds, and smart follow with Return to latest; it also starts over plain HTTP on a local-network name.
+end without console errors: a typed answer, buttons, presses on a message, not on a control, that skip pacing, Space
+that skips pacing or presses a `showButton`, Stage images, audible sounds, and smart follow with Return to latest; it
+also starts over plain HTTP on a local-network name.
 It opens fixture packages by URL in the Player, playground, and editor, including one that does not compile; checks
 script storage, a session kept across a reload with an image the script asked for, saved data exported and imported into
 a fresh profile, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo

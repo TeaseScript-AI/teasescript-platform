@@ -554,13 +554,15 @@ async function complete(
     suppressComposerRefocus = false;
   }
 }
-// The skippable pacing gate settles from Space in the empty composer or a stationary primary
-// click/tap on unused Player space. Controls, message text and selections keep their own behavior.
-const pacingSkipExclusions = [
+// The Player's controls and fields, which keep their own clicks and keys.
+const playerControls = [
   "button, a, input, textarea, select, label, summary, [contenteditable]",
   "[role=button], [role=link], [role=menuitem], [role=separator], [role=slider], [role=tab]",
-  "[data-slot=bubble], .prose, .session-event, [data-slot=scroll-area-scrollbar]",
 ].join(", ");
+// The skippable pacing gate settles from Space in the empty composer or a stationary primary click/tap on Player space
+// that is no control, such as a message, its avatar or unused space. Controls, the composer, the scrollbar and
+// selections keep their own behavior.
+const pacingSkipExclusions = `${playerControls}, .composer-container, [data-slot=scroll-area-scrollbar]`;
 function textSelected() {
   const selection = document.getSelection();
   return !!selection && !selection.isCollapsed;
@@ -612,6 +614,36 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
   if (gesture?.pointerId === event.pointerId && gesture.target.isConnected)
     skipPacing(false, gesture.actionId);
 });
+
+// Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
+// devices: a click on Player content that is no control, which moves focus to the conversation or the page, gives it
+// back. A click that selected text keeps it, as focusing the composer would clear the selection.
+useEventListener(document, "click", (event: MouseEvent) => {
+  const target = event.target;
+  if (
+    event.button === 0 &&
+    hoverAvailable.value &&
+    !textSelected() &&
+    target instanceof Element &&
+    composition.value?.contains(target) &&
+    !target.closest(playerControls)
+  )
+    focusInput();
+});
+// A message's pacing gives the composer its default focus when focus belongs to nothing, as an interaction does, such
+// as after a button pressed with the mouse left with its interaction.
+watch(
+  () => pacing.value?.actionId,
+  async (gate) => {
+    if (gate === undefined) return;
+    await nextTick();
+    const active = document.activeElement;
+    if ((!active || active === document.body) && hoverAvailable.value) {
+      document.documentElement.dataset.playerKeyboardFocus = "false";
+      focusInput();
+    }
+  },
+);
 
 /**
  * Makes one chosen or dropped file the preview of the image request the files are for, which "Use image" then answers
