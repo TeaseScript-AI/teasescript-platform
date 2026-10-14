@@ -22,7 +22,7 @@ import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 // for a popup, a click beside it does not close it, a key held down since before it opened does nothing, and while
 // Debug runs it is not modal and stands in the middle of the session's `area`.
 const props = defineProps<{
-  dialog: LockDialog;
+  dialog: Exclude<LockDialog, { kind: "password" }>;
   busy: boolean;
   modal: boolean;
   /** The session's area, which a dialog that is not modal centres on instead of the window. */

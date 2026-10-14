@@ -1,0 +1,7 @@
+let code = askPassword "Your code?", hint: "The code"
+say "Same: ${code == hashText("corner")}", instant
+let note = encryptText("Field note", password: askPassword("Choose a code"))
+say "Locked.", instant
+let opened = decryptText(note, password: askPassword("Type it again"), default: "closed")
+say "Opened: ${opened}", instant
+exit

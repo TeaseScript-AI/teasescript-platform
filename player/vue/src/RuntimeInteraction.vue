@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
+import ForegroundControls, {
+  type ImageControl,
+  type ImageControls,
+} from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
 import ExportTextDialog from "./ExportTextDialog.vue";
@@ -100,12 +103,21 @@ const props = defineProps<{
     readonly cancel: () => void;
   };
 }>();
-// A lock step waits for the Player or its dialog; the composer takes no answer meanwhile.
+// A lock step waits for the Player or its dialog; the composer takes no answer meanwhile, except in the password field
+// of `password: askPassword(...)`, which the composer itself shows.
 const locking = computed(
   () =>
     props.session?.state.status === "waiting" &&
     props.session.state.foregroundAction?.kind === "lock",
 );
+const lockField = computed(() => {
+  const shown = props.lock?.dialog.value;
+  return shown?.dialog.kind === "password" ? { ...shown.dialog, busy: shown.busy } : null;
+});
+const lockDialog = computed(() => {
+  const shown = props.lock?.dialog.value;
+  return shown && shown.dialog.kind !== "password" ? { ...shown, dialog: shown.dialog } : null;
+});
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
@@ -283,6 +295,8 @@ const composition = computed(() => root.value?.closest<HTMLElement>(".player-com
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
 const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
+/** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
+const repeated = ref("");
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -342,7 +356,12 @@ watch(
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 watch(draft, (text) => {
   clearTimeout(draftTimer);
-  if (actionId.value !== undefined && form.value === null)
+  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+  if (
+    actionId.value !== undefined &&
+    form.value === null &&
+    foreground.value?.kind !== "ask-password"
+  )
     typedTexts()?.set(typedKey(actionId.value, ""), text);
   if (!ownsPresentedEditor() || !props.session) return;
   const target = composerOwner!;
@@ -741,7 +760,40 @@ async function imageControl(control: ImageControl) {
   else capture.retry();
 }
 
+// The password field of `password: askPassword(...)` starts empty each time it shows, also after a block interrupted it,
+// and takes focus as an ask's field does.
+watch(
+  () => lockField.value?.key,
+  async (key) => {
+    draft.value = "";
+    repeated.value = "";
+    clearFeedback();
+    if (key === undefined) return;
+    presentedAt.value = performance.now();
+    const active = document.activeElement;
+    const unowned = (!active || active === document.body) && hoverAvailable.value;
+    const owned = !!active && !!root.value?.contains(active);
+    await nextTick();
+    if (unowned || owned) focusInput();
+  },
+);
+
 function submit(source: "input" | "button") {
+  const field = lockField.value;
+  if (field) {
+    // As for askPassword, an empty field answers nothing.
+    if (field.busy || draft.value === "") return focusInput();
+    if (field.repeat && repeated.value !== draft.value) {
+      showFeedback("The passwords do not match");
+      focusInput();
+      return;
+    }
+    props.lock?.submit({ password: draft.value, openAtMs: null });
+    // The Player keeps it only until the lock or opening uses it.
+    draft.value = "";
+    repeated.value = "";
+    return;
+  }
   void complete(
     answer(source === "input" ? "enter" : "send", (session) =>
       submitPlayerRuntimeComposer(session, draft.value),
@@ -779,7 +831,9 @@ function submit(source: "input" | "button") {
                   )
               "
               @submit="
-                complete(answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())))
+                complete(
+                  answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())),
+                )
               "
               @cancel="complete(answer('button', cancelPlayerRuntimeForm))"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
@@ -842,10 +896,10 @@ function submit(source: "input" | "button") {
           @close="complete(answer('button', closePlayerRuntimeExport))"
         />
         <LockDialog
-          v-if="lock?.dialog.value"
-          :key="lock.dialog.value.dialog.key"
-          :dialog="lock.dialog.value.dialog"
-          :busy="lock.dialog.value.busy"
+          v-if="lock && lockDialog"
+          :key="lockDialog.dialog.key"
+          :dialog="lockDialog.dialog"
+          :busy="lockDialog.busy"
           :modal="popupModal ?? true"
           :area="composition"
           @submit="lock.submit"
@@ -855,7 +909,7 @@ function submit(source: "input" | "button") {
           ref="composer"
           v-model="draft"
           :disabled="
-            (!foreground && !pacing) ||
+            (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
             foreground?.kind === 'export-text' ||
             foreground?.kind === 'open-url'
@@ -868,21 +922,28 @@ function submit(source: "input" | "button") {
             (foreground?.kind === 'form' && !formEditor)
           "
           :fresh-after="presentedAt"
-          :submitting="submitting || readingImage"
+          :submitting="submitting || readingImage || !!lockField?.busy"
           :placeholder="
-            locking ||
-            foreground?.kind === 'popup' ||
-            foreground?.kind === 'export-text' ||
-            foreground?.kind === 'open-url'
-              ? ''
-              : formEditor
-                ? formEditor.hint
-                : foreground && 'hint' in foreground
-                  ? foreground.hint
-                  : 'Type your response…'
+            lockField
+              ? (lockField.hint ?? 'Type your response…')
+              : locking ||
+                  foreground?.kind === 'popup' ||
+                  foreground?.kind === 'export-text' ||
+                  foreground?.kind === 'open-url'
+                ? ''
+                : formEditor
+                  ? formEditor.hint
+                  : foreground && 'hint' in foreground
+                    ? foreground.hint
+                    : 'Type your response…'
           "
           :attach="attach"
-          :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"
+          :password="foreground?.kind === 'ask-password' || lockField !== null"
+          :repeat="lockField?.repeat ?? false"
+          v-model:repeated="repeated"
+          :accessible-name="
+            lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
+          "
           :input-mode="
             formEditor
               ? formEditor.inputMode

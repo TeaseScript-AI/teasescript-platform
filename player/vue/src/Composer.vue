@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="Request">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
-import { Paperclip } from "@lucide/vue";
+import { Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
@@ -17,6 +17,17 @@ const props = withDefaults(
     inputMode?: "text" | "decimal" | "numeric";
     /** A date or time answer uses the browser's own control, whose value is ISO text. */
     inputType?: "text" | "date" | "time" | "datetime-local";
+    /**
+     * `askPassword` (V30 §20): a masked field with an eye button that shows the text while the person typing chooses to,
+     * and a warning while Caps Lock is on. Each new interaction starts masked.
+     */
+    password?: boolean;
+    /**
+     * With `password`, a "Repeat password" field under it, which `repeated` holds: Enter in the password field moves to
+     * it, and Enter there submits.
+     */
+    repeat?: boolean;
+    repeated?: string;
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
@@ -43,6 +54,9 @@ const props = withDefaults(
     accessibleName: "Response",
     inputMode: "text",
     inputType: "text",
+    password: false,
+    repeat: false,
+    repeated: "",
     feedback: "",
     pacing: false,
     preselected: false,
@@ -54,6 +68,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
+  "update:repeated": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
   /** Space in the empty input while a preselected button waits. */
@@ -66,6 +81,7 @@ const emit = defineEmits<{
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
+const repeatInput = ref<HTMLInputElement | null>(null);
 const textareaElement = computed(() => {
   const element = textarea.value?.$el;
   return element instanceof HTMLTextAreaElement ? element : undefined;
@@ -76,6 +92,7 @@ const value = computed({
   set: (text: string) => emit("update:modelValue", text),
 });
 const feedbackId = useId();
+const capsLockId = useId();
 useTextareaAutosize({ element: textareaElement, input: value });
 const conditions = usePlayerConditions();
 const suppressSoftwareKeyboard = ref(false);
@@ -93,7 +110,10 @@ function handleKeydown(event: KeyboardEvent): void {
   const fresh = !event.repeat && event.timeStamp >= props.freshAfter;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    if (fresh) emit("submit", "input");
+    if (!fresh) return;
+    if (props.password && props.repeat && event.currentTarget === picker.value)
+      repeatInput.value?.focus({ preventScroll: true });
+    else emit("submit", "input");
     return;
   }
   if (event.key === "Escape") {
@@ -124,9 +144,17 @@ function guardSendKey(event: KeyboardEvent): void {
 function updateFromPicker(event: Event): void {
   if (event.target instanceof HTMLInputElement) value.value = event.target.value;
 }
+function updateRepeated(event: Event): void {
+  if (event.target instanceof HTMLInputElement) emit("update:repeated", event.target.value);
+}
+
+/** Whether one of the composer's fields has focus. */
+function editing(): boolean {
+  return document.activeElement === input.value || document.activeElement === repeatInput.value;
+}
 
 function preserveEditingFocus(event: PointerEvent): void {
-  if (document.activeElement !== input.value || event.pointerType === "mouse") return;
+  if (!editing() || event.pointerType === "mouse") return;
   // Android may leave the textarea focused after its software keyboard closes.
   if (!conditions.keyboardRaised.value) {
     suppressSoftwareKeyboard.value = true;
@@ -137,14 +165,14 @@ function preserveEditingFocus(event: PointerEvent): void {
 
 // Mouse focus moves on mousedown, which pointerdown cancellation does not prevent.
 function keepMouseEditingFocus(event: MouseEvent): void {
-  if (document.activeElement === input.value) event.preventDefault();
+  if (editing()) event.preventDefault();
 }
 
-// A date or time control and the text field replace each other; the field removed while focused blurs, and its
-// keyboard state carries over to the replacement instead of being released.
+// A date or time control, the password field, and the text field replace each other; the field removed while focused
+// blurs, and its keyboard state carries over to the replacement instead of being released.
 let replacingField = false;
 watch(
-  () => props.inputType === "text",
+  () => (props.password ? "password" : props.inputType === "text" ? "text" : "picker"),
   () => {
     replacingField = true;
     void nextTick(() => (replacingField = false));
@@ -153,8 +181,21 @@ watch(
 );
 
 function releaseOnBlur(): void {
+  capsLock.value = false;
   if (!replacingField) allowSoftwareKeyboard();
 }
+
+// The password field's eye button and Caps Lock warning. Only a key event says whether Caps Lock is on; a field that has
+// seen none shows no warning.
+const shown = ref(false);
+const capsLock = ref(false);
+function readCapsLock(event: KeyboardEvent): void {
+  capsLock.value = event.getModifierState("CapsLock");
+}
+watch(
+  () => [props.password, props.freshAfter],
+  () => (shown.value = false),
+);
 
 function allowSoftwareKeyboard(): void {
   if (!suppressSoftwareKeyboard.value) return;
@@ -273,7 +314,77 @@ defineExpose({ focusInput, selectInput, openPicker });
           :accept="attach?.accept"
           @change="chooseFiles"
         />
-        <div v-if="inputType !== 'text'" class="composer-picker-field">
+        <div v-if="password" class="composer-password-field" data-composer-password>
+          <!-- No saved or suggested passwords: a password typed on the player's device must not stay in its browser. -->
+          <input
+            ref="picker"
+            data-composer-input
+            :type="shown ? 'text' : 'password'"
+            :value="modelValue"
+            :placeholder="placeholder"
+            :aria-label="accessibleName"
+            :aria-invalid="feedback ? true : undefined"
+            :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
+            :inputmode="effectiveInputMode"
+            :disabled="disabled"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            class="composer-input composer-picker composer-password-input"
+            @input="updateFromPicker"
+            @keydown="
+              readCapsLock($event);
+              handleKeydown($event);
+            "
+            @keyup="readCapsLock"
+            @pointerdown="allowSoftwareKeyboard"
+            @blur="releaseOnBlur"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            :aria-label="shown ? 'Hide password' : 'Show password'"
+            :title="shown ? 'Hide password' : 'Show password'"
+            :disabled="disabled"
+            data-composer-password-toggle
+            @click="shown = !shown"
+            @pointerdown="preserveEditingFocus"
+            @mousedown="keepMouseEditingFocus"
+          >
+            <EyeOff v-if="shown" aria-hidden="true" />
+            <Eye v-else aria-hidden="true" />
+          </Button>
+          <input
+            v-if="repeat"
+            ref="repeatInput"
+            data-composer-repeat
+            :type="shown ? 'text' : 'password'"
+            :value="repeated"
+            placeholder="Repeat password"
+            aria-label="Repeat password"
+            :aria-invalid="feedback ? true : undefined"
+            :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
+            :inputmode="effectiveInputMode"
+            :disabled="disabled"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            class="composer-input composer-picker composer-password-repeat"
+            @input="updateRepeated"
+            @keydown="
+              readCapsLock($event);
+              handleKeydown($event);
+            "
+            @keyup="readCapsLock"
+            @pointerdown="allowSoftwareKeyboard"
+            @blur="releaseOnBlur"
+          />
+          <span :id="capsLockId" role="status" class="composer-caps-lock" data-composer-caps-lock>{{
+            capsLock ? "Caps Lock is on" : ""
+          }}</span>
+        </div>
+        <div v-else-if="inputType !== 'text'" class="composer-picker-field">
           <span v-if="placeholder" class="composer-hint" aria-hidden="true">{{ placeholder }}</span>
           <input
             ref="picker"
@@ -409,6 +520,26 @@ defineExpose({ focusInput, selectInput, openPicker });
   align-items: center;
   gap: 4px 8px;
   min-inline-size: 0;
+}
+.composer-password-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  min-inline-size: 0;
+}
+/* The eye button stays beside the password, which takes the rest of the line, and the repeat takes a line of its own. */
+.composer-form .composer-picker.composer-password-input {
+  flex-basis: 0;
+}
+.composer-form .composer-picker.composer-password-repeat {
+  flex-basis: 100%;
+}
+.composer-caps-lock {
+  flex-basis: 100%;
+  padding-inline-start: 12px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 .composer-hint {
   padding-inline-start: 12px;
