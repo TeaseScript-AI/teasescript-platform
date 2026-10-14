@@ -2,4 +2,7 @@ let locked = encryptText("For the keyholder")
 say "Locked.", instant
 let opened = decryptText(locked, default: "closed")
 say "Opened: ${opened}", instant
+let both = encryptText("Both", password: "corner", publicKey: "age1szy34zwzdlhaxywum5gj5pvjp9z5auwqjl9m3kmv3gmz7t5tg9uqx4gu67")
+let second = decryptText(both, default: "closed")
+say "Second: ${second}", instant
 exit
