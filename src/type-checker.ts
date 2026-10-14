@@ -177,6 +177,7 @@ import {
   optional,
   placeType,
   freshPlaceType,
+  ownNull,
   resolved,
   settle,
   STRING_TYPE,
@@ -203,6 +204,7 @@ import {
   placedSlots,
   nextDecision,
   mayBeUnknown,
+  readsHeldUnknown,
   type OpenType,
   numberPaths,
   integerParts,
@@ -1841,7 +1843,10 @@ class TypeChecker {
           "A for-loop goes through a list, a set, a dict, or a range",
         );
         // The loop variable is a place: it keeps the plain element type.
-        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+        const loopType =
+          element === undefined || readsHeldUnknown(element)
+            ? UNKNOWN_TYPE
+            : ownNull(copyType(plainType(element)));
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1959,7 +1964,10 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
+    const valueType =
+      element === undefined || readsHeldUnknown(element)
+        ? UNKNOWN_TYPE
+        : ownNull(copyType(plainType(element)));
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
@@ -2033,13 +2041,12 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      // A place that no value decided yet but that held a value the compiler cannot know, such as an element of `[]`
-      // after `add(load(key, default: null))`, gives such a value, so the variable is of unknown type, as after any
-      // other (rule 1.7): a later value does not decide it, and a known place checks what it holds when the script runs
-      // (#859).
-      if (members(value).some((part) => part.kind === "open" && part.heldUnknown !== undefined))
-        value = UNKNOWN_TYPE;
+      // A read of a place that held only values the compiler cannot know gives such a value (rule 1.7).
+      if (readsHeldUnknown(value)) value = UNKNOWN_TYPE;
       type = this.#newPlaceType(written, value);
+      // A copy of a place that took null keeps that null as a member, which a null check removes; only a copy belongs
+      // to this variable alone.
+      if (this.#placeReads.has(written)) type = ownNull(type);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
       this.#follow({ root: statement, path: [] }, value, written.span);
