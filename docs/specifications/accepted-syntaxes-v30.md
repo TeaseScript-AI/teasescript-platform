@@ -1566,10 +1566,11 @@ one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
   after, and before it the time lock opens nothing, while another opener may. The Player fetches the drand network's
   proof of that moment to open it. A moment in the past opens at once.
 
-Every lock has a time lock 7 days ahead, as `openAt: getAbsoluteDateTime() + 7 days`, unless the call gives `openAt:`.
-`openAt: null` removes it: **without a time lock, a lost password means that the content never opens.** A call with
-`openAt: null` and no `password:` is an error, at compile time where the null is written. When the Player can reach the
-drand network while it locks and the device's clock is behind drand's time, the moment moves later by as much.
+Every lock has a time lock 7 days ahead, as `openAt: getAbsoluteDateTime() + 7 days`, unless the call gives `openAt:` or
+the player moves or removes it in the lock dialog below. `openAt: null` removes it: **without a time lock, a lost
+password means that the content never opens.** A call with `openAt: null` and no `password:` is an error, at compile
+time where the null is written. When the Player can reach the drand network while it locks and the device's clock is
+behind drand's time, the moment moves later by as much.
 
 ```text
 let locked = encryptFile(photo)                                              // the Player asks the player
