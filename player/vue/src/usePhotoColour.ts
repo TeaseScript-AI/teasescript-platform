@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, watchEffect, type Ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import type { PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
-import { photoColours } from "../../theme/photo-theme.js";
+import { photoColours, type PhotoColourChoice } from "../../theme/photo-theme.js";
 
 // Photo colours (PLAYER-UI.md "Stage and media presentation"): the Stage photo colours the Player.
 
@@ -66,13 +66,15 @@ export function usePhotoColour(
   photo: Readonly<Ref<unknown>>,
   swatches: Readonly<Ref<PhotoSwatches | null>>,
   mode: Readonly<Ref<"light" | "dark">>,
+  /** The swatch family the colours come from; another choice maps the same swatches again, without measuring. */
+  choice: Readonly<Ref<PhotoColourChoice>>,
   elements: {
     readonly canvas: Readonly<Ref<HTMLElement | undefined>>;
     readonly stage: Readonly<Ref<HTMLElement | undefined>>;
   },
 ) {
   const colours = computed(() =>
-    swatches.value ? photoColours(swatches.value, mode.value) : null,
+    swatches.value ? photoColours(swatches.value, mode.value, choice.value) : null,
   );
   usePhotoGeometry(elements.canvas, elements.stage, [photo, swatches]);
   const root = document.documentElement;

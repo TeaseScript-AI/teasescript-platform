@@ -28,3 +28,22 @@ export function usePlayerPreference<T extends string>(
     },
   });
 }
+
+/** A number preference from `min` to `max`; stored text that is no such number reads as the default. */
+export function usePlayerNumberPreference(
+  key: string,
+  { min, max }: { readonly min: number; readonly max: number },
+  fallback: number,
+): Ref<number> {
+  const storage = browserStorage();
+  if (!storage) return shallowRef(fallback);
+  return useStorage<number>(key, fallback, storage, {
+    serializer: {
+      read: (raw) => {
+        const value = raw.trim() === "" ? Number.NaN : Number(raw);
+        return value >= min && value <= max ? value : fallback;
+      },
+      write: (value) => String(value),
+    },
+  });
+}

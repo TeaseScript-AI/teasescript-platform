@@ -1407,8 +1407,8 @@ async function keptSessionScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, and the empty Stage after
- * `hideImage` gives
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, a Next option in the A/B tests
+ * panel changes the Player's colours, and the empty Stage after `hideImage` gives
  * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
  * in both modes and in Standard and High contrast.
  */
@@ -1479,6 +1479,23 @@ async function photoColourScenario(cdp, origin, profile) {
     false,
     "The photo left the painted background unchanged",
   );
+  // The A/B tests panel opens from the tools menu, and its photo accent's Next option changes the Player's colours.
+  const abTests = '[data-tools-focus="launcher:A/B tests"]';
+  const nextAccent = '[aria-label="Next option: Photo accent"]';
+  await physicalClick(cdp, abTests);
+  await waitFor(cdp, visible(nextAccent));
+  const beforeVariant = JSON.stringify(await value(cdp, roles));
+  await physicalClick(cdp, nextAccent);
+  await waitFor(
+    cdp,
+    `JSON.stringify(${roles}) !== ${JSON.stringify(beforeVariant)}`,
+    3_000,
+    "The photo accent's Next option left the Player's colours as they were",
+  );
+  await physicalClick(cdp, nextAccent);
+  await waitFor(cdp, `JSON.stringify(${roles}) === ${JSON.stringify(beforeVariant)}`);
+  await physicalClick(cdp, abTests);
+  await waitFor(cdp, `!document.querySelector('[data-tool="A/B tests"]')`);
   await switchMode("dark");
   await readable("Dark mode");
   await chooseContrast("high");

@@ -6,9 +6,10 @@ import type { PhotoSwatches, SwatchName } from "./node-vibrant/swatches.js";
 
 /**
  * Photo colours, "deep Vibrant" (owner, 2026-10-13): the Stage photo decides which colour the Player takes, its hue and
- * colourfulness, and the Player's own tones per mode decide how light it is. The surfaces follow the photo's
- * Vibrant-family swatch for the mode, so the background, the message bubbles, the composer, the buttons and the tools
- * follow the photo together; the accent can follow its Vibrant swatch.
+ * colourfulness, and the Player's own tones per mode decide how light it is. The surfaces follow one swatch of the
+ * photo for the mode, of the family the "Photo colour family" A/B test chooses (owner, 2026-10-14), so the background,
+ * the message bubbles, the composer, the buttons and the tools follow the photo together; the accent can follow its
+ * Vibrant swatch.
  */
 export interface PhotoColours {
   readonly surfaces: PhotoSurfaces;
@@ -18,12 +19,55 @@ export interface PhotoColours {
   readonly vignette: number;
 }
 
-// The background swatch per mode, then the ones that stand in when the photo has no such colour. Only the hue and the
-// colourfulness are used, so the other mode's swatches can stand in last.
-const SURFACE_SWATCHES: Readonly<Record<"light" | "dark", readonly SwatchName[]>> = {
-  dark: ["DarkVibrant", "Vibrant", "DarkMuted", "Muted", "LightVibrant", "LightMuted"],
-  light: ["LightVibrant", "Vibrant", "LightMuted", "Muted", "DarkVibrant", "DarkMuted"],
+export const PHOTO_FAMILIES = ["vibrant", "muted", "large-vibrant"] as const;
+/**
+ * The swatch family the surfaces take: the Vibrant family, the Muted family, or the Vibrant family only where its
+ * swatch covers at least a share of the photo, else the Muted family. Light and dark stay tied to the Player's mode:
+ * "Muted" is LightMuted in light mode and DarkMuted in dark mode.
+ */
+export type PhotoFamily = (typeof PHOTO_FAMILIES)[number];
+export interface PhotoColourChoice {
+  readonly family: PhotoFamily;
+  /** The least share of the photo's measured pixels, 0..1, a Vibrant swatch covers to count as large enough. */
+  readonly minShare: number;
+}
+
+type Mode = "light" | "dark";
+// Each family's swatch for the mode, then the family's mid swatch.
+const FAMILIES: Readonly<
+  Record<Mode, Readonly<Record<"vibrant" | "muted", readonly [mode: SwatchName, mid: SwatchName]>>>
+> = {
+  dark: { vibrant: ["DarkVibrant", "Vibrant"], muted: ["DarkMuted", "Muted"] },
+  light: { vibrant: ["LightVibrant", "Vibrant"], muted: ["LightMuted", "Muted"] },
 };
+
+/**
+ * The background swatches in order, the chosen family's first, then the ones that stand in when the photo has no such
+ * colour. A Vibrant swatch that stands in for a missing Muted one is the larger one, so a tiny bright detail does not
+ * colour the Player when the photo has more of another. Only the hue and the colourfulness are used, so the other
+ * mode's swatches can stand in last.
+ */
+function surfaceSwatches(swatches: PhotoSwatches, mode: Mode, choice: PhotoColourChoice) {
+  const { vibrant, muted } = FAMILIES[mode];
+  const other = FAMILIES[mode === "dark" ? "light" : "dark"];
+  const share = (name: SwatchName) => swatches[name]?.share ?? 0;
+  const largest = [...vibrant].sort((first, second) => share(second) - share(first));
+  switch (choice.family) {
+    case "vibrant":
+      return [...vibrant, ...muted, other.vibrant[0], other.muted[0]];
+    case "muted":
+      return [...muted, ...largest, other.muted[0], other.vibrant[0]];
+    case "large-vibrant":
+      return [
+        ...vibrant.filter((name) => share(name) >= choice.minShare),
+        ...muted,
+        ...largest,
+        other.vibrant[0],
+        other.muted[0],
+      ];
+  }
+}
+
 const ACCENT_SWATCHES: readonly SwatchName[] = ["Vibrant", "DarkVibrant", "LightVibrant"];
 
 interface ModeColours {
@@ -65,8 +109,12 @@ function hct(swatches: PhotoSwatches, names: readonly SwatchName[]) {
 }
 
 /** The Player's colours for a photo in one mode, or `null` when the photo has no measured colour at all. */
-export function photoColours(swatches: PhotoSwatches, mode: "light" | "dark"): PhotoColours | null {
-  const surface = hct(swatches, SURFACE_SWATCHES[mode]);
+export function photoColours(
+  swatches: PhotoSwatches,
+  mode: Mode,
+  choice: PhotoColourChoice,
+): PhotoColours | null {
+  const surface = hct(swatches, surfaceSwatches(swatches, mode, choice));
   if (!surface) return null;
   const colours = mode === "dark" ? DARK : LIGHT;
   const grey = surface.chroma < GREY_CHROMA;
