@@ -265,12 +265,7 @@ const root = ref<HTMLElement | null>(null);
 // The session's area, which a popup that is not modal centres on, beside the Debug panel.
 const composition = computed(() => root.value?.closest<HTMLElement>(".player-composition") ?? null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{
-  focusInput(): void;
-  selectInput(): void;
-  openPicker(): void;
-  takeKey(event: KeyboardEvent): void;
-} | null>(null);
+const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -573,7 +568,7 @@ function textSelected() {
   return !!selection && !selection.isCollapsed;
 }
 function skipPacing(refocusInput: boolean, actionId?: number) {
-  if (!pacing.value) return;
+  if (!pacing.value || textSelected()) return;
   void complete(skipPlayerRuntimePacing, refocusInput, "pacing", actionId);
 }
 // A press skips the message whose pacing was presented when it began; a gate that elapses while the button is held
@@ -616,54 +611,24 @@ for (const type of ["pointercancel", "wheel", "scroll"] as const)
 useEventListener(document, "pointerup", (event: PointerEvent) => {
   const gesture = pacingGesture;
   pacingGesture = null;
-  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected && !textSelected())
+  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected)
     skipPacing(false, gesture.actionId);
 });
 
 // Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
-// devices. A click on Player content that is no control, which moves focus to the conversation or the page, gives it
-// back. A click that selected text in a message keeps it, as focusing the composer would clear the selection; while that
-// selection is the player's last action, a character typed goes to the composer as typed there (owner decision
-// 2026-10-14). Any other press or any focus move, such as by Tab, ends that.
-let selectionTypes = false;
-let pressedWithMouse = false;
-useEventListener(
-  document,
-  "pointerdown",
-  (event: PointerEvent) => {
-    selectionTypes = false;
-    pressedWithMouse = event.pointerType === "mouse";
-  },
-  { capture: true },
-);
-useEventListener(document, "focusin", () => (selectionTypes = false));
+// devices: a click on Player content that is no control, which moves focus to the conversation or the page, gives it
+// back. A click that selected text keeps it, as focusing the composer would clear the selection.
 useEventListener(document, "click", (event: MouseEvent) => {
   const target = event.target;
   if (
-    event.button !== 0 ||
-    !(target instanceof Element) ||
-    !composition.value?.contains(target) ||
-    target.closest(playerControls)
+    event.button === 0 &&
+    hoverAvailable.value &&
+    !textSelected() &&
+    target instanceof Element &&
+    composition.value?.contains(target) &&
+    !target.closest(playerControls)
   )
-    return;
-  if (!textSelected()) {
-    if (hoverAvailable.value) focusInput();
-  } else selectionTypes = pressedWithMouse && !!target.closest(".transcript-entry");
-});
-useEventListener(document, "keydown", (event: KeyboardEvent) => {
-  if (
-    selectionTypes &&
-    textSelected() &&
-    event.key.length === 1 &&
-    !event.defaultPrevented &&
-    !event.isComposing &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey
-  ) {
-    document.documentElement.dataset.playerKeyboardFocus = "false";
-    composer.value?.takeKey(event);
-  }
+    focusInput();
 });
 // A message's pacing gives the composer its default focus when focus belongs to nothing, as an interaction does, such
 // as after a button pressed with the mouse left with its interaction.

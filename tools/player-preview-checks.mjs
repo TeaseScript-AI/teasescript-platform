@@ -451,29 +451,7 @@ async function startComposerFocusChecks(page) {
     .locator("[data-foreground-controls]")
     .getByRole("button", { name: "Done counting", exact: true })
     .waitFor({ state: "detached", timeout: 2000 });
-  // The conversation, focused with the keyboard, keeps its own Space, also while a word in it is selected.
-  const next = page
-    .locator("[data-foreground-controls]")
-    .getByRole("button", { name: "Thank you, Mistress", exact: true });
-  await next.waitFor();
-  await page.locator("[data-slot=bubble]").last().dblclick();
-  await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("Tab");
-  check(
-    await page.evaluate(() => document.activeElement?.matches(".transcript-scroll") === true),
-    "Tab did not return focus to the conversation",
-  );
-  await page.keyboard.press("Space");
-  await page.waitForTimeout(500);
-  check(
-    (await next.count()) === 1,
-    "Space in the conversation focused with the keyboard pressed the showButton",
-  );
-  // A word selected with the mouse again hands Space back to the composer.
-  await page.locator("[data-slot=bubble]").last().dblclick();
-  await page.keyboard.press("Space");
-  await next.waitFor({ state: "detached", timeout: 2000 });
-  return "PASS the composer takes and keeps focus, where Space presses the showButton, unlike in the focused conversation";
+  return "PASS the composer takes and keeps focus, where Space presses the showButton";
 }
 
 async function composerSendFocusChecks(page) {

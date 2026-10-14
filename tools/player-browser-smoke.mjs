@@ -847,38 +847,15 @@ async function pacingInputOwnershipCheck(cdp) {
   );
 }
 
-// A word selected in a message keeps focus there, so that it can be copied, and Space in the empty composer still
-// presses the showButton, which is preselected.
+// Space in the empty composer presses the showButton, which is preselected.
 async function spaceButtonCheck(cdp) {
-  await pressPoint(cdp, latestMessage(), "the latest message");
-  const word = await value(
-    cdp,
-    `(() => {
-      const walker = document.createTreeWalker(${latestMessage()}, NodeFilter.SHOW_TEXT);
-      let text = walker.nextNode();
-      while (text && !/\\S{3}/u.test(text.textContent)) text = walker.nextNode();
-      const start = text.textContent.search(/\\S{3}/u);
-      const range = document.createRange();
-      range.setStart(text, start);
-      range.setEnd(text, start + 3);
-      const box = range.getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-    })()`,
-  );
-  for (const clickCount of [1, 2])
-    for (const type of ["mousePressed", "mouseReleased"])
-      await cdp.call("Input.dispatchMouseEvent", { type, ...word, button: "left", clickCount });
-  assertEqual(
-    await value(cdp, `document.getSelection().toString().trim().length > 0`),
-    true,
-    "A double click did not select a word in the message",
-  );
+  await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
   await pressSpace(cdp);
   await waitFor(
     cdp,
     `!document.querySelector('[data-foreground-controls] button')`,
     1_000,
-    "Space in the empty composer did not press the showButton while a word was selected",
+    "Space in the empty composer did not press the showButton",
   );
 }
 
