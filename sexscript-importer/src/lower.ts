@@ -15748,12 +15748,13 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
     );
   }
   const elementType = (text(node.elementType) ?? "").replace(/^java\.lang\./u, "");
+  const arrayType = `${elementType}${"[]".repeat(sizes.length)}`;
   if (CONVERTING_ARRAY_TYPES.has(elementType)) {
     addDiagnostic(
       context,
       "SX_JAVA_ARRAY_CONVERSION",
       "warning",
-      `A Java ${elementType}[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.`,
+      `A Java ${arrayType} converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.`,
       node.span,
     );
   } else if (!LIST_LIKE_ARRAY_TYPES.has(elementType)) {
@@ -15761,7 +15762,7 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
       context,
       node,
       "SX_JAVA_ARRAY_TYPE",
-      `A Java ${elementType}[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
+      `A Java ${arrayType} converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
     );
   }
   const lowered = lowerArguments(sizes, context);

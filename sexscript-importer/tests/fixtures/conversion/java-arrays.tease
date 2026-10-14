@@ -61,7 +61,7 @@ function review(key) {
 }
 review("mandy.record")
 // A two-dimensional array of sizes given at its creation is a list of rows, whose object slots start as null.
-// NOTE SX_JAVA_ARRAY_CONVERSION line 25: A Java String[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
+// NOTE SX_JAVA_ARRAY_CONVERSION line 25: A Java String[][] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.
 let board: string?[][] = sexscriptLegacyArrayRows(2, 3, null)
 board[1][2] = "Kneel"
 say prose "${board[1][2]} ${board[0][0]} ${board.length}", instant
