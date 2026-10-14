@@ -15,11 +15,14 @@ const props = defineProps<{
   camera?: MediaStreamTrack | null;
   /** An image request's preview, the image that would answer it, shown still instead of the image and camera view. */
   preview?: { src: string; alt: string } | null;
+  /** The camera switch's name on the camera view, or `null` without another camera to switch to. */
+  cameraSwitchLabel?: string | null;
 }>();
 const emit = defineEmits<{
   mediaAspect: [ratio: number];
   mediaLoad: [src: string | null];
   mediaFailure: [src: string | null];
+  switchCamera: [];
 }>();
 const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
 // The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
@@ -105,7 +108,12 @@ function cameraMeasured(ratio: number) {
         <Viewfinder v-if="camera" :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
         <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
         <slot name="camera" />
-        <ViewfinderControls v-if="camera" v-model:mirrored="cameraMirrored" />
+        <ViewfinderControls
+          v-if="camera"
+          v-model:mirrored="cameraMirrored"
+          :switch-label="cameraSwitchLabel ?? null"
+          @switch-camera="emit('switchCamera')"
+        />
       </div>
     </div>
   </section>

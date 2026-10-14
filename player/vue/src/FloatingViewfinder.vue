@@ -17,7 +17,12 @@ export interface FloatingPlace {
   readonly ratio?: number;
 }
 // Without a track the window keeps its frame, for Player controls drawn on it while a camera opens or cannot be used.
-defineProps<{ track: MediaStreamTrack | null }>();
+defineProps<{
+  track: MediaStreamTrack | null;
+  /** The camera switch's name, or `null` without another camera to switch to. */
+  switchLabel?: string | null;
+}>();
+const emit = defineEmits<{ switchCamera: [] }>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
 const mirrored = defineModel<boolean>("mirrored", { default: true });
 
@@ -208,7 +213,12 @@ function measured(next: number) {
           <div v-else class="floating-viewfinder-empty" />
           <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
           <slot />
-          <ViewfinderControls v-if="track" v-model:mirrored="mirrored" />
+          <ViewfinderControls
+            v-if="track"
+            v-model:mirrored="mirrored"
+            :switch-label="switchLabel ?? null"
+            @switch-camera="emit('switchCamera')"
+          />
         </div>
       </div>
       <span

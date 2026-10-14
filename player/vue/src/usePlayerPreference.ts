@@ -30,6 +30,16 @@ export function usePlayerPreference<T extends string>(
   });
 }
 
+/** A preference without a fixed set of values, such as a camera the browser names; `null` while none is stored. */
+export function usePlayerTextPreference(key: string): Ref<string | null> {
+  const storage = browserStorage();
+  if (!storage) return shallowRef(null);
+  return useStorage<string | null>(key, null, storage, {
+    writeDefaults: false,
+    serializer: { read: (raw) => (raw === "" ? null : raw), write: (value) => value ?? "" },
+  });
+}
+
 /**
  * Moves the choice stored for the former Photo colour transition A/B test, which changed the fade time and the blending
  * together, to the two tests that replaced it (owner decision 2026-10-14): its B, 0.3 s blended in sRGB, chooses B in

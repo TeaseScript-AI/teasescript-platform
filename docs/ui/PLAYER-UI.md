@@ -573,17 +573,23 @@ A script can show the user what the session camera sees, for example to get into
 `showCamera` in a floating window or `showCamera stage` over the Stage image, and hide it with `hideCamera`
 ([§22](../specifications/accepted-syntaxes-v30.md#camera-view)). The camera view is only a preview: it has no capture
 control, and the script alone takes photos with `takePhoto()`. It shows a live image at the camera's aspect ratio,
-without a visible label, mirrored (selfie view) by default. Captured photos are never mirrored. Its controls sit in the
-view's lower left corner, clear of the Player's top controls over the top of the Stage and of the timer rail along its
-right side: a mirror button switches the mirroring off and on while the Player is mounted. Without an available camera
-the view is not shown. In the window it floats over the Player with a slim title bar. Like a desktop window, the user
-drags it anywhere
-and resizes it from any edge or corner, keeping the camera's aspect; focused, the arrow keys move it and + and - resize
-it. It floats in the whole Player, so showing or hiding the tools sidebar never moves it: it lies over the docked
-sidebar, and the narrow layout's drawer slides over it. It keeps its place while the Player is mounted, also when the
-script moves the view to the Stage and back. Over the Stage, the view covers the Stage image, which stays loaded
-underneath, and the Stage takes the camera's aspect until the view goes. The Player's camera view is the only one: the
-browser's own picture-in-picture is not offered for it.
+without a visible label, mirrored (selfie view) by default, except a camera the browser reports as facing back, which
+is not mirrored, as in camera apps. Captured photos are never mirrored. Its controls sit in the view's lower left
+corner, clear of the Player's top controls over the top of the Stage and of the timer rail along its right side: a
+mirror button switches the mirroring off and on while the Player is mounted, and where the browser reports two or more
+cameras, a Switch camera button beside it opens the next camera in the browser's order, wrapping around, so a phone
+flips between its front and back cameras. Its accessible name says which camera comes next where the browser reports
+that, such as "Switch to back camera", and is "Switch camera" otherwise. A camera switched to starts from its own
+mirroring default. The script keeps running, and `takePhoto()` and an image request's camera step use the chosen
+camera. The Player opens the browser's default camera until the player switches, and remembers the chosen camera in
+this browser, like its [settings](#player-settings); a camera that is gone falls back to the default. Without an
+available camera the view is not shown. In the window it floats over the Player with a slim title bar. Like a desktop
+window, the user drags it anywhere and resizes it from any edge or corner, keeping the camera's aspect; focused, the
+arrow keys move it and + and - resize it. It floats in the whole Player, so showing or hiding the tools sidebar never
+moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it. It keeps its place while the
+Player is mounted, also when the script moves the view to the Stage and back. Over the Stage, the view covers the Stage
+image, which stays loaded underneath, and the Stage takes the camera's aspect until the view goes. The Player's camera
+view is the only one: the browser's own picture-in-picture is not offered for it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
