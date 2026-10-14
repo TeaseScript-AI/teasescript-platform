@@ -212,6 +212,18 @@ after a short wait, both as the 64 lowercase hexadecimal digits that other progr
 other value goes through `toJson` first. A hash hides only a secret with many possible values
 ([§13](specifications/accepted-syntaxes-v30.md#hashes)).
 
+```tease
+let locked = encryptFile(photo, password: "corner")
+let photo = decryptFile(locked, default: null)
+```
+
+`encryptText` and `encryptFile` lock text, as Base64, or a stored file, with a `password:` and a time lock that opens by
+itself, 7 days ahead unless `openAt:` gives the moment; `openAt: null` removes it, and without either the Player asks
+the player how to lock. `decryptText` and `decryptFile` need a `default:`, which a wrong password, a changed lock, or a
+time lock not yet open gives; without `password:` a passed time lock opens, otherwise the Player asks
+([§13](specifications/accepted-syntaxes-v30.md#encryption), [locks](RUNTIME.md#locks),
+[`ENCRYPTION.md`](ENCRYPTION.md)).
+
 ### Compact choices
 
 `askChoice` returns the value of the selected button. A value may be written before an option's `:`; an option without
@@ -386,7 +398,8 @@ Implemented value operations include the V30 §8 text operations and regexes, jo
 §13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
 `toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
-`hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
+`hashFile`, the §13 locks `encryptText`, `encryptFile`, `decryptText`, and `decryptFile` ([locks](RUNTIME.md#locks)),
+the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
 numeric functions `round` (also with
 `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials
 and logarithms `exp`, `ln`, and `log10`, angles with a unit such as `90 deg` or `pi rad` and the angle functions `sin`,

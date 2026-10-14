@@ -280,7 +280,8 @@ text adds the last 50 transcript messages the chat shows, so not a removed one, 
 sources, notice messages, and the Debug log while the Debug menu is on, and the events with their content: messages and
 their changes and removals, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
-saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
+saved values, answers, or storage keys, only when saved values and answers are chosen too, and never a lock step's text,
+file, or password ([`ENCRYPTION.md`](ENCRYPTION.md#what-is-stored-and-recorded)); replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
 as the last good state when that state cannot be checkpointed; photos add the chosen originals of the photos the export
 refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,

@@ -986,7 +986,7 @@ adds nothing to the transcript. Meanwhile the composer takes no answer. A block 
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
 panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
 the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup, an
-`exportText` dialog, or an `openUrl` button waits, the composer shows no hint.
+`exportText` dialog, an `openUrl` button, or a lock waits, the composer shows no hint.
 
 `exportText` opens a dialog like a popup's, named by its title, with the text in a read-only monospace field that wraps
 long lines and scrolls, and the buttons **Copy**, which takes focus, **Download**, and **Close**. Copy writes the whole
@@ -996,6 +996,20 @@ copy it by hand or use Download. Download saves the text as a UTF-8 file with th
 Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
 script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
 Debug runs, and its return after a block or a reload, are a popup's.
+
+A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that must ask the player opens a dialog like a
+popup's, with nothing in the transcript. **Lock**, for an encrypt call that wrote no opener, has **Opens by itself at**,
+a date-and-time field prefilled 7 days ahead that accepts only a moment in the future ("Choose a moment in the future."
+otherwise), **Password (optional)**, and, once a password is typed, **Repeat password**, with "The passwords do not
+match" until they do; its **Lock** button, the only way out, works only then. **Unlock**, for a decrypt call, shows
+"Opens by itself at …" for each time lock in the player's locale, a **Password** field where a password opens it, and
+**Unlock** and **Cancel**; Cancel, or Escape, gives the call's default. A wrong password keeps it open with "That
+password does not open it."; a passed time lock whose relays the Player cannot reach shows "Its time has passed, but the
+time service could not be reached." and **Try again**; and a time lock whose moment comes while it shows opens it
+without the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, and says
+"Caps Lock is on" while it is. While the Player locks or opens with what the player gave, the dialog stays, takes no
+input, and its button reads **Locking…** or **Opening…**. A block that interrupts the dialog closes it, and it asks
+again afterwards with empty fields; its modality and placement while Debug runs are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes

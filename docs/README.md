@@ -17,6 +17,8 @@
 - `ARCHITECTURE.md`
 - `TEASESCRIPT.md`
 - `RUNTIME.md`
+- `ENCRYPTION.md`: the locks of `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`: scheme, format, drand
+  time locks, what is recorded, and honest limits.
 - `RESOURCE-LIMITS.md`: canonical resource-limit inventory, evidence/policy status, coupling, and reassessment routing.
 - `DATA-AND-API.md`
 - `LIBRARIES.md`
