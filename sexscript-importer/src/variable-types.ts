@@ -759,6 +759,9 @@ function analyse(
   const elementWrites = new Map<Binding, TeaseType[]>();
   // Lists that start empty and get a variable whose type allows null, `answers[i] = answer` (storeElement).
   const nullableWrites = new Set<Binding>();
+  // Java object arrays of one dimension, and the lists whose slots get a value of a type the conversion does not know.
+  const nullArrays = new Set<Binding>();
+  const unknownSlots = new Set<Binding>();
   // Java object arrays of two dimensions, which start with null in every slot, and the values written to their slots.
   const nullRows = new Set<Binding>();
   const rowWrites = new Map<Binding, TeaseType[]>();
@@ -769,8 +772,10 @@ function analyse(
     if (value.kind !== "call" || value.local === true) return;
     const start = value.positional.at(-1);
     if (start?.kind !== "literal" || start.value !== null) return;
-    if (value.name === "sexscriptLegacyArray" && slotsOnly(statements, target.name, 1))
+    if (value.name === "sexscriptLegacyArray" && slotsOnly(statements, target.name, 1)) {
       nullableWrites.add(target);
+      nullArrays.add(target);
+    }
     if (value.name === "sexscriptLegacyArrayRows") nullRows.add(target);
   };
   // Lists that get a stored number read without a default, which a missing key gives as null,
@@ -1293,6 +1298,7 @@ function analyse(
             slotWrites.set(list, [...(slotWrites.get(list) ?? []), value]);
           if (list !== undefined && item.operator === "=") {
             noteNullable(list, item.value, scope);
+            if (nonNull(value).kind === "unknown") unknownSlots.add(list);
             storeElement(list, value, item);
           }
           return;
@@ -1620,7 +1626,12 @@ function analyse(
     }
     // An element that may be null, `answers[i] = answer` after `answer = snapfile` (interrogation), holds null in
     // Groovy's list as well: the list's elements may be null.
-    else if (element?.kind === "scalar" && nullableWrites.has(list)) {
+    // A Java array's slot that gets a value of unknown type may hold any value, which no element type takes.
+    else if (
+      element?.kind === "scalar" &&
+      nullableWrites.has(list) &&
+      !(nullArrays.has(list) && unknownSlots.has(list))
+    ) {
       const nullable = listOf({ kind: "optional", value: element });
       change(() => (list.union = nullable));
     }
@@ -2067,7 +2078,15 @@ function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 
       const indexOf = (node: unknown, target: unknown): boolean =>
         isRecord(node) && node.kind === "index" && node.target === target;
       const length = isRecord(parent) && parent.kind === "property" && parent.name === "length";
-      const assigned = isRecord(parent) && parent.kind === "assign" && parent.target === value;
+      // Assigned a new array of empty slots; any other array, `rows = other`, may hold other values.
+      const assigned =
+        isRecord(parent) &&
+        parent.kind === "assign" &&
+        parent.target === value &&
+        isRecord(parent.value) &&
+        parent.value.kind === "call" &&
+        (parent.value.name === "sexscriptLegacyArray" ||
+          parent.value.name === "sexscriptLegacyArrayRows");
       const slot =
         depth === 1
           ? indexOf(parent, value)

@@ -59,6 +59,7 @@ export function withNativeTime(programs: readonly TimeProgram[]): IrStatement[][
     for (const program of programs)
       analyse(program.statements, program.shared, variables, declared, keyFor);
     for (const record of [...variables.values(), ...keys.values()]) {
+      record.whole = !record.writes.includes("fraction");
       record.time = record.native ? joined(record.writes) : null;
       if (record.time === "mixed") {
         record.native = false;
@@ -90,9 +91,10 @@ interface Time {
 }
 /**
  * What a value holds: a moment, a duration, a plain number (or any value that is no time), or null; `placeholder` is
- * the number a declaration starts with before its later writes, `def start = 0`.
+ * the whole number a declaration starts with before its later writes, `def start = 0`, and `fraction` a written number
+ * that may not be whole, which a duration's whole seconds cannot take.
  */
-type Kind = Time | "plain" | "null" | "fail" | "placeholder" | "other";
+type Kind = Time | "plain" | "null" | "fail" | "placeholder" | "other" | "fraction";
 
 /** A variable or a storage key, as far as it could hold a moment or a duration. */
 interface Variable {
@@ -105,11 +107,13 @@ interface Variable {
   writes: Kind[];
   /** Whether a write reads a key that may be missing, so that the variable may hold null. */
   nullable?: boolean;
+  /** False once a write of the round before gave a number that may not be whole (a `fraction`). */
+  whole?: boolean;
 }
 
 function signature(variable: Variable): string {
   const time = variable.time;
-  return `${variable.native}:${variable.nullable === true}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
+  return `${variable.native}:${variable.nullable === true}:${variable.whole !== false}:${time === null || time === "mixed" ? String(time) : `${time.kind}/${time.unit}`}`;
 }
 
 function timeOf(variable: Variable | undefined): Time | null {
@@ -131,14 +135,50 @@ function joined(writes: readonly Kind[]): Time | null | "mixed" {
   const first = times[0]!;
   if (writes.includes("fail")) return "mixed";
   if (times.some((time) => time.kind !== first.kind || time.unit !== first.unit)) return "mixed";
-  if (first.kind === "moment" && writes.includes("plain")) return "mixed";
-  if (first.kind === "duration" && writes.includes("null")) return "mixed";
+  if (first.kind === "moment" && (writes.includes("plain") || writes.includes("fraction")))
+    return "mixed";
+  if (first.kind === "duration" && (writes.includes("null") || writes.includes("fraction")))
+    return "mixed";
   return first;
 }
 
 /** A written number a declaration starts with, which a moment variable replaces with the current moment. */
 function isPlaceholder(value: IrExpression): boolean {
   return numberLiteral(value) !== null;
+}
+
+/**
+ * A whole number written from literals, `3600` or `3 * 24 * 3600`, or a sum or product of whole numbers, a rounding,
+ * a length, or a variable or key whose writes so far are whole numbers or times: the only numbers a duration combines
+ * with, since legacy's whole seconds and a number that may not be whole, `elapsed + frac` or `elapsed * 0.5`, made a
+ * number of seconds that the duration's own whole seconds would not. A variable's writes are read optimistically until
+ * a round shows one that may not be whole.
+ */
+function wholeConstant(value: IrExpression): boolean {
+  const number = constantNumber(value);
+  return number !== null && Number.isInteger(number);
+}
+
+function mayBeWhole(value: IrExpression, scope: Scope): boolean {
+  if (wholeConstant(value)) return true;
+  if (value.kind === "literal") return false;
+  const record =
+    value.kind === "variable"
+      ? scope.resolve(value.name)
+      : storedKey(value) !== null
+        ? scope.keys(storedKey(value)!)
+        : undefined;
+  if (record !== undefined) {
+    if (!record.native) return false;
+    const time = timeOf(record);
+    return time === null ? record.whole !== false : time.kind === "duration";
+  }
+  if (value.kind === "call" && value.local !== true && ROUNDINGS.has(value.name)) return true;
+  if (value.kind === "property" && value.name === "length") return true;
+  if (value.kind === "unary" && value.operator === "-") return mayBeWhole(value.value, scope);
+  if (value.kind === "binary" && ["+", "-", "*"].includes(value.operator))
+    return mayBeWhole(value.left, scope) && mayBeWhole(value.right, scope);
+  return false;
 }
 
 type KeyFor = (name: string) => Variable | undefined;
@@ -312,15 +352,12 @@ function kindOf(value: IrExpression, scope: Scope): Kind {
   if (value.kind === "binary" && ARITHMETIC.has(value.operator)) {
     const left = kindOf(value.left, scope);
     const right = kindOf(value.right, scope);
-    // A duration and a fraction of a second make a number: legacy added it to the whole seconds.
-    const fraction = (side: IrExpression): boolean => {
-      const number = numberLiteral(side);
-      return number !== null && !Number.isInteger(number);
-    };
+    // A duration and a number that is not a whole constant make a number: legacy added it to the whole seconds.
     const duration = (kind: Kind): boolean => typeof kind === "object" && kind.kind === "duration";
     if (
       (value.operator === "+" || value.operator === "-") &&
-      ((duration(left) && fraction(value.right)) || (duration(right) && fraction(value.left)))
+      ((duration(left) && right === "plain" && !mayBeWhole(value.right, scope)) ||
+        (duration(right) && left === "plain" && !mayBeWhole(value.left, scope)))
     )
       return "plain";
     // A number taken from a moment is an offset where it is computed from written numbers, `getTime() - 7200`; one
@@ -581,7 +618,7 @@ function analyse(
       return;
     }
     const kind = kindOf(value, scope);
-    variable.writes.push(kind);
+    variable.writes.push(kind === "plain" && !mayBeWhole(value, scope) ? "fraction" : kind);
     // A read of a key that may be missing, or of a variable that may hold its null, may be null.
     if (
       mayBeMissing(value) ||
@@ -605,7 +642,8 @@ function analyse(
           (item.type === undefined || /^(integer|number)\??$/u.test(item.type));
         const variable = variableFor(item, item.name, native);
         declared.set(item, variable);
-        if (variable.native && isPlaceholder(item.value)) variable.writes.push("placeholder");
+        if (variable.native && isPlaceholder(item.value))
+          variable.writes.push(wholeConstant(item.value) ? "placeholder" : "fraction");
         else write(variable, item.value, scope);
         scope.names.set(item.name, variable);
         return;
