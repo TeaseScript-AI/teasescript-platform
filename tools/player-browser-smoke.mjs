@@ -2802,7 +2802,8 @@ async function lateImageScenario(cdp, origin) {
 /**
  * Photo colours (`photo-colour` package): the green Stage photo, downloaded only once, colours the background and the
  * theme's surfaces in both modes, and the accent too; the photo accent A/B test's B changes only the accent back to the
- * theme's; the background's effects stay centred on the photo when its box changes behind an image request's preview;
+ * theme's; the photo shows again, and the background's effects are placed anew for it, when its box changes behind an
+ * image request's preview;
  * the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the theme's return, a mode
  * change in either direction, and the next photo fade the background and the message bubbles, except under reduced
  * motion. Once each change has settled, text is readable and the transcript's authored speaker and prose colours are

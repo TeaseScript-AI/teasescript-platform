@@ -689,7 +689,7 @@ restoring the Stage; in `late-image`, an invalid image that fails only after the
 neither hides that image nor is reported. Its `photo-colour` package's green Stage photo, downloaded only once, colours
 the background, the theme's surfaces in both modes, and the accent; the photo accent A/B test's B changes only the
 accent back to the theme's; the photo shows again after the window shrank behind an image
-request's preview; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
+request's preview, and the background's effects are placed anew for it; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
 theme's return, a mode change in either direction, and the next photo fade the background and message bubbles, except
 under reduced motion; once each change has settled, text is readable and the authored speaker and prose colours are
 adapted to the background shown, in Standard and High contrast. Its `photo-vignette` package's authored text low at the
