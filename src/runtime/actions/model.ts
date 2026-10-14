@@ -63,6 +63,12 @@ export interface RuntimeInteractionActionSnapshot {
    */
   readonly pausedMs?: number;
   /**
+   * How often an expiry block interrupted this password field and it asked again afterwards, present once positive and
+   * only for `askPassword`: the Player shows the field anew, without what was typed, also after a block that returned at
+   * once.
+   */
+  readonly resumes?: number;
+  /**
    * A button's timeout or a form's time limit; it times out at `createdAtMs + pausedMs + timeoutMs`. Always `null` for
    * other interactions.
    */

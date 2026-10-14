@@ -1500,7 +1500,14 @@ function validInteractionAction(
       "requestEventSequence",
       ...(action.interactionKind === "form" ? ["form"] : []),
       ...(Object.hasOwn(action, "pausedMs") ? ["pausedMs"] : []),
+      ...(Object.hasOwn(action, "resumes") ? ["resumes"] : []),
     ])
+  )
+    return false;
+  // Only a password field counts its returns after blocks.
+  if (
+    Object.hasOwn(action, "resumes") &&
+    (action.interactionKind !== "password" || !positiveSafeInteger(action.resumes))
   )
     return false;
   if (

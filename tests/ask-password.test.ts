@@ -12,6 +12,7 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -157,4 +158,32 @@ test("plans and states keep a password field's shape: no prefill, and no written
       [],
       JSON.stringify(passwordField),
     );
+});
+
+test("a password field that a block interrupted counts its return, also after a block that returned at once", () => {
+  const plan = compileValidPlan(
+    [
+      'timer async 1 s { say "Time is up", instant }',
+      'let typed = askPassword("Code?")',
+      'let text = askText("Name?")',
+      "exit",
+    ].join("\n"),
+  );
+  let result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const asked = passwordStep(result.snapshot);
+  assert.equal(asked.resumes, undefined);
+  result = run(plan, observeTime(plan, result.snapshot, 1000).snapshot);
+  assert.ok(result.events.some((event) => event.kind === "say" && event.text === "Time is up"));
+  const again = passwordStep(result.snapshot);
+  assert.deepEqual([again.actionId, again.resumes], [asked.actionId, 1]);
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
+  ).snapshot;
+  assert.deepEqual(validateRuntimeSnapshot(restored, plan).errors, []);
+  // Another kind of interaction keeps no count.
+  const text = { ...again, interactionKind: "text", ui: { ...again.ui, kind: "text" } };
+  assert.notDeepEqual(
+    validateRuntimeSnapshot({ ...restored, foregroundAction: text }, plan).errors,
+    [],
+  );
 });

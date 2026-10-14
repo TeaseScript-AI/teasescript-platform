@@ -917,7 +917,8 @@ through 9999; a prefill in year 0000, which they cannot show, is offered as edit
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
 new field. `askPassword` masks the composer's field, with an eye button, "Show password" or "Hide password", that shows
 the text while the person typing chooses to, and "Caps Lock is on" under it while a key event reports Caps Lock; an
-empty field answers nothing, and the answer adds no line to the chat. The password field of `password: askPassword(...)`
+empty field answers nothing, and the answer adds no line to the chat; after a block interrupted it, the field is empty
+again. The password field of `password: askPassword(...)`
 in an encrypt or decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field on a line of
 its own, to which Enter in the first moves, and Send or Enter there locks only when both match, else the composer notice
 says "The passwords do not match", the repeat empties, and the password is selected. While the Player locks or opens,

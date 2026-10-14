@@ -987,6 +987,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     ui: cloneInteractionUi(action.ui),
     createdAtMs: action.createdAtMs,
     ...(action.pausedMs === undefined ? {} : { pausedMs: action.pausedMs }),
+    ...(action.resumes === undefined ? {} : { resumes: action.resumes }),
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
     ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),

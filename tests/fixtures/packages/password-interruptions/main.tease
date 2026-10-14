@@ -1,0 +1,10 @@
+showPermanentButton "Ping" {
+    say "Pinged", instant
+}
+showPermanentButton "Lock it" {
+    let locked = encryptText("x", password: askPassword("Interrupting password"), openAt: null)
+}
+let typed = askPassword("Code?")
+let form = askForm("Original form", fields: { name: "Ada" }, submit: "Continue")
+say "Name ${form.name}", instant
+exit

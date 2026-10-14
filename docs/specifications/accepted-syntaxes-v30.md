@@ -2541,7 +2541,8 @@ Its field is masked, with an eye button that shows the text while the person typ
 Lock is on. It completes once a password is typed and returns `string`: the SHA-256 of the typed text as `hashText(...)`
 gives it ([§13](#hashes)), 64 lowercase hexadecimal digits. The Player hashes, so the typed text never reaches the
 script, and the answer adds no line to the chat. Comparing the answer with `hashText(...)` of a password, or two answers
-with each other, tells whether the same password was typed.
+with each other, tells whether the same password was typed. After a block interrupted it, the field asks again empty,
+without what was typed and not yet given.
 
 The hash is not the typed password. Passed to `password:` of an encrypt call, it locks with the hash text itself, which
 is recorded like any answer, so anyone who can read a save or replay data that holds it can open such a lock. Written

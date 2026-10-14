@@ -150,7 +150,8 @@ Completion semantics are:
   byte limit gets a message for the host instead;
 - `askPassword` is a `password` interaction, without a prefill: the host answers `{ kind: "submittedPassword", hash }`
   with the SHA-256 of the typed text as 64 lowercase hexadecimal digits, which it returns as `string`, never the text,
-  and the completion adds nothing to the transcript;
+  and the completion adds nothing to the transcript. Each return after an interrupting block adds one to the action's
+  `resumes`, present once positive, so the Player shows the field anew, also after a block that returned at once;
 - `askImage(...)` is an `image` interaction whose answer is an image the trusted host stored; see
   [Image input](#image-input);
 - a form is a `form` interaction whose fields the player edits before submitting; see [Forms](#forms);
@@ -2019,7 +2020,7 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 99 | `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): an interaction may be of kind `password`, prepared from the temporary of its hint, which plan validation previously rejected; a `lock` instruction has `passwordField`, `null` or `{ hint }` with a temporary or literal hint, which it previously lacked. |
-| Runtime snapshot | 86 | `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): a foreground `password` interaction, which the hash of the typed text completes, `{ kind: "submittedPassword", hash }`, and its result handoff of that hash, 64 lowercase hexadecimal digits; a `lock` action has `passwordField`, `null` or `{ hint }`, which it previously lacked. |
+| Runtime snapshot | 86 | `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): a foreground `password` interaction, which the hash of the typed text completes, `{ kind: "submittedPassword", hash }`, with `resumes`, the count of its returns after interrupting blocks, once positive, and its result handoff of that hash, 64 lowercase hexadecimal digits; a `lock` action has `passwordField`, `null` or `{ hint }`, which it previously lacked. |
 | Checkpoint | 122 | The `askPassword` plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.

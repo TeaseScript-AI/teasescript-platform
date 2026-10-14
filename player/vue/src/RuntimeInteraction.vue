@@ -122,6 +122,11 @@ const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>(
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
 );
+// A password field that a block interrupted is presented anew, without what was typed, also after a block that returned
+// at once.
+const passwordResumes = computed(() =>
+  props.session ? (activePlayerRuntimeInteraction(props.session.state)?.resumes ?? 0) : 0,
+);
 // An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
 // observations do not re-render, and re-measure, the controls on every update.
 // Action IDs restart per session; the plan and the host's reset count identify which session an ID belongs to.
@@ -445,7 +450,7 @@ function focusInput() {
 
 const { hoverAvailable } = usePlayerConditions();
 watch(
-  [actionId, () => props.reset],
+  [actionId, () => props.reset, passwordResumes],
   async () => {
     presentedAt.value = performance.now();
     // Text typed for another action, or for a replaced session, reaches the form only when it shows that field again.
@@ -773,9 +778,12 @@ async function imageControl(control: ImageControl) {
 watch(
   () => lockField.value?.key,
   async (key) => {
-    draft.value = "";
     repeated.value = "";
-    clearFeedback();
+    // A question or form that came back meanwhile already holds the composer; its text stays.
+    if (key !== undefined || actionId.value === undefined) {
+      draft.value = "";
+      clearFeedback();
+    }
     if (key === undefined) return;
     presentedAt.value = performance.now();
     const active = document.activeElement;
