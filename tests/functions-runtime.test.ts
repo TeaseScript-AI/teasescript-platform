@@ -569,8 +569,12 @@ test("a prepared receiver in a speaker's state keeps that speaker when a call re
     "speaker vera {\n    items: [1]\n    config: { value: 1 }\n}",
     "speaker anna {\n    items: [2]\n    config: { value: 2 }\n}",
     "speaker cara {\n    boss: vera\n}",
+    "speaker dora {\n    roles: dict{ boss: vera }\n}",
   ].join("\n");
   const toAnna = "let current = vera\nfunction change { current = anna\nreturn 5 }";
+  // A dict's `values` is a new list at each read, which clearing the dict does not change.
+  const throughValues =
+    "let box = { who: dora }\nfunction change { box = { who: anna }\ndora.roles.clear()\nreturn 5 }";
   const added = "[1,5] 1 [2] 2";
   const cases: readonly (readonly [string, string, string])[] = [
     [toAnna, "current.items.add(change())", added],
@@ -606,6 +610,8 @@ test("a prepared receiver in a speaker's state keeps that speaker when a call re
       "current.boss.items.add(change())",
       added,
     ],
+    [throughValues, "box.who.roles.values[0].items.add(change())", added],
+    [throughValues, "box.who.roles.values[0].items = [change()]", "[5] 1 [2] 2"],
   ];
   for (const [setup, store, expected] of cases) {
     const result = runSource(

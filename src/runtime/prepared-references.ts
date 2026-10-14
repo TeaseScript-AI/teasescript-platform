@@ -397,7 +397,8 @@ function preparedReferenceMutationDepth(
  * Makes an attached reference independent of the value `changedDepth` steps along its path, which is about to change,
  * or without `changedDepth`, of its root, which no longer exists. The reference keeps a copy of the value it leads to
  * now. A speaker that the path reaches at or after the change stays the same speaker, though, so a reference that goes
- * on into its properties follows it from its global instead, like a reference prepared through the speaker's name.
+ * on from the last such speaker into the values it stores follows it from its global instead, like a reference prepared
+ * through the speaker's name.
  */
 function freezePreparedReference(
   snapshot: RuntimeSnapshot,
@@ -448,8 +449,10 @@ function freezePreparedReference(
 }
 
 /**
- * The first speaker that the path of `descriptor` reaches after `minimumDepth` or more steps, with steps left after it,
- * and the number of steps that lead to it; `null` when there is none or the rest of the path leads nowhere from it.
+ * The last speaker that the path of `descriptor` reaches after `minimumDepth` or more steps, and the number of steps
+ * that lead to it, when the rest of the path goes on from it into values the session stores: properties of objects and
+ * speakers, list elements, and dict entries. `null` when there is none, as when the rest reads a property derived at
+ * each read, such as a dict's `values`, which no change of the dict follows.
  */
 function speakerOnPath(
   snapshot: RuntimeSnapshot,
@@ -458,24 +461,19 @@ function speakerOnPath(
 ): { readonly reference: SerializableSpeakerReference; readonly depth: number } | null {
   const root = preparedReferenceRoot(snapshot, descriptor);
   if (!root.found) return null;
+  let speaker: { reference: SerializableSpeakerReference; depth: number } | null = null;
   let current = root.value;
   for (let depth = 0; depth < descriptor.path.length; depth += 1) {
-    if (depth >= minimumDepth && isSpeakerReference(current)) {
-      // A speaker's global holds that speaker for the whole session (TSR034).
-      const rest = resolveStoredPreparedReference(snapshot, {
-        rootFrameId: GLOBAL_SCOPE_ID,
-        rootName: current.identifier,
-        path: descriptor.path.slice(depth),
-        capturedRoot: undefined,
-        detached: false,
-      });
-      return rest.found ? { reference: current, depth } : null;
-    }
-    const next = resolvePreparedReferenceStep(snapshot, current, descriptor.path[depth]!);
+    if (depth >= minimumDepth && isSpeakerReference(current))
+      speaker = { reference: current, depth };
+    const step = descriptor.path[depth]!;
+    if (step.kind === "property" && !isObject(current) && !isSpeakerReference(current))
+      speaker = null;
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
     if (!next.found) return null;
     current = next.value;
   }
-  return null;
+  return speaker;
 }
 
 export function preparedReferenceSpeakerPath(
