@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import Viewfinder from "./Viewfinder.vue";
-import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
+import ViewfinderControls from "./ViewfinderControls.vue";
 const props = defineProps<{
   /**
    * The image: the URL it loads from, and its source as the Player knows it (`data-stage-source`) when that URL is a
@@ -105,9 +105,7 @@ function cameraMeasured(ratio: number) {
         <Viewfinder v-if="camera" :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
         <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
         <slot name="camera" />
-        <div v-if="camera" class="stage-camera-mirror">
-          <ViewfinderMirrorButton v-model="cameraMirrored" />
-        </div>
+        <ViewfinderControls v-if="camera" v-model:mirrored="cameraMirrored" />
       </div>
     </div>
   </section>
@@ -133,10 +131,5 @@ function cameraMeasured(ratio: number) {
   width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
   /* Its own height, so the margins centre it like the image underneath. */
   aspect-ratio: var(--viewfinder-ratio);
-}
-.stage-camera-mirror {
-  position: absolute; top: 8px; right: 8px; display: flex;
-  border: 1px solid var(--media-border); border-radius: 8px; color: var(--media-text);
-  background: var(--media-surface); box-shadow: 0 1px 3px var(--media-shadow); backdrop-filter: blur(3px);
 }
 </style>
