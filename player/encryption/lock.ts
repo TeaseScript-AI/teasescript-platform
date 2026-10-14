@@ -54,13 +54,13 @@ export interface LockServices {
 /** The openers of a lock to make: a password, and a moment the time lock opens at. */
 export interface LockOpeners {
   readonly password: string | null;
-  readonly openAtMs: number | null;
+  readonly timeLockMs: number | null;
 }
 
 /** A lock as made: its bytes and the moment its time lock opens, after a correction of a clock that is behind. */
 export interface MadeLock {
   readonly bytes: Uint8Array<ArrayBuffer>;
-  readonly openAtMs: number | null;
+  readonly timeLockMs: number | null;
 }
 
 /** How long locking waits for drand's latest round to check the device clock; offline it locks without the check. */
@@ -76,13 +76,13 @@ export async function lock(
   openers: LockOpeners,
   services: LockServices,
 ): Promise<MadeLock> {
-  if (openers.password === null && openers.openAtMs === null)
+  if (openers.password === null && openers.timeLockMs === null)
     throw new Error("A lock needs an opener.");
   const key = randomBytes(KEY_BYTES);
   const parts: Uint8Array[] = [];
   if (openers.password !== null) parts.push(await passwordOpener(openers.password, key));
-  let openAtMs = openers.openAtMs;
-  if (openAtMs !== null) {
+  let timeLockMs = openers.timeLockMs;
+  if (timeLockMs !== null) {
     const tlock = await services.tlock();
     const latest = await fetchBeacon(
       "latest",
@@ -92,9 +92,9 @@ export async function lock(
     );
     if (latest.kind === "signature") {
       const behind = roundTimeMs(latest.round) - services.nowMs();
-      if (behind > 0) openAtMs += behind;
+      if (behind > 0) timeLockMs += behind;
     }
-    const round = roundAtOrAfter(openAtMs);
+    const round = roundAtOrAfter(timeLockMs);
     parts.push(
       opener(TIME_OPENER, uint64(round), tlock.sealToRound(QUICKNET_PUBLIC_KEY, round, key)),
     );
@@ -109,7 +109,7 @@ export async function lock(
   );
   return {
     bytes: concat(header, nonce, new Uint8Array(sealed)),
-    openAtMs: openAtMs === null ? null : roundTimeMs(roundAtOrAfter(openAtMs)),
+    timeLockMs: timeLockMs === null ? null : roundTimeMs(roundAtOrAfter(timeLockMs)),
   };
 }
 

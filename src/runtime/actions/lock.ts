@@ -26,22 +26,40 @@ import { temporalCaptureAt, wallClockAt } from "../temporal-captures.js";
 import { checkTextLength, messageText } from "../text-length.js";
 import { describeRuntimeValue } from "../value-predicates.js";
 import type { CapturedMediaAdmission } from "./capture.js";
-import type { RuntimeLockActionSnapshot, RuntimeLockNotice, RuntimeLockOutcome } from "./model.js";
+import type {
+  RuntimeLockActionSnapshot,
+  RuntimeLockChoice,
+  RuntimeLockNotice,
+  RuntimeLockOutcome,
+} from "./model.js";
 
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
 // again with each answer, which the completion hands off: in its `work` phase the Player locks or opens with what it has;
 // when it must ask the player, the instruction waits again in an `ask` phase, which its dialog answers, and then works
 // again with what the player typed, which never reaches the engine. Every run reads the same operands.
 
-/** The time lock of an encrypt call without `openAt:`: 7 days from now (owner decision, 2026-10-13). */
-const DEFAULT_LOCK_DELAY_MS = 7 * 24 * 60 * 60 * 1000;
+/** The moment the lock dialog suggests for its time lock: 7 days from now (owner decisions, 2026-10-13 and 2026-10-14). */
+const SUGGESTED_TIME_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The openers of an encrypt call, in the order the lock dialog shows them. */
+const LOCK_CHOICES: readonly RuntimeLockChoice[] = ["timeLock", "password"];
 
 /** The operands of a run: the text, Base64 lock, or stored file, and the written options. */
 interface LockOperands {
   readonly value: SerializableRuntimeValue;
   readonly password: SerializableRuntimeValue | undefined;
-  readonly openAt: SerializableRuntimeValue | undefined;
+  readonly timeLock: SerializableRuntimeValue | undefined;
   readonly fallback: SerializableRuntimeValue;
+}
+
+/**
+ * An encrypt call's openers: the password and the time lock's moment it gives, and those the player chooses in the lock
+ * dialog, written `true` or, without any written, all of them.
+ */
+interface EncryptOpeners {
+  readonly password: string | null;
+  readonly timeLockMs: number | null;
+  readonly choices: readonly RuntimeLockChoice[];
 }
 
 /** What a run asks the Player for, or the result it gives at once. */
@@ -51,7 +69,8 @@ type LockStep =
       readonly phase: RuntimeLockActionSnapshot["phase"];
       readonly value: string;
       readonly password: string | null;
-      readonly openAtMs: number | null;
+      readonly timeLockMs: number | null;
+      readonly choices: readonly RuntimeLockChoice[];
       readonly dialogActionId: number | null;
       readonly notice: RuntimeLockNotice | null;
     };
@@ -78,7 +97,7 @@ export function executeLock(
   const operands: LockOperands = {
     value: evaluator.evaluate(instruction.value),
     password: instruction.password === null ? undefined : evaluator.evaluate(instruction.password),
-    openAt: instruction.openAt === null ? undefined : evaluator.evaluate(instruction.openAt),
+    timeLock: instruction.timeLock === null ? undefined : evaluator.evaluate(instruction.timeLock),
     fallback: instruction.default === null ? null : evaluator.evaluate(instruction.default),
   };
   const handoff = snapshot.interactionResultHandoff;
@@ -133,18 +152,19 @@ function lockAnswer(result: SerializableRuntimeValue, span: LockInstruction["spa
 /** The first run: checks the operands and asks the Player, or gives the default at once for text that is not Base64. */
 function startLock(
   instruction: LockInstruction,
-  { value, password, openAt, fallback }: LockOperands,
+  operands: LockOperands,
   snapshot: RuntimeSnapshot,
 ): LockStep {
+  const { value, password, fallback } = operands;
   const span = instruction.span;
   const call = instruction.call;
-  if (password !== undefined && typeof password !== "string")
+  if (!locks(call) && password !== undefined && typeof password !== "string")
     throw new RuntimeFault(
       "TSR059",
       `'password:' of ${call}(...) takes text (string), not ${describeRuntimeValue(password)}.`,
       copySpan(span),
     );
-  const written = password === undefined ? null : password;
+  const written = typeof password === "string" ? password : null;
   if (call === "decryptText") {
     if (typeof value !== "string")
       throw new RuntimeFault(
@@ -159,6 +179,7 @@ function startLock(
   }
   if (call === "decryptFile")
     return workStep(storedFile(call, value, snapshot, span), written, null);
+  const openers = encryptOpeners(call, operands, span);
   const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
   if (typeof text !== "string")
     throw new RuntimeFault(
@@ -166,43 +187,85 @@ function startLock(
       `encryptText(...) locks text (string), not ${describeRuntimeValue(text)}.`,
       copySpan(span),
     );
-  if (openAt !== undefined && openAt !== null && !isAbsoluteDateTime(openAt))
+  if (openers.choices.length === 0 && openers.password === null && openers.timeLockMs === null)
     throw new RuntimeFault(
       "TSR059",
-      `'openAt:' of ${call}(...) takes a moment (absoluteDateTime) or null, not ${describeRuntimeValue(openAt)}.`,
+      `${call}(...) has no way to open, because 'password:' and 'timeLock:' are both false, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
       copySpan(span),
     );
-  if (openAt === null && written === null)
+  // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog.
+  if (openers.choices.length > 0) return dialogStep(call, text, openers, snapshot, span);
+  return workStep(text, openers.password, openers.timeLockMs);
+}
+
+/**
+ * The checked openers of an encrypt call: `password:` takes text, `timeLock:` a moment, and each also `true`, which lets
+ * the player choose it, or `false`, which leaves it out. A call writes each opener or none (plan validation).
+ */
+function encryptOpeners(
+  call: LockCall,
+  { password, timeLock }: LockOperands,
+  span: LockInstruction["span"],
+): EncryptOpeners {
+  if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
     throw new RuntimeFault(
       "TSR059",
-      `${call}(...) has no way to open, because 'openAt:' is null and there is no 'password:'. Give a 'password:', or a moment in 'openAt:'.`,
+      `'password:' of ${call}(...) takes text (string), true, or false, not ${describeRuntimeValue(password)}.`,
       copySpan(span),
     );
-  const openAtMs =
-    openAt === undefined
-      ? defaultOpenAtMs(call, snapshot, span)
-      : openAt === null
-        ? null
-        : openAt.epochMilliseconds;
-  // Without any opener written, the Player's dialog asks the player how to lock, suggesting the default time lock.
-  if (password === undefined && openAt === undefined)
-    return {
-      phase: "ask",
-      value: text,
-      password: null,
-      openAtMs,
-      dialogActionId: null,
-      notice: null,
-    };
-  return workStep(text, written, openAtMs);
+  if (timeLock !== undefined && typeof timeLock !== "boolean" && !isAbsoluteDateTime(timeLock))
+    throw new RuntimeFault(
+      "TSR059",
+      `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeRuntimeValue(timeLock)}.`,
+      copySpan(span),
+    );
+  const written = password !== undefined || timeLock !== undefined;
+  const chosen = { password, timeLock };
+  return {
+    password: typeof password === "string" ? password : null,
+    timeLockMs: typeof timeLock === "object" ? timeLock.epochMilliseconds : null,
+    choices: LOCK_CHOICES.filter((choice) => !written || chosen[choice] === true),
+  };
 }
 
-function workStep(value: string, password: string | null, openAtMs: number | null): LockStep {
-  return { phase: "work", value, password, openAtMs, dialogActionId: null, notice: null };
+function workStep(value: string, password: string | null, timeLockMs: number | null): LockStep {
+  return {
+    phase: "work",
+    value,
+    password,
+    timeLockMs,
+    choices: [],
+    dialogActionId: null,
+    notice: null,
+  };
 }
 
-/** The moment of the default time lock: 7 days after the current moment, as `getAbsoluteDateTime()` gives it. */
-function defaultOpenAtMs(
+/**
+ * The lock dialog, which asks the player for the openers they choose; a chosen time lock is suggested 7 days from now.
+ * The step after it locks with the openers the call gives and what the player chose.
+ */
+function dialogStep(
+  call: LockCall,
+  value: string,
+  { password, timeLockMs, choices }: EncryptOpeners,
+  snapshot: RuntimeSnapshot,
+  span: LockInstruction["span"],
+): LockStep {
+  return {
+    phase: "ask",
+    value,
+    password,
+    timeLockMs: choices.includes("timeLock")
+      ? suggestedTimeLockMs(call, snapshot, span)
+      : timeLockMs,
+    choices,
+    dialogActionId: null,
+    notice: null,
+  };
+}
+
+/** The moment the lock dialog suggests: 7 days after the current moment, as `getAbsoluteDateTime()` gives it. */
+function suggestedTimeLockMs(
   call: LockCall,
   snapshot: RuntimeSnapshot,
   span: LockInstruction["span"],
@@ -212,10 +275,10 @@ function defaultOpenAtMs(
   if (epochMs === undefined)
     throw new RuntimeFault(
       "TSR064",
-      `${call}(...) needs the current time for its time lock, but this Player supplied no clock when the session started or continued.`,
+      `${call}(...) needs the current time to suggest a time lock, but this Player supplied no clock when the session started or continued.`,
       copySpan(span),
     );
-  return epochMs + DEFAULT_LOCK_DELAY_MS;
+  return epochMs + SUGGESTED_TIME_LOCK_MS;
 }
 
 /**
@@ -257,24 +320,32 @@ function nextLockStep(
     case "submitted": {
       // The operands were checked when the first run asked.
       const value = startValue(call, operands.value);
+      if (!locks(call))
+        return outcome === "submitted"
+          ? { ...workStep(value, null, null), dialogActionId: actionId }
+          : {
+              phase: "ask",
+              value,
+              password: null,
+              timeLockMs: null,
+              choices: [],
+              dialogActionId: null,
+              notice: detail === "wrongPassword" || detail === "unreachable" ? detail : null,
+            };
+      const openers = encryptOpeners(call, operands, span);
+      // The step after the dialog locks with what the player chose there, instead of the moment it suggested.
       if (outcome === "submitted")
         return {
           phase: "work",
           value,
-          password: null,
-          openAtMs: null,
+          password: openers.password,
+          timeLockMs: openers.choices.includes("timeLock") ? null : openers.timeLockMs,
+          choices: openers.choices,
           dialogActionId: actionId,
           notice: null,
         };
-      return {
-        phase: "ask",
-        value,
-        password: null,
-        // The lock dialog suggests the default time lock again, from now.
-        openAtMs: locks(call) ? defaultOpenAtMs(call, snapshot, span) : null,
-        dialogActionId: null,
-        notice: detail === "wrongPassword" || detail === "unreachable" ? detail : null,
-      };
+      // The lock dialog asks again, suggesting its time lock from now.
+      return dialogStep(call, value, openers, snapshot, span);
     }
   }
 }
@@ -331,7 +402,8 @@ function requestLock(
     phase: step.phase,
     value: step.value,
     password: step.password,
-    openAtMs: step.openAtMs,
+    timeLockMs: step.timeLockMs,
+    choices: step.choices,
     dialogActionId: step.dialogActionId,
     notice: step.notice,
     resumes: 0,

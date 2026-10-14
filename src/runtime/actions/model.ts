@@ -267,6 +267,9 @@ export function fileStoreOperation(
 /** Why the unlock dialog asks again: the typed password did not open, or the passed time lock could not be fetched. */
 export type RuntimeLockNotice = "wrongPassword" | "unreachable";
 
+/** An opener the player chooses in the lock dialog: written `true`, or each without any written (V30 §13). */
+export type RuntimeLockChoice = "timeLock" | "password";
+
 /**
  * How a step of a lock ended: `locked` or `opened` with the result, `notOpened` (the default), `unreadable` or `failed`
  * (a runtime error), `ask` (the Player must ask the player), or, for a dialog, `submitted` or `cancelled` (the default).
@@ -297,14 +300,19 @@ export interface RuntimeLockActionSnapshot {
   readonly phase: "work" | "ask";
   /** `encryptText`'s text, `decryptText`'s lock as standard Base64, or the stored file of the file calls. */
   readonly value: string;
-  /** The written `password:`, or `null`. */
+  /** The password text written in `password:`, or `null`. */
   readonly password: string | null;
   /**
-   * An encrypt call's time lock: the moment it opens by itself, in epoch milliseconds, from `openAt:` or 7 days from now,
-   * or `null` with `openAt: null`; while the lock dialog asks, the moment it suggests. `null` for a decrypt call and for
-   * the step after a dialog.
+   * An encrypt call's time lock: the moment written in `timeLock:`, when it opens by itself, in epoch milliseconds, or
+   * `null`; while the lock dialog asks for a time lock, the moment it suggests, 7 days from now. `null` for a decrypt
+   * call and for a time lock that the player chose in the dialog before this step.
    */
-  readonly openAtMs: number | null;
+  readonly timeLockMs: number | null;
+  /**
+   * The openers of an encrypt call that the player chooses in its lock dialog, which asks in the `ask` step, and whose
+   * answer the `work` step after it locks with; empty for any other step.
+   */
+  readonly choices: readonly RuntimeLockChoice[];
   /** The `ask` action whose dialog the player answered just before this `work` step, or `null`. */
   readonly dialogActionId: number | null;
   /** Why the unlock dialog asks again, or `null`. */

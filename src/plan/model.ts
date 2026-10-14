@@ -1002,10 +1002,13 @@ export interface LockInstruction extends InstructionBase {
   readonly call: LockCall;
   /** The text, Base64 lock, or stored file. */
   readonly value: ExpressionPlan;
-  /** The written `password:`, or `null`. */
+  /** The written `password:`: text, or for an encrypt call also `true` or `false`; `null` without one. */
   readonly password: ExpressionPlan | null;
-  /** The written `openAt:` of an encrypt call; `null` without one, which means the default time lock. */
-  readonly openAt: ExpressionPlan | null;
+  /**
+   * The written `timeLock:` of an encrypt call, a moment, `true`, or `false`; `null` without one. An encrypt call writes
+   * every opener or none, and none means that the player chooses each.
+   */
+  readonly timeLock: ExpressionPlan | null;
   /** The `default:` of a decrypt call; `null` for an encrypt call. */
   readonly default: ExpressionPlan | null;
   readonly destinationTemporary: number;

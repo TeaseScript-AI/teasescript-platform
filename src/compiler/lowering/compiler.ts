@@ -2602,10 +2602,10 @@ export class InstructionCompiler {
     const lowered = yield* compileChild(
       this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
     );
-    const operands: Record<"value" | "password" | "openAt" | "default", ExpressionPlan | null> = {
+    const operands: Record<"value" | "password" | "timeLock" | "default", ExpressionPlan | null> = {
       value: null,
       password: null,
-      openAt: null,
+      timeLock: null,
       default: null,
     };
     const temporaryIds: number[] = [];
@@ -2626,7 +2626,7 @@ export class InstructionCompiler {
         plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
       }
       const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-      if (name !== "value" && name !== "password" && name !== "openAt" && name !== "default")
+      if (name !== "value" && name !== "password" && name !== "timeLock" && name !== "default")
         throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
       operands[name] = plan;
     });
@@ -2638,7 +2638,7 @@ export class InstructionCompiler {
       call,
       value: operands.value,
       password: operands.password,
-      openAt: operands.openAt,
+      timeLock: operands.timeLock,
       default: operands.default,
       destinationTemporary,
       span: copySpan(expression.span),

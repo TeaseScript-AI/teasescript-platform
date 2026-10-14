@@ -491,7 +491,7 @@ test("a lock's text and password never show in readable sections, and its steps 
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
     [
-      `let locked = encryptText("${text}", password: "${password}")`,
+      `let locked = encryptText("${text}", password: "${password}", timeLock: false)`,
       'let opened = decryptText(locked, default: "closed")',
       'say "Done"',
       "exit",

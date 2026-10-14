@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 // focus, so the busy state is read where the person is.
 const props = defineProps<{
   label: string;
+  /** A sentence under the label that says what the password is for, or none. */
+  description?: string;
   busy?: boolean;
   /** Why the field's text does not do, shown under it, or none. */
   error?: string | null;
@@ -18,6 +20,7 @@ const model = defineModel<string>({ required: true });
 
 const id = useId();
 const statusId = useId();
+const descriptionId = useId();
 const shown = ref(false);
 const capsLock = ref(false);
 const input = ref<InstanceType<typeof Input> | null>(null);
@@ -35,6 +38,9 @@ defineExpose({ focus });
 <template>
   <div class="grid gap-1.5" data-password-field>
     <label :for="id" class="text-sm font-medium">{{ props.label }}</label>
+    <p v-if="props.description" :id="descriptionId" class="text-sm text-muted-foreground">
+      {{ props.description }}
+    </p>
     <div class="flex items-center gap-2">
       <!-- No saved or suggested passwords: a lock password typed on the player's device must not stay in its browser. -->
       <Input
@@ -45,7 +51,7 @@ defineExpose({ focus });
         autocomplete="off"
         :readonly="props.busy"
         :aria-invalid="props.error ? 'true' : undefined"
-        :aria-describedby="statusId"
+        :aria-describedby="props.description ? `${descriptionId} ${statusId}` : statusId"
         autocapitalize="off"
         spellcheck="false"
         data-password-input

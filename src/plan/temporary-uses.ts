@@ -112,7 +112,7 @@ export function requiredInstructionTemporaries(
     case "lock":
       collect(instruction.value);
       if (instruction.password !== null) collect(instruction.password);
-      if (instruction.openAt !== null) collect(instruction.openAt);
+      if (instruction.timeLock !== null) collect(instruction.timeLock);
       if (instruction.default !== null) collect(instruction.default);
       break;
     case "storageWrite":

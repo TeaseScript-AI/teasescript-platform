@@ -66,16 +66,30 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
 /** A lock step's openers as Debug shows them; never its text, password, or key. */
 function lockDetail(
   kind: PlayerDebugWaitKind,
-  lock: { dialog: boolean; password: boolean; openAtMs: number | null },
+  lock: {
+    dialog: boolean;
+    password: boolean;
+    timeLockMs: number | null;
+    choices: readonly string[];
+  },
 ): string {
-  const moment = lock.openAtMs === null ? null : new Date(lock.openAtMs).toISOString();
-  if (lock.dialog) return moment === null ? "dialog" : `dialog, suggests ${moment}`;
-  const parts = [
+  const moment = lock.timeLockMs === null ? null : new Date(lock.timeLockMs).toISOString();
+  const chosen = lock.choices.map((choice) =>
+    choice !== "timeLock"
+      ? choice
+      : lock.dialog && moment !== null
+        ? `time lock (suggests ${moment})`
+        : "time lock",
+  );
+  const given = [
     ...(lock.password ? ["password"] : []),
-    ...(moment === null ? [] : [`time lock ${moment}`]),
+    ...(moment === null || lock.choices.includes("timeLock") ? [] : [`time lock ${moment}`]),
   ];
-  if (parts.length > 0) return parts.join(", ");
-  return kind === "lock" ? "as the player chose" : "time lock";
+  if (kind === "unlock")
+    return lock.dialog ? "dialog" : given.length > 0 ? given.join(", ") : "time lock";
+  if (chosen.length === 0) return given.join(", ");
+  const choosing = `${lock.dialog ? "dialog" : "as the player chose"}: ${chosen.join(", ")}`;
+  return given.length === 0 ? choosing : `${choosing}; given: ${given.join(", ")}`;
 }
 const callLabels = {
   function: (name: string) => `${name}()`,

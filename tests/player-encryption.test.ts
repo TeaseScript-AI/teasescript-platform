@@ -124,8 +124,8 @@ test("a time lock opens at the first round at or after its moment", () => {
 
 test("a password lock opens with exactly its password, and its header and content cannot be changed", async () => {
   const content = new TextEncoder().encode("corner time");
-  const made = await lock(content, { password: "corner", openAtMs: null }, services(fetch, 0));
-  assert.equal(made.openAtMs, null);
+  const made = await lock(content, { password: "corner", timeLockMs: null }, services(fetch, 0));
+  assert.equal(made.timeLockMs, null);
   // "TSLK", version 1, one opener of 3 + 68 bytes, a nonce, and the content with its tag.
   assert.equal(made.bytes.length, 6 + 71 + 12 + content.length + 16);
   assert.deepEqual([...made.bytes.subarray(0, 8)], [0x54, 0x53, 0x4c, 0x4b, 1, 1, 1, 0]);
@@ -136,7 +136,7 @@ test("a password lock opens with exactly its password, and its header and conten
     assert.equal(await openWithPassword(read, wrong), null, wrong);
   // An empty password is a password too, exactly as given.
   const empty = readLock(
-    (await lock(content, { password: "", openAtMs: null }, services(fetch, 0))).bytes,
+    (await lock(content, { password: "", timeLockMs: null }, services(fetch, 0))).bytes,
   )!;
   assert.deepEqual(await openWithPassword(empty, ""), content);
   assert.equal(await openWithPassword(empty, " "), null);
@@ -167,7 +167,7 @@ test("a password lock opens with exactly its password, and its header and conten
 test("a lock asking for too many PBKDF2 iterations is not tried, so a made-up lock cannot keep the Player busy", async () => {
   const made = await lock(
     new Uint8Array([1]),
-    { password: "p", openAtMs: null },
+    { password: "p", timeLockMs: null },
     services(fetch, 0),
   );
   const changed = new Uint8Array(made.bytes);
@@ -184,10 +184,10 @@ test("a time lock opens with its round's beacon from the relays, after its momen
   const now = roundTimeMs(ROUND_33045040.round) + 1_000;
   const made = await lock(
     content,
-    { password: null, openAtMs: 0 },
+    { password: null, timeLockMs: 0 },
     services(relays([ROUND_1, ROUND_33045040]).fetcher, now),
   );
-  assert.equal(made.openAtMs, QUICKNET_GENESIS_MS);
+  assert.equal(made.timeLockMs, QUICKNET_GENESIS_MS);
   assert.equal(made.bytes.length, 6 + 171 + 12 + content.length + 16);
   const read = readLock(made.bytes)!;
   assert.deepEqual(
@@ -204,7 +204,7 @@ test("a time lock opens with its round's beacon from the relays, after its momen
   // A lock for a moment still to come: no relay is asked before it, and none has its beacon.
   const future = await lock(
     content,
-    { password: null, openAtMs: now + 3_600_000 },
+    { password: null, timeLockMs: now + 3_600_000 },
     services(relays([ROUND_33045040]).fetcher, now),
   );
   const early = relays([ROUND_1]);
@@ -246,18 +246,18 @@ test("a device clock behind drand's latest round moves a time lock's moment late
   const moment = deviceNow + 60_000;
   const behind = await lock(
     new Uint8Array([1]),
-    { password: null, openAtMs: moment },
+    { password: null, timeLockMs: moment },
     services(relays([ROUND_33045040]).fetcher, deviceNow),
   );
-  assert.equal(behind.openAtMs, roundTimeMs(roundAtOrAfter(moment + 3_600_000)));
+  assert.equal(behind.timeLockMs, roundTimeMs(roundAtOrAfter(moment + 3_600_000)));
   // A clock ahead of drand, or relays out of reach, leave the moment as it is.
   for (const fetcher of [relays([ROUND_33045040]).fetcher, relays([], { down: true }).fetcher]) {
     const kept = await lock(
       new Uint8Array([1]),
-      { password: null, openAtMs: drandNow + 600_000 },
+      { password: null, timeLockMs: drandNow + 600_000 },
       services(fetcher, drandNow + 5_000),
     );
-    assert.equal(kept.openAtMs, roundTimeMs(roundAtOrAfter(drandNow + 600_000)));
+    assert.equal(kept.timeLockMs, roundTimeMs(roundAtOrAfter(drandNow + 600_000)));
   }
 });
 
@@ -266,7 +266,7 @@ test("a lock with a password and a time lock opens with either, and its content 
   const now = roundTimeMs(ROUND_33045040.round);
   const made = await lock(
     content,
-    { password: "both", openAtMs: QUICKNET_GENESIS_MS },
+    { password: "both", timeLockMs: QUICKNET_GENESIS_MS },
     services(relays([ROUND_1, ROUND_33045040]).fetcher, now),
   );
   assert.equal(made.bytes.length, 6 + 71 + 171 + 12 + content.length + 16);

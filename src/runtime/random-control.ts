@@ -453,7 +453,7 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
       return [
         instruction.value,
         ...(instruction.password === null ? [] : [instruction.password]),
-        ...(instruction.openAt === null ? [] : [instruction.openAt]),
+        ...(instruction.timeLock === null ? [] : [instruction.timeLock]),
         ...(instruction.default === null ? [] : [instruction.default]),
       ];
     case "storageWrite":

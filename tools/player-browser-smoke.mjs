@@ -146,6 +146,7 @@ async function main() {
         ["entrances", () => entrancesScenario(cdp, origin)],
         ["camera", () => cameraScenario(cdp, origin)],
         ["viewfinder", () => viewfinderScenario(cdp, origin)],
+        ["lock", () => lockScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -168,7 +169,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, and the camera view's controls on a phone",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, and the lock dialogs",
       );
     } finally {
       cdp.close();
@@ -1886,6 +1887,104 @@ async function messageUpdatesScenario(cdp, origin) {
     16_000,
     "Focus did not stay on the message whose link a change removed",
   );
+}
+
+/**
+ * A stand-in for the pinned drand relays on the next pages, which gives quicknet's beacon of round 1: round 1 is out, the
+ * latest round is round 1, and no later round is. Returns the identifier of the script that installs it.
+ */
+async function standInRelays(cdp) {
+  const round1 = {
+    round: 1,
+    randomness: "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",
+    signature:
+      "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b",
+  };
+  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const beacon = ${JSON.stringify(round1)};
+      const original = window.fetch.bind(window);
+      window.__drandRequests = [];
+      window.fetch = (input, init) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (!/^https:\\/\\/(api[23]?\\.drand\\.sh|drand\\.cloudflare\\.com)\\//u.test(url)) return original(input, init);
+        window.__drandRequests.push(url);
+        return Promise.resolve(
+          /\\/public\\/(1|latest)$/u.test(url)
+            ? new Response(JSON.stringify(beacon), { headers: { "content-type": "application/json" } })
+            : new Response("Requested future beacon", { status: 425 }),
+        );
+      };
+    })();`,
+  });
+  return identifier;
+}
+
+/**
+ * The `locks` package's dialogs (V30 §13, PLAYER-UI "Foreground interaction presentation"), coarsely: the lock dialog
+ * shows the openers the player chooses and locks with a password, which opens it in the unlock dialog; a dialog for a
+ * password alone shows no time lock; and a passed time lock opens without a dialog. No typed password is kept.
+ */
+async function lockScenario(cdp, origin) {
+  const identifier = await standInRelays(cdp);
+  try {
+    await setViewport(cdp, 1280, 800);
+    await navigate(cdp, `${origin}/player/?package=locks`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    const dialog = (kind) => `!!document.querySelector('[data-lock-dialog="${kind}"]')`;
+    const said = (text) =>
+      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+    const openers = `['time', 'password'].filter((name) => !!document.querySelector('[data-lock-' + name + ']')).join()`;
+    const lockWith = async (password, locked) => {
+      await typeInto(cdp, "[data-lock-password] [data-password-input]", password);
+      await waitFor(
+        cdp,
+        `!!document.querySelector('[data-lock-repeat]')`,
+        2_000,
+        "No repeat field",
+      );
+      await typeInto(cdp, "[data-lock-repeat] [data-password-input]", password);
+      await physicalClick(cdp, "[data-lock-submit]");
+      await waitFor(cdp, said(locked), 15_000, `The lock dialog did not lock: ${locked}`);
+    };
+    const openWith = async (password, opened) => {
+      await waitFor(cdp, dialog("unlock"), 8_000, "The unlock dialog did not open");
+      await typeInto(cdp, "[data-unlock-password] [data-password-input]", password);
+      await physicalClick(cdp, "[data-unlock-submit]");
+      await waitFor(cdp, said(opened), 15_000, `The password did not open it: ${opened}`);
+    };
+
+    // No opener written: the player chooses a time lock or a password.
+    await waitFor(cdp, dialog("lock"), 8_000, "The lock dialog did not open");
+    assertEqual(await value(cdp, openers), "time,password", "The lock dialog's openers");
+    await lockWith("corner pass", "Locked.");
+    await openWith("corner pass", "Opened: A secret note");
+
+    // `password: true, timeLock: false`: the dialog asks for the password alone.
+    await waitFor(cdp, dialog("lock"), 8_000, "The password's lock dialog did not open");
+    assertEqual(await value(cdp, openers), "password", "The password's lock dialog's openers");
+    await lockWith("only words", "Locked with a password.");
+    await openWith("only words", "Password: Only a password");
+
+    // A passed time lock opens with its round's beacon, without a dialog.
+    await waitFor(cdp, said("Time lock: From the past"), 15_000, "The time lock did not open");
+    assertEqual(
+      await value(cdp, `window.__drandRequests.some((url) => url.endsWith('/public/1'))`),
+      true,
+      "No relay was asked for the round",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `/corner pass|only words/u.test(JSON.stringify([document.body.innerText, localStorage]))`,
+      ),
+      false,
+      "A typed password was kept",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
 }
 
 async function cameraScenario(cdp, origin) {

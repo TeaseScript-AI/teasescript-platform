@@ -13,10 +13,10 @@ import PasswordField from "./PasswordField.vue";
 import type { LockDialog, LockDialogInput } from "../../lock-service.js";
 
 // The dialogs of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"), outside the chat like a popup's.
-// The lock dialog asks how an encrypt call that wrote no opener locks: the moment its time lock opens by itself,
-// suggested 7 days from now, which the player may move, or switch off with a warning, and an optional password, typed
-// twice; it locks once one of them opens it. The unlock dialog shows what opens a decrypt call's lock: a password field where a password does, and the moment of its
-// time lock; Cancel gives the call's default. What is typed stays in the Player. While the Player locks or opens with it
+// The lock dialog shows only the openers the player chooses: a time lock, suggested 7 days from now, which the player may
+// move, or switch off, and a password, typed twice. It locks once the lock has an opener, also one the call gives, and
+// warns while nothing but a password would open it. The unlock dialog shows what opens a decrypt call's lock: a password
+// field where a password does, and the moment of its time lock; Cancel gives the call's default. What is typed stays in the Player. While the Player locks or opens with it
 // (`busy`), the dialog takes no input but keeps focus where it is, and the control that started the work says so. As
 // for a popup, a click beside it does not close it, a key held down since before it opened does nothing, and while
 // Debug runs it is not modal and stands in the middle of the session's `area`.
@@ -53,7 +53,18 @@ function localText(moment: number): string {
   const two = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
 }
-const moment = ref(props.dialog.kind === "lock" ? localText(props.dialog.suggestedOpenAtMs) : "");
+/** The openers the lock dialog lets the player choose, and those the call gives itself. */
+const choices = computed(() => (props.dialog.kind === "lock" ? props.dialog.choices : []));
+const given = computed(() =>
+  props.dialog.kind === "lock" ? props.dialog.given : { password: false, timeLock: false },
+);
+const choosesTime = computed(() => choices.value.includes("timeLock"));
+const choosesPassword = computed(() => choices.value.includes("password"));
+const moment = ref(
+  props.dialog.kind === "lock" && props.dialog.suggestedTimeLockMs !== null
+    ? localText(props.dialog.suggestedTimeLockMs)
+    : "",
+);
 /** Whether the lock opens by itself at the chosen moment; switched off, the moment stays for when it is on again. */
 const timed = ref(true);
 function setTimed(on: boolean | "indeterminate") {
@@ -76,12 +87,26 @@ const future = computed(() => chosenMs.value !== null && chosenMs.value > now.va
 const mismatch = computed(
   () => repeated.value !== "" && !password.value.startsWith(repeated.value),
 );
-/** Without its time lock, a lock needs a password, or nothing would open it. */
-const openerless = computed(() => !timed.value && password.value === "");
+/** Whether the lock will have a time lock, and a password, as the player chose them or the call gives them. */
+const hasTime = computed(() => (choosesTime.value && timed.value) || given.value.timeLock);
+const hasPassword = computed(
+  () => (choosesPassword.value && password.value !== "") || given.value.password,
+);
+/** Nothing would open the lock. */
+const openerless = computed(() => !hasTime.value && !hasPassword.value);
+/** A field the player may leave empty, as another opener may open the lock. */
+const optional = computed(
+  () => choices.value.length > 1 || given.value.password || given.value.timeLock,
+);
+/** Why Lock waits: the openers the player can still set. */
+const reason = computed(() => {
+  const names = choices.value.map((choice) => (choice === "timeLock" ? "a time" : "a password"));
+  return `Set ${names.join(" or ")}.`;
+});
 const canLock = computed(
   () =>
-    (!timed.value || chosenMs.value !== null) &&
-    (password.value === "" || repeated.value === password.value) &&
+    (!choosesTime.value || !timed.value || chosenMs.value !== null) &&
+    (!choosesPassword.value || password.value === "" || repeated.value === password.value) &&
     !openerless.value,
 );
 
@@ -111,31 +136,35 @@ function lock() {
   if (props.busy || !canLock.value) return;
   // Checked at this moment too, as the clock may have passed the chosen moment since the last tick.
   now.value = Date.now();
-  if (timed.value && !future.value) return;
+  if (choosesTime.value && timed.value && !future.value) return;
   emit("submit", {
-    password: password.value === "" ? null : password.value,
-    openAtMs: timed.value ? chosenMs.value : null,
+    password: choosesPassword.value && password.value !== "" ? password.value : null,
+    timeLockMs: choosesTime.value && timed.value ? chosenMs.value : null,
   });
 }
 // An empty password is a password too: a script may lock with `password: ""`.
 function unlock() {
   if (props.busy) return;
   started.value = "unlock";
-  emit("submit", { password: password.value, openAtMs: null });
+  emit("submit", { password: password.value, timeLockMs: null });
 }
 function tryAgain() {
   if (props.busy) return;
   started.value = "retry";
-  emit("submit", { password: null, openAtMs: null });
+  emit("submit", { password: null, timeLockMs: null });
 }
 function cancel() {
   if (!props.busy) emit("cancel");
 }
 
-// The password field takes focus, or else Cancel, so the dialog always has it.
+// The password field takes focus, or else the time lock's moment, or else Cancel, so the dialog always has it.
+const momentField = ref<InstanceType<typeof Input> | null>(null);
 function focusFirst(event: Event) {
   event.preventDefault();
-  if (props.dialog.kind === "lock" || props.dialog.password) passwordField.value?.focus();
+  if (props.dialog.kind === "lock" ? choosesPassword.value : props.dialog.password)
+    passwordField.value?.focus();
+  else if (props.dialog.kind === "lock")
+    (momentField.value?.$el as HTMLElement | undefined)?.focus();
   else (cancelButton.value?.$el as HTMLElement | undefined)?.focus();
 }
 // Opened by the script, the dialog has no trigger to return focus to; the next interaction takes it.
@@ -182,66 +211,80 @@ function heldKey(event: KeyboardEvent) {
         @keydown="heldKey"
         @submit.prevent="lock"
       >
-        <div class="grid gap-1.5">
-          <!-- The checkbox switches the time lock off; the moment's field and its line name themselves by its label. -->
+        <p class="text-sm text-muted-foreground" data-lock-intro>
+          {{
+            choices.length > 1
+              ? "Choose one or more ways this can be opened again."
+              : "Choose how this can be opened again."
+          }}
+        </p>
+        <div v-if="choosesTime" class="grid gap-1.5" data-lock-time>
+          <!-- The checkbox switches the time lock off; the moment's field names itself by its label. -->
           <label class="flex min-h-11 items-center gap-3 text-sm font-medium">
             <Checkbox
               :model-value="timed"
               :aria-disabled="busy ? 'true' : undefined"
+              aria-describedby="lock-dialog-time-text"
               data-lock-timed
               @update:model-value="setTimed"
             />
-            <span id="lock-dialog-moment-label">Opens by itself at</span>
+            <span id="lock-dialog-time-label">Time lock</span>
           </label>
+          <p id="lock-dialog-time-text" class="text-sm text-muted-foreground">
+            Opens by itself after the time you set.
+          </p>
           <Input
             v-if="timed"
             id="lock-dialog-moment"
+            ref="momentField"
             v-model="moment"
             type="datetime-local"
             required
             :min="earliest"
             :readonly="busy"
             :aria-invalid="future ? undefined : 'true'"
-            aria-labelledby="lock-dialog-moment-label"
-            aria-describedby="lock-dialog-moment-hint"
+            aria-labelledby="lock-dialog-time-label"
+            aria-describedby="lock-dialog-time-text lock-dialog-moment-hint"
             data-lock-moment
           />
           <p
+            v-if="timed && !future"
             id="lock-dialog-moment-hint"
             role="status"
-            class="min-h-5 text-sm"
+            class="text-sm text-destructive"
             data-lock-moment-hint
           >
-            <span v-if="timed && !future" class="text-destructive"
-              >Choose a moment in the future.</span
-            >
-            <span v-else-if="openerless" class="text-destructive" data-lock-no-opener
-              >Set a time or a password.</span
-            >
-            <span v-else-if="!timed" class="flex items-start gap-2" data-lock-no-time>
-              <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <span
-                >Without a time, this only opens with the password. If the password is forgotten, it
-                never opens.</span
-              >
-            </span>
+            Choose a moment in the future.
           </p>
         </div>
-        <PasswordField
-          ref="passwordField"
-          v-model="password"
-          label="Password (optional)"
-          :busy="busy"
-          data-lock-password
-        />
-        <PasswordField
-          v-if="password !== ''"
-          v-model="repeated"
-          label="Repeat password"
-          :busy="busy"
-          :error="mismatch ? 'The passwords do not match' : null"
-          data-lock-repeat
-        />
+        <template v-if="choosesPassword">
+          <PasswordField
+            ref="passwordField"
+            v-model="password"
+            :label="optional ? 'Password (optional)' : 'Password'"
+            description="Opens with a password you choose."
+            :busy="busy"
+            data-lock-password
+          />
+          <PasswordField
+            v-if="password !== ''"
+            v-model="repeated"
+            label="Repeat password"
+            :busy="busy"
+            :error="mismatch ? 'The passwords do not match' : null"
+            data-lock-repeat
+          />
+        </template>
+        <p id="lock-dialog-status" role="status" class="min-h-5 text-sm" data-lock-status>
+          <span v-if="openerless" class="text-destructive" data-lock-no-opener>{{ reason }}</span>
+          <span v-else-if="!hasTime" class="flex items-start gap-2" data-lock-no-time>
+            <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span
+              >Without a time, this only opens with the password. If the password is forgotten, it
+              never opens.</span
+            >
+          </span>
+        </p>
         <!-- While busy, the controls look disabled but keep focus, as `aria-disabled` says. -->
         <div class="flex flex-wrap justify-end gap-2" :class="{ 'opacity-50': busy }">
           <Button
@@ -249,7 +292,7 @@ function heldKey(event: KeyboardEvent) {
             class="min-h-11"
             :disabled="!busy && !canLock"
             :aria-disabled="busy ? 'true' : undefined"
-            :aria-describedby="openerless ? 'lock-dialog-moment-hint' : undefined"
+            :aria-describedby="openerless ? 'lock-dialog-status' : undefined"
             data-lock-submit
           >
             {{ busy ? "Locking…" : "Lock" }}

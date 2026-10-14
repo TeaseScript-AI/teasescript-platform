@@ -329,6 +329,7 @@ export type {
   RuntimeInteractionActionSnapshot,
   RuntimeLockActionSettlementSnapshot,
   RuntimeLockActionSnapshot,
+  RuntimeLockChoice,
   RuntimeLockNotice,
   RuntimeMediaActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,

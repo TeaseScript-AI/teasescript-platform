@@ -290,10 +290,11 @@ function validForegroundActionKind(
 }
 
 /**
- * A pending step of a lock, for its instruction's call: a `work` step of an encrypt call has a written password or a
- * time lock, unless it follows the dialog; a decrypt call has no time lock; only the dialog of an encrypt call that
- * wrote no opener suggests a moment; the notice belongs to the unlock dialog, and a wrong password to one that follows a
- * dialog's step. The text is any text, the Base64 lock standard Base64, and a file one this session knows.
+ * A pending step of a lock, for its instruction's call. An encrypt call's lock dialog asks for the openers the player
+ * chooses, suggesting a moment for a chosen time lock, and the step after it locks with the openers the call gives and
+ * what the player chose; a step without the dialog has an opener. A decrypt call has no time lock and chooses nothing,
+ * its dialog and the step after it have no written password, and its notice belongs to the dialog. The text is any text,
+ * the Base64 lock standard Base64, and a file one this session knows.
  */
 function validLockAction(
   action: Record<string, unknown>,
@@ -316,7 +317,8 @@ function validLockAction(
       "phase",
       "value",
       "password",
-      "openAtMs",
+      "timeLockMs",
+      "choices",
       "dialogActionId",
       "notice",
       "resumes",
@@ -331,7 +333,8 @@ function validLockAction(
     !isOneOf(action.phase, ["work", "ask"]) ||
     typeof action.value !== "string" ||
     (action.password !== null && typeof action.password !== "string") ||
-    (action.openAtMs !== null && !isEpochMilliseconds(action.openAtMs)) ||
+    (action.timeLockMs !== null && !isEpochMilliseconds(action.timeLockMs)) ||
+    !validLockChoices(action.choices) ||
     (action.dialogActionId !== null &&
       !(
         positiveSafeInteger(action.dialogActionId) &&
@@ -343,6 +346,7 @@ function validLockAction(
     return false;
   const encrypts = action.call === "encryptText" || action.call === "encryptFile";
   const asks = action.phase === "ask";
+  const choices: readonly unknown[] = action.choices;
   const value = action.value;
   if (
     (action.call === "decryptText" && !isStandardBase64(value)) ||
@@ -350,37 +354,48 @@ function validLockAction(
       !holdsStoredFile(snapshot.storedFiles, value))
   )
     return false;
-  // A dialog, and the step after it, ask for nothing written: the dialog's call wrote no password.
-  if ((asks || action.dialogActionId !== null) && action.password !== null) return false;
   if (asks && action.dialogActionId !== null) return false;
   if (encrypts) {
     if (action.notice !== null) return false;
-    // The lock dialog suggests a moment; the step after it locks with what the player typed.
-    if (
-      asks ? action.openAtMs === null : action.dialogActionId !== null && action.openAtMs !== null
-    )
-      return false;
-    if (
-      !asks &&
-      action.dialogActionId === null &&
-      action.password === null &&
-      action.openAtMs === null
-    )
-      return false;
+    // The dialog and the step after it have choices; a chosen opener is not written, and a chosen time lock is
+    // suggested while the dialog asks and comes from the player's answer after it.
+    const dialog = asks || action.dialogActionId !== null;
+    if (dialog !== choices.length > 0) return false;
+    if (choices.includes("password") && action.password !== null) return false;
+    if (choices.includes("timeLock") && (action.timeLockMs !== null) !== asks) return false;
+    if (!dialog && action.password === null && action.timeLockMs === null) return false;
   } else {
-    if (action.openAtMs !== null) return false;
+    if (action.timeLockMs !== null || choices.length > 0) return false;
     if (!asks && action.notice !== null) return false;
+    // The unlock dialog, and the step after it, ask for nothing written: the dialog's call wrote no password.
+    if ((asks || action.dialogActionId !== null) && action.password !== null) return false;
   }
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const owner = plan.instructions[action.owningInstruction];
   if (owner?.kind !== "lock" || owner.call !== action.call) return false;
-  if ((owner.password !== null) !== (action.password !== null)) return false;
-  // Only a call that writes no opener asks: a decrypt call without a password, an encrypt call without any.
-  const dialogCall = owner.password === null && (!encrypts || owner.openAt === null);
-  if ((asks || action.dialogActionId !== null) && !dialogCall) return false;
-  // An encrypt call that writes no opener asks first; one without `openAt:` has the default time lock.
-  if (encrypts && !asks && action.dialogActionId === null)
-    return !dialogCall && (owner.openAt !== null || action.openAtMs !== null);
+  if (owner.password === null && action.password !== null) return false;
+  if (encrypts) {
+    if (owner.timeLock === null && action.timeLockMs !== null && !choices.includes("timeLock"))
+      return false;
+    // An encrypt call that writes no opener lets the player choose each.
+    return owner.password !== null || choices.length === LOCK_CHOICES.length;
+  }
+  // Only a decrypt call without a written password asks.
+  return owner.password === null || (!asks && action.dialogActionId === null);
+}
+
+/** The openers an encrypt call's lock dialog lets the player choose, in the order the dialog shows them. */
+const LOCK_CHOICES = ["timeLock", "password"] as const;
+
+/** Each choice once, in the order the dialog shows them. */
+function validLockChoices(value: unknown): value is readonly string[] {
+  if (!Array.isArray(value)) return false;
+  let next = 0;
+  for (const choice of value) {
+    const index = LOCK_CHOICES.findIndex((known, at) => at >= next && known === choice);
+    if (index === -1) return false;
+    next = index + 1;
+  }
   return true;
 }
 

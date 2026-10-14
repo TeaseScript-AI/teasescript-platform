@@ -37,6 +37,7 @@ import {
   type RuntimeCaptureActionSnapshot,
   type RuntimeFileStoreActionSnapshot,
   type RuntimeLockActionSnapshot,
+  type RuntimeLockChoice,
   type RuntimeLockNotice,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
@@ -1016,12 +1017,14 @@ export interface PlayerRuntimeDebugNow {
     readonly at: PlayerDebugSourceLocation;
     /**
      * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
-     * was written, and its time lock's moment in epoch milliseconds, or `null`.
+     * was written, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
+     * time lock, and the openers the player chooses in the lock dialog.
      */
     readonly lock?: {
       readonly dialog: boolean;
       readonly password: boolean;
-      readonly openAtMs: number | null;
+      readonly timeLockMs: number | null;
+      readonly choices: readonly RuntimeLockChoice[];
     };
   } | null;
   readonly calls: readonly PlayerDebugCall[];
@@ -1178,7 +1181,8 @@ export function playerRuntimeDebugNow(
                   lock: Object.freeze({
                     dialog: foreground.phase === "ask",
                     password: foreground.password !== null,
-                    openAtMs: foreground.openAtMs,
+                    timeLockMs: foreground.timeLockMs,
+                    choices: foreground.choices,
                   }),
                 }
               : {}),

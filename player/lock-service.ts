@@ -3,6 +3,7 @@ import {
   OCTET_STREAM,
   storedFileKind,
   type RuntimeLockActionSnapshot,
+  type RuntimeLockChoice,
   type RuntimeLockNotice,
 } from "../src/index.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
@@ -16,16 +17,20 @@ import type { PlayerDiagnostic } from "./session-camera.js";
 import { base64FromBytes, bytesFromBase64, type FileStoreMedia } from "./stored-files.js";
 
 /**
- * A dialog of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"): the lock dialog of an encrypt call that
- * wrote no opener, which suggests a moment, or the unlock dialog of a decrypt call, with what opens this lock.
+ * A dialog of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"): the lock dialog of an encrypt call, with
+ * the openers the player chooses, or the unlock dialog of a decrypt call, with what opens this lock.
  */
 export type LockDialog =
   | {
       readonly kind: "lock";
       readonly key: string;
       readonly actionId: number;
-      /** The moment the lock dialog suggests, 7 days from now, in epoch milliseconds. */
-      readonly suggestedOpenAtMs: number;
+      /** The openers the player chooses, in the order the dialog shows them. */
+      readonly choices: readonly RuntimeLockChoice[];
+      /** The moment the lock dialog suggests for a chosen time lock, 7 days from now, in epoch milliseconds. */
+      readonly suggestedTimeLockMs: number | null;
+      /** The openers the call itself gives besides them: a password, and a time lock. */
+      readonly given: { readonly password: boolean; readonly timeLock: boolean };
     }
   | {
       readonly kind: "unlock";
@@ -40,11 +45,11 @@ export type LockDialog =
 
 /**
  * What the player gave in a dialog: a password, and the lock dialog's moment, `null` where the player switched its time
- * lock off; nothing for "Try again".
+ * lock off or the dialog does not ask for one; nothing for "Try again".
  */
 export interface LockDialogInput {
   readonly password: string | null;
-  readonly openAtMs: number | null;
+  readonly timeLockMs: number | null;
 }
 
 export interface LockServiceHost {
@@ -231,8 +236,19 @@ export class LockService {
       return;
     }
     if (action.call === "encryptText" || action.call === "encryptFile") {
+      const timed = action.choices.includes("timeLock");
       this.#showDialog(
-        { kind: "lock", key, actionId: action.actionId, suggestedOpenAtMs: action.openAtMs! },
+        {
+          kind: "lock",
+          key,
+          actionId: action.actionId,
+          choices: action.choices,
+          suggestedTimeLockMs: timed ? action.timeLockMs : null,
+          given: {
+            password: action.password !== null,
+            timeLock: !timed && action.timeLockMs !== null,
+          },
+        },
         false,
       );
       return;
@@ -278,7 +294,7 @@ export class LockService {
     const wake = () => {
       if (this.#dialog?.key !== key || this.#busy) return;
       const remaining = due - this.#crypto.nowMs();
-      if (remaining <= 0) this.submit({ password: null, openAtMs: null });
+      if (remaining <= 0) this.submit({ password: null, timeLockMs: null });
       else this.#cancelRetry = this.#host.after(Math.min(remaining, MAX_WAKE_MS), wake);
     };
     wake();
@@ -312,6 +328,7 @@ export class LockService {
   /**
    * The answer of a `work` step: the lock or the opened content, or why not. `typed` is what the player typed in the
    * dialog before this step; `undefined` when this step follows a dialog whose typed answer this Player no longer has.
+   * An encrypt call locks with the openers it gives and, for those the player chose, what they typed.
    */
   async #work(
     action: RuntimeLockActionSnapshot,
@@ -321,10 +338,14 @@ export class LockService {
     try {
       if (action.call === "encryptText" || action.call === "encryptFile") {
         if (typed === undefined) return { kind: "ask" };
-        const openers =
-          typed === null ? { password: action.password, openAtMs: action.openAtMs } : typed;
+        // A step without the dialog chooses nothing.
+        const answer = typed ?? { password: null, timeLockMs: null };
+        const openers = {
+          password: action.choices.includes("password") ? answer.password : action.password,
+          timeLockMs: action.choices.includes("timeLock") ? answer.timeLockMs : action.timeLockMs,
+        };
         // A lock needs an opener. The dialog does not submit without one, and an answer without one asks again.
-        if (openers.password === null && openers.openAtMs === null) return { kind: "ask" };
+        if (openers.password === null && openers.timeLockMs === null) return { kind: "ask" };
         const content =
           action.call === "encryptText"
             ? new TextEncoder().encode(action.value)
