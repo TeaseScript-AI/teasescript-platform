@@ -84,9 +84,9 @@ async function main() {
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
-    // A synthetic camera that shows the test card for the camera scenario; permissions are granted or denied per
-    // scenario through CDP.
-    "--use-fake-device-for-media-stream",
+    // Two synthetic cameras that show the test card for the camera scenarios, like a phone's front and back cameras;
+    // permissions are granted or denied per scenario through CDP.
+    "--use-fake-device-for-media-stream=device-count=2",
     // A local-network name for the same server: plain HTTP there is not a secure context, unlike 127.0.0.1.
     `--host-resolver-rules=MAP ${LAN_HOST} 127.0.0.1`,
     `--remote-debugging-port=${debugPort}`,
@@ -145,6 +145,7 @@ async function main() {
         ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
         ["entrances", () => entrancesScenario(cdp, origin)],
         ["camera", () => cameraScenario(cdp, origin)],
+        ["viewfinder", () => viewfinderScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -167,7 +168,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, and the camera",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, and the camera view's controls on a phone",
       );
     } finally {
       cdp.close();
@@ -1988,6 +1989,56 @@ async function cameraScenario(cdp, origin) {
   await waitFor(
     cdp,
     `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
+  await cdp.call("Browser.resetPermissions");
+}
+
+// On a phone-sized screen the camera view's controls take real clicks in the window and over the Stage, whose top lies
+// under the Player's top controls: the mirror button flips the picture, and the switch opens the other fake camera.
+async function viewfinderScenario(cdp, origin) {
+  const video = (view) => `document.querySelector('${view} [data-viewfinder] video')`;
+  const playing = (view) => `${video(view)}?.readyState >= 2 && !${video(view)}.paused`;
+  const mirrored = (view) => `${video(view)}?.classList.contains('viewfinder-mirrored')`;
+  const camera = (view) => `${video(view)}?.srcObject?.getVideoTracks()[0]?.getSettings().deviceId`;
+  const flips = async (view) => {
+    const before = await value(cdp, mirrored(view));
+    await physicalClick(cdp, `${view} [data-viewfinder-mirror]`);
+    await waitFor(
+      cdp,
+      `${mirrored(view)} === ${!before}`,
+      2_000,
+      `A click on the mirror button in ${view} did not flip the picture`,
+    );
+  };
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "granted",
+  });
+  await setViewport(cdp, 390, 844);
+  await navigate(cdp, `${origin}/player/?dev&debug=off&scenario=viewfinder`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, playing("[data-floating-viewfinder]"));
+  await flips("[data-floating-viewfinder]");
+  await clickLabelled(cdp, "I'm ready, Mistress");
+  await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
+  await clickLabelled(cdp, "Put me on your Stage");
+  await waitFor(cdp, playing("[data-stage-camera]"));
+  await flips("[data-stage-camera]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-stage-camera] [data-viewfinder-switch]')`,
+    4_000,
+    "Two cameras offered no camera switch",
+  );
+  const before = await value(cdp, camera("[data-stage-camera]"));
+  await physicalClick(cdp, "[data-stage-camera] [data-viewfinder-switch]");
+  await waitFor(
+    cdp,
+    `${playing("[data-stage-camera]")} && ${camera("[data-stage-camera]")} !== ${JSON.stringify(before)}`,
+    8_000,
+    "The camera switch did not open the other camera",
   );
   await cdp.call("Browser.resetPermissions");
 }

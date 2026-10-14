@@ -107,7 +107,9 @@ import {
 import { serializableEquals } from "../../../src/runtime/serializable-values.js";
 import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
+import { useCameraChoice } from "./useCameraChoice";
 import { useImageCapture } from "./useImageCapture";
+import { usePlayerTextPreference } from "./usePlayerPreference";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import { useScreenWakeLock } from "./useScreenWakeLock";
 
@@ -333,6 +335,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   // Changes whenever the session camera may have opened, failed, ended, or been released.
   const cameraRevision = ref(0);
+  // The camera the player switched to; every camera the Player opens prefers it while the browser has it.
+  const chosenCamera = usePlayerTextPreference("player-camera");
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
@@ -343,6 +347,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       capturedMedia,
     ),
     reportDiagnostic,
+    () => chosenCamera.value,
   );
   /** Captured media resolves only through the trusted store, never as a package asset. */
   const resolveAsset = (path: string): string | null => {
@@ -574,7 +579,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       capturedMedia,
     ),
     () => {},
+    () => chosenCamera.value,
   );
+  const cameraChoice = useCameraChoice({
+    cameras: [camera, captureCamera],
+    revision: cameraRevision,
+    chosen: chosenCamera,
+  });
   const imageCapture = useImageCapture({
     // A session a Player error stopped takes no input, so its request's steps close.
     session: computed(() => (stopped.value ? null : servicedSession.value)),
@@ -1993,6 +2004,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     viewfinder,
     /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */
     viewfinderPlacement,
+    /**
+     * The camera view's controls, also on an image request's viewfinder: its mirroring, and the switch to the next
+     * camera where the browser reports two or more.
+     */
+    cameraChoice,
     /**
      * The image input of `askImage`: `store` checks and stores a chosen file, and `discard` drops a stored image that
      * never became the request's preview, for example after the request ended while the file was read.

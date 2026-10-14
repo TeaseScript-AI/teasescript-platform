@@ -101,6 +101,9 @@ class FakeTrack extends EventTarget {
   stop() {
     this.readyState = "ended";
   }
+  getSettings() {
+    return { deviceId: "fake camera" };
+  }
 }
 class FakeCanvas {
   constructor(
@@ -132,12 +135,12 @@ function stubBrowser(context: TestContext) {
     document,
     window: new EventTarget(),
     navigator: {
-      mediaDevices: {
+      mediaDevices: Object.assign(new EventTarget(), {
         getUserMedia: async () => {
           const track = new FakeTrack();
           return { getTracks: () => [track] };
         },
-      },
+      }),
     },
     MediaStream: class {
       constructor(readonly tracks: unknown) {}

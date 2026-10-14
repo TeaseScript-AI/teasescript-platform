@@ -29,7 +29,12 @@ export function createBrowserCaptureHost(
       const found: CaptureDeviceInfo[] = [];
       for (const device of await mediaDevices().enumerateDevices()) {
         if (device.kind === "videoinput")
-          found.push({ kind: "camera", deviceId: device.deviceId, label: device.label });
+          found.push({
+            kind: "camera",
+            deviceId: device.deviceId,
+            label: device.label,
+            ...facing(device),
+          });
         else if (device.kind === "audioinput")
           found.push({ kind: "microphone", deviceId: device.deviceId, label: device.label });
       }
@@ -73,6 +78,13 @@ function mediaDevices(): MediaDevices {
   if (!("mediaDevices" in navigator))
     throw new DOMException("Media capture is unavailable.", "NotSupportedError");
   return navigator.mediaDevices;
+}
+
+/** A camera's facing as the browser reports it before the camera opens; Firefox reports none. */
+function facing(device: MediaDeviceInfo): { facingMode?: string } {
+  if (typeof InputDeviceInfo === "undefined" || !(device instanceof InputDeviceInfo)) return {};
+  const [facingMode] = device.getCapabilities().facingMode ?? [];
+  return facingMode === undefined ? {} : { facingMode };
 }
 
 function constraints(request: CaptureRequest): MediaStreamConstraints {

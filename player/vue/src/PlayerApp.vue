@@ -94,9 +94,8 @@ const props = withDefaults(
     debug: () => ({ menu: false, autoSkip: false }),
   },
 );
-// The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
+// The camera view's window keeps the place the user gave it while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
-const viewfinderMirrored = ref(true);
 // An image request's camera step shows its viewfinder in the camera window the script shows, otherwise on the Stage,
 // where it shows the camera instead of any camera view the script shows there. Its first step shows the preview on the
 // Stage, over the Stage image and any camera view there.
@@ -599,10 +598,12 @@ async function toggleFullscreen() {
         <template #stage>
           <Stage
             ref="stage"
-            v-model:camera-mirrored="viewfinderMirrored"
+            v-model:camera-mirrored="player.cameraChoice.mirrored.value"
             :media="shownMedia"
             :camera="stageCamera"
             :preview="imagePreview"
+            :camera-switch-label="player.cameraChoice.switchLabel.value"
+            @switch-camera="player.cameraChoice.switchCamera"
             @media-aspect="mediaAspect = $event"
             @media-load="stageImageLoaded"
             @media-failure="stageImageFailed"
@@ -619,8 +620,10 @@ async function toggleFullscreen() {
               (captureInWindow || player.viewfinder.value)
             "
             v-model:place="floatingPlace"
-            v-model:mirrored="viewfinderMirrored"
+            v-model:mirrored="player.cameraChoice.mirrored.value"
             :track="captureInWindow ? capture!.track : player.viewfinder.value"
+            :switch-label="player.cameraChoice.switchLabel.value"
+            @switch-camera="player.cameraChoice.switchCamera"
           >
             <ImageCapture v-if="captureInWindow" :view="capture!" />
           </FloatingViewfinder>

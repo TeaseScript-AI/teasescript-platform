@@ -1,5 +1,11 @@
 import type { CapturedMediaAdmission, CaptureUnavailableReason } from "../src/index.js";
-import type { CaptureDevice, CaptureFailureKind, CaptureTrack } from "./capture-device.js";
+import type {
+  AcquireOutcome,
+  CaptureDevice,
+  CaptureDeviceInfo,
+  CaptureFailureKind,
+  CaptureTrack,
+} from "./capture-device.js";
 import {
   activePlayerRuntimeCapture,
   answerPlayerRuntimeCapture,
@@ -26,18 +32,29 @@ const REASONS: Readonly<Record<CaptureFailureKind, CaptureUnavailableReason>> = 
 /**
  * The session camera: opened once when the session starts, kept open while it runs, and used silently by
  * `takePhoto()`. Any failure leaves it unavailable for the rest of the session, so later captures answer `null`
- * without opening the camera again or asking for permission again.
+ * without opening the camera again or asking for permission again. The player may switch it to another camera.
  */
 export class SessionCamera<Track extends CaptureTrack> {
   readonly #device: CaptureDevice<Track>;
   readonly #diagnostic: (diagnostic: PlayerDiagnostic) => void;
+  /** The camera the player chose in this browser, or `null` for the browser's default camera. */
+  readonly #chosen: () => string | null;
   #unavailable: CaptureUnavailableReason | null = "unconfigured";
   /** Increments when the session camera is released, so late results of an earlier session are ignored. */
   #generation = 0;
+  /** A switch to another camera until it settled. */
+  #switching: Promise<boolean> | null = null;
+  /** The track a viewfinder keeps while the camera switches, until the next camera's picture arrives. */
+  #switchedFrom: Track | null = null;
 
-  constructor(device: CaptureDevice<Track>, diagnostic: (diagnostic: PlayerDiagnostic) => void) {
+  constructor(
+    device: CaptureDevice<Track>,
+    diagnostic: (diagnostic: PlayerDiagnostic) => void,
+    chosen: () => string | null = () => null,
+  ) {
     this.#device = device;
     this.#diagnostic = diagnostic;
+    this.#chosen = chosen;
   }
 
   get available(): boolean {
@@ -46,10 +63,69 @@ export class SessionCamera<Track extends CaptureTrack> {
 
   /**
    * The open camera's track for a viewfinder; never part of runtime state. Every way the camera becomes unavailable
-   * stops its stream, so an unavailable camera has none.
+   * stops its stream, so an unavailable camera has none. While the camera switches, the viewfinder keeps the previous
+   * track, so it stays in place until the next camera's track replaces it.
    */
   get previewTrack(): Track | null {
-    return this.#device.track("camera");
+    const track = this.#device.track("camera");
+    if (track !== null || this.#switching === null || this.#unavailable !== null) return track;
+    return this.#switchedFrom;
+  }
+
+  /** The cameras the browser reports, in its order; none before the player allows a camera, or when it lists none. */
+  async cameras(): Promise<readonly CaptureDeviceInfo[]> {
+    const listed = await this.#device.listDevices();
+    if (listed.kind === "failed") return [];
+    return listed.devices.filter((device) => device.kind === "camera" && device.deviceId !== "");
+  }
+
+  /**
+   * Switches the open camera to the camera `deviceId` without closing the session camera: a photo taken meanwhile comes
+   * from the next camera. One that cannot be opened opens the chosen or the default camera again. `true` once the
+   * camera switched; `false` when it is not open, is already switching, or could not switch.
+   */
+  switchTo(deviceId: string): Promise<boolean> {
+    if (this.#unavailable !== null || this.#switching !== null) return Promise.resolve(false);
+    const generation = this.#generation;
+    this.#switchedFrom = this.#device.track("camera");
+    const switching = this.#switch(deviceId, generation).finally(() => {
+      if (this.#switching !== switching) return;
+      this.#switching = null;
+      this.#switchedFrom = null;
+    });
+    this.#switching = switching;
+    return switching;
+  }
+
+  async #switch(deviceId: string, generation: number): Promise<boolean> {
+    const outcome = await this.#device.acquire({ camera: { deviceId } });
+    if (generation !== this.#generation || outcome.kind !== "failed")
+      return outcome.kind === "active";
+    // Most phones open one camera at a time, so the previous camera already closed.
+    const reopened = await this.#openChosen(generation);
+    if (generation === this.#generation && reopened.kind === "failed")
+      this.#markUnavailable(
+        REASONS[reopened.failure.kind],
+        "could not be opened again",
+        reopened.failure,
+      );
+    return false;
+  }
+
+  /**
+   * Opens the camera the player chose, or the browser's default camera without a choice or once the browser no longer
+   * has the chosen one. Browsers such as Chromium open only an exactly requested camera, not merely a preferred one.
+   */
+  async #openChosen(generation: number): Promise<AcquireOutcome> {
+    const chosen = this.#chosen();
+    if (chosen !== null) {
+      const outcome = await this.#device.acquire({ camera: { deviceId: chosen } });
+      const gone =
+        outcome.kind === "failed" &&
+        (outcome.failure.kind === "not-found" || outcome.failure.kind === "overconstrained");
+      if (!gone || generation !== this.#generation) return outcome;
+    }
+    return this.#device.acquire({ camera: {} });
   }
 
   /**
@@ -64,7 +140,7 @@ export class SessionCamera<Track extends CaptureTrack> {
       return true;
     }
     if (this.#unavailable === null && this.#device.state("camera").status === "active") return true;
-    const outcome = await this.#device.acquire({ camera: {} });
+    const outcome = await this.#openChosen(generation);
     if (generation !== this.#generation) return false;
     if (outcome.kind === "active") this.#unavailable = null;
     else if (outcome.kind === "failed")
@@ -81,6 +157,8 @@ export class SessionCamera<Track extends CaptureTrack> {
   /** Captures a photo for `takePhoto()`, or reports why the camera is unavailable. */
   async answer(): Promise<PlayerCaptureAnswer> {
     const generation = this.#generation;
+    if (this.#switching !== null) await this.#switching;
+    if (generation !== this.#generation) return { kind: "unavailable", reason: "revoked" };
     if (this.#unavailable !== null) return { kind: "unavailable", reason: this.#unavailable };
     const photo = await this.#device.capturePhoto();
     if (generation !== this.#generation) return { kind: "unavailable", reason: "revoked" };
@@ -93,6 +171,8 @@ export class SessionCamera<Track extends CaptureTrack> {
   release(): void {
     this.#generation++;
     this.#unavailable = "unconfigured";
+    this.#switching = null;
+    this.#switchedFrom = null;
     this.#device.reset();
   }
 

@@ -96,7 +96,7 @@ function stubBrowser(
     window: new EventTarget(),
     navigator: {
       ...(wakeLock === "missing" ? {} : { wakeLock: { request } }),
-      mediaDevices: {
+      mediaDevices: Object.assign(new EventTarget(), {
         getUserMedia: async () => {
           await cameraGranted;
           const track = Object.assign(new EventTarget(), {
@@ -104,10 +104,11 @@ function stubBrowser(
             label: "fake camera",
             readyState: "live",
             stop() {},
+            getSettings: () => ({ deviceId: "fake camera" }),
           });
           return { getTracks: () => [track] };
         },
-      },
+      }),
     },
     Audio: class {
       src = "";

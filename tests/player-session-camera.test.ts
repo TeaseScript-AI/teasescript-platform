@@ -7,6 +7,7 @@ import {
   type CaptureRequest,
   type CaptureTrack,
 } from "../player/capture-device.js";
+import { nextCamera } from "../player/camera-choice.js";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { RgbaImage } from "../player/rgba-image.js";
 import {
@@ -16,6 +17,8 @@ import {
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 class FakeTrack implements CaptureTrack {
   readonly kind = "video";
@@ -34,18 +37,23 @@ class FakeTrack implements CaptureTrack {
   }
 }
 
-function harness(grant: (request: CaptureRequest) => Promise<readonly FakeTrack[]>) {
+function harness(
+  grant: (request: CaptureRequest) => Promise<readonly FakeTrack[]>,
+  chosen: () => string | null = () => null,
+) {
   const requests: CaptureRequest[] = [];
   const diagnostics: PlayerDiagnostic[] = [];
-  const frames = { fail: false };
+  const grabbed: FakeTrack[] = [];
+  const frames = { fail: false, grabbed };
   const host: CaptureHost<FakeTrack> = {
     acquire: (request) => (requests.push(request), grant(request)),
     listDevices: async () => [],
     createRecorder: () => {
       throw new Error("not used");
     },
-    grabFrame: async () => {
+    grabFrame: async (track) => {
       if (frames.fail) throw Object.assign(new Error(), { name: "NotReadableError" });
+      frames.grabbed.push(track);
       return new RgbaImage(1, 1, new Uint8ClampedArray([1, 2, 3, 255]));
     },
     encodeImage: async () => new Blob(["png"], { type: "image/png" }),
@@ -64,8 +72,10 @@ function harness(grant: (request: CaptureRequest) => Promise<readonly FakeTrack[
     "package",
   );
   const device = new CaptureDevice(host, media);
-  const camera: SessionCamera<FakeTrack> = new SessionCamera(device, (diagnostic) =>
-    diagnostics.push(diagnostic),
+  const camera: SessionCamera<FakeTrack> = new SessionCamera(
+    device,
+    (diagnostic) => diagnostics.push(diagnostic),
+    chosen,
   );
   return { camera, device, media, requests, diagnostics, frames };
 }
@@ -164,6 +174,68 @@ test("the viewfinder previews only the open camera's live track", async () => {
   assert.equal(released.camera.previewTrack, null);
 });
 
+test("the player switches the open camera, and a photo taken meanwhile comes from the next camera", async () => {
+  const opened: FakeTrack[] = [];
+  const pending: Array<() => void> = [];
+  let chosen: string | null = "back";
+  const { camera, requests, frames } = harness(
+    () =>
+      new Promise((resolve) => {
+        const track = new FakeTrack();
+        opened.push(track);
+        // The first camera opens at once; a switch waits until the test lets it open.
+        if (opened.length === 1) resolve([track]);
+        else pending.push(() => resolve([track]));
+      }),
+    () => chosen,
+  );
+  // The camera the player chose opens.
+  await camera.open(true);
+  assert.deepEqual(requests[0], { camera: { deviceId: "back" } });
+  const [first] = opened;
+  const switching = camera.switchTo("front");
+  await settle();
+  assert.deepEqual(requests[1], { camera: { deviceId: "front" } });
+  // Phones open one camera at a time: the previous camera closed, and the view keeps its picture until the next arrives.
+  assert.equal(first?.readyState, "ended");
+  assert.equal(camera.previewTrack, first);
+  const photo = camera.answer();
+  pending.shift()?.();
+  assert.equal(await switching, true);
+  assert.equal((await photo).kind, "captured");
+  assert.equal(frames.grabbed[0], opened[1]);
+  assert.equal(camera.previewTrack, opened[1]);
+
+  // A camera that cannot be opened opens the chosen camera again, and the session camera stays open. A chosen camera
+  // the browser no longer has opens the default camera.
+  chosen = "front";
+  const failing = harness(
+    async (request) => {
+      if (request.camera?.deviceId === "gone")
+        throw Object.assign(new Error(), { name: "OverconstrainedError" });
+      return [new FakeTrack()];
+    },
+    () => chosen,
+  );
+  await failing.camera.open(true);
+  assert.equal(await failing.camera.switchTo("gone"), false);
+  assert.deepEqual(failing.requests.at(-1), { camera: { deviceId: "front" } });
+  assert.equal(failing.camera.available, true);
+  assert.equal((await failing.camera.answer()).kind, "captured");
+  failing.camera.release();
+  chosen = "gone";
+  await failing.camera.open(true);
+  assert.deepEqual(failing.requests.slice(-2), [{ camera: { deviceId: "gone" } }, { camera: {} }]);
+  assert.equal(failing.camera.available, true);
+  assert.deepEqual(failing.diagnostics, []);
+
+  // The switch steps through the browser's cameras in its order and wraps around; one camera has nothing to switch to.
+  const cameras = [{ deviceId: "front" }, { deviceId: "back" }, { deviceId: "wide" }];
+  assert.equal(nextCamera(cameras, "back")?.deviceId, "wide");
+  assert.equal(nextCamera(cameras, "wide")?.deviceId, "front");
+  assert.equal(nextCamera(cameras.slice(0, 1), "front"), null);
+});
+
 test("a session released while the browser answers never reports its camera as opened", async () => {
   let grant = (_tracks: readonly FakeTrack[]) => {};
   const track = new FakeTrack();
@@ -198,8 +270,6 @@ function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
   };
   return { state, service, diagnostics, held, start };
 }
-
-const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("a capture is answered once and its photo continues the script", async () => {
   let answers = 0;

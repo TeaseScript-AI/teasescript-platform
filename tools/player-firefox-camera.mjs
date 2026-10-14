@@ -171,6 +171,11 @@ async function checks(page, url) {
   await tab.waitForFunction(decodedPhotos);
   await tab.locator("button", { hasText: "Put me on your Stage" }).click();
   await wide("[data-stage-camera]");
+  // Firefox's fake camera is the only camera, so there is no other one to switch to.
+  check(
+    (await tab.locator("[data-viewfinder-switch]").count()) === 0,
+    "A single camera offered a camera switch",
+  );
   await tab.locator("button", { hasText: "Back to the window" }).click();
   await wide("[data-floating-viewfinder]");
   // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
@@ -179,7 +184,7 @@ async function checks(page, url) {
   check((await tab.locator("[data-viewfinder]").count()) === 0, "hideCamera left a camera view");
   check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
   await tab.close();
-  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder";
+  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder without a camera switch";
 }
 
 let passed = false;
