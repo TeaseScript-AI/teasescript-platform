@@ -650,6 +650,38 @@ test("restores prepared speaker aliases before and after nested identity mutatio
   );
 });
 
+test("restores a prepared receiver that follows its speaker after a call replaces its holder", () => {
+  const { boundaries, events } = assertRuntimeResumeEquivalent(
+    [
+      "speaker vera { items: [1] }",
+      "speaker anna { items: [2] }",
+      "let current = vera",
+      "function change { wait 1 s\ncurrent = anna\nwait 1 s\nreturn 5 }",
+      "current.items.add(change())",
+      'say "${toJson(vera.items)} ${toJson(anna.items)}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["[1,5] [2]"],
+  );
+  // While the call waits after the change, the receiver is attached to vera's global.
+  assert.ok(
+    boundaries.some((snapshot) =>
+      snapshot.callFrames.some((frame) =>
+        frame.callerTemporaries.some(
+          (temporary) =>
+            serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+            serializedObjectProperty(temporary.value, "rootName") === "vera" &&
+            serializedObjectProperty(temporary.value, "detached") === false,
+        ),
+      ),
+    ),
+  );
+});
+
 test("restores retained prepared list items across structural index shifts", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(
     [

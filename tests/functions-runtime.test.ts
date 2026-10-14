@@ -564,6 +564,75 @@ test("keeps a prepared speaker receiver when a call gives its variable another s
   assert.deepEqual(sayTexts(result), ["Lady", "Miss"]);
 });
 
+test("a prepared receiver in a speaker's state keeps that speaker when a call replaces or removes its holder", () => {
+  const speakers = [
+    "speaker vera {\n    items: [1]\n    config: { value: 1 }\n}",
+    "speaker anna {\n    items: [2]\n    config: { value: 2 }\n}",
+    "speaker cara {\n    boss: vera\n}",
+  ].join("\n");
+  const toAnna = "let current = vera\nfunction change { current = anna\nreturn 5 }";
+  const added = "[1,5] 1 [2] 2";
+  const cases: readonly (readonly [string, string, string])[] = [
+    [toAnna, "current.items.add(change())", added],
+    [toAnna, "current.items[0] = change()", "[5] 1 [2] 2"],
+    [toAnna, "current.config.value = change()", "[1] 5 [2] 2"],
+    [
+      "let current = vera\nfunction change { current = vera\nreturn 5 }",
+      "current.items.add(change())",
+      added,
+    ],
+    [
+      "let people = [vera]\nfunction change { people[0] = anna\nreturn 5 }",
+      "people[0].items.add(change())",
+      added,
+    ],
+    [
+      "let people = [vera]\nfunction change { people.removeFirst()\nreturn 5 }",
+      "people[0].items.add(change())",
+      added,
+    ],
+    [
+      'let roles = dict{ boss: vera }\nfunction change { roles.remove("boss")\nreturn 5 }',
+      'roles["boss"].items.add(change())',
+      added,
+    ],
+    [
+      "let box = { who: vera }\nfunction change { box = { who: anna }\nreturn 5 }",
+      "box.who.items.add(change())",
+      added,
+    ],
+    [
+      "let current = cara\nfunction change { cara.boss = anna\nreturn 5 }",
+      "current.boss.items.add(change())",
+      added,
+    ],
+  ];
+  for (const [setup, store, expected] of cases) {
+    const result = runSource(
+      [
+        speakers,
+        setup,
+        store,
+        'say "${toJson(vera.items)} ${vera.config.value} ${toJson(anna.items)} ${anna.config.value}"',
+        "exit",
+      ].join("\n"),
+    );
+    assert.deepEqual(sayTexts(result), [expected], `${setup}\n${store}`);
+  }
+
+  // A read through the old holder still gives the value from before the call, which the call then changes.
+  const read = runSource(
+    [
+      speakers,
+      "let current = vera",
+      "function change { current = anna\nvera.items[0] = 9\nreturn 0 }",
+      'say "${current.items[0] + change()} ${vera.items[0]}"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(read), ["1 9"]);
+});
+
 test("functions read and assign package-global variables without leaking locals", () => {
   const result = runSource(
     [
