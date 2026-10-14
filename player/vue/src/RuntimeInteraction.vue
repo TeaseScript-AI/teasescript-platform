@@ -624,7 +624,8 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 // Typing focus stays in the composer (PLAYER-UI.md "Input growth, focus, and keyboard behavior"), except on touch-only
 // devices. A click on Player content that is no control, which moves focus to the conversation or the page, gives it
 // back. A click that selected text keeps it, as focusing the composer would clear the selection, and a key typed then
-// goes to the composer as typed there; a part focused with the keyboard, such as the conversation, keeps its keys.
+// goes to the composer as typed there; a part focused with the keyboard, such as the conversation by Tab, keeps its keys
+// until a pointer takes it again.
 useEventListener(document, "click", (event: MouseEvent) => {
   const target = event.target;
   if (
@@ -638,6 +639,7 @@ useEventListener(document, "click", (event: MouseEvent) => {
     focusInput();
 });
 let focusedByPointer = false;
+useEventListener(document, "pointerdown", () => (focusedByPointer = true), { capture: true });
 useEventListener(document, "focusin", () => (focusedByPointer = playerPointerModality()));
 useEventListener(document, "keydown", (event: KeyboardEvent) => {
   const target = event.target;
@@ -649,9 +651,9 @@ useEventListener(document, "keydown", (event: KeyboardEvent) => {
     !event.metaKey &&
     !event.altKey &&
     textSelected() &&
+    focusedByPointer &&
     (target === document.body ||
-      (focusedByPointer &&
-        target instanceof Element &&
+      (target instanceof Element &&
         !!composition.value?.contains(target) &&
         !target.closest(playerControls)))
   ) {

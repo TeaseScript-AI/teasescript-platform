@@ -469,6 +469,10 @@ async function startComposerFocusChecks(page) {
     (await next.count()) === 1,
     "Space in the conversation focused with the keyboard pressed the showButton",
   );
+  // A word selected with the mouse again hands Space back to the composer.
+  await page.locator("[data-slot=bubble]").last().dblclick();
+  await page.keyboard.press("Space");
+  await next.waitFor({ state: "detached", timeout: 2000 });
   return "PASS the composer takes and keeps focus, where Space presses the showButton, unlike in the focused conversation";
 }
 
