@@ -611,18 +611,18 @@ Standard image/video-like presentation:
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
 
 The Stage image colours the whole Player: the photo decides the hue and colourfulness, from its Vibrant-family colour
-for the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its
-contrast. The background, message bubbles, composer, buttons, and tools follow the photo together. The background is
-deepest in colour around the photo; towards its far edges it darkens in dark mode and pales in light mode. With the
-Photo accent A/B test's A, the default, the accent (Send, the preselected ring, and the other accent marks) takes the
-photo's hue too; B keeps the theme's accent, as does a photo with too little colour. A grey photo makes the Player
-neutral at the same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a
-new image loads, and when the browser does not let the Player read an image's pixels, the previous photo's colour
-stays; a camera view or an image request's preview over the Stage does not change it. The Player follows a new photo
-once it has shown briefly and reuses recent image measurements. From one photo's colour to the next in the same mode
-it fades the background and message bubbles, which keep their lightness; the first photo's colour, the theme's
-return, and a mode change switch at once, together with the text on them. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
-(`player/theme/node-vibrant/`).
+for the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast.
+The background, message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in
+colour around the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent
+A/B test's A, the default, the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue
+too; B keeps the theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
+same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a new image loads,
+and when the browser does not let the Player read an image's pixels, the previous photo's colour stays; a camera view or
+an image request's preview over the Stage does not change it. The Player follows a new photo once it has shown briefly
+and reuses recent image measurements. From one photo's colour to the next in the same mode it fades the background and
+message bubbles, which keep their lightness; the first photo's colour, the theme's return, and a mode change switch at
+once, together with the text on them. Reduced motion removes the fade. The colours are measured as node-vibrant measures
+its swatches (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
 without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed
