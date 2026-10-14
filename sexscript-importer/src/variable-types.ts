@@ -761,10 +761,13 @@ function analyse(
   const nullableWrites = new Set<Binding>();
   // Java object arrays of one dimension, and the lists whose slots get a value of a type the conversion does not know.
   const nullArrays = new Set<Binding>();
+  // The arrays whose code compares a slot with null, which expects the null of a slot not yet written; their slots
+  // may be null only where the code also only compares or shows them (onlyComparedElements), since a slot read
+  // elsewhere, as in arithmetic, is never narrowed by such a test.
+  const nullTestedArrays = nullComparedLists(statements);
   const unknownSlots = new Set<Binding>();
   // Java object arrays of two dimensions, which start with null in every slot, and the values written to their slots.
   const nullRows = new Set<Binding>();
-  const rowWrites = new Map<Binding, TeaseType[]>();
   // A Java object array starts with null in every slot (sexscriptLegacyArray, sexscriptLegacyArrayRows).
   // Only where the code reads and writes the array's slots by their positions: another name for the array or one of
   // its rows, a call, or a result may write other values, which these rules do not see.
@@ -772,7 +775,12 @@ function analyse(
     if (value.kind !== "call" || value.local === true) return;
     const start = value.positional.at(-1);
     if (start?.kind !== "literal" || start.value !== null) return;
-    if (value.name === "sexscriptLegacyArray" && slotsOnly(statements, target.name, 1)) {
+    if (
+      value.name === "sexscriptLegacyArray" &&
+      nullTestedArrays.has(target.name) &&
+      onlyComparedElements(statements, target.name) &&
+      slotsOnly(statements, target.name)
+    ) {
       nullableWrites.add(target);
       nullArrays.add(target);
     }
@@ -1279,19 +1287,6 @@ function analyse(
       }
       case "assign": {
         const value = typeOf(item.value, scope);
-        // `rows[i][j] = value` in a Java two-dimensional array (sexscriptLegacyArrayRows).
-        if (
-          item.target.kind === "index" &&
-          item.target.target.kind === "index" &&
-          item.target.target.target.kind === "variable" &&
-          item.operator === "="
-        ) {
-          // A value of unknown type, such as a parameter's, may be of any type: the rows hold any values then.
-          const rows = scope.resolve(item.target.target.target.name);
-          if (rows !== undefined && value.kind !== "null")
-            rowWrites.set(rows, [...(rowWrites.get(rows) ?? []), nonNull(value)]);
-          return;
-        }
         if (item.target.kind === "index" && item.target.target.kind === "variable") {
           const list = scope.resolve(item.target.target.name);
           if (list !== undefined && item.operator === "=" && emptySlots(list.declaration?.value))
@@ -1636,29 +1631,11 @@ function analyse(
       change(() => (list.union = nullable));
     }
   }
-  // A Java two-dimensional object array holds null in every slot not yet written: where its slots get values of one
-  // type it holds those or null, `string?[][]`, and otherwise any rows, `list`, so that no first write fixes a type
-  // without null.
+  // A Java two-dimensional object array holds null in every slot not yet written, and its rows may reach other names:
+  // its type is any rows, `list`, so that no first write fixes an element type without null.
   for (const rows of nullRows) {
     if (rows.declaration === null || rows.fixed !== undefined || rows.union !== undefined) continue;
-    const written = rowWrites.get(rows) ?? [];
-    const element = written.some((type) => type.kind === "unknown")
-      ? null
-      : written.reduce<TeaseType | null>(
-          (joined, type) =>
-            joined === null
-              ? null
-              : isAssignable(joined, type)
-                ? joined
-                : isAssignable(type, joined)
-                  ? type
-                  : null,
-          written[0] ?? null,
-        );
-    if (element?.kind === "scalar" && slotsOnly(statements, rows.name, 2)) {
-      const nullable = listOf(listOf({ kind: "optional", value: element }));
-      change(() => (rows.union = nullable));
-    } else if (rows.anyRows !== true) change(() => (rows.anyRows = true));
+    if (rows.anyRows !== true) change(() => (rows.anyRows = true));
   }
   // So does a list written out with elements of one type, `ids = [0, 0, 0]`, where a stored number read without a
   // default writes a missing key's null and the code compares its elements with null (stripordie's player IDs, whose
@@ -2061,10 +2038,10 @@ function bindingType(binding: Binding): TeaseType | undefined {
 }
 
 /**
- * Whether every use of a variable of this name reads or writes one of its slots, `rows[i][j]` at `depth` 2, or its
- * length, or assigns it: no other name, call, or result can reach its slots.
+ * Whether every use of a variable of this name reads or writes one of its slots, `names[i]`, or its length, or assigns
+ * it a new array of empty slots: no other name, call, or result can reach its slots.
  */
-function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 2): boolean {
+function slotsOnly(statements: readonly IrStatement[], name: string): boolean {
   let only = true;
   const visit = (value: unknown, parents: readonly unknown[]): void => {
     if (!only) return;
@@ -2074,12 +2051,10 @@ function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 
     }
     if (!isRecord(value)) return;
     if (value.kind === "variable" && value.name === name) {
-      const [parent, grand] = [parents.at(-1), parents.at(-2)];
-      const indexOf = (node: unknown, target: unknown): boolean =>
-        isRecord(node) && node.kind === "index" && node.target === target;
+      const parent = parents.at(-1);
       const length = isRecord(parent) && parent.kind === "property" && parent.name === "length";
-      // Assigned a new array of the same shape and empty slots; any other array, `rows = other` or `rows = new
-      // int[2][2]`, may hold other values.
+      // Assigned a new array of empty slots; any other array, `names = other` or `names = new int[2]`, may hold other
+      // values.
       const fresh = isRecord(parent) && isRecord(parent.value) ? parent.value : null;
       const start =
         fresh !== null && Array.isArray(fresh.positional) ? fresh.positional.at(-1) : null;
@@ -2088,15 +2063,11 @@ function slotsOnly(statements: readonly IrStatement[], name: string, depth: 1 | 
         parent.kind === "assign" &&
         parent.target === value &&
         fresh?.kind === "call" &&
-        fresh.name === (depth === 1 ? "sexscriptLegacyArray" : "sexscriptLegacyArrayRows") &&
+        fresh.name === "sexscriptLegacyArray" &&
         isRecord(start) &&
         start.kind === "literal" &&
         start.value === null;
-      const slot =
-        depth === 1
-          ? indexOf(parent, value)
-          : indexOf(parent, value) &&
-            (indexOf(grand, parent) || (isRecord(grand) && grand.kind === "property"));
+      const slot = isRecord(parent) && parent.kind === "index" && parent.target === value;
       if (!length && !assigned && !slot) only = false;
       return;
     }
