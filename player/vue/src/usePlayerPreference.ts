@@ -32,17 +32,17 @@ export function usePlayerPreference<T extends string>(
 
 /**
  * Moves the choice stored for the former Photo colour transition A/B test, which changed the fade time and the blending
- * together, to the two tests that replaced it (owner decision 2026-10-14): its B, 0.3 s blended in sRGB, chooses B in
- * both; its A was their defaults, so it leaves both unchosen.
+ * together, to the two tests that replaced it (owner decision 2026-10-14): its A, 0.6 s blended in Oklab, chooses A in
+ * both, and its B, 0.3 s blended in sRGB, B in both, so a choice stays when a default changes.
  */
 export function migratePhotoTransition(storage: Storage | undefined) {
   if (!storage) return;
   try {
     const stored = storage.getItem("player-photo-transition");
     if (stored === null) return;
-    if (stored === "srgb") {
-      storage.setItem("player-photo-fade-time", "0.3s");
-      storage.setItem("player-photo-blending", "srgb");
+    if (stored === "oklab" || stored === "srgb") {
+      storage.setItem("player-photo-fade-time", stored === "oklab" ? "0.6s" : "0.3s");
+      storage.setItem("player-photo-blending", stored);
     }
     storage.removeItem("player-photo-transition");
   } catch {

@@ -146,15 +146,15 @@ watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
 // The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, the
-// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, and the photo colour
-// fade time and blending to A, 0.6 s and Oklab.
+// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, the photo colour fade
+// time to B, 0.3 s, and the blending to A, Oklab.
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
 // A new key: until B became the default, every browser stored the default A on its first load.
 const photoAccentOption = usePlayerPreference("player-photo-accent-v2", ["photo", "theme"], "theme");
 const photoFamily = usePlayerPreference("player-photo-family", PHOTO_FAMILIES, "large-vibrant");
 const photoFamilyShare = usePlayerNumberPreference("player-photo-family-share", { min: 0, max: 100 }, 3);
 migratePhotoTransition(browserStorage());
-const photoFadeTime = usePlayerPreference("player-photo-fade-time", ["0.6s", "0.3s"], "0.6s");
+const photoFadeTime = usePlayerPreference("player-photo-fade-time", ["0.6s", "0.3s"], "0.3s");
 const photoBlending = usePlayerPreference("player-photo-blending", ["oklab", "srgb"], "oklab");
 // Settings' switch for the A/B tests panel, on unless turned off.
 const storedAbTestsMenu = usePlayerPreference("player-ab-tests-menu", ["on", "off"], "on");

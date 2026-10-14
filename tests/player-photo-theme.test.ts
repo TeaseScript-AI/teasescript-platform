@@ -213,10 +213,12 @@ class MemoryStorage implements Storage {
 }
 
 test("a choice stored for the former Photo colour transition test moves to the fade time and blending tests", () => {
-  // Its B, 0.3 s in sRGB, chooses B in both; its A, both defaults, chooses neither.
+  // Its A, 0.6 s in Oklab, chooses A in both, even where A is no longer the default; its B, 0.3 s in sRGB, chooses B
+  // in both. Unknown stored text chooses neither.
   for (const [stored, moved] of [
+    ["oklab", { "player-photo-fade-time": "0.6s", "player-photo-blending": "oklab" }],
     ["srgb", { "player-photo-fade-time": "0.3s", "player-photo-blending": "srgb" }],
-    ["oklab", {}],
+    ["sepia", {}],
   ] as const) {
     const storage = new MemoryStorage({ "player-photo-transition": stored });
     migratePhotoTransition(storage);

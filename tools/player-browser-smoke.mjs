@@ -1421,9 +1421,9 @@ async function keptSessionScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, the Next options of the photo
- * accent, fade time and blending A/B tests change the Player, and the empty Stage after `hideImage` gives
- * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, fading in 0.3 s unless a
+ * fade time is chosen, the photo accent, fade time and blending A/B tests change the Player, only a dropdown A/B test
+ * has a Next option, and the empty Stage after `hideImage` gives the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
  * in both modes and in Standard and High contrast.
  */
 async function photoColourScenario(cdp, origin, profile) {
@@ -1493,37 +1493,45 @@ async function photoColourScenario(cdp, origin, profile) {
     false,
     "The photo left the painted background unchanged",
   );
-  // The A/B tests panel opens from the tools menu, and its photo accent's Next option changes the Player's colours.
-  const abTests = '[data-tools-focus="launcher:A/B tests"]';
-  const nextAccent = '[aria-label="Next option: Photo accent"]';
-  await physicalClick(cdp, abTests);
-  await waitFor(cdp, visible(nextAccent));
-  const beforeVariant = JSON.stringify(await value(cdp, roles));
-  await physicalClick(cdp, nextAccent);
-  await waitFor(
-    cdp,
-    `JSON.stringify(${roles}) !== ${JSON.stringify(beforeVariant)}`,
-    3_000,
-    "The photo accent's Next option left the Player's colours as they were",
-  );
-  await physicalClick(cdp, nextAccent);
-  await waitFor(cdp, `JSON.stringify(${roles}) === ${JSON.stringify(beforeVariant)}`);
-  // The photo colour fade's two tests change the Player too: the fade time its duration, the blending its colours.
+  // With no fade time chosen, the colours fade in 0.3 s, the fade time test's B.
   const fadeDuration = `document.documentElement.style.getPropertyValue('--photo-fade-duration')`;
-  for (const [test, changed] of [
-    ["Photo colour fade time", fadeDuration],
-    ["Photo colour blending", `JSON.stringify(${roles})`],
+  assertEqual(
+    JSON.stringify(
+      await value(cdp, `[localStorage.getItem('player-photo-fade-time'), ${fadeDuration}]`),
+    ),
+    JSON.stringify([null, "300ms"]),
+    "With no fade time chosen, the photo colours do not fade in 0.3 s",
+  );
+  // The A/B tests panel opens from the tools menu. A radio button already takes either option in one click, so only a
+  // test shown as a dropdown, such as the photo colour family, has a Next option.
+  const abTests = '[data-tools-focus="launcher:A/B tests"]';
+  await physicalClick(cdp, abTests);
+  await waitFor(cdp, visible('[aria-label="Next option: Photo colour family"]'));
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-ab-test]')].every((test) => !!test.querySelector('select') === [...test.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Next option'))`,
+    ),
+    true,
+    "An A/B test has a Next option although it is not a dropdown, or a dropdown test has none",
+  );
+  // Each radio button applies its option at once: the photo accent and the blending change the Player's colours, the
+  // fade time the fade's duration. The second press goes back to the default.
+  for (const [test, option, original, changed] of [
+    ["photo-accent", "photo", "theme", `JSON.stringify(${roles})`],
+    ["photo-fade-time", "0.6s", "0.3s", fadeDuration],
+    ["photo-blending", "srgb", "oklab", `JSON.stringify(${roles})`],
   ]) {
-    const next = `[aria-label="Next option: ${test}"]`;
+    const radio = (choice) => `[data-ab-test="${test}"] input[value="${choice}"]`;
     const before = await value(cdp, changed);
-    await physicalClick(cdp, next);
+    await physicalClick(cdp, radio(option));
     await waitFor(
       cdp,
       `${changed} !== ${JSON.stringify(before)}`,
       3_000,
-      `The ${test} Next option left the Player as it was`,
+      `The ${test} A/B test's ${option} left the Player as it was`,
     );
-    await physicalClick(cdp, next);
+    await physicalClick(cdp, radio(original));
     await waitFor(cdp, `${changed} === ${JSON.stringify(before)}`);
   }
   await physicalClick(cdp, abTests);
