@@ -334,7 +334,7 @@ export function checkTypes(
   const decided: Decided = new Map();
   const copies: Copies = new Map();
   const kept: KeptFallbacks = new Set();
-  // Likewise, a check that finds a custom speaker property that a store reaches unchecked starts again without its type.
+  // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
   const unchecked: UncheckedProperties = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
   // types the previous check found, and starts again until they stay the same. A load's own type never depends on
@@ -357,6 +357,17 @@ export function checkTypes(
       lines,
     );
     checker.check(programs);
+    // A check that found more of them read those properties with the types they no longer keep, so what it found rests
+    // on those types: the next check starts again from nothing but the larger set, which only grows.
+    if (checker.uncheckedMore) {
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      storage = new Map();
+      storageRounds = 0;
+      continue;
+    }
     let storageChanged = false;
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
@@ -384,7 +395,6 @@ export function checkTypes(
       !checker.widenedMore &&
       !checker.decidedMore &&
       !checker.keptMore &&
-      !checker.uncheckedMore &&
       (!storageChanged || (!storageRead && !checker.copiedMore));
     let followed = false;
     if (last && storageChanged) {
@@ -1131,6 +1141,9 @@ class TypeChecker {
 
   readonly #unchecked: UncheckedProperties;
 
+  /** For a named speaker's custom property, the names that stores read after it on the way to their targets. */
+  readonly #storedThrough = new Map<string, string[]>();
+
   /** The fallbacks of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
 
@@ -1526,19 +1539,39 @@ class TypeChecker {
    * to `target` (see {@link UncheckedProperties}).
    */
   #noteUncheckedStore(target: Expression, scope: Scope): void {
-    for (let node = unwrap(target); ;) {
+    const named = (node: Expression): boolean =>
+      node.kind === "identifier" && scope.resolve(node.name)?.kind === "speaker";
+    // The property names read on the way, from the target back to where the way starts.
+    const names: string[] = [];
+    let node = unwrap(target);
+    for (;;) {
       if (node.kind === "propertyAccessExpression") {
         const receiver = unwrap(node.object);
-        const named =
-          receiver.kind === "identifier" && scope.resolve(receiver.name)?.kind === "speaker";
-        const name = node.property.name;
-        if (!named && !this.#unchecked.has(name) && mayBe(this.#typeOf(receiver), "speaker")) {
-          this.#unchecked.add(name);
-          this.uncheckedMore = true;
-        }
+        names.push(node.property.name);
+        if (!named(receiver) && mayBe(this.#typeOf(receiver), "speaker"))
+          this.#markUnchecked(node.property.name);
         node = receiver;
       } else if (node.kind === "indexExpression") node = unwrap(node.object);
-      else return;
+      else break;
+    }
+    // A named speaker's property that keeps no type may hold any speaker, so the names read after it are reached too.
+    // Its read gave them that reason above; one that loses its type later in this check gives it to them then.
+    if (!named(node) || names.length < 2) return;
+    const [first, ...later] = names.reverse();
+    if (!this.#keepsType(first!)) return;
+    const through = this.#storedThrough.get(first!) ?? [];
+    through.push(...later);
+    this.#storedThrough.set(first!, through);
+  }
+
+  /** Adds `name` to the custom speaker properties that keep no type, with the names stored through it on the way. */
+  #markUnchecked(name: string): void {
+    const work = [name];
+    for (let next = work.pop(); next !== undefined; next = work.pop()) {
+      if (this.#unchecked.has(next)) continue;
+      this.#unchecked.add(next);
+      this.uncheckedMore = true;
+      work.push(...(this.#storedThrough.get(next) ?? []));
     }
   }
 

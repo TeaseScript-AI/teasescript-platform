@@ -505,6 +505,33 @@ test("a speaker's custom property that a store may reach unchecked is checked wh
     const source = `speaker vera {\n    level: 0\n    data: { v: 0 }\n    items: [0]\n}\n${setup}\n${store}\nlet n: integer = ${read}\nexit`;
     assert.deepEqual(failure(source), ["TSR058", message, read], source);
   }
+  // Each property here keeps no type only once the one before it keeps none, through a copy of it, so finding them
+  // takes more checks than storage key types may change in; the key that a load of the last one types has none then.
+  const steps = Array.from({ length: 8 }, (_, step) => 7 - step);
+  const result = runValidSource(
+    [
+      "speaker vera {",
+      ...Array.from({ length: 9 }, (_, index) => `    p${index}: { v: 0 }`),
+      "}",
+      "function chain {",
+      ...steps.map(
+        (index) => `    let t${index} = vera.p${index}\n    t${index}.p${index + 1} = 0`,
+      ),
+      "}",
+      "function seed(s: speaker) {",
+      "    s.p0 = 0",
+      "}",
+      ...Array.from(
+        { length: 9 },
+        (_, index) => `let x${index} = load("k${index}", default: vera.p${index}.v)`,
+      ),
+      'save "bad" as "k8"',
+      'say load("k8", default: vera.p8.v)',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["bad"]);
 });
 
 test("values that fit their place pass the runtime check unchanged", () => {
