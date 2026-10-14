@@ -9,7 +9,7 @@ import { photoColours, type PhotoColourChoice } from "../../theme/photo-theme.js
  * How long the Player's colours take to fade to a new photo's colour, per the Photo colour transition A/B test: A, 0.6 s
  * blended in Oklab, or B, 0.3 s blended in sRGB like Milovana's player (`usePlayerTheme.ts` writes the colours for it).
  */
-export const PHOTO_TRANSITIONS = { oklab: 600, srgb: 300 } as const;
+const PHOTO_TRANSITIONS = { oklab: 600, srgb: 300 } as const;
 export type PhotoTransition = keyof typeof PHOTO_TRANSITIONS;
 
 /** The Stage's photo, not an image request's preview over it. */
