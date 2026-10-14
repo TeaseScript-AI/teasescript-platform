@@ -597,9 +597,10 @@ card it also runs the development preview's camera scenario (`/player/?dev&debug
 opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
 reference in saved data shows no photo. The camera view scenario (`?scenario=viewfinder`) checks that the script's
-camera view plays the test card mirrored in its window, stays in place while the sidebar is hidden and shown, and stays
+camera view plays the test card mirrored in its window, stays where the arrow keys moved it while the sidebar is hidden
+and shown and after a visit to the Stage, and stays
 when the script takes its unmirrored photo; that `view.placement = "stage"` moves it over the Stage, where the photo stays
-underneath and the Stage takes the camera's aspect; that `hideCamera` hides it; and that a denied camera shows none.
+underneath and a narrow Stage shows it whole; that `hideCamera` hides it; and that a denied camera shows none.
 The permanent buttons scenario (`?scenario=buttons`) checks that a clicked button stays in place, inactive and focused,
 until its block ends; that a block can remove its own button, passing focus to the next one; that a click interrupts
 the waiting question, which returns; and that a `goto` and `exit` remove the buttons. Serving the fixture package root
@@ -621,13 +622,13 @@ first step, which answers `null`, and that one without offers none. Its `updates
 the text being read still as the reader scrolls up past it, the change adds no entry and is announced by the status
 region, and focus on a link that a change removes stays on its message. Its `entrances` package checks that what Start
 shows appears directly, a later message enters while the conversation glides up, the controls of a new choice glide
-with the message above them, an update taller than the view shows directly and stops with its first entry at the top
-with Return to latest while later messages do not move the reader, also for a two-entry update after the reader
+with the message above them, an update taller than the view shows directly and stops showing its first entry,
+with Return to latest, while later messages do not move the reader, also for a two-entry update after the reader
 scrolled back to the end, and that nothing enters under reduced motion. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
 with the saved photo's exact bytes and not the unsaved one, a copy without the clipboard API still copies the text, a
 refused copy selects it, closing releases the file,
-and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file
+and the narrow dialog stays on the screen. In a fresh browser profile it imports that export: a chosen file
 lists every script as new and Cancel keeps the running session; a dropped file's confirmation ends the session, puts
 every script into its own scope, and the next Start shows the imported photo; pasted text replaces the data before
 Start; and, while another script runs, only the ticked script is replaced and the session continues. Its `debug-failure`
@@ -635,8 +636,8 @@ package stops with TSR036 after an answer and a photo: the error line and its no
 not open by itself, names the file and line, and shows the code with its message and the failing line with its
 expression marked only once expanded; Close returns focus to the line, and the dialog fits a narrow screen; the debug
 export it hands over to with nothing chosen holds no answer or photo reference, the export with replay data and the
-photo chosen holds the photo's exact bytes and the offline tool reproduces the failure, and the narrow dialog fits with
-touch-sized rows. On the
+photo chosen holds the photo's exact bytes and the offline tool reproduces the failure, and the narrow dialog stays on
+the screen. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
@@ -659,7 +660,7 @@ rows in IndexedDB; its sweep deletes the history databases of pages that ended, 
 and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
 shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
 later state and Return the session; a different answer adopts the earlier state with its saved data; an inspected failed
-state shows its failure above the bar, which fits a narrow screen with 44 px controls, and the error dialog's Open in
+state shows its failure above the bar, which fits a narrow screen, and the error dialog's Open in
 Debug shows the failure on the Now tab. Its `session-end` package opens the end dialog with Close focused, which returns
 focus to the end line, and a five-star radio group chosen by click and arrow key beside an unavailable Send review;
 Escape closes it too, the line's Play again starts anew, and an end that rewind's Forward and Return restore opens no
@@ -683,7 +684,7 @@ missing and an invalid image and sound, reaches its end at once, with one warnin
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported. Its `photo-colour` package's green Stage photo, downloaded only once, colours
 the background, the theme's surfaces in both modes, and the accent; the photo accent A/B test's B changes only the
-accent back to the theme's; the background's effects stay centred on the photo after the window shrank behind an image
+accent back to the theme's; the photo shows again after the window shrank behind an image
 request's preview; and the empty Stage after `hideImage` gives every theme colour back. The first photo's colour, the
 theme's return, a mode change in either direction, and the next photo fade the background and message bubbles, except
 under reduced motion; once each change has settled, text is readable and the authored speaker and prose colours are
