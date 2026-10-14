@@ -352,7 +352,6 @@ export function checkTypes(
       lines,
     );
     checker.check(programs);
-    checker.recordDecisions();
     let storageChanged = false;
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
@@ -370,6 +369,10 @@ export function checkTypes(
         storageRounds += 1;
       }
     }
+    // A load that read its default's type reads the type that another load declares from the next check on, so what
+    // this check decided may rest on the wrong type: the next check decides again.
+    if (![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true))
+      checker.recordDecisions();
     // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
     // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
     let last =
@@ -1234,6 +1237,12 @@ class TypeChecker {
   readonly storageLoads: StorageLoad[] = [];
 
   /**
+   * The keys of loads that read their default's type because the previous check found no type for the key. Where another
+   * load declares its type, they read that type in the next check, so what this check decided from them may be wrong.
+   */
+  readonly keysReadAsDefault = new Set<string>();
+
+  /**
    * The declared type of the variable that a `load` starts or is assigned to, which the load reads the stored value as
    * (rule 6.2).
    */
@@ -1241,6 +1250,9 @@ class TypeChecker {
 
   /** Loads whose default cannot be saved, which a store does not check again. */
   readonly #rejectedDefaults = new Set<Expression>();
+
+  /** Loads that read the type another load of their key declares, which may take more values than their default. */
+  readonly #declaredLoads = new Set<Expression>();
 
   /** One origin for each element or property inside a variable, so equal parts are one origin. */
   readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
@@ -3798,6 +3810,7 @@ class TypeChecker {
             );
         } else if (kept?.declared === true) {
           read = detachedType(kept.type);
+          this.#declaredLoads.add(expression);
           // A default the compiler cannot know may be anything, also null; it is checked when the load uses it.
           if (mayBeUnknown(fallback)) {
             this.storageLoads.push({ key, type: read, at: expression.span, declared: false });
@@ -3825,6 +3838,7 @@ class TypeChecker {
           // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
           if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
           read = given;
+          if (kept === undefined) this.keysReadAsDefault.add(key);
           // Each type that loads without a declared type read before this one accepts every value of it, or it of them.
           const earlier = kept?.loads ?? [];
           const text = typeKey(read);
@@ -7302,13 +7316,17 @@ class TypeChecker {
 
   /**
    * What a store checks at compile time: for a load, its default, unless that default cannot be saved and was reported
-   * already. The loaded value itself is checked at runtime.
+   * already. The loaded value itself is checked at runtime against the load's type, which is then the type of the
+   * receiving variable or the default's. A load of the type another load of its key declares is checked as the loaded
+   * value instead: that type may take values that its default, which it accepts, does not, such as text where the
+   * default is a number.
    */
   #checkedValue(expression: Expression): Expression {
     const value = unwrap(expression);
     return value.kind === "loadExpression" &&
       value.defaultValue !== null &&
-      !this.#rejectedDefaults.has(value)
+      !this.#rejectedDefaults.has(value) &&
+      !this.#declaredLoads.has(value)
       ? value.defaultValue
       : expression;
   }
@@ -7316,8 +7334,7 @@ class TypeChecker {
   /**
    * After a store checked a load's default, stores the loaded value of type `loaded` in a place of type `place`: its
    * objects, which may have other properties, and what it decides where the default decided nothing, such as after
-   * `default: null`. A load of a declared key decides the type it declares, and a load of a computed key gives a value
-   * of unknown type, which the place may then hold (#859).
+   * `default: null`. A load of a computed key gives a value of unknown type, which the place may then hold (#859).
    */
   #storeLoaded(place: StaticType, loaded: StaticType, expression: Expression): void {
     settle(place, loaded, expression.span);
