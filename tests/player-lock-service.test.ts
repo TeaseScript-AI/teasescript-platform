@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
-import { loadTlock, type LockServices } from "../player/encryption/lock.js";
+import { rebuildRecordedSession } from "../player/debug-export.js";
+import { DebugRecorder } from "../player/debug-recorder.js";
+import { loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
 import { roundTimeMs } from "../player/encryption/drand.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
 import {
+  createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   playerRuntimeSnapshot,
+  restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 
 /*
@@ -66,12 +71,14 @@ class Harness {
       readonly subtle?: SubtleCrypto | undefined;
       readonly media?: CapturedMediaStore;
       readonly files?: readonly string[];
+      readonly recorder?: DebugRecorder;
     } = {},
   ) {
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
     this.session = createPlayerRuntimeSession(source, {
       wallClockMs: NOW_MS,
       storedFiles: options.files ?? [],
+      ...(options.recorder ? { recorder: options.recorder } : {}),
     });
     const services: LockServices = {
       tlock: loadTlock,
@@ -195,6 +202,50 @@ test("the lock dialog suggests 7 days, locks with what the player chose, and the
   const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
   assert.ok(!recorded.includes("secret words"));
   assert.ok(!recorded.includes("not the password 7"));
+});
+
+test("the lock dialog's time lock may be switched off: the lock opens only with its password, and replays and restores without it", async () => {
+  const recorder = new DebugRecorder();
+  const player = new Harness(
+    [
+      'let locked = encryptText("no time")',
+      'let opened = decryptText(locked, default: "closed")',
+      'let written = decryptText(locked, password: "only words", default: "closed")',
+      "exit",
+    ].join("\n"),
+    { recorder },
+  );
+  assert.equal((await player.dialog()).kind, "lock");
+  player.answer({ password: "only words", openAtMs: null });
+  // Its unlock dialog has a password field and no moment, and waits for nothing to open it by itself.
+  const unlock = await player.dialog();
+  assert.deepEqual(unlock.kind === "unlock" && [unlock.password, unlock.moments], [true, []]);
+  assert.deepEqual(player.wakes, []);
+  const waiting = playerRuntimeSnapshot(player.session);
+  assert.deepEqual(
+    playerRuntimeSnapshot(
+      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(player.session)),
+    ),
+    waiting,
+  );
+  player.answer({ password: "only words", openAtMs: null });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "no time");
+  assert.equal(values.written, "no time");
+  const read = readLock(bytesFromBase64(String(values.locked))!);
+  assert.deepEqual([read?.passwords.length, read?.times.length], [1, 0]);
+  // The recorded calls reach the same state again without the password, the relays, or the Player's locks.
+  const recording = recorder.recording()!;
+  assert.equal(recording.complete, true);
+  assert.deepEqual(
+    rebuildRecordedSession(
+      recording.plan,
+      recording.anchorSnapshot,
+      recording.operations,
+    ).exportSnapshot(),
+    playerRuntimeSnapshot(player.session),
+  );
 });
 
 test("a cancelled unlock dialog gives the default, and a passed time lock out of reach asks only when a password can open it", async () => {

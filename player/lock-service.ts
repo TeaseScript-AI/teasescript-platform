@@ -38,7 +38,10 @@ export type LockDialog =
       readonly notice: RuntimeLockNotice | null;
     };
 
-/** What the player gave in a dialog: a password, and the lock dialog's moment; nothing for "Try again". */
+/**
+ * What the player gave in a dialog: a password, and the lock dialog's moment, `null` where the player switched its time
+ * lock off; nothing for "Try again".
+ */
 export interface LockDialogInput {
   readonly password: string | null;
   readonly openAtMs: number | null;
@@ -320,6 +323,7 @@ export class LockService {
         if (typed === undefined) return { kind: "ask" };
         const openers =
           typed === null ? { password: action.password, openAtMs: action.openAtMs } : typed;
+        // A lock needs an opener. The dialog does not submit without one, and an answer without one asks again.
         if (openers.password === null && openers.openAtMs === null) return { kind: "ask" };
         const content =
           action.call === "encryptText"

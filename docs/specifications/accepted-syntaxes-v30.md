@@ -1579,7 +1579,8 @@ let locked = encryptText(confession, password: "corner", openAt: null)       // 
 ```
 
 A call with neither `password:` nor `openAt:` lets the player choose: the Player asks how to lock, with a moment 7 days
-ahead, which the player may move to another moment in the future but not remove, and an optional password, typed twice.
+ahead, which the player may move to another moment in the future or remove, and an optional password, typed twice.
+Without the moment it locks only with a password, and warns that a forgotten password means the content never opens.
 
 `decryptText` and `decryptFile` need their `default:`, which may be any value, also `null`; a call without one is a
 compile error. A wrong password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a

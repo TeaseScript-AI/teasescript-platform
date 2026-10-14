@@ -2,6 +2,10 @@ let note = encryptText("A secret note")
 say "Locked.", instant
 let opened = decryptText(note, default: "closed")
 say "Opened: ${opened}", instant
+let untimed = encryptText("No time")
+say "Locked without a time.", instant
+let openedUntimed = decryptText(untimed, default: "closed")
+say "Untimed: ${openedUntimed}", instant
 let later = encryptText("Later", openAt: getAbsoluteDateTime() + 1 h)
 let early = decryptText(later, default: "closed")
 say "Early: ${early}", instant
