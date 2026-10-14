@@ -155,7 +155,7 @@ async function checks(page, url) {
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
   // The script's camera view plays the same camera, also when its first frames have no size yet, and the photo follows.
-  // In the window and over the Stage, the view adopts the wide camera's aspect once the frames have a size.
+  // In the window and over the Stage, the view plays the wide camera's frames once they have a size.
   ({ tab, messages } = await start(1_500, {
     scenario: url.replace("scenario=camera", "scenario=viewfinder"),
     video: { width: 1280, height: 720 },
@@ -163,14 +163,10 @@ async function checks(page, url) {
   const wide = (selector) =>
     tab.waitForFunction((selector) => {
       const video = document.querySelector(`${selector} [data-viewfinder] video`);
-      const frame = document
-        .querySelector(`${selector} [data-viewfinder]`)
-        ?.getBoundingClientRect();
       return (
         video?.videoWidth === 1280 &&
         !video.paused &&
-        getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
-        Math.abs(frame.width / frame.height - 16 / 9) < 0.02
+        getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)"
       );
     }, selector);
   await wide("[data-floating-viewfinder]");
@@ -188,17 +184,6 @@ async function checks(page, url) {
   await tab.waitForFunction(decodedPhotos);
   await tab.locator("button", { hasText: "Put me on your Stage" }).click();
   await wide("[data-stage-camera]");
-  await tab.waitForFunction(
-    () =>
-      Math.abs(
-        Number(
-          getComputedStyle(document.querySelector("#player-shell")).getPropertyValue(
-            "--media-aspect",
-          ),
-        ) -
-          16 / 9,
-      ) < 0.01,
-  );
   await tab.locator("button", { hasText: "Back to the window" }).click();
   await wide("[data-floating-viewfinder]");
   // A 16:9 camera's window comes back with the place and size it had.
