@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+import { compilePlayerProject, playerRuntimeStageImages } from "../player/runtime-adapter.js";
 import type { PhotoSwatches } from "../player/theme/node-vibrant/swatches.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -10,6 +11,7 @@ interface PreparedPhoto {
   release(): void;
 }
 let prepareStagePhoto: (source: string) => PreparedPhoto;
+let preloadStagePhotos: (sources: readonly string[]) => () => void;
 
 // The page this module runs in, without an image decoder for a worker: downloads, object URLs, images that decode, and
 // a canvas whose pixels are one green, so every photo is measured on the canvas.
@@ -57,6 +59,9 @@ before(async () => {
   assert.equal(typeof module.prepareStagePhoto, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export was checked callable just above.
   prepareStagePhoto = module.prepareStagePhoto as typeof prepareStagePhoto;
+  // EVIDENCE: validation: the same checked module exports the preloader beside it.
+  preloadStagePhotos = module.preloadStagePhotos as typeof preloadStagePhotos;
+  assert.equal(typeof preloadStagePhotos, "function");
 });
 after(() => {
   globalThis.fetch = saved.fetch;
@@ -97,4 +102,48 @@ test("a photo that cannot be downloaded shows from its source for the Stage to l
   assert.equal(await photo.shown, "https://unreachable.example/sea.jpg");
   assert.equal(await photo.swatches, null);
   photo.release();
+});
+
+test("a preloaded photo is measured before it shows, and stays while the preloader holds it", async () => {
+  const release = preloadStagePhotos(["/files/garden.jpg"]);
+  const first = prepareStagePhoto("/files/garden.jpg");
+  const url = await first.shown;
+  const swatches = await first.swatches;
+  first.release();
+  assert.equal(page.revoked.has(url), false, "the preloader still holds the photo");
+  const draws = page.draws;
+  const again = prepareStagePhoto("/files/garden.jpg");
+  assert.equal(await again.shown, url);
+  assert.equal(await again.swatches, swatches);
+  assert.equal(page.draws, draws, "the photo is not measured again");
+  again.release();
+  release();
+  assert.equal(page.revoked.has(url), true);
+});
+
+test("the Stage images to load ahead are the script's image paths and its tag queries' candidates", () => {
+  const { plan } = compilePlayerProject({
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          'showImage "images/hall.jpg"',
+          'showImage tagged "bedroom", "punishment" > 3',
+          'let name = "images/" + "attic.jpg"',
+          "showImage name",
+          'showImage "images/hall.jpg"',
+          "hideImage",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    images: [
+      { path: "images/attic.jpg", keywords: [] },
+      { path: "images/bedroom-soft.jpg", keywords: ["bedroom", "punishment: 1"] },
+      { path: "images/garden.jpg", keywords: ["outdoor"] },
+      { path: "images/hall.jpg", keywords: ["hall"] },
+    ],
+  });
+  // The comparison is read when the script runs, so the soft bedroom may be the pick; the computed attic is not known.
+  assert.deepEqual(playerRuntimeStageImages(plan!), ["images/hall.jpg", "images/bedroom-soft.jpg"]);
 });

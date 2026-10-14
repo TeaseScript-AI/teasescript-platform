@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onErrorCaptured, provide, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -32,7 +32,11 @@ import { isRemovedEntry } from "./transcriptPresentation";
 import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
-import { playerRuntimeCalls, playerRuntimeDebugNow } from "../../runtime-adapter.js";
+import {
+  playerRuntimeCalls,
+  playerRuntimeDebugNow,
+  playerRuntimeStageImages,
+} from "../../runtime-adapter.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
 import SessionEndDialog from "./SessionEndDialog.vue";
@@ -51,7 +55,7 @@ import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
-import { prepareStagePhoto } from "./stagePhotos";
+import { preloadStagePhotos, prepareStagePhoto } from "./stagePhotos";
 import { useStagePhoto } from "./useStagePhoto";
 
 // Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
@@ -417,6 +421,22 @@ useResizeObserver(stageElement, ([entry]) => {
 // and its colour stay. Without a photo, also after an image failed, the theme's colours apply. Whether
 // the accent follows the photo is an A/B test.
 const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
+// Every Stage image the script names is downloaded and measured in the background once its session runs, so such a
+// photo and its colour are ready when it shows. They stay between sessions of the same script.
+let releasePreloaded = () => {};
+watch(
+  () => props.player.session.value?.plan,
+  (plan) => {
+    if (plan === undefined) return;
+    const release = releasePreloaded;
+    releasePreloaded = preloadStagePhotos(
+      playerRuntimeStageImages(plan).flatMap((path) => props.player.resolveAsset(path) ?? []),
+    );
+    release();
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => releasePreloaded());
 const shownMedia = computed(() => {
   const photo = stagePhoto.shown.value;
   return photo === null ? undefined : { ...photo.media, src: photo.url, source: photo.media.src };

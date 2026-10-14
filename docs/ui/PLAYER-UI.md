@@ -620,9 +620,12 @@ too; B keeps the theme's accent, as does a photo with too little colour. A grey 
 same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. A new photo and its
 colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
 stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
-photo shows with the previous colour, and its own colour follows. When the browser does not let the Player read an
-image's pixels, the previous photo's colour stays; a camera view or an image request's preview over the Stage does not
-change it. The Player reuses recent image measurements. The background and message bubbles fade in 0.6 s whenever the
+photo shows with the previous colour, and its own colour follows. After Start, the Player downloads and measures every
+Stage image the script names, by its path or as a candidate of `showImage tagged`, in the background, one at a time
+and after any photo the Stage waits for; such a photo then only needs decoding when it shows. An image path the script
+computes while it runs is downloaded when it shows. When the browser does not let the Player read an image's pixels,
+the previous photo's colour stays; a camera view or an image request's preview over the Stage does not change it. The
+Player reuses recent image measurements. The background and message bubbles fade in 0.6 s whenever the
 photo colour changes: to the first photo's colour, from one photo's colour to the next, back to the theme's colours,
 and with a mode change. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).

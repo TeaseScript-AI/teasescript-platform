@@ -1,9 +1,9 @@
 import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
 import type { StagePhotoRequest, StagePhotoResponse } from "./stagePhotoWorker";
 
-// Stage photos prepared for showing (PLAYER-UI.md "Stage and media presentation"): each source is downloaded once, and
-// that one download serves both the Stage, as an object URL, and the measuring of its colours. Kept per source while
-// the Stage shows the photo or waits for it.
+// Stage photos (PLAYER-UI.md "Stage and media presentation"), kept per source: each is downloaded once, and that one
+// download serves both the Stage, as an object URL, and the measuring of its colours. A photo is kept while the Stage
+// shows it or waits for it, or while the preloader holds it to have it ready when the Stage needs it.
 
 /** The photo is measured at this longest side: enough pixels for six swatches, few enough to stay cheap. */
 const MEASURE_SIDE = 128;
@@ -25,89 +25,157 @@ export interface PreparedPhoto {
 }
 
 interface Entry {
+  /** The Stage's and the preloader's holds on the photo, and how many of them are the Stage's. */
   holds: number;
+  shows: number;
   readonly download: AbortController;
-  /** The object URL of the download, and the decoded image, once there are; the image keeps its decoding ready. */
+  /** The download, `null` while the photo waits for the preloader; the bytes, `null` when they could not be fetched. */
+  bytes: Promise<Blob | null> | null;
+  swatches: Promise<PhotoSwatches | null> | null;
+  /** The object URL of the download, once there is one. */
   url: string | null;
-  image: HTMLImageElement | null;
-  readonly shown: Promise<string>;
-  readonly swatches: Promise<PhotoSwatches | null>;
+  /** The photo decoded for showing, while the Stage needs it, or for measuring it on the page's canvas. */
+  image: { readonly element: HTMLImageElement; readonly decoded: Promise<void> } | null;
 }
 const entries = new Map<string, Entry>();
 
-/** Prepares the photo of `source`, or holds it once more while it is prepared or shown. */
-export function prepareStagePhoto(source: string): PreparedPhoto {
-  const entry = entries.get(source) ?? start(source);
+function hold(source: string): Entry {
+  let entry = entries.get(source);
+  if (entry === undefined) {
+    entry = {
+      holds: 0,
+      shows: 0,
+      download: new AbortController(),
+      bytes: null,
+      swatches: null,
+      url: null,
+      image: null,
+    };
+    entries.set(source, entry);
+  }
   entry.holds++;
+  return entry;
+}
+
+function drop(source: string, entry: Entry) {
+  if (--entry.holds > 0) return;
+  entries.delete(source);
+  entry.download.abort();
+  if (entry.url !== null && entry.url !== source) URL.revokeObjectURL(entry.url);
+  entry.image = null;
+}
+
+/** Starts the download of a photo and the measuring of its colours, unless they have started. */
+function load(source: string, entry: Entry, priority: RequestPriority) {
+  if (entry.bytes !== null) return;
+  // A failed download, such as from another origin that does not share the image, leaves the Stage to load the source.
+  const bytes = fetch(source, { signal: entry.download.signal, priority })
+    .then((response) => (response.ok ? response.blob() : null))
+    .catch(() => null)
+    .then((blob) => (entry.download.signal.aborted ? null : blob));
+  entry.bytes = bytes;
+  const known = measured.get(source);
+  entry.swatches =
+    known !== undefined
+      ? Promise.resolve(known)
+      : bytes.then(async (blob) => {
+          if (blob === null) return null;
+          let result: PhotoSwatches | null | "unsupported";
+          try {
+            result = await measureInWorker(blob);
+            if (result === "unsupported") {
+              const { element, decoded } = decode(source, entry, blob);
+              await decoded;
+              result = measure(element);
+              if (entry.shows === 0) entry.image = null;
+            }
+          } catch {
+            result = null;
+          }
+          measured.set(source, result);
+          if (measured.size > CACHE_SIZE) measured.delete(measured.keys().next().value!);
+          return result;
+        });
+}
+
+/** The photo's image of its URL, decoding: a source in the page's memory, such as a captured photo, as it is. */
+function decode(source: string, entry: Entry, blob: Blob) {
+  entry.url ??= /^(blob|data):/u.test(source) ? source : URL.createObjectURL(blob);
+  if (entry.image === null) {
+    const element = new Image();
+    element.src = entry.url;
+    // Decoded now, so the Stage's image of this URL shows at once; one that does not decode is the Stage's to report.
+    entry.image = { element, decoded: element.decode().catch(() => undefined) };
+  }
+  return entry.image;
+}
+
+// The preloader's photos that wait for their download, in order, and whether one is downloaded or measured now. It waits
+// while the Stage waits for a photo.
+const queue: { readonly source: string; readonly entry: Entry }[] = [];
+let preloading = false;
+let waiting = 0;
+
+function preloadNext() {
+  while (!preloading && waiting === 0 && queue.length > 0) {
+    const { source, entry } = queue.shift()!;
+    if (entries.get(source) !== entry || entry.bytes !== null) continue;
+    load(source, entry, "low");
+    preloading = true;
+    void Promise.all([entry.bytes, entry.swatches]).then(() => {
+      preloading = false;
+      preloadNext();
+    });
+  }
+}
+
+/** Prepares the photo of `source` for the Stage, or holds it once more while it is prepared or shown. */
+export function prepareStagePhoto(source: string): PreparedPhoto {
+  const entry = hold(source);
+  entry.shows++;
+  load(source, entry, "high");
   let held = true;
+  let waited = true;
+  waiting++;
+  const done = () => {
+    if (!waited) return;
+    waited = false;
+    waiting--;
+    preloadNext();
+  };
+  void Promise.all([entry.bytes, entry.swatches]).then(done);
   return {
-    shown: entry.shown,
-    swatches: entry.swatches,
+    shown: entry.bytes!.then(async (blob) => {
+      if (blob === null || !held) return source;
+      const { decoded } = decode(source, entry, blob);
+      await decoded;
+      return entry.url ?? source;
+    }),
+    swatches: entry.swatches!,
     release() {
       if (!held) return;
       held = false;
-      if (--entry.holds > 0) return;
-      entries.delete(source);
-      entry.download.abort();
-      if (entry.url !== null) URL.revokeObjectURL(entry.url);
-      entry.image = null;
+      done();
+      if (--entry.shows === 0) entry.image = null;
+      drop(source, entry);
     },
   };
 }
 
-function start(source: string): Entry {
-  const download = new AbortController();
-  const known = measured.get(source);
-  // A failed download, such as from another origin that does not share the image, leaves the Stage to load the source.
-  const prepared = fetch(source, { signal: download.signal })
-    .then((response) => (response.ok ? response.blob() : null))
-    .catch(() => null)
-    .then((blob) => {
-      if (blob === null || download.signal.aborted) return null;
-      // The worker measures while the page decodes the photo for the Stage.
-      const measuring = known === undefined ? measureInWorker(blob) : null;
-      // A source in the page's memory, such as a captured photo, shows as it is; a download by an object URL of it.
-      const url = /^(blob|data):/u.test(source) ? source : URL.createObjectURL(blob);
-      if (url !== source) entry.url = url;
-      const image = new Image();
-      image.src = url;
-      entry.image = image;
-      // Decoded now, so the Stage's image of this URL shows at once; one that does not decode is the Stage's to report.
-      const decoded = image.decode().catch(() => undefined);
-      return { url, image, decoded, measuring };
-    });
-  const entry: Entry = {
-    holds: 0,
-    download,
-    url: null,
-    image: null,
-    shown: prepared.then(async (photo) => {
-      if (photo === null) return source;
-      await photo.decoded;
-      return photo.url;
-    }),
-    swatches:
-      known !== undefined
-        ? Promise.resolve(known)
-        : prepared.then(async (photo) => {
-            if (photo === null) return null;
-            let result: PhotoSwatches | null | "unsupported";
-            try {
-              result = await photo.measuring!;
-              if (result === "unsupported") {
-                await photo.decoded;
-                result = measure(photo.image);
-              }
-            } catch {
-              result = null;
-            }
-            measured.set(source, result);
-            if (measured.size > CACHE_SIZE) measured.delete(measured.keys().next().value!);
-            return result;
-          }),
+/**
+ * Downloads and measures these photos in the background, one at a time and after any photo the Stage waits for, so a
+ * later `prepareStagePhoto` of one finds it ready. Returns a function that gives the photos up again.
+ */
+export function preloadStagePhotos(sources: readonly string[]): () => void {
+  const held = sources.map((source) => ({ source, entry: hold(source) }));
+  queue.push(...held);
+  preloadNext();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const { source, entry } of held) drop(source, entry);
   };
-  entries.set(source, entry);
-  return entry;
 }
 
 /**
@@ -130,7 +198,7 @@ function measure(image: HTMLImageElement): PhotoSwatches | null {
 // One worker measures every photo, started with the first; `null` once it cannot run.
 let worker: Worker | null | undefined;
 let nextRequest = 0;
-const waiting = new Map<number, (swatches: StagePhotoResponse["swatches"]) => void>();
+const requests = new Map<number, (swatches: StagePhotoResponse["swatches"]) => void>();
 
 function measureInWorker(blob: Blob) {
   if (
@@ -142,15 +210,15 @@ function measureInWorker(blob: Blob) {
     try {
       worker = new Worker(new URL("./stagePhotoWorker.ts", import.meta.url), { type: "module" });
       worker.addEventListener("message", ({ data }: MessageEvent<StagePhotoResponse>) => {
-        waiting.get(data.id)?.(data.swatches);
-        waiting.delete(data.id);
+        requests.get(data.id)?.(data.swatches);
+        requests.delete(data.id);
       });
       // A worker that cannot start or run leaves every photo to the page's canvas.
       worker.addEventListener("error", () => {
         worker?.terminate();
         worker = null;
-        for (const resolve of waiting.values()) resolve("unsupported");
-        waiting.clear();
+        for (const resolve of requests.values()) resolve("unsupported");
+        requests.clear();
       });
     } catch {
       worker = null;
@@ -159,5 +227,5 @@ function measureInWorker(blob: Blob) {
   if (worker === null) return Promise.resolve("unsupported" as const);
   const id = nextRequest++;
   worker.postMessage({ id, blob } satisfies StagePhotoRequest);
-  return new Promise<StagePhotoResponse["swatches"]>((resolve) => waiting.set(id, resolve));
+  return new Promise<StagePhotoResponse["swatches"]>((resolve) => requests.set(id, resolve));
 }

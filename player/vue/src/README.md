@@ -131,8 +131,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   `FloatingViewfinder.vue`'s default slot, with the shadcn Alert.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   `stagePhotos.ts` downloads a Stage photo once for the Stage and for measuring it, in `stagePhotoWorker.ts` where the
-  browser's image decoder can; `useStagePhoto.ts` shows a new photo together with its colours, which `usePhotoColour.ts`
-  applies and `PlayerApp.vue` passes to the theme. See
+  browser's image decoder can, and loads the images the script names (`playerRuntimeStageImages`) ahead;
+  `useStagePhoto.ts` shows a new photo together with its colours, which `usePhotoColour.ts` applies and
+  `PlayerApp.vue` passes to the theme. See
   [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its
   timer collection and `TimerDisplay.vue` individual timers. `PlayerApp.vue` presents runtime timers in the rail; the
