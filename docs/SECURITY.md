@@ -102,7 +102,7 @@ Other capture use, such as the microphone, is author-controlled after the browse
 permission or per-use approval. When the package or session has the camera capability, the Player acquires the selected
 or default camera immediately after the user presses Start and before ordinary TeaseScript execution begins, so any
 browser permission request happens there, and keeps the stream open for the entire running session. Direct capture such
-as `takePhoto()` only captures from that open stream: it never opens or reopens the camera, closes it afterwards, or
+as `takePhoto()` only captures from that open stream: it never opens the camera itself, closes it afterwards, or
 otherwise reveals the capture moment, and it has no Player indicator, capture flash, per-photo message, preview, stop
 control, or per-use approval. Separately, a script's camera view (`showCamera`, [Player UI](ui/PLAYER-UI.md#stage-and-media-presentation))
 may show the user a live local preview of that open stream, for example before a photo; it is shown only when the script
@@ -121,7 +121,10 @@ opened at Start, so the browser may ask permission then; it shows its viewfinder
 takes a photo only from the player's "Take photo" or "Self-timer", and turns a camera it opened itself off again when
 the camera step ends. Such a camera serves only that request, never `takePhoto()` or a script's camera view, and a
 photo or file reaches the runtime only through "Use image". `takePhoto()` stays
-silent and uses only the camera opened at Start. A recording contains exactly the sources the author requests; whether
+silent and uses only the camera opened at Start. When the browser or the system ends or stops that stream, as when
+another app takes the camera while the page is in the background, the Player opens the same camera again by itself once
+the page is shown, a few times at most and never after a refusal, and a capture waits for that rather than capturing a
+dead picture. A recording contains exactly the sources the author requests; whether
 video includes microphone audio never depends on whether a microphone is already open. How
 brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs
 directly, which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or

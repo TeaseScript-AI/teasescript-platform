@@ -24,16 +24,23 @@ class FakeTrack implements CaptureTrack {
   readonly kind = "video";
   readonly label = "camera";
   readyState: "live" | "ended" = "live";
-  readonly #ended: Array<() => void> = [];
+  muted = false;
+  readonly #listeners: Record<"ended" | "mute", Array<() => void>> = { ended: [], mute: [] };
   stop() {
     this.readyState = "ended";
   }
-  addEventListener(_type: "ended", listener: () => void) {
-    this.#ended.push(listener);
+  addEventListener(type: "ended" | "mute", listener: () => void) {
+    this.#listeners[type].push(listener);
   }
+  /** The browser or the system ends the stream. */
   end() {
     this.readyState = "ended";
-    for (const listener of this.#ended) listener();
+    for (const listener of this.#listeners.ended) listener();
+  }
+  /** The stream stops delivering frames, as a phone's camera while the page is in the background. */
+  mute() {
+    this.muted = true;
+    for (const listener of this.#listeners.mute) listener();
   }
 }
 
@@ -41,6 +48,8 @@ function harness(
   grant: (request: CaptureRequest) => Promise<readonly FakeTrack[]>,
   chosen: () => string | null = () => null,
 ) {
+  // Whether the page is shown, and the clock that tells trouble that keeps coming back; waits pass at once.
+  const page = { shown: true, now: 0 };
   const requests: CaptureRequest[] = [];
   const diagnostics: PlayerDiagnostic[] = [];
   const grabbed: FakeTrack[] = [];
@@ -63,7 +72,7 @@ function harness(
     },
     now: () => 0,
     stateChanged: (kind, state) => {
-      if (kind === "camera" && state.status === "ended") camera.revoked();
+      if (kind === "camera" && state.status === "ended") camera.ended();
     },
   };
   const media = new CapturedMediaStore(
@@ -75,9 +84,18 @@ function harness(
   const camera: SessionCamera<FakeTrack> = new SessionCamera(
     device,
     (diagnostic) => diagnostics.push(diagnostic),
-    chosen,
+    { chosen, visible: () => page.shown, wait: async () => {}, now: () => page.now },
   );
-  return { camera, device, media, requests, diagnostics, frames };
+  return { camera, device, media, requests, diagnostics, frames, page };
+}
+
+/** A grant that opens a new camera track for every request, recorded in `opened`. */
+function newTracks(opened: FakeTrack[]) {
+  return async () => {
+    const track = new FakeTrack();
+    opened.push(track);
+    return [track];
+  };
 }
 
 test("the session camera opens once and captures silently from the open stream", async () => {
@@ -123,13 +141,7 @@ test("without the capability, or when the camera cannot be opened, captures answ
   ]);
 });
 
-test("a revoked or failing camera stays unavailable for the rest of the session", async () => {
-  const track = new FakeTrack();
-  const revoked = harness(async () => [track]);
-  await revoked.camera.open(true);
-  track.end();
-  assert.deepEqual(await revoked.camera.answer(), { kind: "unavailable", reason: "revoked" });
-
+test("a camera that cannot capture stays unavailable for the rest of the session", async () => {
   const failing = harness(async () => [new FakeTrack()]);
   await failing.camera.open(true);
   failing.frames.fail = true;
@@ -153,8 +165,6 @@ test("the viewfinder previews only the open camera's live track", async () => {
   // Taking a photo uses the same stream and keeps the preview.
   assert.equal((await open.camera.answer()).kind, "captured");
   assert.equal(open.camera.previewTrack, track);
-  track.end();
-  assert.equal(open.camera.previewTrack, null);
 
   const denied = harness(async () => {
     throw Object.assign(new Error(), { name: "NotAllowedError" });
@@ -234,6 +244,98 @@ test("the player switches the open camera, and a photo taken meanwhile comes fro
   assert.equal(nextCamera(cameras, "back")?.deviceId, "wide");
   assert.equal(nextCamera(cameras, "wide")?.deviceId, "front");
   assert.equal(nextCamera(cameras.slice(0, 1), "front"), null);
+});
+
+test("a camera whose stream ended or stopped opens again with the same camera, and a photo waits for it", async () => {
+  const opened: FakeTrack[] = [];
+  const { camera, requests, frames, page, diagnostics } = harness(newTracks(opened), () => "back");
+  await camera.open(true);
+  const [first] = opened;
+  first?.end();
+  // The view keeps the ended camera's picture until the reopened camera's arrives.
+  assert.equal(camera.previewTrack, first);
+  assert.equal((await camera.answer()).kind, "captured");
+  assert.equal(frames.grabbed.at(-1), opened[1]);
+  assert.equal(camera.previewTrack, opened[1]);
+  assert.deepEqual(requests.slice(-1), [{ camera: { deviceId: "back" } }]);
+
+  // A muted camera that does not resume opens again, and a photo taken meanwhile comes from the reopened camera.
+  opened[1]?.mute();
+  assert.equal((await camera.answer()).kind, "captured");
+  assert.equal(frames.grabbed.at(-1), opened[2]);
+
+  // A hidden page cannot get the camera back: no photo for now, and the camera opens again once the page is shown.
+  page.shown = false;
+  page.now += 60_000;
+  opened[2]?.end();
+  assert.deepEqual(await camera.answer(), { kind: "unavailable", reason: "revoked" });
+  assert.equal(camera.available, true);
+  assert.equal(opened.length, 3);
+  page.shown = true;
+  camera.shown();
+  await settle();
+  assert.equal(camera.previewTrack, opened[3]);
+  assert.equal((await camera.answer()).kind, "captured");
+  // Each return to the page may find the camera stopped again; that never uses up the recoveries.
+  for (let visit = 0; visit < 4; visit++) {
+    page.shown = false;
+    opened.at(-1)?.end();
+    page.shown = true;
+    camera.shown();
+    await settle();
+  }
+  assert.equal(opened.length, 8);
+  // Also a stream that ended without telling, found once the page is shown again.
+  opened[7]?.stop();
+  camera.shown();
+  await settle();
+  assert.equal(opened.length, 9);
+  assert.equal((await camera.answer()).kind, "captured");
+  assert.deepEqual(diagnostics, []);
+});
+
+test("a camera that is refused, cannot be opened again, or keeps stopping stops opening again", async () => {
+  // A refusal is not asked again.
+  let refuse = false;
+  const refused = harness(async () => {
+    if (refuse) throw Object.assign(new Error(), { name: "NotAllowedError" });
+    return [new FakeTrack()];
+  });
+  await refused.camera.open(true);
+  refuse = true;
+  refused.camera.stalled();
+  assert.deepEqual(await refused.camera.answer(), { kind: "unavailable", reason: "denied" });
+  assert.equal(refused.requests.length, 2);
+  assert.match(
+    refused.diagnostics[0]?.message ?? "",
+    /could not be opened again \(denied, NotAllowedError\)/,
+  );
+
+  // A busy camera is tried a few times, waiting longer each time.
+  let busy = false;
+  const failing = harness(async () => {
+    if (busy) throw Object.assign(new Error(), { name: "NotReadableError" });
+    return [new FakeTrack()];
+  });
+  await failing.camera.open(true);
+  busy = true;
+  failing.camera.stalled();
+  assert.deepEqual(await failing.camera.answer(), { kind: "unavailable", reason: "busy" });
+  assert.equal(failing.requests.length, 4);
+
+  // A camera that stops again right after each recovery stays unavailable after a few of them.
+  const opened: FakeTrack[] = [];
+  const stopping = harness(newTracks(opened));
+  await stopping.camera.open(true);
+  for (let recovery = 0; recovery < 3; recovery++) {
+    opened.at(-1)?.end();
+    await settle();
+  }
+  assert.equal(opened.length, 4);
+  opened.at(-1)?.end();
+  assert.equal(opened.length, 4);
+  assert.equal(stopping.camera.available, false);
+  assert.match(stopping.diagnostics[0]?.message ?? "", /kept stopping/);
 });
 
 test("a session released while the browser answers never reports its camera as opened", async () => {

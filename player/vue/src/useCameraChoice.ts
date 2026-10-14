@@ -68,5 +68,7 @@ export function useCameraChoice(host: CameraChoiceHost) {
       () => next.value && switchCameraLabel(cameraFacing(next.value.facingMode)),
     ),
     switchCamera,
+    /** Reports that the view's picture stopped while the page is shown, so its camera opens again. */
+    stalled: () => shownCamera()?.stalled(),
   };
 }

@@ -176,6 +176,23 @@ async function checks(page, url) {
     (await tab.locator("[data-viewfinder-switch]").count()) === 0,
     "A single camera offered a camera switch",
   );
+  // A camera whose frames stop opens again; Firefox pauses a video whose camera ended.
+  const stopped = await tab.evaluate(() => {
+    const track = document
+      .querySelector("[data-stage-camera] [data-viewfinder] video")
+      .srcObject.getVideoTracks()[0];
+    track.stop();
+    return track.id;
+  });
+  await tab.waitForFunction(
+    (stopped) => {
+      const video = document.querySelector("[data-stage-camera] [data-viewfinder] video");
+      const track = video?.srcObject?.getVideoTracks()[0];
+      return track?.readyState === "live" && track.id !== stopped && !video.paused;
+    },
+    stopped,
+    { timeout: 10_000 },
+  );
   await tab.locator("button", { hasText: "Back to the window" }).click();
   await wide("[data-floating-viewfinder]");
   // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
@@ -184,7 +201,7 @@ async function checks(page, url) {
   check((await tab.locator("[data-viewfinder]").count()) === 0, "hideCamera left a camera view");
   check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
   await tab.close();
-  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder without a camera switch";
+  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder without a camera switch and reopened after its frames stopped";
 }
 
 let passed = false;
