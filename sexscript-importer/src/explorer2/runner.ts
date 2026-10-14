@@ -76,6 +76,8 @@ type RawSession = Record<SessionOperation, (...args: unknown[]) => Data> & {
   callReturnInstructions: () => number[];
   /** The scope a name refers to where execution stands, as `DebugContext.variableRecord` takes it. */
   scopeOf: (name: string) => number | "global" | null;
+  /** The calls under way, by ID (callable while an observer runs). */
+  callFrameIds: () => number[];
   exportTaggedSnapshot: () => TaggedSnapshot;
   mediaPlaybackProjection: () => Data[];
   permanentButtonProjection: () => Data[];
@@ -126,6 +128,11 @@ function rawSession(session: unknown): RawSession {
     exportSnapshot: operation("exportSnapshot"),
     scopeOf: callOf(session, "scopeOf", (value) =>
       typeof value === "number" || value === "global" ? value : null,
+    ),
+    callFrameIds: callOf(session, "callFrameIds", (value) =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is number => typeof entry === "number")
+        : [],
     ),
     callReturnInstructions: callOf(session, "callReturnInstructions", (value) =>
       Array.isArray(value)
@@ -278,6 +285,8 @@ export interface Played {
   readonly storages: readonly (readonly StorageEntry[])[];
   /** For each of {@link storages}, the inputs given when the session first had it. */
   readonly storageSteps: readonly number[];
+  /** For each of {@link storages}, the session's wall clock then: a later visit with it starts no earlier. */
+  readonly storageClocks: readonly number[];
   /** The steps during which the script asked for a photo. */
   readonly captures: readonly number[];
   /** What `PlayOptions.measure` read, when the play came to its interaction. */
@@ -345,13 +354,25 @@ export interface PlayOptions {
   readonly patience?: number;
 }
 
-/** Calls with temporaries a traced play keeps before it looks which calls are still under way (see `Runner.play`). */
-const MAX_CALL_TEMPORARIES = 64;
+/** Draw events shared between plays at most (see `Runner.#drawEvents`). */
+const MAX_SHARED_DRAWS = 4096;
+
+/** A draw event's sharing key: its JSON when short; none for a negative zero, which JSON would make a zero. */
+function drawKey(event: DrawEvent): string | undefined {
+  if (Object.is(event.outcome.value, -0) || Object.is(event.natural.value, -0)) return undefined;
+  try {
+    const key = JSON.stringify(event);
+    return key.length <= 1024 ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The instructions whose records or decisions a traced play takes in after they ran (see `Runner.play`). */
 const OBSERVED = new Set([
   "storeTemporary",
   "end",
+  "transfer",
   "callFunction",
   "returnValue",
   "returnVoid",
@@ -513,8 +534,6 @@ export class Runner {
   readonly #runtime: Runtime2;
   readonly #plan: Data;
   readonly #instructions: readonly Data[];
-  /** The first instructions of the blocks the runtime starts by itself: timer expiries, media cues, buttons. */
-  readonly #handlerEntries: ReadonlySet<number>;
   readonly #seed: number;
   readonly #options: Session;
   /** V1's data flow of the plan, which V2's solver asks for the values conditions compare. */
@@ -526,6 +545,11 @@ export class Runner {
   readonly readKeys = new Set<string>();
   /** Instructions whose names {@link readNames} has from a run without a trace. */
   readonly #namesRead = new Set<number>();
+  /**
+   * Draw events plays made, shared by their JSON while it is short: replays of one path make equal events again (a
+   * bounded cache, the oldest out).
+   */
+  readonly #drawEvents = new Map<string, DrawEvent>();
   /** Instructions all paths executed. */
   instructionsRun = 0;
   /**
@@ -538,11 +562,6 @@ export class Runner {
     this.#runtime = runtime;
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
-    this.#handlerEntries = new Set(
-      list(plan.functions)
-        .filter((declared) => declared.handler !== null && declared.handler !== undefined)
-        .map((declared) => Number(declared.entryInstruction)),
-    );
     this.#seed = seed;
     this.#options = new Session(engine, plan, seed);
     // The answers V1 offers: with compared answers on, as V1's search sets them up.
@@ -621,7 +640,7 @@ export class Runner {
         (sameSite ? bySite.outcome : undefined) ??
         (options.random === undefined ? undefined : randomOutcome(support, options.random));
       const outcome = fixed ?? natural;
-      const event: DrawEvent = {
+      let event: DrawEvent = {
         occurrence,
         step,
         drawId: Number(draw.drawId),
@@ -631,6 +650,15 @@ export class Runner {
         natural,
         outcome,
       };
+      const eventKey = drawKey(event);
+      if (eventKey !== undefined) {
+        const known = this.#drawEvents.get(eventKey);
+        this.#drawEvents.delete(eventKey);
+        this.#drawEvents.set(eventKey, known ?? event);
+        if (this.#drawEvents.size > MAX_SHARED_DRAWS)
+          this.#drawEvents.delete(this.#drawEvents.keys().next().value!);
+        event = known ?? event;
+      }
       draws.push(event);
       drawsById.set(event.drawId, event);
       return fixed === undefined || natural.kind === "failure"
@@ -966,6 +994,7 @@ export class Runner {
     let measures = 0;
     const storages: StorageEntry[][] = [];
     const storageSteps: number[] = [];
+    const storageClocks: number[] = [];
     /** Steps that took a photo or found no camera, and whether the current step's input asks for a photo. */
     const captures = new Set<number>();
     let photo = false;
@@ -978,10 +1007,12 @@ export class Runner {
       storageTexts.add(text);
       storages.push(storage);
       storageSteps.push(inputs.length);
+      storageClocks.push(wallClockOf(snapshot));
     };
     if (from === undefined) {
       storages.push([...(path.storage ?? [])]);
       storageSteps.push(0);
+      storageClocks.push(path.wallClockMs ?? EPOCH_MS);
     }
     storageTexts.add(JSON.stringify(path.storage ?? []));
     const decisionCount = new Map<string, number>();
@@ -1022,20 +1053,14 @@ export class Runner {
     /** Whether the step's instruction cap ended the current run. */
     let capped = false;
     /**
-     * Calls with temporaries past which a run stops to let go of those of calls no longer under way (a goto or an `end`
-     * leaves calls without returning from them), and whether it stopped for that.
+     * Lets go of the temporaries and return destinations of calls no longer under way (a goto or an `end` ends calls
+     * without returning from them).
      */
-    let sweepAbove = MAX_CALL_TEMPORARIES;
-    let sweep = false;
     const letGoOfEndedCalls = (): void => {
-      const live = new Set([
-        0,
-        ...list(session.exportTrustedSnapshot().callFrames).map((frame) => Number(frame.id)),
-      ]);
+      const live = new Set([0, ...session.callFrameIds()]);
       for (const each of temporaryOrigins.keys())
         if (!live.has(each)) temporaryOrigins.delete(each);
       for (const each of returnsTo.keys()) if (!live.has(each)) returnsTo.delete(each);
-      sweepAbove = Math.max(MAX_CALL_TEMPORARIES, 2 * temporaryOrigins.size);
     };
     /** The highest call ID the play saw (call IDs only grow): a higher one is a new call. */
     let highestCall = 0;
@@ -1060,23 +1085,24 @@ export class Runner {
      * temporaries a condition may read, a call's result, and each decision with what its condition read.
      */
     const observer = {
-      before: (index: number, call: number): boolean => {
-        // The calls under way are known outside the observer only: the run stops here, and goes on after them.
-        if (temporaryOrigins.size > sweepAbove) {
-          sweep = true;
+      // A block the runtime starts by itself (a timer's expiry, a cue, a button) counts as one instruction, as the
+      // runtime's budget counts it.
+      dispatch: (_block: number, call: number): boolean => {
+        if (stepInstructions >= options.maxStepInstructions) {
+          capped = true;
           return true;
         }
+        highestCall = Math.max(highestCall, call);
+        instructions += 1;
+        stepInstructions += 1;
+        return false;
+      },
+      before: (index: number, call: number): boolean => {
         if (call > highestCall) {
           highestCall = call;
           if (entering !== null && index === entering.entry) {
             returnsTo.set(call, { call: entering.call, destination: entering.destination });
             entering = null;
-          } else if (this.#handlerEntries.has(index)) {
-            // A block the runtime started by itself (a timer's expiry, a cue, a button): its start counts as one
-            // instruction for the step's cap, as the runtime's budget counts it. (A file call's frame starts at its
-            // file's code, and a resumed play's frames at where they stood.)
-            instructions += 1;
-            stepInstructions += 1;
           }
         }
         if (stepInstructions >= options.maxStepInstructions) {
@@ -1111,9 +1137,8 @@ export class Runner {
         if (kind === "storeTemporary") {
           const { origins } = originsOfReads(readsAt(instruction.value, made, call));
           setTemporary(call, Number(instruction.temporaryId), origins);
-        } else if (kind === "end") {
-          // A called file's frame ends with its file.
-          temporaryOrigins.delete(call);
+        } else if (kind === "end" || kind === "transfer") {
+          letGoOfEndedCalls();
         } else if (kind === "callFunction") {
           // A call's result, which a condition may read from its temporary, has the origins of the arguments it was
           // given, and of the records the call made.
@@ -1132,15 +1157,14 @@ export class Runner {
           // A function's result also has the origins of what it returns, and of the decisions it returned under: the
           // records the return made.
           const back = returnsTo.get(call);
-          returnsTo.delete(call);
-          // The call's own temporaries end with it.
-          temporaryOrigins.delete(call);
           if (kind === "returnValue" && back !== undefined && back.destination !== null) {
             const origins = new Set(temporaryOrigins.get(back.call)?.get(back.destination) ?? []);
             for (let id = made[0]; id <= made[1]; id += 1)
               for (const origin of originsOfRecord(id)) origins.add(origin);
             setTemporary(back.call, back.destination, origins);
           }
+          // The call's own temporaries end with it, as do those of calls a goto or an `end` left under it.
+          letGoOfEndedCalls();
         } else {
           const way: 0 | 1 = next === index + 1 ? 0 : 1;
           const key = `${step}:${index}`;
@@ -1265,10 +1289,6 @@ export class Runner {
             });
             if (result.randomRefusal !== undefined) end = "diverged";
             if (end !== null) return;
-            if (sweep) {
-              sweep = false;
-              letGoOfEndedCalls();
-            }
             if (capped) {
               end = "stuck";
               return;
@@ -1445,6 +1465,7 @@ export class Runner {
       resumes,
       storages,
       storageSteps,
+      storageClocks,
       captures: [...captures],
       ...(measured === undefined ? {} : { measured }),
     };

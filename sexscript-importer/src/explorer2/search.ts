@@ -46,6 +46,7 @@ import {
   type Resume,
   type Runtime2,
 } from "./runner.ts";
+import { CompactVisit, compactKey } from "./compact-visit.ts";
 import { Places, type Trap } from "./traps.ts";
 
 export interface Explore2Options {
@@ -125,7 +126,7 @@ const PATIENCE = 12;
 
 /** The share of the work each kind gets at least while it has work. */
 const MIN_SHARE = 0.1;
-/** The weight of the latest piece of work in a kind's moving average of new instructions per unit of work. */
+/** The part of a kind's recent totals of new instructions and of work that each further piece of work lets lapse. */
 const RATE_WEIGHT = 0.1;
 
 /**
@@ -373,6 +374,15 @@ export function explore2(
   const visitKeys = new Set<string>();
   /** Recent played paths, which random walks go on from. */
   const recent: Played[] = [];
+  /**
+   * The plays of decision children, and the plays that went on from them (answers, visits and walks): code these find
+   * counts for decisions as well, as a decision's value is in what it unlocks. The line stands in for what a decision
+   * unlocked; it does not prove it.
+   */
+  const fromDecisions = new WeakSet<Played>();
+  /** Whether the play under way is in such a line, and the kind that made it. */
+  let underDecision = false;
+  let playKind: (typeof KINDS)[number] = "answers";
   let state = options.seed >>> 0 || 1;
   const random = () => {
     // xorshift32: the walks depend on the seed alone.
@@ -413,10 +423,24 @@ export function explore2(
   let visitsLeft = 0;
   /** Plays the run's step cap stopped. */
   let stepsCut = 0;
-  /** Storage states plays went through, by their JSON text: where later visits start. */
+  /** Storage states plays went through, by their compressed JSON text: where later visits start. */
   const saved = new Map<string, readonly StorageEntry[]>();
+  /** The wall clock at which the play that first saved each of {@link saved} had it. */
+  const savedAt = new Map<string, number>();
+  /**
+   * A path that starts with a saved storage starts no earlier than the clock at which it was saved (a clock the solver
+   * chose, or a next day counted from an earlier start, would have the session go back in time).
+   */
+  const notBeforeSave = (path: Path): Path => {
+    if (path.storage === undefined) return path;
+    const at = savedAt.get(compactKey(JSON.stringify(path.storage)));
+    return at === undefined || (path.wallClockMs ?? EPOCH_MS) >= at
+      ? path
+      : { ...path, wallClockMs: at };
+  };
   /** For each saved state, the visit that first had it: its inputs and draws up to there, and how it started. */
-  const producers = new Map<string, Visit>();
+  // Kept compressed: only a crash or trap witness's earlier visits read one again.
+  const producers = new Map<string, CompactVisit>();
   /**
    * The visits before one that starts from saved data, oldest first: each the one that saved the data the next starts
    * from, back to one from the start; none when one of them is no longer known.
@@ -424,7 +448,7 @@ export function explore2(
   const earlierOf = (storage: readonly StorageEntry[] | undefined): { earlier?: Visit[] } => {
     const chain: Visit[] = [];
     for (let at = storage; at !== undefined;) {
-      const producer = producers.get(JSON.stringify(at));
+      const producer = producers.get(compactKey(JSON.stringify(at)))?.value;
       if (producer === undefined || chain.length > MAX_SAVED) return {};
       chain.unshift(producer);
       at = producer.storage;
@@ -790,10 +814,12 @@ export function explore2(
     places.add(played, (instruction) => runner.readsClock(instruction));
     const visits: (readonly StorageEntry[])[] = [];
     for (const [index, storage] of played.storages.entries()) {
-      const text = JSON.stringify(storage);
+      const text = compactKey(JSON.stringify(storage));
       if (saved.has(text)) continue;
       // The values of the keys conditions read: a state with new ones is worth a later visit, and keeping.
-      const key = JSON.stringify(storage.filter((entry) => runner.readKeys.has(entry.key)));
+      const key = compactKey(
+        JSON.stringify(storage.filter((entry) => runner.readKeys.has(entry.key))),
+      );
       const novel = !visitKeys.has(key);
       if (saved.size >= MAX_SAVED) {
         // Full: a state with new values of those keys takes the place of the oldest one (a flag or count that only a
@@ -803,19 +829,24 @@ export function explore2(
         const oldest = saved.keys().next().value!;
         saved.delete(oldest);
         producers.delete(oldest);
+        savedAt.delete(oldest);
       }
       saved.set(text, storage);
+      savedAt.set(text, played.storageClocks[index] ?? played.path.wallClockMs ?? EPOCH_MS);
       const step = played.storageSteps[index] ?? played.inputs.length;
-      producers.set(text, {
-        ...withChosenDraws(
-          played.inputs.slice(0, step),
-          played.draws.filter((draw) => draw.step <= step),
-        ),
-        draws: played.draws
-          .filter((draw) => draw.step <= step)
-          .map((draw) => ({ occurrence: draw.occurrence, outcome: draw.outcome })),
-        ...startOf(played.path),
-      });
+      producers.set(
+        text,
+        new CompactVisit({
+          ...withChosenDraws(
+            played.inputs.slice(0, step),
+            played.draws.filter((draw) => draw.step <= step),
+          ),
+          draws: played.draws
+            .filter((draw) => draw.step <= step)
+            .map((draw) => ({ occurrence: draw.occurrence, outcome: draw.outcome })),
+          ...startOf(played.path),
+        }),
+      );
       if (!novel) continue;
       visitKeys.add(key);
       visits.push(storage);
@@ -909,8 +940,17 @@ export function explore2(
       resumes,
       storages: [],
       storageSteps: [],
+      storageClocks: [],
       captures: [],
     };
+    if (underDecision) {
+      fromDecisions.add(kept);
+      // Counted as it is found, it lapses as the decisions' other totals do.
+      if (playKind !== "decisions" && found > 0 && recentWork.decisions > 0) {
+        recentFound.decisions += found;
+        rate.decisions = recentFound.decisions / recentWork.decisions;
+      }
+    }
     const replay = traced.get(played);
     if (replay !== undefined) traced.set(kept, replay);
     // The player comes back the next day and does as this play did where they can: a route that adds to a stored
@@ -922,7 +962,10 @@ export function explore2(
           draws: new Map(),
           inherited: [],
           storage,
-          wallClockMs: (played.path.wallClockMs ?? EPOCH_MS) + DAY_MS,
+          wallClockMs: Math.max(
+            (played.path.wallClockMs ?? EPOCH_MS) + DAY_MS,
+            savedAt.get(compactKey(JSON.stringify(storage))) ?? -Infinity,
+          ),
         },
         score: -visitKeys.size,
         target: null,
@@ -1083,7 +1126,8 @@ export function explore2(
     readonly grown: number;
     readonly found: { path: Path; from: number } | null;
   } | null => {
-    const candidate = as?.path ?? apply(parent, assignment, saved, target.step);
+    const applied = as?.path ?? apply(parent, assignment, saved, target.step);
+    const candidate = applied === null ? null : notBeforeSave(applied);
     if (candidate === null) return null;
     checks += 1;
     // A climb's checks (which measure) have their own bound; the cap counts the others.
@@ -1821,17 +1865,20 @@ export function explore2(
     answer: "",
   });
   let stoppedBy: "exhausted" | "budget" | "memory" = "exhausted";
-  // The work each kind did so far (in the runner's units: see `Runner.work`), and the new instructions per unit it found
-  // lately (a moving average): the kind that finds most goes next, except that each kind gets a share while it has work.
+  // The work each kind did so far (in the runner's units: see `Runner.work`), and the new instructions it found and the
+  // work it took lately (moving totals): the kind that finds most per unit of work goes next, except that each kind gets
+  // a share while it has work. Totals rather than an average of each play's ratio: a cheap play that finds one
+  // instruction does not outweigh a costly one that finds many.
   const spent = { decisions: 0, answers: 0, visits: 0, walks: 0 };
+  const recentFound = { decisions: 0, answers: 0, visits: 0, walks: 0 };
+  const recentWork = { decisions: 0, answers: 0, visits: 0, walks: 0 };
   const rate = { decisions: Infinity, answers: Infinity, visits: Infinity, walks: Infinity };
   const charge = (kind: (typeof KINDS)[number], before: number, found: number) => {
     const work = Math.max(runner.work - before, 1);
     spent[kind] += work;
-    rate[kind] =
-      rate[kind] === Infinity
-        ? found / work
-        : (1 - RATE_WEIGHT) * rate[kind] + RATE_WEIGHT * (found / work);
+    recentFound[kind] = (1 - RATE_WEIGHT) * recentFound[kind] + found;
+    recentWork[kind] = (1 - RATE_WEIGHT) * recentWork[kind] + work;
+    rate[kind] = recentFound[kind] / recentWork[kind];
   };
   for (;;) {
     if (outOfTime()) {
@@ -1867,11 +1914,15 @@ export function explore2(
     if (least === "walks") {
       const walkStarted = runner.work;
       // A random walk: from a random point of a recent path on, random answers and random draw outcomes; with half the
-      // chance, while a watched condition has a lead, from the point closest to it.
-      const leads = watched.flatMap((each) => (each.lead === null ? [] : [each.lead]));
+      // chance, while a watched condition not yet met both ways has a lead, from the point closest to it.
+      const leads = watched.flatMap((each) =>
+        each.lead === null || ways.has(each.side) ? [] : [{ ...each.lead, watched: each }],
+      );
       const lead =
         leads.length > 0 && random() < 0.5 ? leads[Math.floor(random() * leads.length)]! : null;
       const base = lead?.play ?? recent[Math.floor(random() * recent.length)]!;
+      playKind = "walks";
+      underDecision = fromDecisions.has(base);
       const cut = lead?.step ?? Math.floor(random() * (base.inputs.length + 1));
       // It resumes from the last point before the cut the play kept, if any.
       let at = cut;
@@ -1879,6 +1930,8 @@ export function explore2(
       const draws = new Map(
         [...base.path.draws].filter(([occurrence]) => (base.draws[occurrence]?.step ?? 0) <= cut),
       );
+      let walkDistance = Infinity;
+      const policy = new Map<number, { input: ExplorerInput; distance: number }>();
       const walked = runner.play(
         {
           inputs: base.inputs.slice(0, cut),
@@ -1890,13 +1943,47 @@ export function explore2(
           ...(at < 0 ? {} : { resume: { at, parent: base } }),
           keepResumes: true,
           extend: (interaction) => {
-            return interaction.options[Math.floor(random() * interaction.options.length)] ?? null;
+            const previous = lead === null ? undefined : policy.get(interaction.instruction);
+            // Toward a lead, the answer last given at this place is given again while the condition got closer since
+            // (a deck dealt card by card, a count of waits); otherwise one at random.
+            const prior =
+              previous !== undefined && walkDistance < previous.distance
+                ? previous.input
+                : undefined;
+            const repeated =
+              prior === undefined
+                ? undefined
+                : prior.kind === "text" &&
+                    interaction.options.some((option) => option.kind === "text")
+                  ? prior
+                  : interaction.options.find((option) =>
+                      prior.kind === "wait" ? option.kind === "wait" : sameInput(option, prior),
+                    );
+            const input =
+              repeated ??
+              interaction.options[Math.floor(random() * interaction.options.length)] ??
+              null;
+            if (lead !== null && input !== null)
+              policy.set(interaction.instruction, { input, distance: walkDistance });
+            return input;
           },
           maxSteps: Math.min(options.maxSteps, cut + options.extendSteps),
           maxStepInstructions: options.maxStepInstructions,
           origins: false,
           random,
-          ...(watched.length > 0 ? { observe } : {}),
+          ...(watched.length > 0
+            ? {
+                observe: (snapshot: Data, step: number) => {
+                  if (lead !== null)
+                    walkDistance = conditionMeasure(
+                      lead.watched.condition,
+                      lead.watched.wanted,
+                      snapshot,
+                    ).distance;
+                  return observe(snapshot, step);
+                },
+              }
+            : {}),
         },
       );
       const { found: walkFound } = take(
@@ -1934,6 +2021,9 @@ export function explore2(
       const tried = `${child.place}|${child.answer}`;
       answerTries.set(tried, (answerTries.get(tried) ?? 0) + 1);
     }
+    playKind = least;
+    underDecision =
+      least === "decisions" || (child.parent !== null && fromDecisions.has(child.parent));
     const childStarted = runner.work;
     let path = child.path;
     let parent = child.parent;
@@ -2491,6 +2581,18 @@ function conditionMeasure(condition: unknown, wanted: boolean, snapshot: Data): 
     if (node.kind === "group") return valueOf(node.expression);
     if (node.kind === "identifier" && typeof node.name === "string")
       return scalar(variables.get(node.name));
+    // A list's length: a deck dealt card by card gets closer to `cards.length <= 0`.
+    const object = record(node.object);
+    if (
+      node.kind === "property" &&
+      node.name === "length" &&
+      object.kind === "identifier" &&
+      typeof object.name === "string"
+    ) {
+      const collection = record(variables.get(object.name));
+      if (collection.kind === "list" && Array.isArray(collection.items))
+        return collection.items.length;
+    }
     // What the condition compares with may be worked out of numbers: `limit - 1`, `3 * min(LIMITS)`.
     if (node.kind === "unary" && node.operator === "-") {
       const operand = valueOf(node.operand);
