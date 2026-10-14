@@ -2764,11 +2764,17 @@ async function photoVignetteScenario(cdp, origin) {
   const readable = async (label, enhanced) => {
     const points = await value(cdp, samples);
     const texts = new Set(points.map(({ text }) => text));
-    assertEqual(
-      texts.size >= 7,
-      true,
-      `${label}: the authored text is not shown: ${[...texts].join(" | ")}`,
-    );
+    // Each kind of authored text, among them both inline code examples, has visible samples.
+    for (const text of [
+      "Plain grey",
+      "Grey code",
+      "Inline grey",
+      "Link",
+      "Light prose",
+      "Dark prose",
+      "grey code",
+    ])
+      assertEqual(texts.has(text), true, `${label}: no visible sample of "${text}"`);
     await evaluate(
       cdp,
       `const style = document.createElement('style'); style.id = 'smoke-hidden-glyphs'; style.textContent = '.transcript-entry, .transcript-entry * { -webkit-text-fill-color: transparent !important; text-decoration-color: transparent !important; text-shadow: none !important; }'; document.head.append(style);`,
