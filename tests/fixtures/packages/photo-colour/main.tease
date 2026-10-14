@@ -3,7 +3,7 @@ speaker guide {
     displayName: "Guide"
     color: "#7a9a3a"
 }
-showImage "images/green.svg"
+showImage "images/green.jpg"
 say "A green photo.", instant
 say as guide "Spoken in the guide's colour.", instant
 say prose(color: "#eeeeee") "Authored prose on the background.", instant
@@ -11,7 +11,7 @@ let picture: string = askImage(hint: "Add an image")
 showButton "Next"
 showImage "images/red.svg"
 showButton "Back"
-showImage "images/green.svg"
+showImage "images/green.jpg"
 showButton "Again"
 showImage "images/red.svg"
 showButton "Hide"

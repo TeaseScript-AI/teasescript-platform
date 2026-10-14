@@ -8,18 +8,19 @@ const modules = [
   "player/theme/palette.ts",
   "player/theme/photo-theme.ts",
   "player/vue/src/randomDrawPresentation.ts",
+  "player/vue/src/stagePhotos.ts",
   "player/vue/src/transcriptPresentation.ts",
   "player/vue/src/useDebugRandom.ts",
   "player/vue/src/useDebugRewind.ts",
   "player/vue/src/useDevelopmentTime.ts",
   "player/vue/src/useImageCapture.ts",
   "player/vue/src/useMessageUpdateAnnouncements.ts",
-  "player/vue/src/usePhotoSwatches.ts",
   "player/vue/src/usePlayerDebug.ts",
   "player/vue/src/usePlayerNotifications.ts",
   "player/vue/src/usePlayerSession.ts",
   "player/vue/src/usePlayerTheme.ts",
   "player/vue/src/usePlayerToasts.ts",
+  "player/vue/src/useStagePhoto.ts",
 ];
 
 // One server-side bundle for all test processes, built with the other UI builds, instead of every test file

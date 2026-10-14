@@ -74,7 +74,7 @@ accent; Theme Lab's diagnostics show the intent's own theme.
 Photo colours ([Stage and media presentation](../docs/ui/PLAYER-UI.md#stage-and-media-presentation)):
 `theme/node-vibrant/swatches.ts` measures a photo's six swatches as node-vibrant 4.0.4 does, without the library; it is
 derived from node-vibrant, whose MIT notice is kept in `theme/node-vibrant/LICENSE`. `theme/photo-theme.ts` maps the
-swatches to surfaces and an accent seed for the generator, and `vue/src/usePhotoColour.ts` measures the Stage image.
+swatches to surfaces and an accent seed for the generator, and `vue/src/stagePhotos.ts` measures the Stage image.
 
 Surface roles drive canvas ambience, containers and neutral interaction states; accent drives primary actions,
 focus and progress. Nested surfaces use less tint. Translucent media controls and Timer materials account for
