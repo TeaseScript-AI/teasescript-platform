@@ -160,9 +160,16 @@ test("the script's camera view previews the session camera where it places it, a
   const showing = host.session.value;
   assert.ok(showing);
   const saved = createPlayerRuntimeRestorePoint(showing);
-  // An ended camera has nothing to preview; the script's placement stays.
+  // A camera the browser or the system ended opens again: the view keeps its picture until the reopened camera's
+  // arrives, and the script's placement stays.
   camera.dispatchEvent(new Event("ended"));
-  assert.equal(host.viewfinder.value, null);
+  assert.equal(host.viewfinder.value, camera);
+  const deadline = Date.now() + 2_000;
+  while (host.viewfinder.value === camera) {
+    assert.ok(Date.now() < deadline, "the ended camera did not open again");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(host.viewfinder.value, tracks[1]);
   assert.equal(host.viewfinderPlacement.value, "stage");
 
   // Hiding the view keeps the camera open for `takePhoto()`.
@@ -170,13 +177,13 @@ test("the script's camera view previews the session camera where it places it, a
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, null);
   assert.equal(host.viewfinder.value, null);
-  assert.equal(tracks[1]?.readyState, "live");
+  assert.equal(tracks[2]?.readyState, "live");
 
   // A restored session shows the view where it was, with the camera Continue opens.
   host.prepareRestore(restorePlayerRuntimeSession(saved));
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, "stage");
-  assert.equal(host.viewfinder.value, tracks[2]);
+  assert.equal(host.viewfinder.value, tracks[3]);
 });
 
 test("a Start that throws after the camera opened releases the camera", async (context) => {
