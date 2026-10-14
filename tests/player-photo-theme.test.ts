@@ -143,6 +143,21 @@ test("Vibrant when large enough takes a Vibrant swatch only when it covers the s
     hue(swatches({ LightVibrant: RED, DarkMuted: GREEN }), "dark", LARGE_VIBRANT),
     green,
   );
+  // A Muted swatch that covers too little gives way to the other Muted one, and without a large enough swatch the
+  // largest one colours the Player (a street with a small red figure, 2026-10-14).
+  const street = (muted: number) =>
+    swatches(
+      { Vibrant: RED, LightMuted: PINK_GREY, Muted: GREEN },
+      { Vibrant: 0.019, LightMuted: 0.0001, Muted: muted },
+    );
+  assert.equal(
+    hue(street(0.079), "light", LARGE_VIBRANT),
+    hue(swatches({ Muted: GREEN }), "light", VIBRANT),
+  );
+  assert.equal(
+    hue(street(0.001), "light", LARGE_VIBRANT),
+    hue(swatches({ Vibrant: RED }), "light", VIBRANT),
+  );
   // A photo without a Muted swatch keeps its small Vibrant one.
   assert.equal(
     hue(swatches({ DarkVibrant: BROWN }, { DarkVibrant: 0.0006 }), "dark", LARGE_VIBRANT),

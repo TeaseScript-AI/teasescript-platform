@@ -621,8 +621,9 @@ The Stage image colours the whole Player: the photo decides the hue and colourfu
 the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast. The
 Photo colour family A/B test chooses the swatch: A, the Vibrant family (DarkVibrant in dark mode, LightVibrant in light
 mode, else Vibrant); B, the Muted family in the same way; C, the default, a Vibrant-family swatch only when it covers at
-least the set share of the photo's measured pixels, else the Muted family, so a small bright detail does not colour the
-Player. A photo without a swatch of that family takes the other family's, the larger Vibrant one first. The background,
+least the set share of the photo's measured pixels, else a Muted-family swatch that does, else the largest of them, so a
+small detail does not colour the Player. A photo without a swatch of that family takes the other family's, the larger
+Vibrant one first. The background,
 message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in colour around
 the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent A/B test's A,
 the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue too; B, the default, keeps the

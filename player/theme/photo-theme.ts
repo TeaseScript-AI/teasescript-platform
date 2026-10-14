@@ -22,13 +22,13 @@ export interface PhotoColours {
 export const PHOTO_FAMILIES = ["vibrant", "muted", "large-vibrant"] as const;
 /**
  * The swatch family the surfaces take: the Vibrant family, the Muted family, or the Vibrant family only where its
- * swatch covers at least a share of the photo, else the Muted family. Light and dark stay tied to the Player's mode:
- * "Muted" is LightMuted in light mode and DarkMuted in dark mode.
+ * swatch covers at least a share of the photo, else the Muted family, again only a swatch that covers the share. Light
+ * and dark stay tied to the Player's mode: "Muted" is LightMuted in light mode and DarkMuted in dark mode.
  */
 export type PhotoFamily = (typeof PHOTO_FAMILIES)[number];
 export interface PhotoColourChoice {
   readonly family: PhotoFamily;
-  /** The least share of the photo's measured pixels, 0..1, a Vibrant swatch covers to count as large enough. */
+  /** The least share of the photo's measured pixels, 0..1, a swatch covers to count as large enough. */
   readonly minShare: number;
 }
 
@@ -43,25 +43,28 @@ const FAMILIES: Readonly<
 
 /**
  * The background swatches in order, the chosen family's first, then the ones that stand in when the photo has no such
- * colour. A Vibrant swatch that stands in for a missing Muted one is the larger one, so a tiny bright detail does not
- * colour the Player when the photo has more of another. Only the hue and the colourfulness are used, so the other
- * mode's swatches can stand in last.
+ * colour. "Vibrant when large enough" takes a swatch of either family only when it covers the share, so a tiny detail
+ * does not colour the Player, and otherwise the largest. A Vibrant swatch that stands in for a missing Muted one is the
+ * larger one. Only the hue and the colourfulness are used, so the other mode's swatches can stand in last.
  */
 function surfaceSwatches(swatches: PhotoSwatches, mode: Mode, choice: PhotoColourChoice) {
   const { vibrant, muted } = FAMILIES[mode];
   const other = FAMILIES[mode === "dark" ? "light" : "dark"];
   const share = (name: SwatchName) => swatches[name]?.share ?? 0;
-  const largest = [...vibrant].sort((first, second) => share(second) - share(first));
+  const large = (names: readonly SwatchName[]) =>
+    names.filter((name) => share(name) >= choice.minShare);
+  const bySize = (names: readonly SwatchName[]) =>
+    [...names].sort((first, second) => share(second) - share(first));
   switch (choice.family) {
     case "vibrant":
       return [...vibrant, ...muted, other.vibrant[0], other.muted[0]];
     case "muted":
-      return [...muted, ...largest, other.muted[0], other.vibrant[0]];
+      return [...muted, ...bySize(vibrant), other.muted[0], other.vibrant[0]];
     case "large-vibrant":
       return [
-        ...vibrant.filter((name) => share(name) >= choice.minShare),
-        ...muted,
-        ...largest,
+        ...large(vibrant),
+        ...large(muted),
+        ...bySize([...vibrant, ...muted]),
         other.vibrant[0],
         other.muted[0],
       ];
