@@ -21,7 +21,7 @@ A lock encrypts its content once and gives each way to open it, an opener, its o
    public keys: an X25519 stanza for each `age1…` recipient, and an `ssh-ed25519` stanza for each OpenSSH Ed25519 key,
    as the `age` tool writes them. Its content is K in standard Base64 and a line feed, 45 bytes, so `age -d` with a
    matching private key prints the unlock key to send back
-   ([Opening with the private key](#opening-with-the-private-key)).
+   ([For the owner of the private key](#for-the-owner-of-the-private-key)).
 4. **Time opener:** K is sealed with drand's tlock to the round of the moment: identity-based encryption on BLS12-381
    for the quicknet chain (`bls-unchained-g1-rfc9380`, chain hash `52db9ba7…e971`, a round every 3 s since
    2023-08-23T15:09:27Z). The identity is the SHA-256 of the round as 8 bytes; only the round's beacon signature, which
@@ -73,19 +73,20 @@ not verify. It asks for a round only once the device clock says it is out; a rel
 not out yet, which is told apart from relays out of reach. A round's signature stays valid for ever, so a time lock
 opens also long after its moment.
 
-### Opening with the private key
+### For the owner of the private key
 
-The owner of the private key, a keyholder for example, needs only the `age` tool and their own key; nothing of
-TeaseScript. Once, they make an age identity and give the player its public key, or give their OpenSSH Ed25519 public
-key (`~/.ssh/id_ed25519.pub`):
+These instructions are for the owner of the private key, a keyholder for example; the Player shows none of them. They
+need only the `age` tool and their own key; nothing of TeaseScript. Once, they make an age identity or an OpenSSH
+Ed25519 key and give the player its public key:
 
 ```sh
 age-keygen -o key.txt          # prints "Public key: age1…", which they give the player
+ssh-keygen -t ed25519          # or this: they give the player the line in ~/.ssh/id_ed25519.pub
 ```
 
 For each lock, the player copies or downloads the unlock request (`unlock-request.age`) from the Player's unlock dialog
-and sends it to the owner of the private key, who opens it with the key that matches and sends back the unlock key, the
-44 characters it prints:
+and sends it to them. They open it with the private key that matches,
+`age -d -i <private key file> unlock-request.age`, and send back the unlock key, the 44 characters it prints:
 
 ```sh
 age -d -i key.txt unlock-request.age

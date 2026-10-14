@@ -1570,8 +1570,8 @@ one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
   (`ssh-ed25519 AAAA…`), locks the key in a standard age file that only the matching private key opens. The owner of
   the private key, a keyholder for example, opens it with the `age` tool and sends back the unlock key it holds, 44
   characters of Base64, which opens the lock as `key:` of a decrypt call or in the Player's dialog
-  ([`ENCRYPTION.md`](../ENCRYPTION.md#opening-with-the-private-key)). A lock holds at most 594 public keys. Text that is
-  no such key is an error, at compile time where it is written.
+  ([`ENCRYPTION.md`](../ENCRYPTION.md#for-the-owner-of-the-private-key)). A lock holds at most 594 public keys. Text
+  that is no such key is an error, at compile time where it is written.
 - `timeLock:`, a moment (`absoluteDateTime`), is a time lock, a lock that cannot open before a set time: from that
   moment anyone can open the lock with it, also long after, and before it the time lock opens nothing, while another
   opener may. The Player fetches the drand network's proof of that moment to open it. A moment in the past opens at
