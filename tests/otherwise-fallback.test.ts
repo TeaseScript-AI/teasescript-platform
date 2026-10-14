@@ -349,6 +349,13 @@ test("a read of a place that held only values of unknown type is of unknown type
     assert.deepEqual(outcome(loop("5")), [["4"], null]);
     assert.deepEqual(outcome(loop("null")), [["-1"], null]);
   }
+  // A store that decides the elements later still decides them for the loop, which checks them when they are added.
+  assert.deepEqual(
+    diagnostics(
+      `${HIDE}let bets = []\nfunction fill {\n    bets.add(hide(5))\n    for e in bets {\n        if e == null {\n            say "none"\n        }\n    }\n}\nfunction reset {\n    bets = [5, 10]\n}\nfill()\nreset()\nexit`,
+    ).map(([, code, , text]) => [code, text]),
+    [["TSV046", "e == null"]],
+  );
 });
 
 test("a null check removes the null of a copy of a place that took null first", () => {

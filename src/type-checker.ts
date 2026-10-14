@@ -1842,11 +1842,7 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, a dict, or a range",
         );
-        // The loop variable is a place: it keeps the plain element type.
-        const loopType =
-          element === undefined || readsHeldUnknown(element)
-            ? UNKNOWN_TYPE
-            : ownNull(copyType(plainType(element)));
+        const loopType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1964,10 +1960,7 @@ class TypeChecker {
       declaration: statement,
     };
     const element = dictValueType(iterable);
-    const valueType =
-      element === undefined || readsHeldUnknown(element)
-        ? UNKNOWN_TYPE
-        : ownNull(copyType(plainType(element)));
+    const valueType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
     this.#follow({ root: valueName, path: [] }, valueType, statement.iterable.span);
     const value: Variable = {
       name: valueName.name,
@@ -8240,6 +8233,18 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
       kept.add(member);
   }
   return all.filter((member) => kept.has(member));
+}
+
+/**
+ * The type of a loop variable that takes each value of a collection whose values are of type `element`, as a `let` of a
+ * read of one would have: a copy that keeps the plain type (see {@link ownNull}), or the unknown type of a place that held
+ * only values the compiler cannot know (see {@link readsHeldUnknown}). Either way the loop reads the values, so a store
+ * that decides them later in the check decides them for the loop too.
+ */
+function loopValueType(element: StaticType): StaticType {
+  if (!readsHeldUnknown(element)) return ownNull(copyType(plainType(element)));
+  observe(element);
+  return UNKNOWN_TYPE;
 }
 
 /**
