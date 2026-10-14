@@ -202,11 +202,16 @@
   }
 }
 
-/* The background's colour as a registered colour, so that it can fade to a new photo's colour. */
+/* The background's colour and its vignette's edge as registered colours; the edge fades to the other mode's. */
 @property --player-field {
   syntax: "<color>";
   inherits: false;
   initial-value: transparent;
+}
+@property --photo-edge {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: black;
 }
 /* One background behind the Stage and the chat, in which both sit (PLAYER-UI.md "Stage and media presentation"): one
    field colour, and effects centred on the photo that fade into it, so no edge marks where the Stage ends. */
@@ -235,15 +240,22 @@
     calc(var(--photo-w, 480px) * 0.5 + var(--usable-width) * 0.4)
       calc(var(--photo-h, 320px) * 0.5 + var(--usable-height) * 0.75)
       at var(--photo-cx, 50%) var(--photo-cy, 30%),
-    transparent 50%, var(--photo-edge, black) 100%);
+    transparent 50%, var(--photo-edge) 100%);
   opacity: var(--photo-vignette, 0);
   pointer-events: none;
 }
 :root[data-player-theme="light"] .player-viewport-canvas { --photo-edge: white; }
+/* While the photo colour changes (`usePhotoColour.ts`), every theme colour fades together from the root, where
+   `usePlayerTheme.ts` lists them as transition properties: the background, the bubbles, the buttons, the accent and the
+   composer, with the vignette beside them. `--photo-fade-duration` follows the Photo colour transition A/B test. */
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-photo-fade] .player-viewport-canvas { transition: --player-field 0.6s; }
-  :root[data-photo-fade] .player-viewport-canvas::before { transition: opacity 0.6s; }
-  :root[data-photo-fade] .message-speaker { transition: background-color 0.6s; }
+  :root[data-photo-fade] { transition-duration: var(--photo-fade-duration); transition-timing-function: ease; }
+  :root[data-photo-fade] .player-viewport-canvas { transition: --photo-edge var(--photo-fade-duration) ease; }
+  :root[data-photo-fade] .player-viewport-canvas::before { transition: opacity var(--photo-fade-duration) ease; }
+  /* Controls' own colour transitions would trail the fade; they step aside while it runs. */
+  :root[data-photo-fade] :is(.transition-colors, .transition-all, [class*="transition-[color"], .player-action-button) {
+    transition-duration: 0s;
+  }
 }
 
 .player-sidebar {

@@ -254,7 +254,7 @@ while Debug runs, named by the bar's tooltip "Debug session · Debug on" or "Deb
 Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
-title-bar A/B setting chooses the presentation:
+Title bar on short screens A/B test ([A/B tests](#player-settings)) chooses the presentation:
 
 - **A · Always visible, controls left** (default): the bar stays visible and its controls move left of the timer rail;
 - **B · Auto-hide, controls right**: the bar hides and reveals on mouse entry, a tap on unused bar space, or keyboard
@@ -272,15 +272,22 @@ available in every build to every user. It currently offers:
 - **Menu Sidebar labels:** icons only, icons with a temporary label preview, or icons with labels;
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
-- **Title bar on short screens · A/B test:** variant A or B above;
-- **Photo accent · A/B test:** A, the accent follows the photo (default), or B, the theme's accent
-  ([Stage and media presentation](#stage-and-media-presentation));
 - **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)); on
   in the normal room, play goes on in the [debug room](../DEBUGGER.md#debug-room).
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
-  started, also with the Debug menu off.
+  started, also with the Debug menu off;
+- **Testing · A/B tests** (on by default): adds the **A/B tests** panel to the tools menu, after Debug. It holds only
+  the A/B tests the owner approved, each with its options and a **Next option** button that steps to the following
+  option and wraps around, so a variant can be flipped while the panel stays open beside the playing Player:
+  - **Title bar on short screens:** A or B above (default A);
+  - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
+  - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
+    photo from which a swatch counts as large enough (default 3 %);
+  - **Photo colour transition:** A, 0.6 s blended in Oklab (default), or B, 0.3 s blended in sRGB
+    ([Stage and media presentation](#stage-and-media-presentation)).
 
-Apart from the Debug menu, these are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
+Apart from the Debug menu, these settings and the A/B test choices are presentation preferences, not canonical runtime
+state. The Player keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
 storage when the host frame denies it. Account settings may later take over or synchronize them. The Debug menu is not
 stored: every load in the normal room starts with it off, so a tester who opens another script never debugs it by
@@ -602,27 +609,44 @@ Standard image/video-like presentation:
 - places the Stage and the transcript in one background: a single layer behind both, in which the media and the chat
   both sit. The background has no separate Stage or chat colour and no fade that marks where the Stage ends.
   Media-derived colour and decorative effects, such as a glow or vignette, belong to that one background, centred on
-  or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. An accepted
-  author/media capability may still provide an explicit stage/background presentation. Tool panels and Player
-  controls keep their own materials. Stage and transcript remain separate regions with separate content and
-  scrolling ownership;
+  or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. Readable contrast is
+  required once a change has settled; a short colour transition, such as the photo fade, may pass through lower
+  contrast. An accepted author/media capability may still provide an explicit stage/background presentation. Tool
+  panels and Player controls keep their own materials. Stage and transcript remain separate regions with separate
+  content and scrolling ownership;
 - uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
   scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
 
-The Stage image colours the whole Player: the photo decides the hue and colourfulness, from its Vibrant-family colour
-for the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast.
-The background, message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in
-colour around the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent
-A/B test's A, the default, the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue
-too; B keeps the theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
-same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. While a new image loads,
-and when the browser does not let the Player read an image's pixels, the previous photo's colour stays; a camera view or
-an image request's preview over the Stage does not change it. The Player follows a new photo once it has shown briefly
-and reuses recent image measurements. From one photo's colour to the next in the same mode it fades the background and
-message bubbles, which keep their lightness; the first photo's colour, the theme's return, and a mode change switch at
-once, together with the text on them. Reduced motion removes the fade. The colours are measured as node-vibrant measures
-its swatches (`player/theme/node-vibrant/`).
+The Stage image colours the whole Player: the photo decides the hue and colourfulness, from one of its swatches for
+the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast. The
+Photo colour family A/B test chooses the swatch: A, the Vibrant family (DarkVibrant in dark mode, LightVibrant in light
+mode, else Vibrant); B, the Muted family in the same way; C, the default, a Vibrant-family swatch only when it covers at
+least the set share of the photo's measured pixels, else a Muted-family swatch that does, else the largest of them, so a
+small detail does not colour the Player. A photo without a swatch of that family takes the other family's, the larger
+Vibrant one first. The background,
+message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in colour around
+the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent A/B test's A,
+the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue too; B, the default, keeps the
+theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
+same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. A new photo and its
+colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
+stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
+photo shows with the previous colour, and its own colour follows. After Start, the Player downloads every Stage image
+the script names, by its path or as a candidate of `showImage tagged`, into its Cache Storage and measures it, in the
+background, one at a time and after any photo the Stage waits for; such a photo then shows from that copy without a new
+download and only needs decoding. An image path the script computes while it runs is downloaded into the cache when it
+shows. In memory the Player keeps each photo's colours, and the file only of the photo the Stage shows or prepares. The
+Player empties its cache when a newly opened page loads a script, so a later visit downloads changed files again, and
+keeps only the images a script names when another script starts. Without Cache Storage, as outside a secure context, a
+photo is downloaded again each time it shows. When the browser does not let the Player read an image's pixels,
+the previous photo's colour stays; a camera view or an image request's preview over the Stage does not change it. The
+Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
+colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
+a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
+message bubbles, the buttons, the accent, and the composer. The Photo colour transition A/B test sets the fade: A, the
+default, 0.6 s blended in Oklab; B, as in Milovana's player, 0.3 s blended in sRGB. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+(`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
 without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed
@@ -990,10 +1014,10 @@ unambiguous text of one field label or of the submit or cancel button activates 
 `askChoice`. A form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
-click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
-A click/tap settles only the gate presented when the press began; if that gate ended while the press was held, the
-release settles nothing. Actual interactive controls always take precedence and must not also fire the viewport-wide
-pacing shortcut.
+click/tap on a message, its speaker avatar, or Player background/unused space, or Space with the empty focused composer,
+may settle that gate under ADR 0018. A click/tap settles only the gate presented when the press began; if that gate
+ended while the press was held, the release settles nothing. Actual interactive controls and the composer always take
+precedence and must not also fire the viewport-wide pacing shortcut, and a press that selects text settles nothing.
 
 Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Player; it currently uses wrapping
 buttons.

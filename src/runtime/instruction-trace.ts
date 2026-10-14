@@ -16,13 +16,18 @@ export interface RuntimeInstructionTrace {
 
 /**
  * A session host's observer of each instruction an operation executes, in order (`docs/RUNTIME.md#runtime-sessions`).
- * `call` is the ID of the call frame that runs the instruction, 0 outside every call.
+ * `call` is the ID of the call frame that runs the instruction or block, 0 outside every call.
  */
 export interface RuntimeInstructionObserver {
   /** Called right before a planned instruction runs; returning `true` ends the operation there, before it runs. */
   readonly before?: (instruction: number, call: number) => boolean | void;
   /** Called once an instruction completed, with `next`, the instruction where execution continues. */
   readonly after?: (instruction: number, next: number, call: number) => void;
+  /**
+   * Called right before a queued timer, media, or button block starts, which counts as one executed instruction, with
+   * `block`, its function ID; returning `true` ends the operation there, before it starts.
+   */
+  readonly dispatch?: (block: number, call: number) => boolean | void;
 }
 
 /** Collects one call's instruction trace; the engine records into it at each instruction boundary. */

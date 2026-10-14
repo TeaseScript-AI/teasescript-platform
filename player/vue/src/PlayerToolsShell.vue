@@ -83,10 +83,10 @@ const props = defineProps<{
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
-const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
-const photoAccentOption = defineModel<"photo" | "theme">("photoAccentOption", { required: true });
 // Testing: whether the tools menu offers the Debug panel. PlayerApp owns it; it is not a stored preference.
 const debugMenu = defineModel<boolean>("debugMenu", { required: true });
+// Testing: whether the tools menu offers the A/B tests panel, a stored preference PlayerApp owns.
+const abTestsMenu = defineModel<boolean>("abTestsMenu", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = usePlayerPreference<LabelMode>("player-menu-label-mode", ["icons", "preview", "labels"], "icons");
 const hoverPreview = ref(false);
@@ -922,28 +922,6 @@ async function updateSidebarVisibility(open: boolean) {
                         <option value="high">High</option>
                       </select>
                     </label>
-                    <fieldset class="grid gap-2 border-t pt-4 text-sm" data-player-setting="titlebar">
-                      <legend class="font-medium">Title bar on short screens · A/B test</legend>
-                      <label class="flex items-start gap-2">
-                        <input v-model="titlebarOption" type="radio" name="titlebar-option" value="left" />
-                        A · Always visible, controls left
-                      </label>
-                      <label class="flex items-start gap-2">
-                        <input v-model="titlebarOption" type="radio" name="titlebar-option" value="overlap" />
-                        B · Auto-hide, controls right
-                      </label>
-                    </fieldset>
-                    <fieldset class="grid gap-2 border-t pt-4 text-sm" data-player-setting="photo-accent">
-                      <legend class="font-medium">Photo accent · A/B test</legend>
-                      <label class="flex items-start gap-2">
-                        <input v-model="photoAccentOption" type="radio" name="photo-accent-option" value="photo" />
-                        A · Accent follows the photo
-                      </label>
-                      <label class="flex items-start gap-2">
-                        <input v-model="photoAccentOption" type="radio" name="photo-accent-option" value="theme" />
-                        B · Theme accent
-                      </label>
-                    </fieldset>
                     <section class="grid gap-2 border-t pt-4 text-sm" data-player-setting="testing">
                       <h3 class="font-medium">Testing</h3>
                       <label class="flex min-h-11 items-center justify-between gap-4">
@@ -953,6 +931,14 @@ async function updateSidebarVisibility(open: boolean) {
                       <p class="text-muted-foreground">
                         Adds the Debug panel to the tools menu. It shows how the script runs and may reveal what
                         comes next.
+                      </p>
+                      <label class="flex min-h-11 items-center justify-between gap-4">
+                        A/B tests
+                        <Switch v-model="abTestsMenu" data-player-setting="ab-tests-menu" />
+                      </label>
+                      <p class="text-muted-foreground">
+                        Adds the A/B tests panel to the tools menu: variants of the Player's look that are being
+                        compared.
                       </p>
                       <template v-if="debugExport">
                         <Button

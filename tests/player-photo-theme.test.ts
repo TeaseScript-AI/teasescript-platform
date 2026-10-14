@@ -8,7 +8,7 @@ import {
   type Rgb,
   type SwatchName,
 } from "../player/theme/node-vibrant/swatches.js";
-import type { OklchColor } from "../player/theme/color.js";
+import { legacySrgbCss, type OklchColor } from "../player/theme/color.js";
 import type {
   ContrastDiagnostic,
   PhotoSurfaces,
@@ -23,7 +23,15 @@ interface PhotoColours {
   readonly vignette: number;
 }
 type Mode = "light" | "dark";
-let photoColours: (swatches: PhotoSwatches, mode: Mode) => PhotoColours | null;
+interface PhotoColourChoice {
+  readonly family: "vibrant" | "muted" | "large-vibrant";
+  readonly minShare: number;
+}
+let photoColours: (
+  swatches: PhotoSwatches,
+  mode: Mode,
+  choice: PhotoColourChoice,
+) => PhotoColours | null;
 let generatePlayerTheme: (
   intent: PlayerThemeIntent,
   photo?: PhotoSurfaces | null,
@@ -46,93 +54,131 @@ before(async () => {
   defaults = player.defaultPlayerThemeIntents as typeof defaults;
 });
 
-const NONE: PhotoSwatches = {
-  Vibrant: null,
-  LightVibrant: null,
-  DarkVibrant: null,
-  Muted: null,
-  LightMuted: null,
-  DarkMuted: null,
-};
-function swatches(colours: Partial<Record<SwatchName, Rgb>>): PhotoSwatches {
+// Swatches of the given colours, each covering the given share of the photo, 10 % unless given.
+function swatches(
+  colours: Partial<Record<SwatchName, Rgb>>,
+  shares: Partial<Record<SwatchName, number>> = {},
+): PhotoSwatches {
+  const swatch = (name: SwatchName) => {
+    const rgb = colours[name];
+    return rgb ? { rgb, population: 1, share: shares[name] ?? 0.1 } : null;
+  };
   return {
-    ...NONE,
-    ...Object.fromEntries(
-      Object.entries(colours).map(([name, rgb]) => [name, { rgb, population: 1 }]),
-    ),
+    Vibrant: swatch("Vibrant"),
+    LightVibrant: swatch("LightVibrant"),
+    DarkVibrant: swatch("DarkVibrant"),
+    Muted: swatch("Muted"),
+    LightMuted: swatch("LightMuted"),
+    DarkMuted: swatch("DarkMuted"),
   };
 }
-function colours(photo: PhotoSwatches, mode: Mode): PhotoColours {
-  const result = photoColours(photo, mode);
+const VIBRANT: PhotoColourChoice = { family: "vibrant", minShare: 0.02 };
+const MUTED: PhotoColourChoice = { family: "muted", minShare: 0.02 };
+const LARGE_VIBRANT: PhotoColourChoice = { family: "large-vibrant", minShare: 0.02 };
+// The surface hue the Player takes from a photo.
+function hue(photo: PhotoSwatches, mode: Mode, choice: PhotoColourChoice): number {
+  const result = photoColours(photo, mode, choice);
   assert.ok(result, "the photo has colours");
-  return result;
+  return result.surfaces.hue;
 }
 
 const RED: Rgb = [244, 40, 51];
 const LIGHT_BLUE: Rgb = [168, 205, 251];
-const DARK_GREEN: Rgb = [60, 108, 4];
+const BROWN: Rgb = [126, 60, 17];
+const GREEN: Rgb = [50, 72, 61];
+const PINK_GREY: Rgb = [205, 170, 180];
+const YELLOW: Rgb = [245, 195, 82];
 
-test("the Player takes the colour of the photo's Vibrant-family swatch for the mode", () => {
-  const photo = swatches({ Vibrant: RED, LightVibrant: LIGHT_BLUE, DarkVibrant: DARK_GREEN });
-  const dark = colours(photo, "dark").surfaces;
-  const light = colours(photo, "light").surfaces;
-  assert.equal(dark.hue, colours(swatches({ DarkVibrant: DARK_GREEN }), "dark").surfaces.hue);
-  assert.equal(light.hue, colours(swatches({ LightVibrant: LIGHT_BLUE }), "light").surfaces.hue);
-  assert.ok(dark.chroma > 0 && light.chroma > 0);
-  // Without that swatch, Vibrant stands in, then the Muted family, then the other mode's swatches.
-  assert.equal(
-    colours(swatches({ Vibrant: RED, LightVibrant: LIGHT_BLUE }), "dark").surfaces.hue,
-    colours(swatches({ Vibrant: RED }), "dark").surfaces.hue,
-  );
-  assert.equal(
-    colours(swatches({ DarkMuted: DARK_GREEN, LightVibrant: LIGHT_BLUE }), "dark").surfaces.hue,
-    dark.hue,
-  );
-  assert.equal(colours(swatches({ DarkVibrant: DARK_GREEN }), "light").surfaces.hue, dark.hue);
-});
-
-test("the Player keeps its own lightness, whatever the photo's", () => {
-  for (const mode of ["light", "dark"] as const) {
-    const pale = colours(swatches({ Vibrant: [250, 200, 205] }), mode).surfaces;
-    const deep = colours(swatches({ Vibrant: [90, 8, 14] }), mode).surfaces;
-    assert.deepEqual(pale.tones, deep.tones, mode);
-    const canvas = (surfaces: PhotoSurfaces) =>
-      generatePlayerTheme(defaults[mode], surfaces).roles["surface-canvas"]!.l;
-    assert.ok(Math.abs(canvas(pale) - canvas(deep)) < 0.01, `${mode}: canvas lightness`);
-  }
-});
-
-test("a grey photo keeps the Player neutral, and a photo without colours keeps the theme", () => {
-  const grey = swatches({
-    Muted: [124, 124, 124],
-    LightMuted: [188, 188, 188],
-    DarkMuted: [68, 68, 68],
+test("the Muted family takes the photo's Muted swatch for the mode", () => {
+  const photo = swatches({
+    DarkVibrant: RED,
+    LightVibrant: LIGHT_BLUE,
+    DarkMuted: GREEN,
+    LightMuted: PINK_GREY,
   });
-  for (const mode of ["light", "dark"] as const) {
-    const result = colours(grey, mode);
-    assert.equal(result.surfaces.chroma, 0, mode);
-    assert.equal(result.accent, null, `${mode}: the theme's accent stays`);
-    assert.equal(photoColours(NONE, mode), null, `${mode}: no colours`);
-  }
+  assert.equal(hue(photo, "dark", MUTED), hue(swatches({ DarkMuted: GREEN }), "dark", VIBRANT));
+  assert.equal(
+    hue(photo, "light", MUTED),
+    hue(swatches({ LightMuted: PINK_GREY }), "light", VIBRANT),
+  );
+  // Without it, Muted stands in, then the mode's Vibrant family.
+  assert.equal(
+    hue(swatches({ Muted: GREEN, DarkVibrant: RED }), "dark", MUTED),
+    hue(swatches({ DarkMuted: GREEN }), "dark", VIBRANT),
+  );
+  assert.equal(
+    hue(swatches({ DarkVibrant: RED, LightMuted: PINK_GREY }), "dark", MUTED),
+    hue(swatches({ DarkVibrant: RED }), "dark", VIBRANT),
+  );
 });
 
-test("the photo accent takes the photo's Vibrant hue when the photo has enough colour", () => {
-  const red = colours(swatches({ Vibrant: RED }), "light").accent;
-  const green = colours(swatches({ Vibrant: [80, 170, 60] }), "light").accent;
-  assert.ok(red && green);
-  assert.ok(Math.abs(red.h - green.h) > 60, "a different hue per photo");
-  assert.deepEqual(
-    colours(swatches({ Vibrant: RED }), "dark").accent,
-    red,
-    "the same in both modes",
+test("Vibrant when large enough takes a Vibrant swatch only when it covers the share, else the Muted one", () => {
+  // A green landscape whose DarkVibrant is a small brown hut (owner's photo, 2026-10-14).
+  const landscape = (hut: number) =>
+    swatches(
+      { DarkVibrant: BROWN, Vibrant: BROWN, DarkMuted: GREEN },
+      { DarkVibrant: hut, Vibrant: hut / 2, DarkMuted: 0.08 },
+    );
+  const brown = hue(swatches({ DarkVibrant: BROWN }), "dark", VIBRANT);
+  const green = hue(swatches({ DarkMuted: GREEN }), "dark", VIBRANT);
+  assert.equal(hue(landscape(0.0006), "dark", VIBRANT), brown, "Vibrant takes the hut");
+  assert.equal(hue(landscape(0.0006), "dark", LARGE_VIBRANT), green, "the hut is too small");
+  assert.equal(hue(landscape(0.02), "dark", LARGE_VIBRANT), brown, "exactly the share counts");
+  assert.equal(
+    hue(landscape(0.0006), "dark", { family: "large-vibrant", minShare: 0.0005 }),
+    brown,
+    "the share is adjustable",
   );
-  assert.deepEqual(
-    colours(swatches({ DarkVibrant: RED }), "light").accent,
-    red,
-    "DarkVibrant stands in",
+  // The mode's Vibrant swatch is too small, the mid one covers enough.
+  assert.equal(
+    hue(
+      swatches({ DarkVibrant: BROWN, Vibrant: RED, DarkMuted: GREEN }, { DarkVibrant: 0.001 }),
+      "dark",
+      LARGE_VIBRANT,
+    ),
+    hue(swatches({ Vibrant: RED }), "dark", VIBRANT),
   );
-  // A pale cream LightVibrant, as in a sunlit portrait, has too little colour for an accent.
-  assert.equal(colours(swatches({ LightVibrant: [252, 236, 204] }), "light").accent, null);
+  // Light and dark stay tied to the mode: a large LightVibrant does not count in dark mode.
+  assert.equal(
+    hue(swatches({ LightVibrant: RED, DarkMuted: GREEN }), "dark", LARGE_VIBRANT),
+    green,
+  );
+  // A Muted swatch that covers too little gives way to the other Muted one, and without a large enough swatch the
+  // largest one colours the Player (a street with a small red figure, 2026-10-14).
+  const street = (muted: number) =>
+    swatches(
+      { Vibrant: RED, LightMuted: PINK_GREY, Muted: GREEN },
+      { Vibrant: 0.019, LightMuted: 0.0001, Muted: muted },
+    );
+  assert.equal(
+    hue(street(0.079), "light", LARGE_VIBRANT),
+    hue(swatches({ Muted: GREEN }), "light", VIBRANT),
+  );
+  assert.equal(
+    hue(street(0.001), "light", LARGE_VIBRANT),
+    hue(swatches({ Vibrant: RED }), "light", VIBRANT),
+  );
+  // A photo without a Muted swatch keeps its small Vibrant one.
+  assert.equal(
+    hue(swatches({ DarkVibrant: BROWN }, { DarkVibrant: 0.0006 }), "dark", LARGE_VIBRANT),
+    brown,
+  );
+});
+
+test("a Vibrant swatch standing in for a missing Muted one is the larger one", () => {
+  // A red neon sign: no Muted colour, a tiny yellow highlight as LightVibrant, red as Vibrant.
+  const neon = swatches(
+    { LightVibrant: YELLOW, Vibrant: RED },
+    { LightVibrant: 0.002, Vibrant: 0.046 },
+  );
+  const red = hue(swatches({ Vibrant: RED }), "light", VIBRANT);
+  assert.equal(hue(neon, "light", MUTED), red);
+  assert.equal(hue(neon, "light", { family: "large-vibrant", minShare: 0.05 }), red);
+});
+
+test("the sRGB photo transition writes the theme's colours in legacy sRGB syntax, which fades in sRGB", () => {
+  assert.equal(legacySrgbCss("oklch(1 0 0)"), "rgb(255 255 255 / 1)");
+  assert.equal(legacySrgbCss("oklch(0 0 0 / 0.25)"), "rgb(0 0 0 / 0.25)");
 });
 
 // The six photos of the node-vibrant fixture, and a sweep of photo colours around the hue circle.
@@ -177,17 +223,18 @@ test("photo colours fail no contrast check that the theme passes, in either mode
           .diagnostics.filter((item) => item.passes)
           .map(key),
       );
-      for (const photo of all) {
-        const result = photoColours(photo.swatches, mode);
-        if (!result) continue;
-        const theme = generatePlayerTheme(
-          result.accent ? { ...intent, accentSeed: result.accent } : intent,
-          result.surfaces,
-        );
-        const failures = theme.diagnostics
-          .filter((item) => item.passes === false && passing.has(key(item)))
-          .map((item) => `${key(item)} ${item.ratio.toFixed(3)} < ${item.target}`);
-        assert.deepEqual(failures, [], `${photo.name}, ${mode}, ${contrast}`);
-      }
+      for (const photo of all)
+        for (const choice of [VIBRANT, MUTED, LARGE_VIBRANT]) {
+          const result = photoColours(photo.swatches, mode, choice);
+          if (!result) continue;
+          const theme = generatePlayerTheme(
+            result.accent ? { ...intent, accentSeed: result.accent } : intent,
+            result.surfaces,
+          );
+          const failures = theme.diagnostics
+            .filter((item) => item.passes === false && passing.has(key(item)))
+            .map((item) => `${key(item)} ${item.ratio.toFixed(3)} < ${item.target}`);
+          assert.deepEqual(failures, [], `${photo.name}, ${mode}, ${contrast}, ${choice.family}`);
+        }
     }
 });

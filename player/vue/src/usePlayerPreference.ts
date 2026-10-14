@@ -13,7 +13,7 @@ export function browserStorage(): Storage | undefined {
 
 // Player Settings are browser-local presentation preferences, not canonical runtime state.
 // Stored text is external input, including writes from other tabs: every read maps an
-// unknown value to the default.
+// unknown value to the default. Only a choice is stored, so an untouched preference follows a changed default.
 export function usePlayerPreference<T extends string>(
   key: string,
   allowed: readonly T[],
@@ -22,9 +22,30 @@ export function usePlayerPreference<T extends string>(
   const storage = browserStorage();
   if (!storage) return shallowRef(fallback);
   return useStorage<T>(key, fallback, storage, {
+    writeDefaults: false,
     serializer: {
       read: (raw) => allowed.find((value) => value === raw) ?? fallback,
       write: (value) => value,
+    },
+  });
+}
+
+/** A number preference from `min` to `max`; stored text that is no such number reads as the default. */
+export function usePlayerNumberPreference(
+  key: string,
+  { min, max }: { readonly min: number; readonly max: number },
+  fallback: number,
+): Ref<number> {
+  const storage = browserStorage();
+  if (!storage) return shallowRef(fallback);
+  return useStorage<number>(key, fallback, storage, {
+    writeDefaults: false,
+    serializer: {
+      read: (raw) => {
+        const value = raw.trim() === "" ? Number.NaN : Number(raw);
+        return value >= min && value <= max ? value : fallback;
+      },
+      write: (value) => String(value),
     },
   });
 }

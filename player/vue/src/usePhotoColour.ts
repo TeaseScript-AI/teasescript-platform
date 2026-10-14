@@ -1,33 +1,16 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, watchEffect, type Ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
-import { photoSwatches, type PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
-import { photoColours } from "../../theme/photo-theme.js";
-import { usePhotoSwatches } from "./usePhotoSwatches";
+import type { PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
+import { photoColours, type PhotoColourChoice } from "../../theme/photo-theme.js";
 
 // Photo colours (PLAYER-UI.md "Stage and media presentation"): the Stage photo colours the Player.
 
-/** The photo is measured at this longest side: enough pixels for six swatches, few enough to stay cheap. */
-const MEASURE_SIDE = 128;
-/** How long the background and the message bubbles take to fade to a new photo's colour, as in `style.css`. */
-const FADE_MS = 600;
-
 /**
- * The swatches of the photo the Stage shows, read from its own image element: the browser downloads and decodes it
- * once, for the Stage. An image from another origin that its server does not share leaves the canvas unreadable, and
- * this throws.
+ * How long the Player's colours take to fade to a new photo's colour, per the Photo colour transition A/B test: A, 0.6 s
+ * blended in Oklab, or B, 0.3 s blended in sRGB like Milovana's player (`usePlayerTheme.ts` writes the colours for it).
  */
-function measure(image: HTMLImageElement): PhotoSwatches | null {
-  if (image.naturalWidth === 0 || image.naturalHeight === 0) return null;
-  const scale = Math.min(1, MEASURE_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return photoSwatches(context.getImageData(0, 0, canvas.width, canvas.height).data);
-}
+const PHOTO_TRANSITIONS = { oklab: 600, srgb: 300 } as const;
+export type PhotoTransition = keyof typeof PHOTO_TRANSITIONS;
 
 /** The Stage's photo, not an image request's preview over it. */
 function stageImage(stage: HTMLElement | undefined) {
@@ -78,45 +61,43 @@ function usePhotoGeometry(
 }
 
 /**
- * The Player's photo colours for the photo the Stage shows (`source`, `null` without one): `null` keeps the theme's own
- * colours. While they apply, the document root has `data-photo-colour` and the vignette strength `--photo-vignette`;
- * for a moment after one photo's colour follows another's it has `data-photo-fade`, during which `style.css` fades the
+ * The Player's photo colours from the swatches of the photo the Stage shows (`photo`; `null` swatches keep the theme's
+ * own colours). While they apply, the document root has `data-photo-colour` and the vignette strength
+ * `--photo-vignette`; for a moment after they change it has `data-photo-fade`, during which `style.css` fades the
  * background and the message bubbles.
  */
 export function usePhotoColour(
-  source: Readonly<Ref<string | null>>,
+  photo: Readonly<Ref<unknown>>,
+  swatches: Readonly<Ref<PhotoSwatches | null>>,
   mode: Readonly<Ref<"light" | "dark">>,
+  /** The swatch family the colours come from; another choice maps the same swatches again, without measuring. */
+  choice: Readonly<Ref<PhotoColourChoice>>,
+  transition: Readonly<Ref<PhotoTransition>>,
   elements: {
     readonly canvas: Readonly<Ref<HTMLElement | undefined>>;
     readonly stage: Readonly<Ref<HTMLElement | undefined>>;
   },
 ) {
-  // The Stage's own image of that source, while it still shows it.
-  const swatches = usePhotoSwatches(source, (src) => {
-    const image = stageImage(elements.stage.value);
-    return image?.getAttribute("src") === src && image.complete ? measure(image) : undefined;
-  });
   const colours = computed(() =>
-    swatches.value ? photoColours(swatches.value, mode.value) : null,
+    swatches.value ? photoColours(swatches.value, mode.value, choice.value) : null,
   );
-  usePhotoGeometry(elements.canvas, elements.stage, [source, swatches]);
+  usePhotoGeometry(elements.canvas, elements.stage, [photo, swatches]);
   const root = document.documentElement;
   const fading = ref(false);
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
-  // Between two photos in one mode the surfaces keep their tones, so they fade without changing the contrast of anything
-  // on them. Any other change, such as the first photo, the theme's return, or another mode, changes how light the
-  // surfaces are: it switches at once, together with the text and the authored colours drawn on them.
-  watch(colours, (next, previous) => {
+  // Every change fades: the first photo, the next one, the theme's return, and another mode. Authored colours adapt to
+  // the background once it has settled, so they can lack contrast during the fade.
+  watch(colours, () => {
     clearTimeout(fadeTimer);
-    fading.value =
-      next !== null && previous !== null && next.surfaces.tones === previous.surfaces.tones;
-    if (fading.value) fadeTimer = setTimeout(() => (fading.value = false), FADE_MS + 100);
+    fading.value = true;
+    fadeTimer = setTimeout(() => (fading.value = false), PHOTO_TRANSITIONS[transition.value] + 100);
   });
   watchEffect(() => {
     const vignette = colours.value?.vignette;
     root.toggleAttribute("data-photo-colour", vignette !== undefined);
     if (vignette === undefined) root.style.removeProperty("--photo-vignette");
     else root.style.setProperty("--photo-vignette", String(vignette));
+    root.style.setProperty("--photo-fade-duration", `${PHOTO_TRANSITIONS[transition.value]}ms`);
     root.toggleAttribute("data-photo-fade", fading.value);
   });
   onBeforeUnmount(() => {
@@ -124,6 +105,7 @@ export function usePhotoColour(
     root.removeAttribute("data-photo-colour");
     root.removeAttribute("data-photo-fade");
     root.style.removeProperty("--photo-vignette");
+    root.style.removeProperty("--photo-fade-duration");
   });
   return colours;
 }

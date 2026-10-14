@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExpressionPlan, InstructionPlan, SayInstruction } from "../src/plan/model.js";
+import { withRegexWorkLimit } from "../src/regex-engine.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { executeValidatedInstruction } from "../src/runtime/engine.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
@@ -75,9 +76,10 @@ test("a say whose expressions only read, compute, and draw stages selectively", 
     // Regex searches only read their text and regex, and a regex is a plain value (V30 §8).
     "say /a+/i\nsay toRegex(tint, default: null)\nsay tint.matches(/b.*/)\nsay tint.contains(/u/)",
     "say tint.find(/[aeiou]/)\nsay tint.capture(/(b)(l)?/)\nsay tint.indexOf(/e/)",
+    'say tint.findAll(/[aeiou]/)\nsay tint.split(/u/)\nsay tint.replace(/(b)/, "$1$1")\nsay tint.lastIndexOf(/e/)',
   ];
   const results = staging(lines);
-  assert.equal(results.length, 42);
+  assert.equal(results.length, 46);
   assert.deepEqual(
     results.flatMap((admitted, index) => (admitted ? [] : [index])),
     [],
@@ -180,6 +182,7 @@ test("selective and deep staging give the same events and states", () => {
       'say "${toString(count)} ${items.take(2).join()} ${person.name.padStart(5, ".")}", pause',
       'say prose(color: tint) "${twice(count)} left"',
       'say "${tint.capture(/(b)(l)?/)} ${tint.find(/[aeiou]+/)} ${tint.matches(toRegex("b.*", default: /x/))}"',
+      'say "${tint.findAll(/[aeiou]/).join()} ${tint.split(/u/).join()} ${tint.replace(/(b)/, "$1$1")} ${tint.lastIndexOf(/e/)}"',
       "say lookup",
       'say "${toJson(lookup, files: false)} ${toBase64(person.name)} ${fromBase64("QW5u", default: "")} ${hashText(person.name)}"',
       'say "${fromJson(toJson(items, files: false), default: null, files: false)}"',
@@ -212,6 +215,15 @@ test("a say rejected after its expressions ran keeps nothing, with either stagin
     assert.deepEqual(finalSnapshot.warnedSpeakerIds, []);
     assert.deepEqual(finalSnapshot.liveMessages, []);
   }
+  // A draw, then a regex operation that needs too much work (V30 §8).
+  withRegexWorkLimit(100, () => {
+    const { finalSnapshot } = assertStagingsAgree(
+      [...DECLARATIONS, 'say "${random()} ${tint.findAll(/./)}"', "exit"].join("\n"),
+      { ending: "failed", seed: 77 },
+    );
+    assert.equal(finalSnapshot.failure?.code, "TSR087");
+    assert.equal(finalSnapshot.rng.state, 77);
+  });
 });
 
 test("a say rejected for 'speaker' without a speaker keeps nothing, with either staging", () => {

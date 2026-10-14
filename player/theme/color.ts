@@ -78,6 +78,18 @@ export function oklchCss(color: OklchColor, alpha = 1): string {
   return colorValue(color).set({ alpha }).toString({ precision: 8 });
 }
 
+/**
+ * A CSS colour in legacy sRGB syntax, mapped into sRGB: a transition between two such colours blends in sRGB, as older
+ * players do, while one between modern colours, such as `oklch()`, blends in Oklab (CSS Color 4 "Interpolation").
+ */
+export function legacySrgbCss(value: string): string {
+  const color = new Color(value).to("srgb").toGamut({ method: "css" });
+  const [red, green, blue] = color.coords.map(
+    (channel) => Math.round((channel ?? 0) * 255 * 100) / 100,
+  );
+  return `rgb(${red} ${green} ${blue} / ${Math.round((color.alpha ?? 1) * 1000) / 1000})`;
+}
+
 /** Native picker acquisition is a realized literal color, never surface tint intent. */
 export function pickerHexToOklch(hex: string): OklchColor {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new RangeError("Expected a six-digit picker color");

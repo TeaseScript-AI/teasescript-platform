@@ -810,8 +810,8 @@ Rules:
       say path.substring(slash + 1)
   }
   ```
-- Searching and replacing compare text literally and case-sensitively. A `replace` search and a padding `fill` must be
-  non-empty.
+- Searching and replacing compare text literally and case-sensitively. A `replace` search text and a padding `fill`
+  must be non-empty.
 - Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
   case folding and is not reversible: `"ß".uppercase().lowercase()` is `"ss"`. Composed and decomposed forms of the same
   visible text are different text, and `split("")` returns code points, so a flag emoji gives two parts.
@@ -838,7 +838,9 @@ if code.matches(/\d{4}/) {
     say "Four digits"
 }
 let count = report.find(/\d+/)                   // the first number in the text, or null
+let numbers = report.findAll(/\d+/)              // every number in the text, such as ["3", "12"]
 let parts = report.capture(/moved (\d+) times/)  // ["moved 3 times", "3"], or null
+let tidy = report.replace(/\s+/, " ")            // every run of spaces and line breaks as one space
 let rule = toRegex(ruleText, default: null)      // a regex? from text that arrives while the script runs
 ```
 
@@ -851,8 +853,8 @@ A regex literal is the pattern between two slashes, followed by its flags:
   and a `/` inside a character class, as in `/[/]/`, do not end it, and a literal ends on its line.
 - The flags are `i`, which ignores case, `m`, with which `^` and `$` match at the start and end of each line, and `s`,
   with which `.` also matches a line break. A pattern can also turn them on inside itself, as in `(?i)`. An unknown or
-  repeated flag is a compile error, and so is `g`: `findAll`, which comes later, and `replace` and `split` with text
-  handle every occurrence without it. So is `u`, since a regex always matches Unicode characters.
+  repeated flag is a compile error, and so is `g`: `findAll`, `replace`, and `split` handle every match without it. So
+  is `u`, since a regex always matches Unicode characters.
 - The compiler checks every literal: a pattern that is not valid, uses a feature RE2 leaves out, or is over the
   [regex limits](../RESOURCE-LIMITS.md#retained-poc-policies-and-defaults) is a compile error that says why.
 
@@ -865,13 +867,41 @@ These text operations take a regex:
 | `text.find(regex)` | the text of the first match, or `null` |
 | `text.capture(regex)` | a `string?[]?`: `null` without a match, otherwise the whole match at index 0 followed by each group in the order of its opening parenthesis; a group that did not take part is `null`, and an empty one is `""` |
 | `text.indexOf(regex)` | the position of the first match, or `null` |
+| `text.findAll(regex)` | a `string[]` of every match, or `[]` |
+| `text.lastIndexOf(regex)` | the position of the last match, or `null` |
+| `text.split(regex)` | a `string[]` of the parts between matches |
+| `text.replace(regex, replacement)` | the text with every match replaced |
 
 - The first match is the leftmost one, and of alternatives the first that matches there: `"ab".find(/a|ab/)` is
   `"a"`. `matches` tests the whole text, also with `m`: `"a\nb".matches(/^a$/m)` is `false`.
 - Positions count code points, as for the other text operations. A named group, `(?<name>...)`, keeps its number in
   `capture`.
-- `findAll`, and a regex in `split`, `replace`, and `lastIndexOf`, come later. Until then they are compile errors, and
-  the forms with text stay as described above.
+- `findAll`, `lastIndexOf`, `split`, and `replace` take every match in turn, each the leftmost one from where the
+  previous one ended, so matches do not overlap. An empty match counts, also right after another match, and the next
+  search starts one character later: `"ab".findAll(/x*/)` is `["", "", ""]`, `"a".findAll(/a*/)` is `["a", ""]`, and
+  `"ab".replace(/x*/, "-")` is `"-a-b-"`.
+- `lastIndexOf` gives the start of the last match: `"2026-10-14".lastIndexOf(/\d+/)` is `8`. Since matches do not
+  overlap, it can differ from the text form for overlapping text: `"ababa".lastIndexOf(/aba/)` is `0`, while
+  `"ababa".lastIndexOf("aba")` is `2`.
+- `split` keeps empty parts and never inserts groups: `"a,b,".split(/(,)/)` is `["a", "b", ""]`. A match of no text
+  separates nothing at either end of the text or right after another separator, so `"ab".split(/x*/)` and
+  `"a  b".split(/ */)` are both `["a", "b"]`. Empty text gives `[]` when the regex matches it, and `[""]` otherwise.
+- In the replacement of a regex search, `$0` inserts the whole match, `$1`, `$2`, and on a group, `$<name>` a named
+  group, and `$$` one `$`; any other `$` is text. All the digits after `$` form the group's number. A group that did
+  not take part inserts nothing. A group the regex does not have is a compile error when the regex and the replacement
+  are known, and otherwise a runtime error. `${...}` is interpolated before replacing. A text search replaces
+  literally, so `part.replace("$", "$$")` makes text from elsewhere a literal replacement:
+
+  ```text
+  "2026-10-14".replace(/(\d+)-(\d+)-(\d+)/, "$3.$2.$1")                // "14.10.2026"
+  "Ann Lee".replace(/(?<first>\w+) (?<last>\w+)/, "$<last>, $<first>")  // "Lee, Ann"
+  "5 USD".replace(/(\d+) USD/, "$$$1")                                 // "$5"
+  "ab".replace(/(a)/, "$2")                                            // compile error: the regex has 1 group
+  ```
+- Every operation with a regex may do a fixed amount of work, the [regex work
+  limit](../RESOURCE-LIMITS.md#retained-poc-policies-and-defaults). The work counts what RE2 does and what the
+  operation builds, not time, so an operation ends the same way on every device. One that needs more fails with
+  runtime error `TSR087`: `This regex needed too much work for this text. Use a simpler pattern or a shorter text.`
 
 A regex is a value of type `regex` ([§13](#13-explicit-types)), which holds its pattern and its flags in the order `i`,
 `m`, `s`. Two regexes are equal (`==`) when their patterns and flags are, so `/a/si == /a/is`, while `/a/i` and

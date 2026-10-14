@@ -245,7 +245,7 @@ export class RuntimeSession {
   #randomPolicy: RandomPolicy | null;
   #state: RuntimeSnapshot;
   #operating = false;
-  /** Whether an operation calls its instruction observer now, which may call `scopeOf`. */
+  /** Whether an operation calls its instruction observer now, which may call `scopeOf` and `callFrameIds`. */
   #observing = false;
   /** What an operation threw, which ended the session, or `null`. */
   #thrown: { readonly error: unknown } | null = null;
@@ -559,6 +559,17 @@ export class RuntimeSession {
     );
   }
 
+  /**
+   * The ID of each active call, outermost first, as `callStack()` gives it, in work proportional to the call depth. Also
+   * callable from an instruction observer while its operation runs.
+   */
+  public callFrameIds(): readonly number[] {
+    const ids = (state: RuntimeSnapshot): readonly number[] =>
+      Object.freeze(state.callFrames.map((frame) => frame.id));
+    // The operation calling the observer stands between two instructions.
+    return this.#observing ? ids(this.#state) : this.#read(ids);
+  }
+
   /** `inspectRuntimeState`'s debugger inspection, which captures and validates the whole state first. */
   public inspect(): RuntimeInspectionResult {
     return this.#read((state) => inspectRuntimeState(this.#plan, state));
@@ -647,8 +658,8 @@ export class RuntimeSession {
   }
 
   /**
-   * The instruction observer `options` gives, its callbacks read once and wrapped so that `scopeOf` works while they
-   * run. A malformed observer throws before the operation starts.
+   * The instruction observer `options` gives, its callbacks read once and wrapped so that `scopeOf` and `callFrameIds`
+   * work while they run. A malformed observer throws before the operation starts.
    */
   #observerOption(
     options: Pick<RuntimeSessionRunOptions, "instructionObserver">,
@@ -658,13 +669,15 @@ export class RuntimeSession {
     const given = typeof observer === "object" && observer !== null;
     const before: unknown = given ? observer.before : undefined;
     const after: unknown = given ? observer.after : undefined;
+    const dispatch: unknown = given ? observer.dispatch : undefined;
     if (
       !given ||
       (before !== undefined && typeof before !== "function") ||
-      (after !== undefined && typeof after !== "function")
+      (after !== undefined && typeof after !== "function") ||
+      (dispatch !== undefined && typeof dispatch !== "function")
     ) {
       throw new TypeError(
-        "instructionObserver must be an object whose before and after, when given, are functions.",
+        "instructionObserver must be an object whose before, after, and dispatch, when given, are functions.",
       );
     }
     return {
@@ -684,6 +697,16 @@ export class RuntimeSession {
             this.#observing = true;
             try {
               after.call(observer, instruction, next, call);
+            } finally {
+              this.#observing = false;
+            }
+          },
+        }),
+        ...(typeof dispatch === "function" && {
+          dispatch: (block: number, call: number): boolean | void => {
+            this.#observing = true;
+            try {
+              return dispatch.call(observer, block, call);
             } finally {
               this.#observing = false;
             }

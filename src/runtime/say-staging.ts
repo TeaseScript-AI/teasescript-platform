@@ -89,6 +89,7 @@ const READING_METHODS: ReadonlySet<string> = new Set([
   "matches",
   "find",
   "capture",
+  "findAll",
   "substring",
   "split",
   "replace",

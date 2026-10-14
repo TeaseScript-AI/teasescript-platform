@@ -1,5 +1,6 @@
 import { storyChoiceVariables } from "../../theme/story-choice.js";
 import { onBeforeUnmount, watchEffect, type Ref } from "vue";
+import { legacySrgbCss } from "../../theme/color.js";
 import {
   generatePlayerTheme,
   themeCssVariables,
@@ -30,10 +31,28 @@ export const defaultPlayerThemeIntents: Readonly<Record<"light" | "dark", Player
     }),
   });
 
-/** Applies the theme of `intent`, with `photo`'s surfaces while the Stage photo colours the Player. */
+// The theme's variables are registered colours, so a transition can fade them: every surface, text and accent colour
+// that uses them then fades together. The root lists them as its transition properties; a duration makes them fade
+// (`style.css`, while the photo colour changes).
+const registeredColours = new Set<string>();
+function registerColour(name: string) {
+  if (registeredColours.has(name)) return;
+  registeredColours.add(name);
+  try {
+    CSS.registerProperty({ name, syntax: "<color>", inherits: true, initialValue: "transparent" });
+  } catch {
+    // Already registered, or a browser without registered properties: the colour then changes at once.
+  }
+}
+
+/**
+ * Applies the theme of `intent`, with `photo`'s surfaces while the Stage photo colours the Player. With `blend` "srgb"
+ * the colours are written in legacy sRGB syntax, so a fade between them blends in sRGB instead of Oklab.
+ */
 export function usePlayerTheme(
   intent: Readonly<Ref<PlayerThemeIntent>>,
   photo?: Readonly<Ref<PhotoSurfaces | null>>,
+  blend?: Readonly<Ref<"oklab" | "srgb">>,
 ) {
   // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
   // Retain previous inline values so unmounting restores the exact baseline.
@@ -61,7 +80,10 @@ export function usePlayerTheme(
       previousThemeMode = root.getAttribute("data-player-theme");
       themeApplied = true;
     }
-    for (const [property, value] of Object.entries(update.variables)) {
+    for (const [property, value] of Object.entries({
+      ...update.variables,
+      "transition-property": Object.keys(update.variables).join(", "),
+    })) {
       if (!previousThemeProperties.has(property))
         previousThemeProperties.set(property, {
           value: root.style.getPropertyValue(property),
@@ -73,13 +95,21 @@ export function usePlayerTheme(
   }
   watchEffect(() => {
     const theme = generatePlayerTheme(intent.value, photo?.value);
+    const variables = {
+      ...themeCssVariables(theme),
+      ...storyChoiceVariables(theme.roles["surface-control"]),
+      ...storyChoiceVariables(theme.roles["accent-solid"], "story-accent"),
+    };
+    for (const name of Object.keys(variables)) registerColour(name);
+    const srgb = blend?.value === "srgb";
     applyGeneratedTheme({
       mode: intent.value.mode,
-      variables: {
-        ...themeCssVariables(theme),
-        ...storyChoiceVariables(theme.roles["surface-control"]),
-        ...storyChoiceVariables(theme.roles["accent-solid"], "story-accent"),
-      },
+      variables: Object.fromEntries(
+        Object.entries(variables).map(([name, value]) => [
+          name,
+          srgb ? legacySrgbCss(value) : value,
+        ]),
+      ),
     });
   });
   onBeforeUnmount(clearGeneratedTheme);

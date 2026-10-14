@@ -3,7 +3,11 @@ import { ref, watch } from "vue";
 import Viewfinder from "./Viewfinder.vue";
 import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 const props = defineProps<{
-  media: { src: string; alt: string } | undefined;
+  /**
+   * The image: the URL it loads from, and its source as the Player knows it (`data-stage-source`) when that URL is a
+   * prepared copy of it. The Stage reports its loads and failures by that source.
+   */
+  media: { src: string; alt: string; source?: string } | undefined;
   /**
    * The camera's track while the script shows the camera view over the Stage (`showCamera stage`), or while an image
    * request takes a photo there; the `camera` slot draws Player controls on that view.
@@ -31,15 +35,19 @@ watch(failedSource, (source) => emit("mediaFailure", source));
 // The source the image on the Stage has loaded and decoded, or `null` while it loads, failed, or the Stage is empty.
 const loadedSource = ref<string | null>(null);
 watch(loadedSource, (source) => emit("mediaLoad", source));
-// Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
+// Only a new source needs measuring again; an equal source keeps its loaded image and aspect. A prepared photo is
+// complete as soon as the image has its source, and keeps its aspect from its first frame.
 watch(
   () => props.media?.src,
   () => {
     imageAspect = 0;
     failedSource.value = null;
     loadedSource.value = null;
-    if (!props.camera && !props.preview) emit("mediaAspect", 0);
+    const image = imageElement.value;
+    if (image?.complete && image.naturalHeight) loaded(image);
+    else if (!props.camera && !props.preview) emit("mediaAspect", 0);
   },
+  { flush: "post" },
 );
 watch(
   () => props.camera,
@@ -60,9 +68,12 @@ function previewLoaded(event: Event) {
 }
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
-  if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
-  if (!image.naturalHeight) return;
-  loadedSource.value = props.media.src;
+  if (!(image instanceof HTMLImageElement) || image !== imageElement.value) return;
+  if (image.naturalHeight) loaded(image);
+}
+function loaded(image: HTMLImageElement) {
+  if (!props.media) return;
+  loadedSource.value = props.media.source ?? props.media.src;
   imageAspect = image.naturalWidth / image.naturalHeight;
   if (!props.camera && !props.preview) emit("mediaAspect", imageAspect);
 }
@@ -72,7 +83,7 @@ function mediaFailed(event: Event) {
   const image = event.currentTarget;
   if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
   if (!image.complete || image.naturalWidth !== 0) return;
-  failedSource.value = props.media.src;
+  failedSource.value = props.media.source ?? props.media.src;
 }
 function cameraMeasured(ratio: number) {
   cameraRatio.value = ratio;
@@ -83,7 +94,7 @@ function cameraMeasured(ratio: number) {
 <template>
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
-      <img v-if="media" v-show="failedSource === null && !preview" ref="imageElement" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
+      <img v-if="media" v-show="failedSource === null && !preview" ref="imageElement" :src="media.src" :alt="media.alt" :data-stage-source="media.source" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
       <img v-if="preview" :src="preview.src" :alt="preview.alt" class="stage-media" data-stage-preview @load="previewLoaded" />
       <div
         v-else-if="camera || $slots.camera"

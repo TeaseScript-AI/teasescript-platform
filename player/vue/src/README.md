@@ -91,6 +91,7 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   again while the reader scrolls up.
   The preview only passes the initial `?dev` and `time=skip` state.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
+  `PlayerApp.vue` adds the Debug panel and `AbTestsPanel.vue`, the A/B tests, while their Settings switches are on.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
   `components/ui/scroll-area` supports per-location visibility without reserving width. The transcript currently
@@ -130,8 +131,11 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   camera step's status and countdown on the viewfinder, through `Stage.vue`'s `camera` slot or
   `FloatingViewfinder.vue`'s default slot, with the shadcn Alert.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
-  `usePhotoColour.ts` measures the Stage photo whose colours `PlayerApp.vue` passes to the theme, and
-  `usePhotoSwatches.ts` decides when the Player follows a new photo. See
+  `stagePhotos.ts` downloads a Stage photo once into the Player's Cache Storage, for the Stage and for measuring it in
+  `stagePhotoWorker.ts` where the browser's image decoder can, and loads the images the script names
+  (`playerRuntimeStageImages`) ahead;
+  `useStagePhoto.ts` shows a new photo together with its colours, which `usePhotoColour.ts` applies and
+  `PlayerApp.vue` passes to the theme. See
   [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its
   timer collection and `TimerDisplay.vue` individual timers. `PlayerApp.vue` presents runtime timers in the rail; the

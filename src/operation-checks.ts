@@ -17,6 +17,7 @@ import {
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import type { SourceSpan } from "./source.js";
+import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   CALENDAR_DURATION_TYPE,
@@ -50,8 +51,11 @@ import {
   emptyTextMessage,
   endBeforeStartMessage,
   LIST_JOIN,
+  needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
+  takesRegex,
+  takesText,
   TEXT_MEMBERS,
   unknownTextMemberMessage,
   type ArgumentKind,
@@ -127,9 +131,7 @@ export function memberProblems(
       return problem(
         name === "length"
           ? LENGTH_PROPERTY
-          : name === "findAll"
-            ? unknownTextMemberMessage(name, "method")
-            : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
+          : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
       );
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
@@ -206,16 +208,15 @@ function argumentProblems(
     const fail = (message: string): void => {
       problems.push({ kind: "invalidOperand", message, span: value.span });
     };
-    const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
-    const searches = parameter.kind === "regex" || parameter.kind === "textOrRegex";
-    const needed =
-      parameter.kind === "regex"
-        ? REGEX_TYPE
-        : parameter.kind === "textOrRegex"
-          ? union([STRING_TYPE, REGEX_TYPE])
-          : text
-            ? STRING_TYPE
-            : INTEGER_TYPE;
+    const text = takesText(parameter);
+    const searches = takesRegex(parameter);
+    const needed = searches
+      ? text
+        ? union([STRING_TYPE, REGEX_TYPE])
+        : REGEX_TYPE
+      : text
+        ? STRING_TYPE
+        : INTEGER_TYPE;
     if (!isAssignable(needed, type)) {
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
@@ -228,9 +229,8 @@ function argumentProblems(
       );
       continue;
     }
-    if (searches) continue;
-    if (text) {
-      if (parameter.kind === "nonEmptyText" && staticVisibleText(value) === "")
+    if (text || searches) {
+      if (needsNonEmptyText(parameter) && staticVisibleText(value) === "")
         fail(emptyTextMessage(member, parameter));
       continue;
     }
@@ -251,7 +251,28 @@ function argumentProblems(
       message: endBeforeStartMessage(member, start, end),
       span: call.arguments[1]!.value.span,
     });
+  if (problems.length === 0 && member.name === "replace")
+    problems.push(...replacementProblems(call));
   return problems;
+}
+
+/**
+ * A replacement that refers to a group the regex does not have (V30 §8), when the search is a regex literal and the
+ * replacement's text is known. A literal RE2 rejects is reported where it is written.
+ */
+function replacementProblems(call: CallExpression): OperationProblem[] {
+  let search = call.arguments[0]!.value;
+  while (search.kind === "parenthesizedExpression") search = search.expression;
+  const replacement = call.arguments[1]!.value;
+  const text = staticVisibleText(replacement);
+  if (search.kind !== "regexLiteral" || text === undefined) return [];
+  if (regexFlagProblem(search.flags) !== null) return [];
+  const compiled = compileRegex(search.source, canonicalRegexFlags(search.flags));
+  if (!compiled.ok) return [];
+  const parts = replacementParts(text, search.source, compiled.program.groups);
+  return parts.ok
+    ? []
+    : [{ kind: "invalidOperand", message: parts.problem, span: replacement.span }];
 }
 
 /**

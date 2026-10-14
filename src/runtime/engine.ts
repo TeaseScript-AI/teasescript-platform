@@ -365,15 +365,19 @@ function executeInstructionBoundary(
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return 0;
   }
+  const observer = context.observer;
   // A queued expiry block interrupts at this boundary, even while the main path waits.
   if (timerHandlerDispatchable(snapshot)) {
+    if (observer !== null && observeDispatch(context.trace, observer, snapshot)) {
+      context.stopped = true;
+      return 0;
+    }
     startTimerHandler(plan, snapshot, context.trace);
     return 1;
   }
   if (snapshot.status === "waiting") return 0;
   const instructionIndex = snapshot.nextInstruction;
   const call = currentCallFrameId(snapshot) ?? 0;
-  const observer = context.observer;
   if (
     observeStart &&
     observer !== null &&
@@ -452,6 +456,26 @@ function observeBefore(
   if (trace !== null) trace.betweenInstructions = true;
   try {
     return observer.before(instruction, call) === true;
+  } finally {
+    if (trace !== null) trace.betweenInstructions = false;
+  }
+}
+
+/** Calls an observer's `dispatch` between two instructions, with the block that starts next and the call it gets. */
+function observeDispatch(
+  trace: TraceStore | null,
+  observer: RuntimeInstructionObserver,
+  snapshot: RuntimeSnapshot,
+): boolean {
+  if (observer.dispatch === undefined) return false;
+  if (trace !== null) trace.betweenInstructions = true;
+  try {
+    return (
+      observer.dispatch(
+        snapshot.pendingTimerHandlers[0]!.handlerFunctionId,
+        snapshot.nextCallFrameId,
+      ) === true
+    );
   } finally {
     if (trace !== null) trace.betweenInstructions = false;
   }

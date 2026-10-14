@@ -19,6 +19,7 @@ import {
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
+  type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
@@ -221,13 +222,10 @@ export function detachPreparedReferencesForMutation(
       } catch {
         continue;
       }
-      if (
-        descriptor.detached ||
-        !preparedReferenceMutationMatches(snapshot, descriptor, mutation, false)
-      ) {
-        continue;
-      }
-      freezePreparedReference(snapshot, temporary.value, descriptor);
+      if (descriptor.detached) continue;
+      const changedDepth = preparedReferenceMutationDepth(snapshot, descriptor, mutation, false);
+      if (changedDepth === null) continue;
+      freezePreparedReference(snapshot, temporary.value, descriptor, changedDepth);
     }
   }
 }
@@ -280,7 +278,7 @@ function preparePreparedReferencesForListChange(
       if (step?.kind !== "index") continue;
       const index = newIndex(step.index);
       if (index === undefined) {
-        freezePreparedReference(snapshot, temporary.value, descriptor);
+        freezePreparedReference(snapshot, temporary.value, descriptor, pathIndex + 1);
         continue;
       }
       if (index === step.index) continue;
@@ -341,7 +339,7 @@ export function freezePreparedReferenceDescendants(
       if (position === null) continue;
       const step = descriptor.path[position]!;
       if (key !== undefined && (step.kind !== "key" || step.key !== key)) continue;
-      freezePreparedReference(snapshot, temporary.value, descriptor);
+      freezePreparedReference(snapshot, temporary.value, descriptor, position + 1);
     }
   }
 }
@@ -365,36 +363,67 @@ function preparedReferenceStepPosition(
   return null;
 }
 
-function preparedReferenceMutationMatches(
+/**
+ * The number of steps on the path of `descriptor` that lead to the value `mutation` changes, or `null` when the
+ * mutation does not change the value the descriptor refers to.
+ */
+function preparedReferenceMutationDepth(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
   mutation: PreparedReferenceMutation,
   descendantsOnly: boolean,
-): boolean {
+): number | null {
   const rootMatches =
     descriptor.rootFrameId === mutation.rootFrameId &&
     descriptor.rootName === mutation.rootName &&
     (!descendantsOnly || descriptor.path.length > mutation.path.length) &&
     pathStartsWith(descriptor.path, mutation.path);
-  if (rootMatches) return true;
+  if (rootMatches) return mutation.path.length;
 
   if (mutation.speakerPath === null || mutation.speakerPath === undefined) {
-    return false;
+    return null;
   }
   const descriptorSpeakerPath = preparedReferenceSpeakerPath(snapshot, descriptor);
-  return (
-    descriptorSpeakerPath !== null &&
+  // The speaker path is the end of the descriptor's path after the last speaker it reaches.
+  return descriptorSpeakerPath !== null &&
     descriptorSpeakerPath.speakerId === mutation.speakerPath.speakerId &&
     (!descendantsOnly || descriptorSpeakerPath.path.length > mutation.speakerPath.path.length) &&
     pathStartsWith(descriptorSpeakerPath.path, mutation.speakerPath.path)
-  );
+    ? descriptor.path.length - descriptorSpeakerPath.path.length + mutation.speakerPath.path.length
+    : null;
 }
 
+/**
+ * Makes an attached reference independent of the value `changedDepth` steps along its path, which is about to change,
+ * or without `changedDepth`, of its root, which no longer exists. The reference keeps a copy of the value it leads to
+ * now. A speaker that the path reaches at or after the change stays the same speaker, though, so a reference that goes
+ * on from the last such speaker into the values it stores follows it from its global instead, like a reference prepared
+ * through the speaker's name.
+ */
 function freezePreparedReference(
   snapshot: RuntimeSnapshot,
   serialized: SerializableRuntimeObject,
   descriptor: PreparedReferenceDescriptor,
+  changedDepth?: number,
 ): void {
+  const speaker =
+    changedDepth === undefined ? null : speakerOnPath(snapshot, descriptor, changedDepth);
+  if (speaker !== null) {
+    const followed = serializePreparedReference({
+      rootFrameId: GLOBAL_SCOPE_ID,
+      rootName: speaker.reference.identifier,
+      path: descriptor.path.slice(speaker.depth),
+      // An attached reference keeps a copy of its root exactly where the plan keeps one.
+      capturedRoot:
+        descriptor.capturedRoot === undefined
+          ? undefined
+          : cloneCapturedSerializableValue(speaker.reference),
+      detached: false,
+    });
+    serialized.properties.length = 0;
+    for (const property of followed.properties) serialized.properties.push(property);
+    return;
+  }
   const resolution = resolveStoredPreparedReference(snapshot, descriptor);
   if (!resolution.found) {
     // Every change that could break the path of an attached reference that keeps no copy of its root freezes it first.
@@ -417,6 +446,34 @@ function freezePreparedReference(
   });
   serialized.properties.length = 0;
   for (const property of frozen.properties) serialized.properties.push(property);
+}
+
+/**
+ * The last speaker that the path of `descriptor` reaches after `minimumDepth` or more steps, and the number of steps
+ * that lead to it, when the rest of the path goes on from it into values the session stores: properties of objects and
+ * speakers, list elements, and dict entries. `null` when there is none, as when the rest reads a property derived at
+ * each read, such as a dict's `values`, which no change of the dict follows.
+ */
+function speakerOnPath(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+  minimumDepth: number,
+): { readonly reference: SerializableSpeakerReference; readonly depth: number } | null {
+  const root = preparedReferenceRoot(snapshot, descriptor);
+  if (!root.found) return null;
+  let speaker: { reference: SerializableSpeakerReference; depth: number } | null = null;
+  let current = root.value;
+  for (let depth = 0; depth < descriptor.path.length; depth += 1) {
+    if (depth >= minimumDepth && isSpeakerReference(current))
+      speaker = { reference: current, depth };
+    const step = descriptor.path[depth]!;
+    if (step.kind === "property" && !isObject(current) && !isSpeakerReference(current))
+      speaker = null;
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
+    if (!next.found) return null;
+    current = next.value;
+  }
+  return speaker;
 }
 
 export function preparedReferenceSpeakerPath(
