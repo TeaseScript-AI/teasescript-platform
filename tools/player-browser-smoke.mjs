@@ -133,6 +133,9 @@ const UNCOVERED = `const uncovered = (element) => {
   );
 };`;
 
+// When `chooseOption` last typed into a select.
+const lastChoice = { at: 0 };
+
 await main();
 
 async function main() {
@@ -882,12 +885,12 @@ async function demoScenario(cdp, origin) {
       }
       await physicalClick(cdp, "[data-foreground-controls] button");
     } else if (state.placeholder === "What you call her") {
-      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await cdp.call("Input.insertText", { text: "Mistress" });
       await physicalClick(cdp, ".composer-send");
     } else if (state.placeholder !== null) {
       // A skippable pacing gate: Space in the empty composer hurries the message along.
-      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await pressSpace(cdp);
     }
     await delay(150);
@@ -945,7 +948,7 @@ async function demoScenario(cdp, origin) {
     if (Date.now() > narrowDeadline)
       throw new Error("The narrow demo did not reach its first question");
     if (await value(cdp, `document.querySelector('[data-composer-input]')?.disabled === false`)) {
-      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await pressSpace(cdp);
     }
     await delay(150);
@@ -991,15 +994,12 @@ async function pacingInputOwnershipCheck(cdp) {
     });
   await unchanged("A press on message text skipped the message's pacing");
   const input = `document.querySelector('[data-composer-input]')`;
-  await evaluate(cdp, `${input}.focus()`);
+  await focusSeen(cdp, input);
   await cdp.call("Input.insertText", { text: "x" });
   await pressSpace(cdp);
   await unchanged("Space in a composer holding text skipped pacing");
   assertEqual(await value(cdp, `${input}.value`), "x ", "Space in the composer must type a space");
-  await evaluate(
-    cdp,
-    `${input}.value = ''; ${input}.dispatchEvent(new Event('input', {bubbles:true}))`,
-  );
+  await typeInto(cdp, "[data-composer-input]", "");
   await physicalClick(cdp, ".player-stage");
   await waitFor(
     cdp,
@@ -1013,7 +1013,7 @@ async function pacingInputOwnershipCheck(cdp) {
 async function spaceSkipCheck(cdp) {
   const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
   const gate = await value(cdp, messageCount);
-  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+  await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
   await pressSpace(cdp);
   await waitFor(
     cdp,
@@ -1116,7 +1116,7 @@ async function smartFollowCheck(cdp) {
   );
   await frames();
   // Page Up in the focused transcript: the reader leaves the latest message.
-  await evaluate(cdp, `document.querySelector('.transcript-scroll').focus()`);
+  await focusSeen(cdp, `document.querySelector('.transcript-scroll')`);
   for (const type of ["keyDown", "keyUp"]) {
     await cdp.call("Input.dispatchKeyEvent", {
       type,
@@ -1239,6 +1239,70 @@ function clickLabelled(cdp, label, scope = "button") {
     `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(label)})`,
     `the ${JSON.stringify(label)} button`,
   );
+}
+
+/**
+ * Keyboard focus on the element `expression` evaluates to, as Tab gives it: only once a person can see it and could press
+ * it where it is, without the press itself, which would act (a press on the conversation skips pacing).
+ */
+async function focusSeen(cdp, expression, options = {}) {
+  await pressPoint(cdp, expression);
+  await evaluate(cdp, `(${expression}).focus(${JSON.stringify(options)})`);
+}
+
+/** A real key press, down and up: a letter or digit, which types itself, or a named key such as `Backspace`. */
+async function key(cdp, name, { modifiers = 0, commands } = {}) {
+  const typed = /^[0-9A-Za-z]$/u.test(name);
+  const code = /^[0-9]$/u.test(name) ? `Digit${name}` : typed ? `Key${name.toUpperCase()}` : name;
+  const event = {
+    key: name,
+    code,
+    windowsVirtualKeyCode: typed ? name.toUpperCase().charCodeAt(0) : { Backspace: 8 }[name],
+    modifiers,
+  };
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    ...event,
+    ...(typed && modifiers === 0 ? { text: name } : {}),
+    ...(commands ? { commands } : {}),
+  });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", ...event });
+}
+
+/**
+ * A person chooses an option of a closed `<select>`: once it is in reach and pressable it takes focus, and typing the
+ * option's label (its first word) picks that option directly, firing one change, as a choice from its list does; what
+ * the Player then does with the choice is the caller's to check. Chrome forgets typed letters after a second, so a
+ * choice right after another waits that long.
+ */
+async function chooseOption(cdp, selector, optionValue) {
+  await pressPoint(cdp, `document.querySelector(${JSON.stringify(selector)})`, selector);
+  const label = await evaluate(
+    cdp,
+    `const select = document.querySelector(${JSON.stringify(selector)});
+    select.focus({ preventScroll: true });
+    window.smokeChosen = select.value === ${JSON.stringify(optionValue)};
+    if (!window.smokeChosen) select.addEventListener('change', () => { window.smokeChosen = true; }, { once: true });
+    return [...select.options].find((option) => option.value === ${JSON.stringify(optionValue)})?.label ?? null;`,
+  );
+  if (label === null) throw new Error(`${selector} offers no ${optionValue}`);
+  await delay(Math.max(0, lastChoice.at + 1_100 - Date.now()));
+  for (const letter of /^[0-9A-Za-z]+/u.exec(label)[0]) await key(cdp, letter);
+  lastChoice.at = Date.now();
+  await waitFor(
+    cdp,
+    `window.smokeChosen === true`,
+    2_000,
+    `Typing ${JSON.stringify(label)} did not choose it in ${selector}`,
+  );
+}
+
+/** A person replaces a text field's text: a press on the field, Select All, then the new text typed or deleted. */
+async function typeInto(cdp, selector, text) {
+  await physicalClick(cdp, selector);
+  await key(cdp, "a", { modifiers: 2, commands: ["selectAll"] });
+  if (text === "") await key(cdp, "Backspace");
+  else await cdp.call("Input.insertText", { text });
 }
 
 // A physical click beside the open dialog `selector`, on its backdrop: in the middle of the widest margin the dialog
@@ -1927,9 +1991,9 @@ async function randomPickerScenario(cdp, origin) {
     "The X did not close the large view",
   );
   // The corner grip resizes a whole line at a time.
-  await evaluate(
+  await focusSeen(
     cdp,
-    `document.querySelector('[data-random-draw-source] [data-code-block-resize]').focus()`,
+    `document.querySelector('[data-random-draw-source] [data-code-block-resize]')`,
   );
   await key("ArrowDown", "ArrowDown");
   assertEqual(
@@ -1998,7 +2062,7 @@ async function randomPickerScenario(cdp, origin) {
     8_000,
     "The chosen outcome did not reach the script",
   );
-  await evaluate(cdp, `document.querySelector('[data-random-draw-value]').focus()`);
+  await focusSeen(cdp, `document.querySelector('[data-random-draw-value]')`);
   await cdp.call("Input.insertText", { text: "42" });
   await physicalClick(cdp, "[data-random-draw-use]");
   await waitFor(
@@ -2768,10 +2832,7 @@ async function photoColourScenario(cdp, origin, profile) {
     settings(async () => {
       const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
       const before = await value(cdp, secondary);
-      await evaluate(
-        cdp,
-        `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
-      );
+      await chooseOption(cdp, '[data-player-setting="contrast"]', option);
       await waitFor(
         cdp,
         `${secondary} !== ${JSON.stringify(before)}`,
@@ -2954,10 +3015,7 @@ async function photoVignetteScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-player-setting="contrast"]')`);
     const secondary = `document.documentElement.style.getPropertyValue('--theme-text-secondary')`;
     const before = await value(cdp, secondary);
-    await evaluate(
-      cdp,
-      `const select = document.querySelector('[data-player-setting="contrast"]'); select.value = '${option}'; select.dispatchEvent(new Event('change'));`,
-    );
+    await chooseOption(cdp, '[data-player-setting="contrast"]', option);
     await waitFor(
       cdp,
       `${secondary} !== ${JSON.stringify(before)}`,
@@ -3210,7 +3268,7 @@ async function messageUpdatesScenario(cdp, origin) {
   await waitFor(cdp, `${entries} === 43`, 8_000, "The updates package did not show its messages");
   const viewport = `document.querySelector('.transcript-scroll')`;
   // Measure the counter at its first height, then read further down, with the counter above the view.
-  await evaluate(cdp, `${viewport}.focus(); return true;`);
+  await focusSeen(cdp, viewport);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home" });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
   await delay(300);
@@ -3268,9 +3326,10 @@ async function messageUpdatesScenario(cdp, origin) {
     cdp,
     `!!document.querySelector('.transcript-entry a[href="https://example.com/rules"]')`,
   );
-  await evaluate(
+  await focusSeen(
     cdp,
-    `document.querySelector('.transcript-entry a[href="https://example.com/rules"]').focus({ preventScroll: true }); return true;`,
+    `document.querySelector('.transcript-entry a[href="https://example.com/rules"]')`,
+    { preventScroll: true },
   );
   await waitFor(
     cdp,
@@ -3440,19 +3499,8 @@ async function debugStorageEditScenario(cdp, origin) {
   const entry = (text) =>
     `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
   const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
-  const setField = async (selector, text) => {
-    await evaluate(
-      cdp,
-      `const field = document.querySelector(${JSON.stringify(selector)}); field.value = ''; field.dispatchEvent(new Event('input', { bubbles: true }));`,
-    );
-    await physicalClick(cdp, selector);
-    await cdp.call("Input.insertText", { text });
-  };
-  const choose = (type) =>
-    evaluate(
-      cdp,
-      `const select = document.querySelector('[data-storage-editor-type]'); select.value = ${JSON.stringify(type)}; select.dispatchEvent(new Event('change', { bubbles: true }));`,
-    );
+  const setField = (selector, text) => typeInto(cdp, selector, text);
+  const choose = (type) => chooseOption(cdp, "[data-storage-editor-type]", type);
   const save = async (expected, failure) => {
     await physicalClick(cdp, "[data-storage-editor-save]");
     await waitFor(cdp, expected, 5_000, failure);
@@ -4217,7 +4265,7 @@ async function viewfinderScenario(cdp, origin) {
   // The person moves the window with the arrow keys; it floats in the whole Player, so showing or hiding the docked
   // sidebar does not move it from where they put it.
   const initial = await value(cdp, place);
-  await evaluate(cdp, `document.querySelector('[data-floating-viewfinder]').focus()`);
+  await focusSeen(cdp, `document.querySelector('[data-floating-viewfinder]')`);
   for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "ArrowDown"])
     for (const type of ["keyDown", "keyUp"])
       await cdp.call("Input.dispatchKeyEvent", { type, key, code: key });
@@ -5027,12 +5075,7 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await openImport();
     await physicalClick(cdp, '[data-import-tab="text"]');
     await waitFor(cdp, `!!document.querySelector('[data-import-text]')`);
-    await evaluate(
-      cdp,
-      `const area = document.querySelector('[data-import-text]');
-      area.value = ${JSON.stringify(exported.text.replace(/(.{76})/g, "$1\n"))};
-      area.dispatchEvent(new Event('input', { bubbles: true }));`,
-    );
+    await typeInto(cdp, "[data-import-text]", exported.text.replace(/(.{76})/g, "$1\n"));
     await physicalClick(cdp, "[data-import-review]");
     await waitFor(
       cdp,
@@ -5068,12 +5111,7 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await waitFor(cdp, visible("[data-composer-attach]"), 8_000, "The other script did not start");
     await openImport();
     await physicalClick(cdp, '[data-import-tab="text"]');
-    await evaluate(
-      cdp,
-      `const area = document.querySelector('[data-import-text]');
-      area.value = ${JSON.stringify(exported.text)};
-      area.dispatchEvent(new Event('input', { bubbles: true }));`,
-    );
+    await typeInto(cdp, "[data-import-text]", exported.text);
     await physicalClick(cdp, "[data-import-review]");
     await waitFor(
       cdp,
@@ -5160,7 +5198,7 @@ async function debugExportScenario(cdp, origin, profile) {
     cdp,
     `document.querySelector('[data-composer-input]')?.placeholder === 'Your name'`,
   );
-  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+  await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
   await cdp.call("Input.insertText", { text: answer });
   await physicalClick(cdp, ".composer-send");
   await waitFor(
@@ -5956,7 +5994,7 @@ async function popupScenario(cdp, origin) {
       });
   };
   await waitFor(cdp, `!!${input} && !${input}.disabled`, 8_000, "askText did not open");
-  await evaluate(cdp, `${input}.focus()`);
+  await focusSeen(cdp, input);
   await cdp.call("Input.insertText", { text: "Ada" });
   // The Enter that answers the question is held: its repeats reach the popup that opens next.
   await enter("keyDown");
@@ -6340,7 +6378,7 @@ async function preselectScenario(cdp, origin) {
     8_000,
     "First was not said",
   );
-  await evaluate(cdp, `${input}.focus()`);
+  await focusSeen(cdp, input);
   await pressSpace(cdp);
   await waitFor(cdp, `${buttons}.length === 2`, 8_000, "askBoolean did not show its buttons");
   assertEqual(JSON.stringify(await value(cdp, marked)), '["Yes"]', "prefill: true marks Yes");
@@ -6378,11 +6416,11 @@ async function preselectScenario(cdp, origin) {
   await physicalClick(cdp, "[data-foreground-controls] button");
   // A held Enter, in the input or on Send, does not submit the prefill of the field that just opened; a fresh Enter does.
   await waitFor(cdp, `${input}.value === 'Ada'`, 8_000, "askText did not open with its prefill");
-  await evaluate(cdp, `${input}.focus()`);
+  await focusSeen(cdp, input);
   await heldKey("Enter", "Enter", 13, "\r");
   await delay(300);
   assertEqual(await value(cdp, `${input}.value`), "Ada", "A held Enter submitted the prefill");
-  await evaluate(cdp, `document.querySelector('.composer-send').focus()`);
+  await focusSeen(cdp, `document.querySelector('.composer-send')`);
   await heldKey("Enter", "Enter", 13, "\r");
   await delay(300);
   assertEqual(
@@ -6390,7 +6428,7 @@ async function preselectScenario(cdp, origin) {
     "Ada",
     "A held Enter on Send submitted the prefill",
   );
-  await evaluate(cdp, `${input}.focus()`);
+  await focusSeen(cdp, input);
   for (const type of ["keyDown", "keyUp"])
     await cdp.call("Input.dispatchKeyEvent", {
       type,
@@ -6402,7 +6440,7 @@ async function preselectScenario(cdp, origin) {
   // Space on a focused form toggle flips it and does not submit the form.
   const toggle = `document.querySelector('[data-form-fields] button')`;
   await waitFor(cdp, `!!${toggle}`, 8_000, "askBooleans did not open");
-  await evaluate(cdp, `${toggle}.focus()`);
+  await focusSeen(cdp, toggle);
   await pressSpace(cdp);
   await waitFor(
     cdp,
@@ -6590,10 +6628,13 @@ async function formFieldsScenario(cdp, origin) {
     8_000,
     "The date field did not use the date control",
   );
-  await evaluate(
+  // Typed as a person types a date: its digits in the order the browser's locale shows month, day and year.
+  const order = await value(
     cdp,
-    `const input = document.activeElement; input.value = "2026-10-05"; input.dispatchEvent(new Event("input", { bubbles: true }))`,
+    `new Intl.DateTimeFormat(navigator.language).formatToParts(new Date(2026, 9, 5)).map((part) => part.type).filter((type) => ['month', 'day', 'year'].includes(type))`,
   );
+  for (const part of order)
+    for (const digit of { month: "10", day: "05", year: "2026" }[part]) await key(cdp, digit);
   await pressEnter();
   await waitFor(
     cdp,
