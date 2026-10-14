@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useElementBounding } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
@@ -52,17 +52,19 @@ function localText(moment: number): string {
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
 }
 const moment = ref(props.dialog.kind === "lock" ? localText(props.dialog.suggestedOpenAtMs) : "");
-const earliest = localText(Date.now());
+// The current moment, kept fresh while the dialog is open, so that a chosen moment that passes meanwhile is no longer
+// accepted and the field's minimum moves on.
+const now = ref(Date.now());
+const ticking = setInterval(() => (now.value = Date.now()), 15_000);
+onBeforeUnmount(() => clearInterval(ticking));
+const earliest = computed(() => localText(now.value));
 /** The moment chosen, or `null` while the field holds none. */
 const chosenMs = computed(() => {
   const value = new Date(moment.value).getTime();
   return moment.value === "" || Number.isNaN(value) ? null : value;
 });
-/** Whether the chosen moment is in the future; checked again when the player locks, as time passes meanwhile. */
-const future = ref(true);
-const checkFuture = () => (future.value = chosenMs.value !== null && chosenMs.value > Date.now());
-checkFuture();
-watch(moment, checkFuture);
+/** Whether the chosen moment is in the future. */
+const future = computed(() => chosenMs.value !== null && chosenMs.value > now.value);
 /** The repeat no longer matches the password as typed so far. */
 const mismatch = computed(
   () => repeated.value !== "" && !password.value.startsWith(repeated.value),
@@ -71,7 +73,7 @@ const canLock = computed(
   () => chosenMs.value !== null && (password.value === "" || repeated.value === password.value),
 );
 
-const now = Date.now();
+const opened = Date.now();
 const momentFormat = new Intl.DateTimeFormat(undefined, {
   weekday: "short",
   day: "numeric",
@@ -85,7 +87,7 @@ const shownMoments = computed(() => {
   const dialog = props.dialog;
   if (dialog.kind !== "unlock") return [];
   return dialog.moments
-    .filter((value) => dialog.notice !== "unreachable" || value > now)
+    .filter((value) => dialog.notice !== "unreachable" || value > opened)
     .map((value) => momentFormat.format(value));
 });
 /** Busy without a button of the dialog having started it, as when a time lock opens by itself. */
@@ -95,7 +97,8 @@ const openingByItself = computed(
 
 function lock() {
   if (props.busy || !canLock.value) return;
-  checkFuture();
+  // Checked at this moment too, as the clock may have passed the chosen moment since the last tick.
+  now.value = Date.now();
   if (!future.value) return;
   retrying.value = false;
   emit("submit", {
@@ -103,8 +106,9 @@ function lock() {
     openAtMs: chosenMs.value,
   });
 }
+// An empty password is a password too: a script may lock with `password: ""`.
 function unlock() {
-  if (props.busy || password.value === "") return;
+  if (props.busy) return;
   retrying.value = false;
   emit("submit", { password: password.value, openAtMs: null });
 }
@@ -262,7 +266,6 @@ function heldKey(event: KeyboardEvent) {
             v-if="dialog.password"
             type="submit"
             class="min-h-11"
-            :disabled="!busy && password === ''"
             :aria-disabled="busy ? 'true' : undefined"
             :class="{ 'opacity-50': busy }"
             data-unlock-submit

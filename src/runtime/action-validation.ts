@@ -319,7 +319,10 @@ function validLockAction(
       "openAtMs",
       "dialogActionId",
       "notice",
+      "resumes",
     ]) ||
+    !nonNegativeSafeInteger(action.resumes) ||
+    (action.phase !== "ask" && action.resumes !== 0) ||
     !positiveSafeInteger(action.destinationTemporary) ||
     !validSessionTime(action.createdAtMs) ||
     !validSessionTime(snapshot.currentSessionTimeMs) ||
@@ -709,7 +712,9 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
       (foreground.kind === "delay" ||
         foreground.kind === "interaction" ||
         foreground.kind === "chatPacingGate" ||
-        foreground.kind === "mediaPlayback"))
+        foreground.kind === "mediaPlayback" ||
+        // A lock's dialog, as `timerHandlerDispatchable` lets a block interrupt it.
+        (foreground.kind === "lock" && foreground.phase === "ask")))
   );
 }
 

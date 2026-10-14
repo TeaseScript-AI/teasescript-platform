@@ -1001,18 +1001,19 @@ A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that 
 popup's, with nothing in the transcript. **Lock**, for an encrypt call that wrote no opener, has **Opens by itself at**,
 a date-and-time field prefilled 7 days ahead, **Password (optional)**, which takes focus, and, once a password is typed,
 **Repeat password**, which says "The passwords do not match" under it as soon as it differs from the password; its
-**Lock** button, the only way out, works once the two match, and refuses a moment that is not in the future with
-"Choose a moment in the future." under the field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each
-time lock in the player's locale, a **Password** field where a password opens it, which takes focus, and **Unlock** and
-**Cancel**, which takes focus without a password field; Cancel, or Escape, gives the call's default. A wrong password
-keeps it open with "That password does not open it." under the field; a passed time lock whose relays the Player cannot
-reach shows "Its time has passed, but the time service could not be reached." and **Try again** instead of its moment;
-and a time lock whose moment comes while it shows opens it without the player. A password field masks its text, has an
-eye button, **Show password** or **Hide password**, says "Caps Lock is on" under it while it is, and offers no saved or
-suggested password. While the Player locks or opens with what the player gave, the dialog stays and takes no input but
-keeps focus, and the button that started it reads **Locking…** or **Opening…**, as does a line when a time lock opens it
-by itself. As for a popup, a key held down since before it opened does nothing. A block that interrupts the dialog
-closes it, and it asks again afterwards with empty fields; its modality and placement while Debug runs are a popup's.
+**Lock** button, the only way out, works once the two match, and refuses a moment that is not in the future with "Choose
+a moment in the future." under the field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time
+lock in the player's locale, a **Password** field where a password opens it, which takes focus, **Unlock**, which tries
+the password as typed, also an empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape,
+gives the call's default. A wrong password keeps it open with "That password does not open it." under the field; a
+passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
+reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
+the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, says "Caps Lock
+is on" under it while it is, and offers no saved or suggested password. While the Player locks or opens with what the
+player gave, the dialog stays and takes no input but keeps focus, and the button that started it reads **Locking…** or
+**Opening…**, as does a line when a time lock opens it by itself. As for a popup, a key held down since before it opened
+does nothing. A block that interrupts the dialog closes it, and it asks again afterwards with empty fields; its modality
+and placement while Debug runs are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes

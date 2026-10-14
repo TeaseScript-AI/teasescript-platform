@@ -67,6 +67,8 @@ export async function fetchBeacon(
       const timeout = AbortSignal.timeout(RELAY_TIMEOUT_MS);
       const response = await fetcher(`${relay}/${QUICKNET_CHAIN_HASH}/public/${round}`, {
         credentials: "omit",
+        // A redirect would leave the pinned relays.
+        redirect: "error",
         signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
       });
       // A relay answers a round that is not out yet with 425 Too Early or with 404.

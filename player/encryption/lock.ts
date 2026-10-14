@@ -133,7 +133,10 @@ interface TimeOpener {
   readonly ciphertext: Uint8Array;
 }
 
-/** Reads a lock, or gives `null` for bytes that are not a lock of a version this Player knows. */
+/**
+ * Reads a lock, or gives `null` for bytes that are not a lock of a version this Player knows. A lock holds at most one
+ * opener of each kind, as one is made, so a made-up lock cannot ask for repeated work.
+ */
 export function readLock(bytes: Uint8Array): ReadLock | null {
   if (
     bytes.length < 6 ||
@@ -154,14 +157,14 @@ export function readLock(bytes: Uint8Array): ReadLock | null {
     if (body.length !== length) return null;
     const view = new DataView(body.buffer);
     if (kind === PASSWORD_OPENER) {
-      if (length !== 4 + SALT_BYTES + WRAPPED_KEY_BYTES) return null;
+      if (length !== 4 + SALT_BYTES + WRAPPED_KEY_BYTES || passwords.length > 0) return null;
       passwords.push({
         iterations: view.getUint32(0),
         salt: body.slice(4, 4 + SALT_BYTES),
         wrapped: body.slice(4 + SALT_BYTES),
       });
     } else if (kind === TIME_OPENER) {
-      if (length !== 8 + TIME_CIPHERTEXT_BYTES) return null;
+      if (length !== 8 + TIME_CIPHERTEXT_BYTES || times.length > 0) return null;
       const round = view.getBigUint64(0);
       if (round < 1n || round > BigInt(Number.MAX_SAFE_INTEGER)) return null;
       times.push({ round: Number(round), ciphertext: body.slice(8) });

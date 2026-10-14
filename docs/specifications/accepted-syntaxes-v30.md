@@ -1562,9 +1562,9 @@ with AES-256-GCM under a new random key, and each way to open the lock, an opene
 one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
 
 - `password:` opens with exactly the text it is given.
-- `openAt:`, a moment (`absoluteDateTime`), is a time lock: from that moment anyone can open the lock, also long after,
-  and before it nobody can. The Player fetches the drand network's proof of that moment to open it. A moment in the past
-  opens at once.
+- `openAt:`, a moment (`absoluteDateTime`), is a time lock: from that moment anyone can open the lock with it, also long
+  after, and before it the time lock opens nothing, while another opener may. The Player fetches the drand network's
+  proof of that moment to open it. A moment in the past opens at once.
 
 Every lock has a time lock 7 days ahead, as `openAt: getAbsoluteDateTime() + 7 days`, unless the call gives `openAt:`.
 `openAt: null` removes it: **without a time lock, a lost password means that the content never opens.** A call with

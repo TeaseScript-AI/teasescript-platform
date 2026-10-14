@@ -146,8 +146,14 @@ function startLock(
     );
   const written = password === undefined ? null : password;
   if (call === "decryptText") {
+    if (typeof value !== "string")
+      throw new RuntimeFault(
+        "TSR059",
+        `decryptText(...) opens locked text (string), not ${describeRuntimeValue(value)}.`,
+        copySpan(span),
+      );
     // Text that is not Base64 is no lock, as for `fromBase64`.
-    const binary = typeof value === "string" ? binaryFromBase64(value) : undefined;
+    const binary = binaryFromBase64(value);
     if (binary === undefined) return { result: fallback };
     return workStep(base64FromBinary(binary), written, null);
   }
@@ -328,6 +334,7 @@ function requestLock(
     openAtMs: step.openAtMs,
     dialogActionId: step.dialogActionId,
     notice: step.notice,
+    resumes: 0,
   });
   snapshot.nextActionId += 1;
   snapshot.foregroundAction = action;

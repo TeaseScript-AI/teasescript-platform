@@ -1652,17 +1652,18 @@ type.
 The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
 (`TSR059`, as for `fileToBase64`), `password:` text, and `openAt:` an `absoluteDateTime` or `null` (`TSR059`); an
 encrypt call with `openAt: null` and no `password:` fails with `TSR059`. Without `openAt:` the time lock's moment is 7
-days after the session clock's current moment (`TSR064` without a clock). `decryptText` of text that is not Base64, read
-as `fromBase64` reads it, or of a value that is not text, gives the default at once. Otherwise it creates a foreground
-`lock` action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the stored file), the
-written `password` or `null`, the time lock's `openAtMs` (encrypt only), and a `phase`, and waits with the instruction
-itself as its continuation:
+days after the session clock's current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives
+the default at once for text that is not Base64, read as `fromBase64` reads it. Otherwise it creates a foreground `lock`
+action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the stored file), the written
+`password` or `null`, the time lock's `openAtMs` (encrypt only), and a `phase`, and waits with the instruction itself as
+its continuation:
 
 - `work`: the Player locks or opens with what it has. Nothing interrupts it: a due block runs once it settles.
 - `ask`: the Player's dialog asks the player first. An encrypt call that writes neither `password:` nor `openAt:` starts
   here, with `openAtMs` the moment the dialog suggests; a decrypt call without `password:` comes here when its `work`
-  step answers `ask`, with an optional `notice`. Like an interaction, a due expiry block interrupts it, and once the
-  block returns the dialog asks again.
+  step answers `ask`, with an optional `notice`. Like an interaction, a due expiry block interrupts it, also through a
+  late time observation, and once the block returns the dialog asks again: the step's `resumes` counts these returns,
+  so the Player shows the dialog anew, without what was typed, also after a block that returned at once.
 
 The host answers through `completeAction`:
 

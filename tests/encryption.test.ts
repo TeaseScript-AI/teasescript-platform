@@ -397,17 +397,13 @@ test("decryptText of text that is no Base64 gives the default at once, and a loc
       'let spaced = locked.replace("=", "") + " \\n"',
       'let opened = decryptText(spaced, password: "p", default: null)',
       'let none = decryptText("not base64!", password: "p", default: "default")',
-      // A value of no known type that is not text is no lock either.
-      'let amount = fromJson("42", default: null)',
-      'let notText = decryptText(amount, password: "p", default: "default")',
       "exit",
     ].join("\n"),
     player,
   );
-  const { opened, none, notText } = variables(played);
+  const { opened, none } = variables(played);
   assert.equal(opened, "spaced");
   assert.equal(none, "default");
-  assert.equal(notText, "default");
   assert.deepEqual(
     played.steps.map((step) => step.call),
     ["encryptText", "decryptText"],
@@ -483,6 +479,12 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
     ],
     ['let a = encryptFile("images/a.jpg", password: "p")', "exit"],
     ['let a = decryptFile("images/a.jpg", default: null)', "exit"],
+    // A value of no known type that is not text is a wrong argument, not a lock that does not open.
+    [
+      'let amount = fromJson("42", default: null)',
+      'let a = decryptText(amount, default: "d")',
+      "exit",
+    ],
   ].map((lines) => failure(play(lines.join("\n"))));
   assert.deepEqual(failures, [
     {
@@ -509,6 +511,7 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
       message:
         'decryptFile(...) opens a stored file, but "images/a.jpg" is not one. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.',
     },
+    { code: "TSR059", message: "decryptText(...) opens locked text (string), not a number." },
   ]);
   assert.deepEqual(
     failure(play('let a = encryptText("x", password: "p")\nexit', new FakePlayer(), {})),
@@ -672,5 +675,55 @@ test("a lock completion must fit its call and step, and its handoff is checked o
   ]) {
     const tampered = { ...dialog, foregroundAction: { ...asking, ...change } };
     assert.notDeepEqual(validateRuntimeSnapshot(tampered, plan).errors, [], JSON.stringify(change));
+  }
+});
+
+test("a late time observation lets a due block interrupt a lock dialog, and the state stays valid until it runs", () => {
+  const plan = compileValidPlan(
+    [
+      'timer async 1 s { say "Time is up", instant\n wait 2 s }',
+      'let locked = encryptText("x")',
+      "exit",
+    ].join("\n"),
+  );
+  const started = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  const dialog = lockStep(started.snapshot);
+  // Observed after the block's moment: the state waits for the block, checkpoints, and runs it after a restore.
+  const observed = observeTime(plan, started.snapshot, 1500);
+  assert.deepEqual(validateRuntimeSnapshot(observed.snapshot, plan).errors, []);
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, observed.snapshot)),
+  ).snapshot;
+  const ran = run(plan, restored);
+  assert.ok(ran.events.some((event) => event.kind === "say" && event.text === "Time is up"));
+  assert.deepEqual(validateRuntimeSnapshot(ran.snapshot, plan).errors, []);
+  const back = run(plan, observeTime(plan, ran.snapshot, 4000).snapshot);
+  assert.equal(lockStep(back.snapshot).actionId, dialog.actionId);
+});
+
+test("a lock dialog that a block interrupted counts the return, also after a block that returned at once", () => {
+  const plan = compileValidPlan(
+    ['timer async 1 s { say "due", instant }', 'let locked = encryptText("x")', "exit"].join("\n"),
+  );
+  const started = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  assert.equal(lockStep(started.snapshot).resumes, 0);
+  const back = run(plan, observeTime(plan, started.snapshot, 1000).snapshot);
+  assert.ok(back.events.some((event) => event.kind === "say" && event.text === "due"));
+  const again = lockStep(back.snapshot);
+  assert.deepEqual(
+    [again.actionId, again.phase, again.resumes],
+    [lockStep(started.snapshot).actionId, "ask", 1],
+  );
+  assert.deepEqual(validateRuntimeSnapshot(back.snapshot, plan).errors, []);
+  // A step is never resumed, and a count is a whole number.
+  for (const resumes of [-1, 1.5]) {
+    const tampered = { ...back.snapshot, foregroundAction: { ...again, resumes } };
+    assert.notDeepEqual(validateRuntimeSnapshot(tampered, plan).errors, []);
   }
 });

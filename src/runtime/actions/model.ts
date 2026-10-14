@@ -309,6 +309,11 @@ export interface RuntimeLockActionSnapshot {
   readonly dialogActionId: number | null;
   /** Why the unlock dialog asks again, or `null`. */
   readonly notice: RuntimeLockNotice | null;
+  /**
+   * How often an expiry block interrupted this `ask` step and its dialog asked again afterwards, which the Player shows
+   * anew, without what was typed; always 0 for a `work` step.
+   */
+  readonly resumes: number;
 }
 
 /** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */

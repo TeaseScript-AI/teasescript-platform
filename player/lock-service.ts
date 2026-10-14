@@ -79,6 +79,8 @@ const browserLockServices: LockServices = {
 
 /** A dialog's time lock that has passed by the device clock, but whose beacon was not out yet, is tried this often. */
 const LATE_RETRY_MS = 30_000;
+/** The longest a single wake waits for a dialog's time lock; a later moment is waited for in several wakes. */
+const MAX_WAKE_MS = 60 * 60 * 1000;
 /** How long after a round's moment its beacon is asked for, as relays publish it a moment later. */
 const ROUND_MARGIN_MS = 2_000;
 
@@ -92,7 +94,7 @@ export class LockService {
   readonly #crypto: LockServices;
   /** The answer being made or delivered, with the step it answers. */
   #answer: { readonly key: string; readonly promise: Promise<PlayerLockAnswer> } | null = null;
-  /** What the player typed, by `generation:actionId` of the dialog they answered. */
+  /** What the player typed, by `generation:actionId` of the `ask` step whose dialog they answered. */
   readonly #typed = new Map<string, LockDialogInput>();
   #dialog: LockDialog | null = null;
   #busy = false;
@@ -134,7 +136,7 @@ export class LockService {
   submit(input: LockDialogInput): void {
     const dialog = this.#dialog;
     if (dialog === null || this.#answer?.key === dialog.key) return;
-    this.#typed.set(dialog.key, input);
+    this.#typed.set(`${this.#host.generation()}:${dialog.actionId}`, input);
     this.#answer = { key: dialog.key, promise: Promise.resolve({ kind: "submitted" }) };
     this.#showDialog(dialog, true);
     this.request();
@@ -159,7 +161,8 @@ export class LockService {
       return;
     }
     const generation = this.#host.generation();
-    const key = `${generation}:${action.actionId}`;
+    // A dialog that asks again after an expiry block is a new presentation, so nothing typed before stays.
+    const key = `${generation}:${action.actionId}:${action.resumes}`;
     if (action.phase === "ask" && this.#answer?.key !== key) {
       if (this.#dialog?.key !== key) await this.#present(action, key);
       return;
@@ -169,8 +172,7 @@ export class LockService {
       if (this.#answer?.key !== key) {
         // The dialog the player just answered stays, busy, while this step uses what they gave.
         const answered =
-          action.dialogActionId !== null &&
-          this.#dialog?.key === `${generation}:${action.dialogActionId}`;
+          action.dialogActionId !== null && this.#dialog?.actionId === action.dialogActionId;
         this.#showDialog(answered ? this.#dialog : null, answered);
         const typed =
           action.dialogActionId === null
@@ -237,9 +239,11 @@ export class LockService {
     this.#preparing = null;
     const current = this.#host.session();
     if (this.#stopped || current === null) return;
+    const active = activePlayerRuntimeLock(current.state);
     if (
-      `${this.#host.generation()}:${activePlayerRuntimeLock(current.state)?.actionId}` !== key ||
-      activePlayerRuntimeLock(current.state)?.phase !== "ask"
+      active === null ||
+      `${this.#host.generation()}:${active.actionId}:${active.resumes}` !== key ||
+      active.phase !== "ask"
     ) {
       this.request();
       return;
@@ -263,18 +267,18 @@ export class LockService {
       false,
     );
     // A time lock whose moment comes while the dialog shows opens then, without the player.
+    if (moments.length === 0 || action.notice === "unreachable") return;
     const now = this.#crypto.nowMs();
     const next = moments.filter((moment) => moment + ROUND_MARGIN_MS > now);
-    const delay =
-      next.length > 0
-        ? Math.min(...next) + ROUND_MARGIN_MS - now
-        : moments.length > 0
-          ? LATE_RETRY_MS
-          : null;
-    if (delay !== null && action.notice !== "unreachable")
-      this.#cancelRetry = this.#host.after(delay, () => {
-        if (this.#dialog?.key === key) this.submit({ password: null, openAtMs: null });
-      });
+    const due = next.length > 0 ? Math.min(...next) + ROUND_MARGIN_MS : now + LATE_RETRY_MS;
+    // Bounded wakes, each checking the clock again, so a moment far ahead is waited for, never cut short.
+    const wake = () => {
+      if (this.#dialog?.key !== key || this.#busy) return;
+      const remaining = due - this.#crypto.nowMs();
+      if (remaining <= 0) this.submit({ password: null, openAtMs: null });
+      else this.#cancelRetry = this.#host.after(Math.min(remaining, MAX_WAKE_MS), wake);
+    };
+    wake();
   }
 
   #showDialog(dialog: LockDialog | null, busy = false): void {
@@ -344,8 +348,12 @@ export class LockService {
       if (timed.kind === "opened") return this.#opened(action, timed.content);
       const other = read.passwords.length > 0;
       if (timed.kind === "notYet") return { kind: "ask" };
+      // Unreachable relays ask again where a password could open it or the dialog is already open, so it can try
+      // again; otherwise a call with nothing else to try gives its default.
       if (timed.kind === "unreachable")
-        return other ? { kind: "ask", notice: "unreachable" } : { kind: "notOpened" };
+        return other || action.dialogActionId !== null
+          ? { kind: "ask", notice: "unreachable" }
+          : { kind: "notOpened" };
       // No time lock: a password may open it; a time lock whose key does not open it was changed.
       return read.times.length === 0 && other ? { kind: "ask" } : { kind: "notOpened" };
     } catch {

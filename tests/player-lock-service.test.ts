@@ -54,6 +54,10 @@ class Harness {
   readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
   readonly diagnostics: unknown[] = [];
   relaysDown = false;
+  /** The device clock, which a test may move on. */
+  nowMs = NOW_MS;
+  /** The wakes the service asked for, with their delays; a test fires them, as no timer runs by itself. */
+  readonly wakes: { readonly delayMs: number; readonly task: () => void }[] = [];
   readonly service: LockService;
 
   constructor(
@@ -72,7 +76,7 @@ class Harness {
     const services: LockServices = {
       tlock: loadTlock,
       fetch: relays(() => this.relaysDown),
-      nowMs: () => NOW_MS,
+      nowMs: () => this.nowMs,
     };
     this.service = new LockService({
       session: () => this.session,
@@ -87,8 +91,9 @@ class Harness {
       dialog: (dialog, busy) => this.dialogs.push(dialog === null ? null : { dialog, busy }),
       later: (task) => setTimeout(task, 0),
       after: (delayMs, task) => {
-        const timer = setTimeout(task, delayMs);
-        return () => clearTimeout(timer);
+        const wake = { delayMs, task };
+        this.wakes.push(wake);
+        return () => this.wakes.splice(this.wakes.indexOf(wake) >>> 0, 1);
       },
       subtle: "subtle" in options ? options.subtle : crypto.subtle,
       crypto: services,
@@ -279,4 +284,68 @@ test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with 
   player.stop();
   const failure = playerRuntimeSnapshot(player.session).failure;
   assert.equal(failure?.code, "TSR086");
+});
+
+test("a dialog waits for a distant time lock in bounded wakes, and none opens it early", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("x", openAt: getAbsoluteDateTime() + 30 days)',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const dialog = await player.dialog();
+  const step = player.session.state.foregroundAction;
+  // Each wake is at most an hour, also for a moment 30 days ahead, and a wake before the moment only waits again.
+  for (let wake = 0; wake < 3; wake += 1) {
+    await player.until(() => player.wakes.length === 1);
+    const next = player.wakes[0]!;
+    assert.ok(next.delayMs > 0 && next.delayMs <= 60 * 60 * 1000, String(next.delayMs));
+    player.wakes.length = 0;
+    next.task();
+  }
+  assert.equal(player.session.state.foregroundAction, step);
+  assert.equal(player.dialogs.at(-1)?.dialog, dialog);
+  player.service.cancel();
+  assert.equal((await player.ended()).opened, "closed");
+  player.stop();
+});
+
+test("an empty password is a password: the unlock dialog opens a lock made with one", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("empty", password: "", openAt: null)',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const dialog = await player.dialog();
+  assert.deepEqual(dialog.kind === "unlock" && [dialog.password, dialog.moments], [true, []]);
+  player.answer({ password: "", openAtMs: null });
+  assert.equal((await player.ended()).opened, "empty");
+  player.stop();
+});
+
+test("a time lock's open dialog offers Try again when its moment comes but the relays are out of reach", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("y", openAt: getAbsoluteDateTime() + 1 min)',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const dialog = await player.dialog();
+  assert.deepEqual(dialog.kind === "unlock" && [dialog.password, dialog.notice], [false, null]);
+  // The moment comes while the dialog shows, but no relay can be reached.
+  player.relaysDown = true;
+  player.nowMs = NOW_MS + 5 * 60 * 1000;
+  await player.until(() => player.wakes.length > 0);
+  player.wakes.splice(0).forEach((wake) => wake.task());
+  await player.until(() => {
+    const shown = player.dialogs.at(-1);
+    return shown?.dialog.kind === "unlock" && shown.dialog.notice === "unreachable";
+  });
+  player.service.cancel();
+  assert.equal((await player.ended()).opened, "closed");
+  player.stop();
 });

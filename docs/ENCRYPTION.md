@@ -50,18 +50,20 @@ nonce (12) | AES-256-GCM(K, nonce, content, additional data = every byte before 
 
 A lock has 34 bytes besides its openers and content: 6 of header, the nonce, and the 16-byte tag. The default lock, a
 time lock only, adds 205 bytes to the content; with a password, 276. `encryptText` gives the bytes as standard Base64,
-4/3 of their length. A reader skips an opener of a kind it does not know. A lock asking for more than 10,000,000 PBKDF2
-iterations is not tried, so a made-up lock cannot keep the Player busy.
+4/3 of their length. A reader skips an opener of a kind it does not know and refuses a lock with two openers of one
+kind, as no lock is made so. A lock asking for more than 10,000,000 PBKDF2 iterations is not tried, so a made-up lock
+cannot keep the Player busy.
 
 ### drand
 
 The Player, never package code, contacts drand
 ([`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md#trust-isolation-and-platform-ownership)): only the pinned relays
 `api.drand.sh`, `api2.drand.sh`, `api3.drand.sh`, and `drand.cloudflare.com`, in that order, each within 5 s, with
-`credentials: "omit"` (`player/encryption/drand.ts`). It verifies every beacon signature against quicknet's public key,
-which it pins with the chain's genesis and period, and skips a relay whose beacon does not verify. It asks for a round
-only once the device clock says it is out; a relay that answers 425 or 404 says it is not out yet, which is told apart
-from relays out of reach. A round's signature stays valid for ever, so a time lock opens also long after its moment.
+`credentials: "omit"`, and following no redirect (`player/encryption/drand.ts`). It verifies every beacon signature
+against quicknet's public key, which it pins with the chain's genesis and period, and skips a relay whose beacon does
+not verify. It asks for a round only once the device clock says it is out; a relay that answers 425 or 404 says it is
+not out yet, which is told apart from relays out of reach. A round's signature stays valid for ever, so a time lock
+opens also long after its moment.
 
 ### Code and dependencies
 

@@ -65,8 +65,10 @@ const PORT_CIPHERTEXT =
 /** Relays that answer from `beacons`, say a later round is not out yet, and count what they are asked. */
 function relays(beacons: readonly (typeof ROUND_1)[], options: { down?: boolean } = {}) {
   const asked: string[] = [];
-  const fetcher: typeof fetch = async (input) => {
+  const fetcher: typeof fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
+    // Only the pinned relays: no redirect is followed.
+    assert.equal(init?.redirect, "error");
     asked.push(url);
     if (options.down === true) throw new TypeError("Failed to fetch");
     const round = url.slice(url.lastIndexOf("/") + 1);
@@ -144,6 +146,15 @@ test("a password lock opens with exactly its password, and its header and conten
     changed[at]! ^= 1;
     assert.equal(await openWithPassword(readLock(changed)!, "corner"), null, String(at));
   }
+  // A lock holds one opener of each kind; two password openers are no lock.
+  const opener = made.bytes.subarray(6, 6 + 71);
+  const doubled = new Uint8Array([
+    ...made.bytes.subarray(0, 5),
+    2,
+    ...opener,
+    ...made.bytes.subarray(6),
+  ]);
+  assert.equal(readLock(doubled), null);
   // No lock: other bytes, another version, or a cut lock.
   assert.equal(readLock(new TextEncoder().encode("TSLK")), null);
   assert.equal(
