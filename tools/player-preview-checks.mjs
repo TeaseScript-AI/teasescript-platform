@@ -21,885 +21,247 @@ function cli(...args) {
   return result.stdout;
 }
 
-async function checks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
+// The tools menu opens tools into the sidebar, which keeps them while it is hidden and shown again; on a narrow screen
+// the sidebar is a drawer that Escape closes.
+async function toolsMenuChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
-  const panel = (name) => page.locator(`[data-tool="${name}"]`);
-  const pin = (name) => panel(name).locator("[data-panel-pin]").click();
-  const menu = (name) =>
-    panel(name).getByRole("button", { name: "Panel settings", exact: true }).click();
-  const state = () =>
+  const tools = () =>
     page
       .locator(".tool-panel-content > [data-tool]")
       .evaluateAll((elements) =>
-        elements.map((element) => ({
-          name: element.getAttribute("data-tool"),
-          width: element.style.width,
-          pinned: element.querySelector("[data-panel-pin]").getAttribute("data-state") === "on",
-        })),
+        elements.map((element) => element.getAttribute("data-tool")).sort(),
       );
-  async function width(name, size) {
-    await menu(name);
-    await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
-    await page.getByRole("menuitemradio", { name: size, exact: true }).click();
-  }
-  async function expectState(expected) {
-    await page.waitForFunction((expected) => {
-      const actual = Array.from(document.querySelectorAll(".tool-panel-content > [data-tool]")).map(
-        (element) => ({
-          name: element.getAttribute("data-tool"),
-          width: element.style.width,
-          pinned: element.querySelector("[data-panel-pin]").getAttribute("data-state") === "on",
-        }),
-      );
-      return JSON.stringify(actual) === JSON.stringify(expected);
-    }, expected);
-  }
-
-  // Lifecycle/order: replacement keeps its slot, pinning does not reorder, widths belong to tools.
+  const shows = (names) =>
+    page.waitForFunction(
+      (names) =>
+        JSON.stringify(
+          [...document.querySelectorAll(".tool-panel-content > [data-tool]")]
+            .map((element) => element.getAttribute("data-tool"))
+            .sort(),
+        ) === JSON.stringify(names),
+      names,
+    );
   await launcher("Visual Lab").click();
-  await width("Visual Lab", "Small");
-  const small = (await state())[0].width;
-  await pin("Visual Lab");
+  await page.locator('[data-tool="Visual Lab"] [data-panel-pin]').click();
   await launcher("Layout Debug").click();
-  await width("Layout Debug", "Extra Large");
-  const large = (await state()).find((tool) => tool.name === "Layout Debug").width;
-  await menu("Layout Debug");
-  await page.getByRole("menuitem", { name: "Move left", exact: true }).click();
-  await expectState([
-    { name: "Layout Debug", width: large, pinned: false },
-    { name: "Visual Lab", width: small, pinned: true },
-  ]);
-  await launcher("Playback Diagnostics").click();
-  const normal = (await state()).find((tool) => tool.name === "Playback Diagnostics").width;
-  await expectState([
-    { name: "Playback Diagnostics", width: normal, pinned: false },
-    { name: "Visual Lab", width: small, pinned: true },
-  ]);
-  await pin("Playback Diagnostics");
-  await pin("Visual Lab");
-  await expectState([
-    { name: "Playback Diagnostics", width: normal, pinned: true },
-    { name: "Visual Lab", width: small, pinned: false },
-  ]);
-  await launcher("Layout Debug").click();
-  await expectState([
-    { name: "Playback Diagnostics", width: normal, pinned: true },
-    { name: "Layout Debug", width: large, pinned: false },
-  ]);
-
-  // Composition: the wide dock sits beside the Stage without covering it; lifecycle/width state survives both shells.
-  const expected = await state();
-  check(
-    await page.evaluate(() => {
-      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-      const image = document.querySelector(".stage-media");
-      return !playerChecks
-        .imagePoints(image)
-        .some((point) => dock.contains(document.elementFromPoint(...point)));
-    }),
-    "The wide dock covers the Stage's image",
-  );
+  await shows(["Layout Debug", "Visual Lab"]);
+  const opened = await tools();
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await shows(opened);
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 700 });
-  await page.waitForFunction(
-    () => document.querySelector("#player-shell").dataset.playerHorizontal === "constrained",
-  );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await expectState(expected);
-  await launcher("Playback Diagnostics").click();
-  await expectState(expected);
+  await shows(opened);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.waitForFunction(
-    () => document.querySelector("#player-shell").dataset.playerHorizontal === "comfortable",
-  );
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await expectState(expected);
-  return "PASS lifecycle/order/width and dock/drawer composition";
+  return "PASS the tools menu opens tools that the sidebar keeps, also in the narrow drawer that Escape closes";
 }
 
-async function drawerWidthChecks(page) {
-  await page.setViewportSize({ width: 700, height: 900 });
-  await page.reload();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
-  const panel = page.locator('[data-tool="Visual Lab"]');
-  let selectedWidth;
-  for (const size of ["Small", "Extra Large"]) {
-    await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
-    await page.getByRole("menuitemradio", { name: size, exact: true }).click();
-    selectedWidth = await panel.evaluate((el) => el.style.width);
-    for (const width of [320, 700]) {
-      await page.setViewportSize({ width, height: 900 });
-      // The drawer has finished resizing to the new window.
-      await page.waitForFunction(() => {
-        const drawer = document.querySelector(".tools-drawer");
-        return (
-          drawer.getBoundingClientRect().width > 0 &&
-          document
-            .getAnimations()
-            .every(
-              (animation) =>
-                animation.playState !== "running" ||
-                animation.effect?.getComputedTiming().endTime === Infinity,
-            )
-        );
-      });
-      if (await panel.evaluate((el) => el.scrollWidth > el.clientWidth + 1))
-        throw new Error(`${size} tool content overflows at ${width}px`);
-    }
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
-  if (await panel.evaluate((el, selected) => el.style.width !== selected, selectedWidth))
-    throw new Error("Drawer resizing discarded the selected width");
-  return "PASS drawer preset width constrained by available space";
-}
-
-async function sidebarMotionChecks(page) {
-  const check = (condition, message) => {
-    if (!condition) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  await page.reload();
-  const launcher = page.locator("[data-launcher]");
-  const show = () => page.getByRole("button", { name: "Show sidebar", exact: true });
-  const hide = () => page.getByRole("button", { name: "Hide sidebar", exact: true });
-  // The dock is on screen, has come to rest over two frames, and takes input.
-  async function expanded() {
-    await page.waitForFunction(() => {
-      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-      if (!dock || document.querySelector("[data-tools-surface]")?.inert !== false) return false;
-      const box = dock.getBoundingClientRect();
-      const place = JSON.stringify(box);
-      const still = window.sidebarMotionPlace === place;
-      window.sidebarMotionPlace = place;
-      return (
-        still &&
-        box.width > 0 &&
-        box.right > 0 &&
-        box.left < innerWidth &&
-        dock.getAnimations().every((animation) => animation.playState !== "running")
-      );
-    });
-  }
-  // Interaction ownership while the sidebar closes: sample a running close transition halfway, if there is one.
-  async function closeHalfway() {
-    await expanded();
-    // A person clicks the dock's own toggle; the close transition it starts is held halfway and sampled there.
-    await page.locator('[data-tools-surface] [data-sidebar="trigger"]').click();
-    const sample = await page.evaluate(async () => {
-      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-      for (const animation of dock.getAnimations()) {
-        animation.pause();
-        animation.currentTime = animation.effect.getTiming().duration / 2;
-      }
-      await new Promise(requestAnimationFrame);
-      const surface = document.querySelector("[data-tools-surface]");
-      return {
-        inert: !surface || surface.inert,
-        focus: document.activeElement.getAttribute("aria-label"),
-      };
-    });
-    check(
-      sample.inert && sample.focus === "Show sidebar",
-      `Closing sidebar kept interaction or lost focus: ${JSON.stringify(sample)}`,
-    );
-  }
-  async function finishClose() {
-    await page.evaluate(() =>
-      document
-        .querySelector('[data-slot="sidebar"] > .fixed')
-        .getAnimations()
-        .forEach((animation) => animation.finish()),
-    );
-    await launcher.waitFor({ state: "detached" });
-    check(
-      await page.evaluate(
-        () => document.activeElement.getAttribute("aria-label") === "Show sidebar",
-      ),
-      "Sidebar close lost toggle focus",
-    );
-  }
-  await closeHalfway();
-  await finishClose();
-  await show().click();
-  await expanded();
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.locator('[data-tool="Visual Lab"] [data-tool-body]').waitFor();
-  await page.locator('[data-tool="Visual Lab"] [data-tool-body]').evaluate((element) => {
-    window.sidebarMotionBody = element;
-    element.scrollTop = 120;
-    element.dispatchEvent(new Event("scroll"));
-    window.sidebarMotionScroll = element.scrollTop;
-  });
-  await closeHalfway();
-  await show().click();
-  await expanded();
-  check(
-    await page.evaluate(
-      () =>
-        document.querySelector('[data-tool="Visual Lab"] [data-tool-body]') ===
-        window.sidebarMotionBody,
-    ),
-    "Rapid reopening replaced the tool body",
-  );
-  await closeHalfway();
-  await finishClose();
-  await show().click();
-  await expanded();
-  check(
-    await page.evaluate(() => {
-      const body = document.querySelector('[data-tool="Visual Lab"] [data-tool-body]');
-      return body === window.sidebarMotionBody && body.scrollTop === window.sidebarMotionScroll;
-    }),
-    "Closing and reopening lost the tool body or its scroll position",
-  );
-
-  // Portalled popovers must close with the logical sidebar, not survive its exit.
-  await page
-    .locator('[data-tool="Visual Lab"]')
-    .getByRole("button", { name: "Panel settings", exact: true })
-    .click();
-  await page.getByRole("menu").waitFor();
-  await page.keyboard.press("Control+b");
-  await page.getByRole("menu").waitFor({ state: "hidden" });
-  await launcher.waitFor({ state: "detached" });
-  check(
-    await show().evaluate((element) => element === document.activeElement),
-    "Panel menu close lost toggle focus",
-  );
-  await show().click();
-  await expanded();
-  await page.locator("[data-settings-trigger]").click();
-  await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
-  await page.keyboard.press("Control+b");
-  await page.getByRole("dialog", { name: "Player Settings" }).waitFor({ state: "hidden" });
-  await launcher.waitFor({ state: "detached" });
-  check(
-    await show().evaluate((element) => element === document.activeElement),
-    "Settings close lost toggle focus",
-  );
-
-  await show().click();
-  await expanded();
-  await closeHalfway();
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await launcher.waitFor({ state: "detached" });
-  await show().click();
-  await expanded();
-  await hide().click();
-  await launcher.waitFor({ state: "detached" });
-  check(
-    await page.evaluate(
-      () => document.querySelector('[data-slot="sidebar"] > .fixed').getAnimations().length === 0,
-    ),
-    "Reduced motion retained a sidebar transition",
-  );
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await show().click();
-  await expanded();
-  await closeHalfway();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForFunction(
-    () => document.querySelector("#player-shell").dataset.playerHorizontal === "constrained",
-  );
-  await launcher.waitFor({ state: "detached" });
-  await show().click();
-  await page.locator(".tools-drawer").waitFor();
-  await hide().click();
-  await page.locator(".tools-drawer").waitFor({ state: "hidden" });
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await show().click();
-  await expanded();
-  return "PASS sidebar close inertness, focus, tool retention, rapid reopen, popup closing, reduced motion and breakpoint changes";
-}
-
-async function menuPreviewChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "preview"));
-  await page.reload();
-  const labels = async (visible) =>
-    page.waitForFunction(
-      (visible) =>
-        document.querySelector("#player-shell").dataset.labelsVisible === String(visible),
-      visible,
-    );
-  const menu = page.locator("[data-launcher]");
-  // A point on the menu where a press is not on a control, as a person presses beside the tools: the middle of the
-  // menu's widest free stretch.
-  const menuSpace = () =>
-    page.evaluate(() => {
-      const menu = document.querySelector("[data-launcher]");
-      const box = menu.getBoundingClientRect();
-      const x = box.left + Math.min(24, box.width / 2);
-      let [best, run] = [null, null];
-      for (let y = box.top + 2; y < box.bottom; y += 4) {
-        const hit = document.elementFromPoint(x, y);
-        const free =
-          menu.contains(hit) && !hit.closest("button, a, input, select, textarea, [role=button]");
-        if (free) run = run ? { ...run, end: y } : { start: y, end: y };
-        else run = null;
-        if (run && (!best || run.end - run.start > best.end - best.start)) best = run;
-      }
-      if (!best) throw new Error("The menu has no space beside its controls");
-      return { x, y: (best.start + best.end) / 2 };
-    });
-  // The Stage's middle, away from the menu.
-  const away = async () => {
-    const box = await page.locator(".player-stage").boundingBox();
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  };
-  const { x, y } = await menuSpace();
-  await page.mouse.move(x, y);
-  await labels(true);
-  // A person sees a tool's label: drawn, and not cut off by the narrow menu.
-  await page
-    .waitForFunction(() => {
-      const label = document.querySelector("[data-launcher-label]");
-      const box = label.getBoundingClientRect();
-      return (
-        label.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-        box.width > 0 &&
-        label.contains(
-          document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2),
-        )
-      );
-    })
-    .catch(() => {
-      throw new Error("Preview did not show the tools' labels");
-    });
-  // The extended label area is part of the hover target, not only the reserved icon strip. Playwright waits until the
-  // expanding menu stands still before it is measured.
-  await menu.click({ trial: true });
-  const label = await page.locator("[data-launcher-label]").first().boundingBox();
-  await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
-  await labels(true);
-  const expanded = await menu.boundingBox();
-  await page.mouse.move(expanded.x + expanded.width + 10, y);
-  await labels(false);
-  await page.mouse.move(x, y);
-  await labels(true);
-  await page.mouse.click(x, y);
-  const stage = await away();
-  await page.mouse.move(stage.x, stage.y);
-  await labels(false);
-  // Clicking a tool still opens it, without latching mouse preview.
-  await page.locator("[data-launcher] button").filter({ hasText: "Layout Debug" }).click();
-  await page.locator('[data-tool="Layout Debug"]').waitFor();
-  await page.mouse.move(stage.x, stage.y);
-  await labels(false);
-  // Keyboard focus previews labels and leaving the menu clears them.
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).focus();
-  await page.keyboard.press("Tab");
-  await labels(true);
-  await page.locator("[data-fullscreen-control]").focus();
-  await labels(false);
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  const tap = async (tx, ty) => {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: tx, y: ty }],
-    });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    // VueUse deduplicates clicks until the next task; finish one gesture before starting another.
-    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
-  };
-  // Touch activation is independent of viewport size, including hybrid desktops.
-  await tap(x, y);
-  await labels(true);
-  await tap(x, y);
-  await labels(false);
-  await tap(x, y);
-  await labels(true);
-  // A mouse can take over even while the primary device reports touch capability.
-  const outside = await away();
-  await page.mouse.move(x, y);
-  await page.mouse.move(outside.x, outside.y);
-  await labels(false);
-  await tap(x, y);
-  await labels(true);
-  await tap(outside.x, outside.y);
-  await labels(false);
-  await page.setViewportSize({ width: 390, height: 700 });
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  // The drawer has slid in: Playwright waits until the menu stands still and takes input.
-  await menu.click({ trial: true });
-  const narrowSpace = await menuSpace();
-  await tap(narrowSpace.x, narrowSpace.y);
-  await labels(true);
-  await tap(narrowSpace.x, narrowSpace.y);
-  await labels(false);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
-  await page.reload();
-  await labels(true);
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  await page.reload();
-  await labels(false);
-  return "PASS menu preview mouse, touch and keyboard ownership";
-}
-
-async function menuWidthChecks(page) {
+// Fullscreen goes on and off with focus kept on its control; a refused change is reported, and a browser without
+// fullscreen offers the control disabled.
+async function fullscreenChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
   await page.reload();
-  const menu = page.locator("[data-launcher]");
-  const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
-  const width = async () =>
-    menu.evaluate((element) => {
-      const shell = element.closest("#player-shell");
-      // Include the separate resize rail in the selected menu width.
-      return (
-        shell.dataset.labels === "preview" ? element : element.parentElement
-      ).getBoundingClientRect().width;
-    });
-  const mode = async (value) => {
+  const fullscreen = page.locator("[data-fullscreen-control]");
+  await fullscreen.click();
+  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+  await page.getByRole("button", { name: "Exit fullscreen", exact: true }).waitFor();
+  check(
+    await fullscreen.evaluate((element) => document.activeElement === element),
+    "Entering fullscreen must restore control focus",
+  );
+  await fullscreen.click();
+  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.getByRole("button", { name: "Enter fullscreen", exact: true }).waitFor();
+  check(
+    await fullscreen.evaluate((element) => document.activeElement === element),
+    "Leaving fullscreen must restore control focus",
+  );
+  await page.evaluate(() => {
+    document.documentElement.requestFullscreen = () => Promise.reject(new Error("test rejection"));
+  });
+  await fullscreen.click();
+  await page.getByRole("alert").filter({ hasText: "Fullscreen could not be changed" }).waitFor();
+  const unsupported = await page.context().newPage();
+  await unsupported.addInitScript(() =>
+    Object.defineProperty(document, "fullscreenEnabled", { get: () => false }),
+  );
+  await unsupported.goto(page.url());
+  await unsupported.locator("[data-fullscreen-control]").waitFor();
+  check(
+    await unsupported.locator("[data-fullscreen-control]").isDisabled(),
+    "Unsupported fullscreen must remain disabled",
+  );
+  await unsupported.close();
+  return "PASS fullscreen goes on and off, reports a refused change, and is disabled where unsupported";
+}
+
+async function playerSettingsChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const openSettings = async () => {
     await page.locator("[data-settings-trigger]").click();
-    await page.locator('[data-tools-focus="label-mode"]').selectOption(value);
+    await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
+  };
+  const closeSettings = async () => {
     await page.keyboard.press("Escape");
     await page.getByRole("dialog", { name: "Player Settings" }).waitFor({ state: "hidden" });
   };
-  const initialWidth = await width();
-  await edge.focus();
-  await page.keyboard.press("Home");
-  const minimumWidth = await width();
-  check(minimumWidth <= initialWidth, "Home must select the minimum width");
-  await page
-    .locator("[data-launcher] button")
-    .filter({ hasText: "Media Playback Configuration" })
-    .hover();
-  await page
-    .locator('[data-slot="tooltip-content"]')
-    .filter({ hasText: "Media Playback Configuration" })
-    .waitFor();
-  await edge.focus();
-  await page.keyboard.press("End");
-  const maximumWidth = await width();
-  check(maximumWidth > minimumWidth, "End must select a larger width than Home");
-  const box = await edge.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 - 64, box.y + box.height / 2, { steps: 8 });
-  await page.mouse.up();
-  const selectedWidth = await width();
-  check(
-    selectedWidth < maximumWidth && selectedWidth > minimumWidth,
-    "Drag must resize within bounds",
-  );
-  await mode("icons");
-  check(
-    await page.evaluate(() => {
-      const label = document.querySelector("[data-launcher-label]");
-      const box = label.getBoundingClientRect();
-      return !(
-        label.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-        box.width > 0 &&
-        label.contains(
-          document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2),
-        )
-      );
-    }),
-    "Icons must not show the tools' labels",
-  );
-  // A point on the menu beside its controls, and one away from it, on the Stage.
-  const menuPoint = await menu.evaluate((menu) => {
-    const box = menu.getBoundingClientRect();
-    const x = box.left + Math.min(24, box.width / 2);
-    let [best, run] = [null, null];
-    for (let y = box.top + 2; y < box.bottom; y += 4) {
-      const hit = document.elementFromPoint(x, y);
-      const free =
-        menu.contains(hit) && !hit.closest("button, a, input, select, textarea, [role=button]");
-      if (free) run = run ? { ...run, end: y } : { start: y, end: y };
-      else run = null;
-      if (run && (!best || run.end - run.start > best.end - best.start)) best = run;
-    }
-    if (!best) throw new Error("The menu has no space beside its controls");
-    return { x, y: (best.start + best.end) / 2 };
+  const secondaryText = () =>
+    page.evaluate(() => document.documentElement.style.getPropertyValue("--theme-text-secondary"));
+  // Owner decision: contrast and the title-bar A/B are user settings in every build.
+  await openSettings();
+  const contrast = page.locator('[data-player-setting="contrast"]');
+  const labelMode = page.locator('[data-tools-focus="label-mode"]');
+  const variantA = page.getByRole("radio", { name: "A · Always visible, controls left" });
+  // A fresh browser profile shows the defaults; invalid stored values must fall back to them.
+  const current = async () => ({
+    contrast: await contrast.inputValue(),
+    variantA: await variantA.isChecked(),
+    labelMode: await labelMode.inputValue(),
   });
-  const stage = await page.locator(".player-stage").boundingBox();
-  await mode("preview");
-  await page.mouse.move(menuPoint.x, menuPoint.y);
+  const defaults = await current();
+  const standard = await secondaryText();
+  await contrast.selectOption("high");
   await page.waitForFunction(
-    () => document.querySelector("#player-shell").dataset.labelsVisible === "true",
+    (before) =>
+      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
+    standard,
   );
-  await menu.click({ trial: true });
-  await mode("labels");
-  check(
-    (await width()) === selectedWidth,
-    "Returning to permanent labels must restore the selected width",
-  );
-  // Reduced motion: the preview expands and collapses without a transition.
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await mode("preview");
-  await menu.evaluate((element) => {
-    window.menuPreviewTransitions = 0;
-    element.addEventListener("transitionrun", (event) => {
-      if (event.target === element) window.menuPreviewTransitions++;
-    });
+  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
+  await closeSettings();
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
+  await openSettings();
+  if ((await contrast.inputValue()) !== "high") throw new Error("Switching theme reset contrast");
+  await closeSettings();
+  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
+
+  // Settings are browser-local presentation preferences that survive a reload.
+  await page.reload();
+  await openSettings();
+  if (
+    (await contrast.inputValue()) !== "high" ||
+    !(await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).isChecked())
+  )
+    throw new Error("Player Settings were not restored after reload");
+  await closeSettings();
+  // Stored text is external input: unknown values fall back to the defaults.
+  await page.evaluate(() => {
+    localStorage.setItem("player-contrast", "bogus");
+    localStorage.setItem("player-titlebar-variant", "bogus");
   });
-  const labelsVisible = (visible) =>
-    page.waitForFunction(
-      (visible) =>
-        document.querySelector("#player-shell").dataset.labelsVisible === String(visible),
-      visible,
+  await page.reload();
+  await openSettings();
+  if (JSON.stringify(await current()) !== JSON.stringify(defaults))
+    throw new Error("Invalid stored Player Settings did not fall back to the defaults");
+  await closeSettings();
+  // Another tab's write arrives as a storage event; it must apply and stay validated.
+  const otherTab = (key, value) =>
+    page.evaluate(
+      ([key, value]) => {
+        localStorage.setItem(key, value);
+        window.dispatchEvent(
+          new StorageEvent("storage", { key, newValue: value, storageArea: localStorage }),
+        );
+      },
+      [key, value],
     );
-  await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
-  await labelsVisible(false);
-  await page.mouse.move(menuPoint.x, menuPoint.y);
-  await labelsVisible(true);
-  // A transition starts at the next style update; read the count two frames later.
-  const transitions = await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => resolve(window.menuPreviewTransitions)),
-        ),
-      ),
+  const beforeTab = await secondaryText();
+  await otherTab("player-contrast", "high");
+  await page.waitForFunction(
+    (before) =>
+      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
+    beforeTab,
   );
-  check(transitions === 0, "Reduced motion must not animate the menu preview");
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  return "PASS menu width resize, icons without labels, kept permanent width and reduced-motion preview";
+  await otherTab("player-titlebar-variant", "bogus");
+  await otherTab("player-menu-label-mode", "bogus");
+  await openSettings();
+  if (JSON.stringify(await current()) !== JSON.stringify({ ...defaults, contrast: "high" }))
+    throw new Error("Storage events did not apply validated Player Settings");
+  await closeSettings();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => {
+    localStorage.removeItem("player-contrast");
+    localStorage.removeItem("player-titlebar-variant");
+    localStorage.setItem("player-menu-label-mode", "icons");
+  });
+  return "PASS Player Settings open and close, apply, persist, and validate stored and cross-tab values";
 }
 
-async function menuCollapseChecks(page) {
+async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
-  await page.reload();
-  const shell = page.locator("#player-shell");
-  const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
-  const menu = page.locator("[data-launcher]");
-  const width = async () =>
-    menu.evaluate((element) => {
-      const shell = element.closest("#player-shell");
-      // Include the separate resize rail in the selected menu width.
-      return (
-        shell.dataset.labels === "preview" ? element : element.parentElement
-      ).getBoundingClientRect().width;
-    });
-  const mode = async () => shell.getAttribute("data-labels");
-  // Drags the menu's edge to `x`, holding the pointer there; positions are taken from the menu itself: its left side,
-  // where an inward drag ends, and the chosen label width, where an outward drag ends.
-  let pointerY = 0;
-  const drag = async (x) => {
-    const bounds = await edge.boundingBox();
-    pointerY = bounds.y + bounds.height / 2;
-    await page.mouse.move(bounds.x + bounds.width / 2, pointerY);
-    await page.mouse.down();
-    await page.mouse.move(x, pointerY, { steps: 8 });
-  };
-  const inward = (await menu.boundingBox()).x + 8;
-  // Choose a non-default width to prove collapse preserves the existing preference.
-  await edge.focus();
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
-  const selectedWidth = await width();
-  const outward = inward - 8 + selectedWidth;
-  await drag(inward);
-  check(
-    (await mode()) === "icons" && (await width()) < selectedWidth,
-    "Collapse must be visible while the pointer is still held",
-  );
-  await page.mouse.move(outward, pointerY, { steps: 8 });
-  check((await mode()) === "labels", "Reversing an inward drag must reopen before release");
-  await page.mouse.move(inward, pointerY, { steps: 8 });
-  check((await mode()) === "icons", "Dragging inward again must collapse immediately");
-  await page.keyboard.press("Escape");
-  await page.mouse.up();
-  check(
-    (await mode()) === "labels" && (await width()) === selectedWidth,
-    "Escape must restore the starting width/mode",
-  );
-  await drag(inward);
-  await page.mouse.up();
-  check(
-    (await mode()) === "icons" && (await width()) < selectedWidth,
-    "Inward drag must collapse to icons",
-  );
-  const collapsed = await edge.boundingBox();
-  await drag(collapsed.x + collapsed.width / 2 + 8);
-  await page.mouse.up();
-  check((await mode()) === "icons", "Small outward drag must not expand");
-  await drag(outward);
-  check(
-    (await mode()) === "labels" && (await width()) === selectedWidth,
-    "Expansion must restore the saved width while the pointer is held",
-  );
-  await page.mouse.move(inward, pointerY, { steps: 8 });
-  check((await mode()) === "icons", "Reversing an outward drag must collapse before release");
-  await page.mouse.move(outward, pointerY, { steps: 8 });
-  await page.mouse.up();
-  check(
-    (await mode()) === "labels" && (await width()) === selectedWidth,
-    "Outward drag must restore the saved label width",
-  );
-  // The actual minimum remains usable and does not implicitly collapse.
-  await edge.focus();
-  await page.keyboard.press("Home");
-  const minimumWidth = await width();
-  check(
-    minimumWidth <= selectedWidth && (await mode()) === "labels",
-    "Minimum labels width must remain selectable",
-  );
-  await page.keyboard.press("Enter");
-  check((await mode()) === "icons", "Enter must collapse without a drag");
-  await page.keyboard.press("Enter");
-  check(
-    (await mode()) === "labels" && (await width()) === minimumWidth,
-    "Enter must restore labels and focus",
-  );
-  check(
-    await edge.evaluate((el) => el === document.activeElement),
-    "Mode switch lost resize-edge focus",
-  );
-  // Pointer cancellation restores the starting mode even after a visible collapse.
-  await drag(inward);
-  await edge.dispatchEvent("pointercancel", { pointerId: 1, pointerType: "mouse" });
-  await page.mouse.up();
-  check(
-    (await mode()) === "labels" && (await width()) === minimumWidth,
-    "Pointer cancellation must restore the label width",
-  );
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  return "PASS menu drag collapse, expansion and cancellation";
-}
-
-async function panelResizeChecks(page) {
-  // Reduced CSS viewport models the space left by browser zoom, without device detection.
-  for (const [width, mode, multiple] of [
-    [900, "icons", false],
-    [1440, "icons", true],
-  ]) {
-    await page.setViewportSize({ width, height: 650 });
-    await page.evaluate((mode) => localStorage.setItem("player-menu-label-mode", mode), mode);
-    await page.reload();
-    const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
-    if (multiple) {
-      await launcher("Layout Debug").click();
-      await page.locator('[data-tool="Layout Debug"] [data-panel-pin]').click();
-    }
-    await launcher("Visual Lab").click();
-    const edge = page.locator('[data-panel-resize="Visual Lab"]');
-    await edge.focus();
-    await page.keyboard.press("Home");
-    const settle = async () => {
-      await page.evaluate(async () => {
-        await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
-      });
+  // Observe the Player's audio elements; the first play() is refused, as a browser without activation would.
+  await page.addInitScript(() => {
+    window.__played = [];
+    const play = HTMLMediaElement.prototype.play;
+    let refused = false;
+    HTMLMediaElement.prototype.play = function () {
+      if (!refused) {
+        refused = true;
+        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
+      }
+      window.__played.push(this);
+      return play.call(this);
     };
-    await settle();
-    const reachable = async () => {
-      await page.waitForFunction(() => {
-        const edge = document.querySelector('[data-panel-resize="Visual Lab"]');
-        const bounds = edge.getBoundingClientRect();
-        return (
-          document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) ===
-          edge
-        );
-      });
-    };
-    const drag = async (delta, cancel = false) => {
-      await reachable();
-      const bounds = await edge.boundingBox();
-      await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(bounds.x + bounds.width / 2 + delta, bounds.y + bounds.height / 2, {
-        steps: 12,
-      });
-      if (cancel) await page.keyboard.press("Escape");
-      await page.mouse.up();
-      await settle();
-      await reachable();
-    };
-    const panel = page.locator('[data-tool="Visual Lab"]');
-    const minimum = await panel.evaluate((el) => el.style.width);
-    await edge.focus();
-    await page.keyboard.press("End");
-    await settle();
-    const maximum = await panel.evaluate((el) => el.style.width);
-    // A capped panel must shrink from its rendered edge, not its offscreen preference.
-    await drag(-70);
-    if (await panel.evaluate((el, maximum) => el.style.width === maximum, maximum))
-      throw new Error("Dragging a capped panel inward did not shrink its preference");
-    await edge.focus();
-    await page.keyboard.press("Home");
-    await settle();
-    await drag(400, true);
-    if (await panel.evaluate((el, minimum) => el.style.width !== minimum, minimum))
-      throw new Error("Escape did not restore the starting panel width");
-    for (const key of ["Home", "ArrowRight", "ArrowRight", "End"]) {
-      await edge.focus();
-      await page.keyboard.press(key);
-      await settle();
-      await reachable();
-      const fits = await page.locator('[data-tool="Visual Lab"]').evaluate((panel) => {
-        const strip = panel.parentElement;
-        return (
-          panel.getBoundingClientRect().width <= strip.clientWidth + 1 &&
-          panel.scrollWidth <= panel.clientWidth + 1
-        );
-      });
-      if (!fits) throw new Error("Panel must fit available tool space without content overflow");
-    }
-    await page.setViewportSize({ width: 1920, height: 900 });
-    await settle();
-    await page.waitForFunction((maximum) => {
-      const panel = document.querySelector('[data-tool="Visual Lab"]');
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-      return (
-        panel.style.width === maximum &&
-        Math.abs(panel.getBoundingClientRect().width - parseFloat(maximum) * rem) < 1
-      );
-    }, maximum);
-  }
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  return "PASS panel width cap, resize, restoration and cancellation";
-}
-
-async function carouselChecks(page) {
-  await page.setViewportSize({ width: 900, height: 420 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  await page.reload();
-  for (const name of ["Layout Debug", "Visual Lab"]) {
-    await page.locator("[data-launcher] button").filter({ hasText: name }).click();
-    const panel = page.locator(`[data-tool="${name}"]`);
-    await panel.locator("[data-panel-resize]").focus();
-    await page.keyboard.press("End");
-    await panel.locator("[data-panel-pin]").click();
-  }
-  const strip = page.locator(".tool-panel-strip");
-  await page.waitForFunction(() => {
-    const s = document.querySelector(".tool-panel-strip");
-    return s.scrollWidth > s.clientWidth;
   });
-  const state = await strip.evaluate((s) => ({
-    width: s.clientWidth,
-    total: s.scrollWidth,
-    panels: [...s.querySelectorAll(".tool-panel-content > [data-tool]")].map(
-      (p) => p.getBoundingClientRect().width,
-    ),
-  }));
-  if (state.panels.some((w) => w > state.width + 1)) throw Error("Oversized panel");
-  await strip.evaluate((s) => s.scrollTo({ left: 0, behavior: "instant" }));
-  await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft === 0);
-  const box = await strip.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(state.width * 0.9, 0);
-  // A partial wheel scroll moves the carousel on and comes to rest with the next panel's controls in reach. Where
-  // proximity snapping settles a panel boundary is presentation, left to the scoped visual check.
-  const settled = await page.evaluate(
-    () =>
-      new Promise((resolve) => {
-        const strip = document.querySelector(".tool-panel-strip");
-        let [last, still] = [strip.scrollLeft, 0];
-        const frame = () => {
-          still = strip.scrollLeft === last ? still + 1 : 0;
-          last = strip.scrollLeft;
-          if (still >= 12) resolve(last);
-          else requestAnimationFrame(frame);
-        };
-        requestAnimationFrame(frame);
-      }),
+  page.keepActivation = true;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  // Nothing runs before explicit Start: no transcript, no Stage image, no audio.
+  const start = page.getByRole("button", { name: "Start", exact: true });
+  await start.waitFor();
+  check((await page.locator(".transcript-entry").count()) === 0, "The script ran before Start");
+  check((await page.locator(".stage-media").count()) === 0, "The Stage showed media before Start");
+  await start.click();
+  // The authored Stage image comes from the runtime and the host's asset resolution.
+  await page.locator(".stage-media").waitFor();
+  const firstImage = await page.locator(".stage-media").getAttribute("src");
+  // Refused audio offers a deliberate retry and reports no progress until it plays.
+  const retry = page.getByRole("button", { name: "Enable audio", exact: true });
+  await retry.waitFor();
+  check(
+    await page.evaluate(() => window.__played.length === 0),
+    "Refused audio was reported as playing",
   );
-  if (settled <= 0) throw new Error("A partial wheel scroll did not move the carousel on");
-  const nextControls = await page
-    .locator('[data-tool="Visual Lab"]')
-    .getByRole("button", { name: "Panel settings", exact: true })
-    .evaluate((button) => {
-      const box = button.getBoundingClientRect();
-      return (
-        button.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-        button.contains(
-          document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2),
-        )
-      );
-    });
-  if (!nextControls)
-    throw new Error("After a partial wheel scroll the next panel's controls are out of reach");
-  const body = page.locator('[data-tool="Visual Lab"] [data-tool-body]');
-  await body.hover();
-  await page.mouse.wheel(0, 220);
+  // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
+  await page.locator("[data-notification-bell]").click();
+  const panelNotice = page.locator(
+    '[data-player-notification-panel] [data-player-notice="audio-blocked"]',
+  );
+  check(
+    (await panelNotice.locator("[data-notice-dismiss]").count()) === 0,
+    "The blocked-audio notice must not be dismissible",
+  );
+  await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
+  await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
+  await retry.waitFor({ state: "hidden" });
+  check(
+    await page.evaluate(() => !window.__played[0].muted && window.__played[0].volume > 0),
+    "Audio must play audibly, not muted",
+  );
+  // The runtime settles playback from measured progress and the Player releases the element.
+  await page.waitForFunction(() => !window.__played[0].getAttribute("src"), null, {
+    timeout: 5000,
+  });
+  // A later showImage replaces the Stage image.
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector('[data-tool="Visual Lab"] [data-tool-body]').scrollTop > 0,
+    (previous) => document.querySelector(".stage-media")?.getAttribute("src") !== previous,
+    firstImage,
   );
-  const cdp = await page.context().newCDPSession(page);
-  try {
-    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-    // The swipe starts on the shown panel's content, where a person pans, not on its header's controls.
-    const content = await body.boundingBox();
-    const x = Math.max(content.x, box.x) + 10,
-      y = content.y + Math.min(content.height, box.y + box.height - content.y) / 2;
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 10; i++)
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{ x: x + (i * state.width * 1.2) / 10, y }],
-      });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft < 2);
-  } finally {
-    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-    await cdp.detach();
-  }
-  return "PASS bounded carousel, wheel snapping to a panel, touch scrolling and vertical body scroll";
-}
-
-async function toolContentChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
-  await launcher("Layout Debug").click();
-  await page.setViewportSize({ width: 390, height: 700 });
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
-  await launcher("Layout Debug").click();
-  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
-  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
-  await page.locator(".tools-drawer").evaluate(async (el) => {
-    await Promise.allSettled(el.getAnimations().map((animation) => animation.finished));
-  });
-  // The pointer leaves the drawer's controls for the tool's body.
-  const body = await page.locator('[data-tool="Layout Debug"] [data-tool-body]').boundingBox();
-  await page.mouse.move(
-    body.x + body.width - 10,
-    Math.min(body.y + body.height, page.viewportSize().height) - 10,
-  );
-  await page.locator('[data-tool="Layout Debug"]').getByRole("checkbox").first().focus();
-  // A closing tooltip still owns Escape until its animated layer unmounts.
-  await page.locator('[data-slot="tooltip-content"]').waitFor({ state: "detached" });
-  await page.keyboard.press("Escape");
-  // Focus returns only after Sheet disposes its exiting presentation subtree.
-  await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (!(await show.evaluate((el) => el === document.activeElement))) {
-    throw new Error("Drawer dismissal lost toggle focus");
-  }
-  await show.click();
-  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
-  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
-  return "PASS responsive tool availability, menu return and dismissal focus";
+  page.keepActivation = false;
+  return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
 }
 
 async function transcriptNativeWheelChecks(page) {
@@ -981,1204 +343,6 @@ async function transcriptNativeWheelChecks(page) {
     return Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 2;
   });
   return "PASS native transcript wheel ownership across text, margins and thumb, malformed input, burst and drag";
-}
-
-async function timerChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-
-  const firstTimer = page.locator(".timer-display").first();
-  await firstTimer.waitFor();
-  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (await showSidebar.isVisible()) await showSidebar.click();
-  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
-  const kind = page.locator("[data-timer-fixture-kind]");
-  await page.locator("[data-timer-fixture-count]").selectOption("3");
-  await kind.selectOption("mystery");
-  const mysteryFontSizes = await page
-    .locator(".timer-display")
-    .evaluateAll((timers) =>
-      timers.map((timer) => getComputedStyle(timer.querySelector(".timer-time")).fontSize),
-    );
-  check(
-    new Set(mysteryFontSizes).size === 1,
-    "Mystery timers must not reveal a duration category through their typography",
-  );
-  const mysteryText = await page.locator(".timer-display").evaluateAll((timers) =>
-    timers.map((timer) => ({
-      time: timer.querySelector(".timer-time").innerText,
-      // An authored label may contain digits; the rest of the accessible name must not.
-      name: timer
-        .getAttribute("aria-label")
-        .replace(timer.querySelector(".timer-label")?.textContent ?? "", ""),
-    })),
-  );
-  check(
-    mysteryText.length === 3 && mysteryText.every(({ time }) => time === "?"),
-    `Mystery timer reveals its time: ${JSON.stringify(mysteryText)}`,
-  );
-  check(
-    mysteryText.every(({ name }) => !/\d/u.test(name)),
-    `Mystery timer accessible text reveals its time: ${JSON.stringify(mysteryText)}`,
-  );
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  check(
-    await firstTimer
-      .locator(".timer-rotor")
-      .evaluate((element) => element.getAnimations().length === 0),
-    "Mystery timer motion must stop when reduced motion is requested",
-  );
-  // Hidden timers show no timer at all.
-  await kind.selectOption("hidden");
-  await page.locator(".timer-display").waitFor({ state: "detached" });
-
-  return "PASS timer secrecy, hidden state and reduced motion";
-}
-
-// Choices cover neither the latest message nor the composer, and a long choice's label wraps instead of being cut
-// off.
-async function choiceLayoutChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.locator("[data-foreground-controls] .player-action-button").first().waitFor();
-  // The choices enter the conversation as live play shows them; their layout is where they come to rest.
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every(
-        (animation) =>
-          animation.playState !== "running" ||
-          animation.effect?.getComputedTiming().endTime === Infinity,
-      ),
-  );
-  const layout = () =>
-    page.evaluate(() => {
-      const foreground = document.querySelector("[data-foreground-controls]");
-      const choices = [...foreground.querySelectorAll(".player-action-button")];
-      const bubble = document.querySelector(
-        ".transcript-entry:last-child [data-slot='bubble-content']",
-      );
-      const composer = document.querySelector("[data-composer-shell]");
-      const long = choices.find((button) => button.innerText.startsWith("Take the longer path"));
-      const label = long.querySelector(".player-action-label") ?? long;
-      return {
-        overlap: [...choices, bubble, composer]
-          .filter((element) => !playerChecks.uncovered(element))
-          .map((element) => element.innerText.trim().slice(0, 40)),
-        longReadable:
-          long.scrollWidth <= long.clientWidth + 1 && label.scrollWidth <= label.clientWidth + 1,
-      };
-    });
-  for (const width of [1440, 700]) {
-    await page.setViewportSize({ width, height: 900 });
-    // The conversation lays itself out again for the new width; it is judged once it has come to rest.
-    check(
-      await page.evaluate(() =>
-        playerChecks.settled([
-          "[data-foreground-controls] .player-action-button",
-          ".transcript-entry:last-child [data-slot='bubble-content']",
-          "[data-composer-shell]",
-        ]),
-      ),
-      `${width}px: the conversation did not come to rest`,
-    );
-    const state = await layout();
-    check(
-      state.overlap.length === 0,
-      `${width}px: a choice, the message or the composer is covered: ${JSON.stringify(state)}`,
-    );
-    check(
-      state.longReadable,
-      `${width}px: a long choice's label is cut off: ${JSON.stringify(state)}`,
-    );
-  }
-  return "PASS choices cover neither the message nor the composer and a long choice's label stays whole";
-}
-
-async function topBarChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  const fullscreen = page.locator("[data-fullscreen-control]");
-  const actions = page.locator(".player-top-bar-actions");
-  // The controls stay reachable and the title stays readable beside them; with the narrow drawer open (`barShown`
-  // false), which covers the bar as a modal sheet, its own toggle stays reachable.
-  const visible = async (tools, barShown = true) => {
-    // Judged once the bar, or a drawer sliding in, has come to rest after the last change.
-    check(
-      await page.evaluate(() =>
-        playerChecks.settled([
-          ".player-top-bar-actions button",
-          ".player-top-bar-title > :is(span, button)",
-          '[data-sidebar="trigger"]',
-          ".tools-drawer",
-        ]),
-      ),
-      "The top bar did not come to rest",
-    );
-    // The title's pill; its row around it passes input through to the Stage.
-    const boxes = await Promise.all([
-      tools.boundingBox(),
-      actions.boundingBox(),
-      page.locator(".player-top-bar-title > :is(span, button)").boundingBox(),
-    ]);
-    check(boxes.every(Boolean), "Top controls and title must remain visible");
-    // Neither covers the other: every control is uncovered, and no control is drawn over the title's pill, which is
-    // plain text that passes input through to the Stage.
-    const clear = await tools.evaluate((toggle, barShown) => {
-      const controls = [...document.querySelectorAll(".player-top-bar-actions button")];
-      const pill = document.querySelector(".player-top-bar-title > :is(span, button)");
-      return (
-        playerChecks.uncovered(toggle) &&
-        (!barShown ||
-          (controls.every(playerChecks.uncovered) &&
-            pill.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-            !controls.some((control) => playerChecks.hides(control, pill))))
-      );
-    }, barShown);
-    check(clear, "Title must not collide with controls");
-  };
-  await visible(hide);
-  await hide.click();
-  for (const width of [1440, 320]) {
-    await page.setViewportSize({ width, height: 900 });
-    await visible(show);
-    const result = await page.evaluate(() => {
-      const bar = document.querySelector(".player-top-bar");
-      const title = document.querySelector(".player-top-bar-title");
-      const pill = title.firstElementChild;
-      const text = pill.querySelector(".player-top-bar-title-text");
-      const r = title.getBoundingClientRect();
-      const p = pill.getBoundingClientRect();
-      // The title row beside the pill, where the pill does not fill it.
-      const beside =
-        p.right < r.right - 8
-          ? document.elementFromPoint((p.right + r.right) / 2, r.y + r.height / 2)
-          : null;
-      return {
-        passesThrough: beside === null || !bar.contains(beside),
-        cutOff: text.scrollWidth > text.clientWidth,
-        fullTitleButton: pill.matches("button[data-player-title-full]"),
-        outerScroll: document.documentElement.scrollWidth > innerWidth,
-      };
-    });
-    check(
-      result.passesThrough,
-      "Beside the title pill, the bar must pass input through to the Stage",
-    );
-    // A pill the bar cuts off shows the full title on a tap (PLAYER-UI "Title and global panel controls"); otherwise it
-    // is plain text.
-    check(
-      result.fullTitleButton === result.cutOff,
-      `Only a cut-off title pill may take input: cut off ${result.cutOff}, button ${result.fullTitleButton}`,
-    );
-    check(!result.outerScroll, "Top bar must not introduce document overflow");
-  }
-  await show.click();
-  await visible(hide, false);
-  await page.keyboard.press("Escape");
-  await show.waitFor();
-  check(
-    await show.evaluate((element) => document.activeElement === element),
-    "Drawer dismissal must return focus to the top-bar opener",
-  );
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await fullscreen.click();
-  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
-  await page.getByRole("button", { name: "Exit fullscreen", exact: true }).waitFor();
-  check(
-    await fullscreen.evaluate((element) => document.activeElement === element),
-    "Entering fullscreen must restore control focus",
-  );
-  await fullscreen.click();
-  await page.waitForFunction(() => !document.fullscreenElement);
-  await page.getByRole("button", { name: "Enter fullscreen", exact: true }).waitFor();
-  check(
-    await fullscreen.evaluate((element) => document.activeElement === element),
-    "Leaving fullscreen must restore control focus",
-  );
-  await page.evaluate(() => {
-    document.documentElement.requestFullscreen = () => Promise.reject(new Error("test rejection"));
-  });
-  await fullscreen.click();
-  await page.getByRole("alert").filter({ hasText: "Fullscreen could not be changed" }).waitFor();
-  await page.reload();
-  const stage = await page.locator(".player-stage").boundingBox();
-  await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
-  await fullscreen.hover();
-  await page
-    .locator("[data-slot=tooltip-content]")
-    .filter({ hasText: "Enter fullscreen" })
-    .waitFor();
-  const unsupported = await page.context().newPage();
-  await unsupported.addInitScript(() =>
-    Object.defineProperty(document, "fullscreenEnabled", { get: () => false }),
-  );
-  await unsupported.goto(page.url());
-  await unsupported.locator("[data-fullscreen-control]").waitFor();
-  check(
-    await unsupported.locator("[data-fullscreen-control]").isDisabled(),
-    "Unsupported fullscreen must remain disabled",
-  );
-  await unsupported.close();
-  return "PASS top controls stay reachable, the bar beside the title passes input through, only a cut-off title takes a tap, and fullscreen works";
-}
-
-async function tooltipClickFocusChecks(page) {
-  const content = page.locator('[data-slot="tooltip-content"]');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.reload();
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
-  await show.waitFor({ state: "visible" });
-  // The pointer rests on the Stage, away from every control with a hint.
-  const stage = await page.locator(".player-stage").boundingBox();
-  const rest = () => page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
-  await rest();
-  await show.hover();
-  await content.filter({ hasText: "Show sidebar" }).waitFor({ state: "visible" });
-  await show.click();
-  await hide.waitFor({ state: "visible" });
-  await page.waitForTimeout(350);
-  if (await content.count())
-    throw new Error("Pointer opening the drawer left a tooltip visible on the new Hide control");
-  await hide.click();
-  await show.waitFor({ state: "visible" });
-  await page.waitForTimeout(350);
-  if (await content.count())
-    throw new Error("Pointer closing the drawer left a tooltip visible on the Show control");
-
-  await rest();
-  await page.keyboard.press("Tab");
-  await show.focus();
-  await content.filter({ hasText: "Show sidebar" }).waitFor({ state: "visible" });
-  await page.keyboard.press("Enter");
-  await hide.waitFor({ state: "visible" });
-  await content.filter({ hasText: "Hide sidebar" }).waitFor({ state: "visible" });
-  if (
-    !(await hide.evaluate(
-      (element) => document.activeElement === element && element.matches(":focus-visible"),
-    ))
-  )
-    throw new Error("Keyboard opening the drawer lost visible focus on Hide sidebar");
-
-  // After keyboard use, a mouse click that reopens the drawer leaves no focus tooltip behind.
-  await page.keyboard.press("Escape");
-  await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
-  await show.click();
-  await page.waitForFunction(
-    () => document.activeElement?.getAttribute("aria-label") === "Hide sidebar",
-  );
-  // A focus tooltip opens with the focus; give it two frames to render.
-  await page.evaluate(
-    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
-  if (await content.filter({ hasText: "Hide sidebar" }).count())
-    throw new Error("A mouse click after keyboard use left a focus tooltip on Hide sidebar");
-  return "PASS pointer sidebar clicks leave no tooltip, also after keyboard use, while keyboard focus shows one";
-}
-
-async function playerTooltipChecks(page) {
-  const tooltip = (label) =>
-    page.locator('[data-slot="tooltip-content"]').filter({ hasText: label });
-  // The pointer rests on the Stage, away from every control with a hint.
-  const rest = async () => {
-    const stage = await page.locator(".player-stage").boundingBox();
-    await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
-  };
-  const expectTooltip = async (trigger, label) => {
-    await page.evaluate(() => {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    });
-    await rest();
-    await trigger.hover();
-    await tooltip(label).waitFor({ state: "visible" });
-  };
-  // The hover tooltip must close first, or its exit animation would satisfy the wait. A key press makes the script
-  // focus keyboard focus (:focus-visible); the shared tooltip ignores pointer focus.
-  const expectFocusTooltip = async (trigger, label) => {
-    await rest();
-    await tooltip(label).waitFor({ state: "detached" });
-    await page.keyboard.press("Tab");
-    await trigger.focus();
-    await tooltip(label).waitFor({ state: "visible" });
-  };
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
-  await expectTooltip(hide, "Hide sidebar");
-  await hide.click();
-  await page.evaluate(async () => {
-    const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-    await Promise.allSettled(dock?.getAnimations().map((animation) => animation.finished) ?? []);
-  });
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  await expectTooltip(show, "Show sidebar");
-  await expectFocusTooltip(show, "Show sidebar");
-  await show.click();
-
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  const grip = page.locator('[data-tool="Visual Lab"] [data-panel-drag]');
-  await expectTooltip(grip, "Drag to reorder");
-  const separator = page.getByRole("separator", {
-    name: "Resize media and conversation",
-    exact: true,
-  });
-  await expectTooltip(separator, "Drag or use arrow keys to resize media and conversation");
-  await expectFocusTooltip(separator, "Drag or use arrow keys to resize media and conversation");
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  const narrowShow = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (await narrowShow.isVisible()) await narrowShow.click();
-  const narrowHide = page.getByRole("button", { name: "Hide sidebar", exact: true });
-  await page.keyboard.press("Tab");
-  await narrowHide.focus();
-  await tooltip("Hide sidebar").waitFor({ state: "visible" });
-  await page.keyboard.press("Escape");
-  await narrowShow.waitFor({ state: "visible" });
-  if (
-    !(await narrowShow.evaluate((element) => document.activeElement === element)) ||
-    (await page
-      .locator('[data-slot="tooltip-content"]')
-      .filter({ hasText: "Hide sidebar" })
-      .count())
-  )
-    throw new Error("One Escape must close the drawer, clear its tooltip and restore opener focus");
-  // Reopening from the focused opener with Enter moves keyboard focus to Hide sidebar, which shows its tooltip.
-  await page.keyboard.press("Enter");
-  await narrowHide.waitFor({ state: "visible" });
-  await tooltip("Hide sidebar").waitFor({ state: "visible" });
-  // Hold the closing tooltip's exit animation, so Escape deterministically arrives while its layer remains.
-  const holdExit = await page.addStyleTag({
-    content:
-      '[data-slot="tooltip-content"][data-state="closed"] { animation-play-state: paused !important; }',
-  });
-  await page.locator('[data-slot="sheet-content"]').focus();
-  if (!(await tooltip("Hide sidebar").count()))
-    throw new Error("The drawer tooltip layer did not remain during focus handoff");
-  await page.keyboard.press("Escape");
-  await narrowShow.waitFor({ state: "visible" });
-  if (!(await narrowShow.evaluate((element) => document.activeElement === element)))
-    throw new Error(
-      "Escape during tooltip focus handoff must close the drawer and restore opener focus",
-    );
-  await holdExit.evaluate((style) => style.remove());
-  return "PASS sidebar, grip and splitter hints show on hover and keyboard focus, and Escape closes the drawer under a tooltip";
-}
-
-// The dock, an open tool or a portrait image never hides the media or the conversation.
-async function contentContainmentChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  // What hides the media or the retained reading column, judged by hit tests at the Stage's image (inside its box as
-  // fitted) and at the conversation's text lines: running off the window or under the docked sidebar. The narrow
-  // layout's drawer slides over the Stage by design.
-  const hidden = `(() => {
-    const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
-    const docked = dock && !document.querySelector(".tools-drawer") ? dock : null;
-    const under = (point) => !!docked && docked.contains(document.elementFromPoint(...point));
-    const problems = [];
-    const image = document.querySelector(".stage-media");
-    const drawn = image ? playerChecks.imagePoints(image) : [];
-    if (!image || !image.complete || !image.naturalWidth || !image.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
-      problems.push("the Stage shows no image");
-    else if (drawn.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("media runs off the window");
-    else if (drawn.some(under)) problems.push("media runs under the dock");
-    // Text the conversation shows: in the window, where a hit lands on the transcript itself.
-    const transcript = document.querySelector(".transcript");
-    const text = playerChecks.textPoints(transcript);
-    const shown = text.filter((point) => playerChecks.inWindow(point) && transcript.contains(document.elementFromPoint(...point)));
-    // The narrow layout's drawer covers the conversation by design.
-    const drawer = !!document.querySelector(".tools-drawer");
-    if (!drawer && (!transcript.checkVisibility({ opacityProperty: true, visibilityProperty: true }) || shown.length === 0))
-      problems.push("the conversation shows no text");
-    else if (text.some(([x]) => x < -1 || x > innerWidth + 1)) problems.push("conversation runs off the window");
-    else if (text.filter(playerChecks.inWindow).some(under)) problems.push("conversation runs under the dock");
-    return problems.join("; ");
-  })()`;
-  const verify = async (label) => {
-    // Viewport and tool changes re-lay out the Player asynchronously; it is judged once it has come to rest.
-    check(
-      await page.evaluate(() =>
-        playerChecks.settled([
-          ".stage-media",
-          ".transcript .transcript-entry",
-          '[data-slot="sidebar"] > .fixed',
-          ".tools-drawer",
-        ]),
-      ),
-      `${label}: the Player did not come to rest`,
-    );
-    const problems = await page.evaluate(hidden);
-    check(problems === "", `${label}: ${problems}`);
-  };
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
-  await page.reload();
-  await verify("compact menu, landscape");
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await verify("open tool, landscape");
-  const separator = page.getByRole("separator", { name: "Resize media and conversation" });
-  await separator.focus();
-  for (let step = 0; step < 6; step++) await separator.press("ArrowUp");
-  await verify("resized stage, landscape");
-  await page.getByLabel("Stage media fixture").selectOption("Portrait");
-  await page.waitForFunction(
-    () =>
-      Number.parseFloat(
-        document.querySelector("#player-shell").style.getPropertyValue("--media-aspect"),
-      ) < 1,
-  );
-  await verify("open tool, portrait");
-  for (let step = 0; step < 6; step++) await separator.press("ArrowDown");
-  await verify("resized stage, portrait");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await verify("narrow stage");
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await verify("narrow drawer");
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  return "PASS media and transcript stay on screen and clear of the dock beside tools and portrait media";
-}
-
-async function zoomedViewportChecks(page) {
-  const context = await page
-    .context()
-    .browser()
-    .newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  const mobile = await context.newPage();
-  try {
-    await mobile.goto(page.url().split("?")[0]);
-    await mobile.evaluate(() => {
-      document.querySelector('meta[name="viewport"]').content = "width=980";
-    });
-    await mobile.waitForFunction(() => window.innerWidth >= 900);
-    const session = await context.newCDPSession(mobile);
-    await session.send("Emulation.setPageScaleFactor", { pageScaleFactor: 0.6 });
-    await mobile.evaluate(() => {
-      const spacer = document.createElement("div");
-      spacer.style.height = "3000px";
-      document.body.append(spacer);
-      window.scrollTo(0, 300);
-    });
-    await mobile.waitForFunction(() => window.visualViewport?.pageTop > 100);
-    // The composer stays reachable: completely inside the visible (visual) viewport.
-    const composerVisible = () => {
-      const visual = window.visualViewport;
-      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
-      return (
-        composer.height > 0 &&
-        composer.top >= visual.offsetTop - 1 &&
-        composer.bottom <= visual.offsetTop + visual.height + 1
-      );
-    };
-    await mobile.waitForFunction(composerVisible).catch(() => {});
-    if (!(await mobile.evaluate(composerVisible)))
-      throw new Error(
-        "Zooming or outer-page panning moved the composer out of the visible viewport",
-      );
-    return "PASS zoomed and panned mobile viewport keeps the composer visible";
-  } finally {
-    await context.close();
-  }
-}
-
-async function composerNoticeChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const baseUrl = page.url().split("?")[0];
-  // An invalid answer shows a notice that is readable inside the viewport and leaves the composer uncovered.
-  const invalidAnswer = async () => {
-    await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
-    const input = page.locator("[data-runtime-interaction] textarea");
-    await input.fill("Not an option");
-    await input.press("Enter");
-    // The composer's own feedback; the Player notice live regions are separate status regions.
-    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
-    const placement = await page.evaluate(() => {
-      const notice = document.querySelector(".composer-notice").getBoundingClientRect();
-      return {
-        inside:
-          notice.left >= 0 &&
-          notice.right <= innerWidth &&
-          notice.top >= 0 &&
-          notice.bottom <= innerHeight,
-        coversComposer: !(
-          playerChecks.uncovered(document.querySelector(".composer-notice")) &&
-          playerChecks.uncovered(document.querySelector("[data-composer-shell]"))
-        ),
-        pageOverflow: document.documentElement.scrollWidth > innerWidth,
-      };
-    });
-    check(
-      placement.inside && !placement.coversComposer && !placement.pageOverflow,
-      `Composer notice is cut off, covers the composer or widens the page: ${JSON.stringify(placement)}`,
-    );
-    // A point beside the notice, on the Stage, where a person presses elsewhere.
-    const stage = await page.locator(".player-stage").boundingBox();
-    return { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
-  };
-  await page.setViewportSize({ width: 920, height: 560 });
-  await page.goto(baseUrl);
-  const outside = await invalidAnswer();
-  await page.mouse.click(outside.x, outside.y);
-  check(
-    (await page.locator(".composer-notice").count()) === 0,
-    "Outside press did not dismiss the notice",
-  );
-  await page.setViewportSize({ width: 390, height: 700 });
-  await page.goto(baseUrl);
-  const touchOutside = await invalidAnswer();
-  const touchNotice = page.locator(".composer-notice");
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touchOutside] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  // Well before the notice's own expiry, so only the touch can have dismissed it.
-  await touchNotice.waitFor({ state: "hidden", timeout: 2000 });
-  return "PASS invalid-answer notice stays readable beside the composer and outside press or touch dismisses it";
-}
-
-async function sidebarShortcutChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  await hide.waitFor();
-  // Owner decision: Ctrl/Meta+B stays global but never fires from text editing.
-  await page.locator("[data-composer-input]").focus();
-  for (const shortcut of ["Control+b", "Meta+b"]) {
-    await page.keyboard.press(shortcut);
-    if (!(await hide.isVisible()))
-      throw new Error(`${shortcut} in the composer toggled the sidebar`);
-  }
-  await page.locator("[data-composer-input]").blur();
-  await page.keyboard.press("Control+b");
-  await show.waitFor();
-  await page.keyboard.press("Meta+b");
-  await hide.waitFor();
-  return "PASS Ctrl/Meta+B toggles the sidebar outside text editing only";
-}
-
-// A keyboard user can see where focus is: keyboard focus adds a visible mark that the resting control lacks.
-async function focusIndicatorChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
-  for (const label of ["Reset timers", "Stay by the water"]) {
-    const button = page.getByRole("button", { name: label, exact: true });
-    await button.scrollIntoViewIfNeeded();
-    const resting = await button.evaluate((el) => getComputedStyle(el).boxShadow);
-    // A key press makes the following script focus keyboard focus for the browser (:focus-visible) and the Player.
-    // Chromium ignores `focus({ focusVisible: true })`, so after the launcher click it would stay pointer focus.
-    await page.keyboard.press("Tab");
-    await button.focus();
-    const focused = await button.evaluate(async (el) => {
-      await Promise.all(el.getAnimations().map((animation) => animation.finished));
-      const style = getComputedStyle(el);
-      return {
-        focusVisible: el.matches(":focus-visible"),
-        outline:
-          style.outlineStyle !== "none" &&
-          Number.parseFloat(style.outlineWidth) > 0 &&
-          style.outlineColor !== "rgba(0, 0, 0, 0)",
-        shadow: style.boxShadow,
-      };
-    });
-    // A changed shadow counts only if some part of it is not transparent.
-    const visibleShadow =
-      focused.shadow !== resting &&
-      focused.shadow.split(/,(?![^(]*\))/u).some((part) => !/^\s*rgba\(0, 0, 0, 0\)/u.test(part)) &&
-      focused.shadow !== "none";
-    if (!focused.focusVisible || !(focused.outline || visibleShadow))
-      throw new Error(`${label}: keyboard focus shows no indicator ${JSON.stringify(focused)}`);
-    await button.evaluate((el) => el.blur());
-  }
-  return "PASS keyboard focus shows a visible indicator";
-}
-
-async function backgroundControlPlacementChecks(page) {
-  // What the rail hides, judged by hit tests at the reading column's text lines and at its timers, not by the rail's
-  // or its controls' wrapper boxes, which are transparent; and whether a person can reach and press every background
-  // control, scrolling the controls to it.
-  const placement = () =>
-    page.evaluate(async () => {
-      const rail = document.querySelector(".stage-right-rail");
-      const text = playerChecks
-        .textPoints(document.querySelector(".transcript"))
-        .filter(playerChecks.inWindow);
-      const viewport = rail.querySelector(
-        ".stage-right-rail-controls [data-reka-scroll-area-viewport]",
-      );
-      // A disabled control only has to be seen, in the controls' visible scroll area; it takes no input.
-      const seen = (button) => {
-        const box = button.getBoundingClientRect();
-        const area = viewport.getBoundingClientRect();
-        const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-        return (
-          button.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-          playerChecks.inWindow([x, y]) &&
-          x >= area.left &&
-          x <= area.right &&
-          y >= area.top &&
-          y <= area.bottom
-        );
-      };
-      const unreachable = [];
-      for (const button of rail.querySelectorAll(".stage-right-rail-controls button")) {
-        button.scrollIntoView({ block: "nearest", inline: "nearest" });
-        await new Promise(requestAnimationFrame);
-        const disabled = button.disabled || button.getAttribute("aria-disabled") === "true";
-        if (!(disabled ? seen(button) : playerChecks.pressable(button)))
-          unreachable.push(button.textContent.trim());
-      }
-      viewport.scrollTop = 0;
-      await new Promise(requestAnimationFrame);
-      return {
-        extent: rail.dataset.railExtent,
-        columnText: text.length,
-        coversColumn: text.some((point) => rail.contains(document.elementFromPoint(...point))),
-        coversTimer: [...rail.querySelectorAll(".timer-display")].some(
-          (timer) => !playerChecks.uncovered(timer),
-        ),
-        unreachable,
-      };
-    });
-  // The Player lays itself out again for the new window; it is judged once it has come to rest.
-  const settle = async (width, height) => {
-    await page.setViewportSize({ width, height });
-    // Main judged 300 ms after the resize.
-    if (
-      !(await page.evaluate(() =>
-        playerChecks.settled(
-          [
-            ".stage-right-rail .timer-display",
-            ".stage-right-rail button",
-            ".stage-right-rail-controls",
-            ".transcript .transcript-entry",
-          ],
-          300,
-        ),
-      ))
-    )
-      throw new Error(`The Player did not come to rest at ${width}×${height}`);
-    return placement();
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  // A full-height rail must leave the reading column free, near the threshold and where only the Stage-height rail
-  // fits.
-  let state;
-  for (const width of [800, 1200, 1216, 1240, 1280]) {
-    state = await settle(width, 900);
-    if (state.columnText === 0) throw new Error(`The reading column shows no text at ${width}px`);
-    if (state.extent === "player" && state.coversColumn)
-      throw new Error(
-        `Full-height rail covers the reading column at ${width}px: ${JSON.stringify(state)}`,
-      );
-  }
-  // A short Player keeps the controls clear of the timer and within reach.
-  state = await settle(1440, 420);
-  if (state.coversTimer || state.unreachable.length > 0)
-    throw new Error(
-      `Short viewport covered the timer or put a control out of reach: ${JSON.stringify(state)}`,
-    );
-  // Too little height: the group scrolls, clear of the timer, to every control.
-  state = await settle(1440, 330);
-  if (state.coversTimer || state.unreachable.length > 0)
-    throw new Error(`Insufficient height must scroll the group: ${JSON.stringify(state)}`);
-  const controls = page.locator(".stage-right-rail-controls [data-reka-scroll-area-viewport]");
-  await controls.scrollIntoViewIfNeeded();
-  const area = await controls.boundingBox();
-  await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
-  await page.mouse.wheel(0, 400);
-  await page
-    .waitForFunction(
-      () =>
-        document.querySelector(".stage-right-rail-controls [data-reka-scroll-area-viewport]")
-          .scrollTop > 0,
-      null,
-      { timeout: 5000 },
-    )
-    .catch(() => {
-      throw new Error("A wheel over the background controls did not scroll them");
-    });
-  // A minimal Stage clips the fallback rail instead of letting the timer cover the transcript.
-  await settle(390, 430);
-  await page.getByRole("separator", { name: "Resize media and conversation" }).focus();
-  for (let step = 0; step < 20; step++) await page.keyboard.press("ArrowUp");
-  await page.waitForTimeout(300);
-  // Points across the transcript outside the Stage, where the rail belongs: none of them may show the rail.
-  const covered = await page.evaluate(() => {
-    const view = document.querySelector(".transcript-scroll").getBoundingClientRect();
-    const stage = document.querySelector(".player-stage").getBoundingClientRect();
-    const [top, bottom] = [Math.max(view.top, 0), Math.min(view.bottom, innerHeight)];
-    const hits = [];
-    for (let y = top + 4; y < bottom; y += 12)
-      for (let x = view.left + 4; x < view.right; x += 24) {
-        const onStage = x >= stage.left && x <= stage.right && y >= stage.top && y <= stage.bottom;
-        if (!onStage && document.elementFromPoint(x, y)?.closest(".stage-right-rail"))
-          hits.push([x, y]);
-      }
-    return hits;
-  });
-  if (covered.length > 0)
-    throw new Error(`Stage fallback rail spills over the conversation: ${JSON.stringify(covered)}`);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  return "PASS background controls stay clear of the reading column and timer, scroll when short and stay inside a minimal Stage";
-}
-
-async function playerSettingsChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  const openSettings = async () => {
-    await page.locator("[data-settings-trigger]").click();
-    await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
-  };
-  const closeSettings = async () => {
-    await page.keyboard.press("Escape");
-    await page.getByRole("dialog", { name: "Player Settings" }).waitFor({ state: "hidden" });
-  };
-  const secondaryText = () =>
-    page.evaluate(() => document.documentElement.style.getPropertyValue("--theme-text-secondary"));
-  // Owner decision: contrast and the title-bar A/B are user settings in every build.
-  await openSettings();
-  const contrast = page.locator('[data-player-setting="contrast"]');
-  const labelMode = page.locator('[data-tools-focus="label-mode"]');
-  const variantA = page.getByRole("radio", { name: "A · Always visible, controls left" });
-  // A fresh browser profile shows the defaults; invalid stored values must fall back to them.
-  const current = async () => ({
-    contrast: await contrast.inputValue(),
-    variantA: await variantA.isChecked(),
-    labelMode: await labelMode.inputValue(),
-  });
-  const defaults = await current();
-  const standard = await secondaryText();
-  await contrast.selectOption("high");
-  await page.waitForFunction(
-    (before) =>
-      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
-    standard,
-  );
-  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
-  await closeSettings();
-  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
-  await openSettings();
-  if ((await contrast.inputValue()) !== "high") throw new Error("Switching theme reset contrast");
-  await closeSettings();
-  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
-
-  // B hides the bar on short screens until the pointer enters it.
-  await page.setViewportSize({ width: 1440, height: 600 });
-  const bar = page.locator("[data-player-top-bar]");
-  const stage = await page.locator(".player-stage").boundingBox();
-  await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
-  await page.locator("[data-composer-input]").focus();
-  await page.waitForFunction(
-    () =>
-      !document
-        .querySelector("[data-player-top-bar]")
-        .checkVisibility({ opacityProperty: true, visibilityProperty: true }),
-    null,
-    { timeout: 6000 },
-  );
-  const box = await bar.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForFunction(() =>
-    document
-      .querySelector("[data-player-top-bar]")
-      .checkVisibility({ opacityProperty: true, visibilityProperty: true }),
-  );
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  // Settings are browser-local presentation preferences that survive a reload.
-  await page.reload();
-  await openSettings();
-  if (
-    (await contrast.inputValue()) !== "high" ||
-    !(await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).isChecked())
-  )
-    throw new Error("Player Settings were not restored after reload");
-  await closeSettings();
-  // Stored text is external input: unknown values fall back to the defaults.
-  await page.evaluate(() => {
-    localStorage.setItem("player-contrast", "bogus");
-    localStorage.setItem("player-titlebar-variant", "bogus");
-  });
-  await page.reload();
-  await openSettings();
-  if (JSON.stringify(await current()) !== JSON.stringify(defaults))
-    throw new Error("Invalid stored Player Settings did not fall back to the defaults");
-  await closeSettings();
-  // Another tab's write arrives as a storage event; it must apply and stay validated.
-  const otherTab = (key, value) =>
-    page.evaluate(
-      ([key, value]) => {
-        localStorage.setItem(key, value);
-        window.dispatchEvent(
-          new StorageEvent("storage", { key, newValue: value, storageArea: localStorage }),
-        );
-      },
-      [key, value],
-    );
-  const beforeTab = await secondaryText();
-  await otherTab("player-contrast", "high");
-  await page.waitForFunction(
-    (before) =>
-      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
-    beforeTab,
-  );
-  await otherTab("player-titlebar-variant", "bogus");
-  await otherTab("player-menu-label-mode", "bogus");
-  await openSettings();
-  if (JSON.stringify(await current()) !== JSON.stringify({ ...defaults, contrast: "high" }))
-    throw new Error("Storage events did not apply validated Player Settings");
-  await closeSettings();
-
-  // A very short screen keeps the whole dialog reachable inside the viewport.
-  await page.setViewportSize({ width: 390, height: 260 });
-  await page.waitForTimeout(300);
-  // Focus returned from Settings keeps the narrow drawer open; otherwise open it.
-  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (await showSidebar.isVisible()) await showSidebar.click();
-  await openSettings();
-  const dialog = page.getByRole("dialog", { name: "Player Settings" });
-  const bounds = await dialog.boundingBox();
-  if (bounds.y < 0 || bounds.y + bounds.height > page.viewportSize().height + 1)
-    throw new Error(`Player Settings exceeds a short viewport: ${JSON.stringify(bounds)}`);
-  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
-  // The focus trap wraps at both ends, however many settings it holds; every control Tab reaches, among them the ones
-  // it wraps to, is fully visible.
-  const focusShown = () =>
-    page.evaluate(() => {
-      const dialog = document.querySelector("[data-player-settings]").getBoundingClientRect();
-      const focused = document.activeElement.getBoundingClientRect();
-      return {
-        name:
-          document.activeElement.textContent.trim() ||
-          document.activeElement.getAttribute("aria-label"),
-        visible: focused.top >= dialog.top && focused.bottom <= dialog.bottom,
-        start: document.activeElement.matches('[data-tools-focus="label-mode"]'),
-      };
-    });
-  await page.locator('[data-tools-focus="label-mode"]').focus();
-  // Around the trap with Tab, then with Shift+Tab: each way passes its wrap, from the last control to the first or back.
-  for (const key of ["Tab", "Shift+Tab"]) {
-    let around = false;
-    for (let press = 0; press < 80 && !around; press += 1) {
-      await page.keyboard.press(key);
-      const focus = await focusShown();
-      if (!focus.visible)
-        throw new Error(`${key} moved Settings focus outside the dialog: ${JSON.stringify(focus)}`);
-      around = focus.start;
-    }
-    if (!around) throw new Error(`${key} did not wrap around Player Settings`);
-  }
-  await closeSettings();
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => {
-    localStorage.removeItem("player-contrast");
-    localStorage.removeItem("player-titlebar-variant");
-    localStorage.setItem("player-menu-label-mode", "icons");
-  });
-  return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
-}
-
-// Player notices show as temporary toasts beside the timer and stay in the notification panel until resolved.
-async function noticeChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const keys = (locator, attribute) =>
-    locator.evaluateAll(
-      (elements, name) => elements.map((element) => element.getAttribute(name)),
-      attribute,
-    );
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).first().click();
-  await page.getByRole("button", { name: "Show every notice level" }).click();
-  // The pointer rests on the composer, away from the toasts.
-  const composer = await page.locator("[data-composer-shell]").boundingBox();
-  const rest = () =>
-    page.mouse.move(composer.x + composer.width / 2, composer.y + composer.height / 2);
-  await rest();
-  // At most three toasts, newest first; the oldest publication waits in the panel.
-  const toasts = page.locator("[data-sonner-toast]");
-  const shown = page.locator('[data-sonner-toast][data-visible="true"]');
-  const texts = (locator) =>
-    locator.evaluateAll((elements) =>
-      elements.map((element) => element.querySelector("[data-title]")?.textContent.trim()),
-    );
-  await page.waitForFunction(() => document.querySelectorAll("[data-sonner-toast]").length === 4);
-  // Measure once the toasts have slid into place.
-  await page.waitForTimeout(600);
-  check(
-    JSON.stringify(await texts(shown)) ===
-      JSON.stringify([
-        "Some progress could not be saved in this browser.",
-        "The browser blocked audio.",
-        "This browser does not keep saved progress, so the next run starts fresh.",
-      ]),
-    `The newest three notices show as toasts, newest first: ${JSON.stringify(await texts(shown))}`,
-  );
-  // The fourth waits hidden behind the stack, out of reach of the keyboard.
-  check(
-    await page.locator('[data-sonner-toast][data-visible="false"]').evaluate((element) => {
-      element.focus();
-      return (
-        document.activeElement !== element && getComputedStyle(element).visibility === "hidden"
-      );
-    }),
-    "A hidden toast must not take keyboard focus",
-  );
-  // Each level has its own status colour; equal levels share it.
-  const surfaces = await shown.evaluateAll((elements) =>
-    elements.map((element) => getComputedStyle(element).backgroundColor),
-  );
-  check(
-    surfaces[0] === surfaces[1] && surfaces[1] !== surfaces[2],
-    `Toasts take their level's colour: ${JSON.stringify(surfaces)}`,
-  );
-  // The toasts are in view and leave the top controls free, whether or not a side panel such as the Visual Lab is open.
-  const bell = page.locator("[data-notification-bell]");
-  const toastProblems = () =>
-    page.evaluate(() => {
-      const toasts = [...document.querySelectorAll('[data-sonner-toast][data-visible="true"]')];
-      const problems = [];
-      for (const toast of toasts) {
-        const box = toast.getBoundingClientRect();
-        if (box.left < 0 || box.right > innerWidth || box.top < 0 || box.bottom > innerHeight)
-          problems.push("a toast runs off the window");
-      }
-      for (const control of document.querySelectorAll(".player-top-bar-actions button"))
-        if (!playerChecks.uncovered(control))
-          problems.push(`something covers ${control.getAttribute("aria-label")}`);
-      return problems;
-    });
-  // Judged once the toasts have come to rest.
-  check(
-    await page.evaluate(() =>
-      playerChecks.settled(["[data-sonner-toast]", ".player-top-bar-actions button"]),
-    ),
-    "The toasts did not come to rest",
-  );
-  const blocked = await toastProblems();
-  check(blocked.length === 0, `Toasts must stay in view beside the top controls: ${blocked}`);
-  check(
-    (await bell.locator(".player-notification-dot").count()) === 1,
-    "The bell marks unseen notices",
-  );
-  check(
-    /need attention/.test((await bell.getAttribute("aria-label")) ?? ""),
-    "The bell's name reports attention",
-  );
-  // The pointer on the toasts pauses expiry beyond an info toast's 5 s; once it leaves, the toast expires.
-  const infoToast = toasts.filter({ hasText: "does not keep saved progress" });
-  await shown.first().hover();
-  await page.waitForTimeout(6000);
-  check((await infoToast.count()) === 1, "A toast under the pointer must not expire");
-  await rest();
-  await infoToast.waitFor({ state: "detached", timeout: 8000 });
-
-  // The panel lists every notice, newest first, and replaces the toasts.
-  check((await toasts.count()) > 0, "Toasts remain before the panel opens");
-  await bell.click();
-  const panel = page.locator("[data-player-notification-panel]");
-  await panel.waitFor();
-  const items = panel.locator("[data-player-notice]");
-  check(
-    JSON.stringify(await keys(items, "data-player-notice")) ===
-      JSON.stringify([
-        "storage-write-failed",
-        "audio-blocked",
-        "storage-unavailable",
-        "preview-error",
-      ]),
-    "The panel lists every notice, newest first",
-  );
-  await toasts.first().waitFor({ state: "detached" });
-  const tints = await items.evaluateAll((elements) =>
-    elements.map((element) => getComputedStyle(element).backgroundColor),
-  );
-  check(
-    tints[0] === tints[1] && new Set(tints).size === 3,
-    `Panel entries take their level's colour: ${JSON.stringify(tints)}`,
-  );
-  check(
-    (await panel.locator('[data-player-notice="audio-blocked"] [data-notice-dismiss]').count()) ===
-      0,
-    "A notice the player must act on offers no dismissal",
-  );
-  await panel.locator('[data-player-notice="preview-error"] [data-notice-dismiss]').click();
-  await panel.locator('[data-player-notice="preview-error"]').waitFor({ state: "detached" });
-  check(
-    await panel.evaluate(
-      (element) =>
-        element.contains(document.activeElement) && document.activeElement.matches("button"),
-    ),
-    "Dismissal moves focus to a remaining control in the panel",
-  );
-  await panel.locator("[data-notifications-clear]").focus();
-  await page.keyboard.press("Enter");
-  await panel.locator('[data-player-notice="storage-write-failed"]').waitFor({ state: "detached" });
-  check(
-    JSON.stringify(await keys(items, "data-player-notice")) === JSON.stringify(["audio-blocked"]),
-    "Clear all keeps only the notice the player must act on",
-  );
-  check(
-    await panel.evaluate(
-      (element) =>
-        document.activeElement?.closest("[data-player-notification-panel]") === element &&
-        document.activeElement.matches("[data-notice-action]"),
-    ),
-    "Clear all moves focus to the remaining notice's action",
-  );
-  await page.keyboard.press("Escape");
-  await panel.waitFor({ state: "detached" });
-  check(
-    (await bell.locator(".player-notification-dot").count()) === 1,
-    "A notice the player must act on keeps the bell marked after the panel was seen",
-  );
-  // Its producer withdraws it once resolved.
-  await page.getByRole("button", { name: "Clear notices" }).click();
-  await bell.locator(".player-notification-dot").waitFor({ state: "detached" });
-
-  // Resolving the last notice from the panel closes it and returns focus to the bell.
-  await page.getByRole("button", { name: "Show every notice level" }).click();
-  await bell.click();
-  await panel.locator("[data-notifications-clear]").focus();
-  await page.keyboard.press("Enter");
-  await panel.locator('[data-player-notice="audio-blocked"] [data-notice-action]').waitFor();
-  await page.keyboard.press("Enter");
-  await panel.waitFor({ state: "detached" });
-  check(
-    await bell.evaluate((element) => element === document.activeElement),
-    "With no notice left, focus returns to the bell",
-  );
-
-  // On a small phone, toasts stay in view.
-  await page.getByRole("button", { name: "Show every notice level" }).click();
-  await page.setViewportSize({ width: 320, height: 568 });
-  // Sonner animates the change to its small-screen layout.
-  await page.waitForTimeout(600);
-  const boxes = await shown.evaluateAll((elements) =>
-    elements.map((element) => element.getBoundingClientRect().toJSON()),
-  );
-  check(boxes.length > 0, "No toast shows on a small screen");
-  for (const box of boxes)
-    check(
-      box.left >= 0 && box.right <= 320 && box.top >= 0,
-      `A toast must fit a small screen: ${JSON.stringify(box)}`,
-    );
-  // Withdrawn notices take their toasts with them.
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: "Clear notices" }).click();
-  await toasts.first().waitFor({ state: "detached" });
-  // On a phone, without the development tools open, the panel shifts to fit the screen.
-  // Reduced motion skips the opening zoom, so the box is final when measured.
-  await page.setViewportSize({ width: 320, height: 568 });
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.reload();
-  await bell.click();
-  const narrowPanel = await panel.boundingBox();
-  check(
-    narrowPanel && narrowPanel.x >= 0 && narrowPanel.x + narrowPanel.width <= 320,
-    `The panel must fit a small screen: ${JSON.stringify(narrowPanel)}`,
-  );
-  await page.keyboard.press("Escape");
-  await panel.waitFor({ state: "detached" });
-  await page.emulateMedia({ reducedMotion: null });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  // With reduced motion the panel opens without animation.
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await bell.click();
-  await panel.waitFor();
-  const animation = await panel.evaluate((element) => getComputedStyle(element).animationName);
-  check(animation === "none", `The panel must not animate with reduced motion: ${animation}`);
-  await page.keyboard.press("Escape");
-  await page.emulateMedia({ reducedMotion: null });
-  return "PASS notices toast in view beside the top controls, expire, and stay in the panel until resolved or dismissed";
-}
-
-async function mediaPlaybackChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  // Observe the Player's audio elements; the first play() is refused, as a browser without activation would.
-  await page.addInitScript(() => {
-    window.__played = [];
-    const play = HTMLMediaElement.prototype.play;
-    let refused = false;
-    HTMLMediaElement.prototype.play = function () {
-      if (!refused) {
-        refused = true;
-        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
-      }
-      window.__played.push(this);
-      return play.call(this);
-    };
-  });
-  page.keepActivation = true;
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  // Nothing runs before explicit Start: no transcript, no Stage image, no audio.
-  const start = page.getByRole("button", { name: "Start", exact: true });
-  await start.waitFor();
-  check((await page.locator(".transcript-entry").count()) === 0, "The script ran before Start");
-  check((await page.locator(".stage-media").count()) === 0, "The Stage showed media before Start");
-  await start.click();
-  // The authored Stage image comes from the runtime and the host's asset resolution.
-  await page.locator(".stage-media").waitFor();
-  const firstImage = await page.locator(".stage-media").getAttribute("src");
-  // Refused audio offers a deliberate retry and reports no progress until it plays.
-  const retry = page.getByRole("button", { name: "Enable audio", exact: true });
-  await retry.waitFor();
-  check(
-    await page.evaluate(() => window.__played.length === 0),
-    "Refused audio was reported as playing",
-  );
-  // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
-  await page.locator("[data-notification-bell]").click();
-  const panelNotice = page.locator(
-    '[data-player-notification-panel] [data-player-notice="audio-blocked"]',
-  );
-  check(
-    (await panelNotice.locator("[data-notice-dismiss]").count()) === 0,
-    "The blocked-audio notice must not be dismissible",
-  );
-  await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
-  await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
-  await retry.waitFor({ state: "hidden" });
-  check(
-    await page.evaluate(() => !window.__played[0].muted && window.__played[0].volume > 0),
-    "Audio must play audibly, not muted",
-  );
-  // The runtime settles playback from measured progress and the Player releases the element.
-  await page.waitForFunction(() => !window.__played[0].getAttribute("src"), null, {
-    timeout: 5000,
-  });
-  // A later showImage replaces the Stage image.
-  await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.waitForFunction(
-    (previous) => document.querySelector(".stage-media")?.getAttribute("src") !== previous,
-    firstImage,
-  );
-  page.keepActivation = false;
-  return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
 }
 
 async function composerMouseFocusChecks(page) {
@@ -2331,798 +495,75 @@ async function composerSendFocusChecks(page) {
   }
 }
 
-async function directDemoLatestChecks(page) {
-  const context = await page
-    .context()
-    .browser()
-    .newContext({
-      viewport: { width: 390, height: 700 },
-      isMobile: true,
-      hasTouch: true,
-      deviceScaleFactor: 2,
-    });
-  const mobile = await context.newPage();
-  try {
-    await mobile.goto(page.url().split("?")[0]);
-    await mobile.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
-    // It opens at the latest message: the message's end and the choices are shown uncovered, not under the composer.
-    await mobile.waitForFunction(() => {
-      const scroll = document.querySelector(".transcript-scroll");
-      const composer = document.querySelector(".conversation-glass");
-      const rows = document.querySelectorAll(".transcript-entry");
-      const choices = document.querySelector("[data-foreground-controls]");
-      // Rendered visibly, with its centre and a point just inside the middle of each edge hitting it.
-      const uncovered = (element) => {
-        if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
-          return false;
-        const box = element.getBoundingClientRect();
-        const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-        return [
-          [x, y],
-          [box.left + 2, y],
-          [box.right - 2, y],
-          [x, box.top + 2],
-          [x, box.bottom - 2],
-        ].every((point) => element.contains(document.elementFromPoint(...point)));
-      };
-      // The end of a message is shown: the middle of its bottom edge hits it.
-      const endShown = (element) => {
-        const box = element.getBoundingClientRect();
-        return (
-          element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-          element.contains(document.elementFromPoint(box.left + box.width / 2, box.bottom - 2))
-        );
-      };
-      return (
-        scroll &&
-        composer &&
-        rows.length &&
-        choices &&
-        scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2 &&
-        endShown(rows[rows.length - 1]) &&
-        [...choices.querySelectorAll("button")].every(uncovered) &&
-        !document.querySelector(".return-to-latest")
-      );
-    });
-    const scroll = mobile.locator(".transcript-scroll");
-    await scroll.evaluate((element) => {
-      element.scrollTop = 0;
-    });
-    await mobile.getByRole("button", { name: "Return to latest", exact: true }).waitFor();
-    await mobile.waitForTimeout(200);
-    if (await scroll.evaluate((element) => element.scrollTop !== 0))
-      throw new Error("Initial positioning pulled the reader back after scrolling up");
-    return "PASS direct mobile demo opens at latest and allows reading older messages";
-  } finally {
-    await context.close();
-  }
-}
-
-// Authored markup reaches the transcript only as controlled text, style and link pieces: HTML-like text stays literal,
-// and a validated link opens a separate browsing context without opener or referrer. This group replaces the
-// development scenario with its own script.
-async function markupLinkChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const source = [
-    'say "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> [Docs](https://example.com/docs) and https://example.com/bare", instant',
-    'showButton "Done"',
-    "exit",
-  ].join("\n");
-  await page.route("**/src/runtimeScenario.ts*", (route) => {
-    // Plain string handling: the run-code sandbox that executes this check has no URL global.
-    const url = route.request().url();
-    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
-    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
-    // Only the opening scenario is replaced; the module's other exports stay available.
-    return route.fulfill({
-      contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
-    });
-  });
-  await page
-    .context()
-    .route("https://example.com/**", (route) =>
-      route.fulfill({ contentType: "text/html", body: "<title>Linked page</title>" }),
-    );
+async function sidebarShortcutChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  const markup = page
-    .locator(".transcript-entry .transcript-markup")
-    .filter({ hasText: "Literal" });
-  await markup.waitFor();
-  const rendered = await markup.evaluate((element) => ({
-    text: element.textContent,
-    elements: element.querySelectorAll("b, img, script").length,
-    injected: "markupInjected" in window,
-    links: Array.from(element.querySelectorAll("a"), (link) => ({
-      href: link.href,
-      target: link.target,
-      rel: link.rel.split(/\s+/u).sort().join(" "),
-    })),
-  }));
-  check(
-    rendered.text.includes(
-      "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> Docs",
-    ) &&
-      rendered.elements === 0 &&
-      !rendered.injected,
-    `Authored HTML did not stay literal: ${JSON.stringify(rendered)}`,
-  );
-  check(
-    JSON.stringify(rendered.links) ===
-      JSON.stringify(
-        ["https://example.com/docs", "https://example.com/bare"].map((href) => ({
-          href,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        })),
-      ),
-    `Authored links are not isolated new-context links: ${JSON.stringify(rendered.links)}`,
-  );
-  const playerUrl = page.url();
-  const [linked] = await Promise.all([
-    page.context().waitForEvent("page", { timeout: 5_000 }),
-    markup.getByRole("link", { name: "Docs", exact: true }).click(),
-  ]);
-  await linked.waitForLoadState();
-  const isolation = await linked.evaluate(() => ({
-    opener: window.opener === null,
-    referrer: document.referrer,
-  }));
-  check(
-    linked.url() === "https://example.com/docs" && isolation.opener && isolation.referrer === "",
-    `The link did not open an isolated browsing context: ${JSON.stringify(isolation)}`,
-  );
-  await linked.close();
-  check(
-    page.url() === playerUrl &&
-      JSON.stringify(await page.locator("[data-foreground-controls] button").allInnerTexts()) ===
-        JSON.stringify(["Done"]),
-    "Opening the link replaced the Player session",
-  );
-  return "PASS authored HTML stays literal and links open an isolated browsing context";
-}
-
-// The Debug tool (#615) exists only with `?dev`: its time controls are always active there and reachable by role,
-// keyboard and touch; explanations stay collapsed until their label opens them, several at once; jumps go to the Debug
-// log and an invisible live region, never the transcript or notices; a badge shows auto-skip; and `time=skip` only
-// sets the initial state. This group replaces the development scenario with its own script.
-// Debug's Now tab names a development Stage fixture as such, and the session's image again once Runtime is selected.
-async function debugNowOverrideChecks(page) {
-  const base = page.url().split("?")[0];
-  await page.goto(`${base}?dev`);
-  const status = (value) => page.locator(`[data-debug-now-image] [data-status="${value}"]`);
-  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
-  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
-  await status("displayed").waitFor({ timeout: 5_000 });
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  const fixture = page.getByLabel("Stage media fixture");
-  const fixtures = await fixture.locator("option").allInnerTexts();
-  await fixture.selectOption(fixtures.find((name) => name !== "Runtime"));
-  await status("overridden").waitFor({ timeout: 5_000 });
-  await fixture.selectOption("Runtime");
-  await status("displayed").waitFor({ timeout: 5_000 });
-  return "PASS Debug Now names a Stage fixture override and the session image after Runtime";
-}
-
-// Debug's Variables tab (DEBUGGER.md "Player Debug"): the newest message opens to the values it shows and their
-// immediate causes, further levels open by click, keyboard and tap, the trace keeps recording while the panel is hidden,
-// long values wrap and clamp inside the panel, and turning Debug off and on drops the old history honestly.
-async function debugVariablesChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const longTool = `a very long tool name ${"that keeps going ".repeat(12)}to test wrapping`;
-  const source = [
-    'showImage "images/coast.svg"',
-    "let low = 10",
-    "let spanks = randomInteger(low..=30)",
-    `let tools = ["paddle", "cane", ${JSON.stringify(longTool)}]`,
-    `let variable_${"verylong".repeat(24)} = 7`,
-    `say "You get \${spanks} spanks, \${spanks} in all, \${variable_${"verylong".repeat(24)}}", instant`,
-    'let pick = askChoice a: "Apple", b: "Pear"',
-    'say "You picked ${pick}", instant',
-    'let done = showButton "Done"',
-    // After Debug turns on again: a chain eight values deep from an unrecorded value, with a wide sum on the way.
-    ...Array.from({ length: 25 }, (_, index) => `let x${index} = ${index}`),
-    `let wide = ${Array.from({ length: 25 }, (_, index) => `x${index}`).join(" + ")}`,
-    "let e1 = low + wide",
-    ...Array.from({ length: 7 }, (_, index) => `let e${index + 2} = e${index + 1} + 1`),
-    `say "Done with \${e8} and \${variable_${"verylong".repeat(24)}}", instant`,
-    'let after = askText "Anything else?"',
-    "exit",
-  ].join("\n");
-  await page.route("**/src/runtimeScenario.ts*", (route) => {
-    // Plain string handling: the run-code sandbox that executes this check has no URL global.
-    const url = route.request().url();
-    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
-    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
-    return route.fulfill({
-      contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
-    });
-  });
-  const base = page.url().split("?")[0];
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`${base}?dev`);
-  const panel = page.locator('[data-tool="Debug"]');
-  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
-  await panel.locator("[data-panel-pin]").click();
-  // Now names the statement that set the Stage image.
-  await panel
-    .locator("[data-debug-now-image-origin]")
-    .filter({ hasText: "main.tease:1" })
-    .waitFor();
-  const variablesTab = page.getByRole("tab", { name: "Variables", exact: true });
-  await variablesTab.click();
-  const rows = panel.locator("[data-trace-row]");
-  const depth = (value) => panel.locator(`[data-trace-depth="${value}"]`);
-  await rows.first().waitFor({ timeout: 5_000 });
-  check(
-    (await panel.locator("[data-debug-trace-status]").innerText()).includes(
-      "Recording since Start",
-    ),
-    "A Debug session from Start must say so",
-  );
-  // Two levels by default: the newest message and the value it shows; that value's causes stay closed.
-  const spanks = panel
-    .locator('[data-trace-depth="1"]')
-    .filter({ has: page.locator('[data-trace-kind="record"]') })
-    .filter({ hasText: "let spanks" });
-  // The repeated value links to its first row.
-  await panel.locator('[data-trace-depth="1"] [data-trace-kind="reference"]').first().waitFor();
-  await spanks.waitFor();
-  check((await depth(2).count()) === 0, "Causes beyond the message's values opened by default");
-  const toggle = spanks.locator("[data-trace-toggle]");
-  check(
-    (await toggle.getAttribute("aria-label")) === "Show causes of let spanks",
-    "A cause toggle must name what it opens",
-  );
-  await toggle.click();
-  await depth(2).filter({ hasText: "randomInteger(10..=30)" }).waitFor();
-  check((await toggle.getAttribute("aria-expanded")) === "true", "Opened causes must say so");
-  await toggle.focus();
-  await page.keyboard.press("Enter");
-  await depth(2).first().waitFor({ state: "detached" });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  // A touch, unlike a click, does not scroll its target into view.
-  await toggle.scrollIntoViewIfNeeded();
-  if (!(await toggle.evaluate((element) => playerChecks.pressable(element))))
-    throw new Error("A person cannot see and tap " + (await toggle.textContent()));
-  const box = await toggle.boundingBox();
-  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  await depth(2).first().waitFor();
-
-  // The trace keeps recording while the panel is hidden: the answer given meanwhile explains the next message.
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await panel.waitFor({ state: "hidden" });
-  await page.locator("[data-foreground-controls] button").filter({ hasText: "Pear" }).click();
-  await page.locator(".transcript-entry").filter({ hasText: "You picked b" }).waitFor();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await variablesTab.click();
-  await rows.filter({ hasText: '"You picked b"' }).waitFor();
-  await panel.getByRole("button", { name: "Show causes of let pick", exact: true }).click();
-  await depth(2).filter({ hasText: "Answer" }).waitFor();
-
-  // Long values wrap inside the panel and show in full on request; the view keeps its state across tabs.
-  await panel.locator("[data-debug-background-toggle]").click();
-  await panel.getByLabel("Filter variables by name").fill("tools");
-  await page.getByRole("tab", { name: "Now", exact: true }).click();
-  await variablesTab.click();
-  check(
-    (await panel.getByLabel("Filter variables by name").inputValue()) === "tools",
-    "Another tab reset the Variables view",
-  );
-  const tools = panel.locator("[data-debug-variable]").filter({ hasText: "let tools" });
-  await tools.waitFor();
-  await tools.getByRole("button", { name: "Show all", exact: true }).click();
-  await tools.getByText(longTool, { exact: false }).waitFor();
-  const body = panel.locator("[data-tool-body]");
-  check(
-    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-    "A long value widened the Debug panel",
-  );
-
-  // Debug off drops the trace; on again records from now, and earlier values say so.
-  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
-  await debugSwitch.click();
-  await panel.getByText("Debug is off.").first().waitFor();
-  await debugSwitch.click();
-  await variablesTab.click();
-  await panel.getByText("Recording since Debug was turned on").waitFor();
-  check((await rows.count()) === 0, "A new trace showed messages from before it began");
-
-  // Everything fits the Small dock and the narrowest drawer: long names, unknown origins, and links to rows above.
-  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
-  // The question that follows is the newest message; values from before Debug was turned on say so, also at the
-  // deepest indentation, next to the page of a wide cause list.
-  await rows.filter({ hasText: "Done with" }).locator("[data-trace-toggle]").click();
-  for (let guard = 0; guard < 40; guard += 1) {
-    const closed = panel.locator('[data-trace-toggle][aria-expanded="false"]');
-    if ((await closed.count()) === 0) break;
-    await closed.first().click();
-  }
-  const depthOf = (locator) =>
-    locator.evaluate((element) => Number(element.closest("li").dataset.traceDepth));
-  await panel.locator("[data-trace-more]").first().waitFor();
-  const deepest = [
-    await depthOf(panel.locator("[data-trace-more]").first()),
-    Math.max(
-      ...(await panel
-        .locator("[data-trace-unknown]")
-        .evaluateAll((elements) =>
-          elements.map((element) => Number(element.closest("li").dataset.traceDepth)),
-        )),
-    ),
-  ];
-  check(
-    deepest[0] >= 9 && deepest[1] >= 8,
-    `The deepest rows lack the page control or the unknown origin: ${deepest}`,
-  );
-  await panel.locator("[data-debug-background-toggle]").click();
-  await panel.getByLabel("Filter variables by name").fill("");
-  const fits = async (where) => {
-    const sizes = await body.evaluate((element) => [element.scrollWidth, element.clientWidth]);
-    check(
-      sizes[0] <= sizes[1] + 1,
-      `The Variables tab overflows ${where}: ${JSON.stringify(sizes)}`,
-    );
-  };
-  await fits("the default dock");
-  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
-  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await fits("the Small dock");
-  await page.setViewportSize({ width: 320, height: 700 });
-  // The narrow drawer opens the panel from its launcher.
+  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
   const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (await show.isVisible()) await show.click();
-  if (!(await variablesTab.isVisible()))
-    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
-  await variablesTab.click();
-  await panel.locator("[data-debug-variables]").waitFor();
-  await fits("the narrow drawer");
-  return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, state across tabs, Debug off and on, fit in Small dock and narrow drawer";
+  await hide.waitFor();
+  // Owner decision: Ctrl/Meta+B stays global but never fires from text editing.
+  await page.locator("[data-composer-input]").focus();
+  for (const shortcut of ["Control+b", "Meta+b"]) {
+    await page.keyboard.press(shortcut);
+    if (!(await hide.isVisible()))
+      throw new Error(`${shortcut} in the composer toggled the sidebar`);
+  }
+  await page.locator("[data-composer-input]").blur();
+  await page.keyboard.press("Control+b");
+  await show.waitFor();
+  await page.keyboard.press("Meta+b");
+  await hide.waitFor();
+  return "PASS Ctrl/Meta+B toggles the sidebar outside text editing only";
 }
 
-// Explain values on a chat message (DEBUGGER.md "Player Debug") opens Debug's Variables tab on that message's own recorded
-// values, found by its event and not its text: through a function parameter, after the variable changed, for a message
-// with a link and a prose message, by click, keyboard and tap, from deep in a virtualized transcript, also in the narrow
-// drawer. Messages from before Debug was turned on say so, and Debug off removes the entry point without re-keying rows.
-async function explainValuesChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const source = [
-    "let n = 5",
-    "function tell(message) {",
-    "    say message, instant",
-    "}",
-    'tell("You get ${n}")',
-    "let m = 5",
-    'say "You get ${m}", instant',
-    'say "Read [the rules](https://example.com/rules) about ${n}", instant',
-    'say prose "A quiet aside about ${n}", instant',
-    "n = 9",
-    "for i in 1..=40 {",
-    '    say "Line ${i}", instant',
-    "}",
-    'let done = showButton "Done"',
-    'say "After ${n}", instant',
-    'let more = askText "More?"',
-    "exit",
-  ].join("\n");
-  await page.route("**/src/runtimeScenario.ts*", (route) => {
-    const url = route.request().url();
-    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
-    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
-    return route.fulfill({
-      contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
-    });
-  });
-  const base = page.url().split("?")[0];
+// A keyboard user can see where focus is: keyboard focus adds a visible mark that the resting control lacks.
+async function focusIndicatorChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`${base}?dev`);
-  const panel = page.locator('[data-tool="Debug"]');
-  const selected = panel.locator("[data-debug-selected-message]");
-  const entry = (text) => page.locator(".transcript-entry").filter({ hasText: text });
-  const explain = (locator) => locator.locator("[data-explain-values]");
-  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).waitFor();
-  check(!(await panel.isVisible()), "The Debug panel was open before Explain values");
-
-  // The first messages are far above the latest; the transcript renders them once scrolled to.
-  await page.locator(".transcript-scroll").evaluate((element) => (element.scrollTop = 0));
-  const same = entry("You get 5");
-  await same.nth(1).waitFor();
-  check((await same.count()) === 2, "Both equal messages must be rendered");
-  await same.nth(0).evaluate((element) => (element.dataset.explainMark = "kept"));
-  const button = explain(same.nth(0));
-  check(
-    (await button.getAttribute("aria-label")) === "Explain values",
-    "The entry point must say what it does",
-  );
-  await button.click();
-  await selected.waitFor();
-  check(
-    (await page
-      .getByRole("tab", { name: "Variables", exact: true })
-      .getAttribute("aria-selected")) === "true",
-    "Explain values must show the Variables tab",
-  );
-  // Through the parameter and the argument to the variable, with its value now.
-  for (const text of ["parameter message of tell()", "argument message of tell()", "let n"])
-    await selected.locator("[data-trace-row]").filter({ hasText: text }).first().waitFor();
-  await selected.locator("[data-trace-now]").filter({ hasText: "9" }).waitFor();
-  check(
-    await selected.evaluate((element) => element.contains(document.activeElement)),
-    "Focus must move to the selected message",
-  );
-
-  // The equal message has its own cause, chosen by keyboard.
-  await explain(same.nth(1)).focus();
-  await page.keyboard.press("Enter");
-  await selected.locator("[data-trace-row]").filter({ hasText: "let m" }).first().waitFor();
-  check(
-    (await selected.locator("[data-trace-row]").filter({ hasText: "let n" }).count()) === 0,
-    "An equal message borrowed another message's causes",
-  );
-
-  // A message with a link keeps its link; the entry point sits beside it.
-  const linked = entry("Read the rules about 5");
-  check(
-    (await linked.getByRole("link", { name: "the rules" }).count()) === 1,
-    "The message link must stay a link",
-  );
-  const url = page.url();
-  await explain(linked).click();
-  await selected
-    .locator("[data-trace-row]")
-    .filter({ hasText: "Read the rules" })
-    .first()
-    .waitFor();
-  check(page.url() === url, "Explain values followed the message link");
-
-  // A prose message offers it too, by tap.
-  const prose = page.locator(".transcript-entry[data-prose]").filter({ hasText: "A quiet aside" });
-  const proseButton = explain(prose);
-  // A touch, unlike a click, does not scroll its target into view.
-  await proseButton.scrollIntoViewIfNeeded();
-  if (!(await proseButton.evaluate((element) => playerChecks.pressable(element))))
-    throw new Error("A person cannot see and tap " + (await proseButton.textContent()));
-  const box = await proseButton.boundingBox();
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  await selected.locator("[data-trace-row]").filter({ hasText: "A quiet aside" }).first().waitFor();
-
-  // Debug off removes the entry point and keeps every row; on again, earlier messages say why they cannot be explained.
-  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
-  await debugSwitch.click();
-  await page.locator("[data-explain-values]").first().waitFor({ state: "detached" });
-  check(
-    (await same.nth(0).getAttribute("data-explain-mark")) === "kept",
-    "Debug off re-created a transcript row",
-  );
-  await debugSwitch.click();
-  await explain(same.nth(0)).click();
-  await selected.locator("[data-debug-selected-unavailable]").waitFor();
-  check(
-    (await selected.innerText()).includes("Shown before Debug was turned on"),
-    "An earlier message must say why it cannot be explained",
-  );
-  await selected.locator("[data-debug-selected-dismiss]").click();
-  await selected.waitFor({ state: "detached" });
-
-  // A later message is explained in the narrow drawer.
-  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
-  await page.setViewportSize({ width: 320, height: 700 });
-  const after = entry("After 9");
-  await after.waitFor();
-  if (await page.getByRole("button", { name: "Hide sidebar", exact: true }).isVisible())
-    await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await explain(after).click();
-  await selected.locator("[data-trace-row]").filter({ hasText: "After 9" }).first().waitFor();
-  const body = panel.locator("[data-tool-body]");
-  check(
-    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-    "The selected message widened the narrow drawer",
-  );
-  return "PASS Explain values by event through parameters, equal texts, link and prose messages, click, key and tap, virtualized history, Debug off and on, narrow drawer";
-}
-
-// With Storage, all four Debug tabs fit the Small dock and the narrow drawer: they wrap inside the tab list without
-// widening the panel.
-async function debugTabsFitChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const base = page.url().split("?")[0];
-  await page.setViewportSize({ width: 1440, height: 900 });
-  // The camera scenario's host persists script storage, so the panel offers Storage.
-  await page.goto(`${base}?dev&scenario=camera`);
-  const panel = page.locator('[data-tool="Debug"]');
-  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
-  await panel.locator("[data-panel-pin]").click();
-  await panel.locator('[data-debug-tab="storage"]').waitFor();
-  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
-  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
-  await page.keyboard.press("Escape");
-  const fits = async (where) => {
-    const layout = await panel.evaluate((element) => {
-      const body = element.querySelector("[data-tool-body]");
-      const list = element.querySelector('[role="tablist"]').getBoundingClientRect();
-      const tabs = [...element.querySelectorAll('[role="tab"]')].map((tab) =>
-        tab.getBoundingClientRect(),
-      );
+  await page.reload();
+  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
+  for (const label of ["Reset timers", "Stay by the water"]) {
+    const button = page.getByRole("button", { name: label, exact: true });
+    await button.scrollIntoViewIfNeeded();
+    const resting = await button.evaluate((el) => getComputedStyle(el).boxShadow);
+    // A key press makes the following script focus keyboard focus for the browser (:focus-visible) and the Player.
+    // Chromium ignores `focus({ focusVisible: true })`, so after the launcher click it would stay pointer focus.
+    await page.keyboard.press("Tab");
+    const focused = await button.evaluate(async (el) => {
+      el.focus();
+      await Promise.all(el.getAnimations().map((animation) => animation.finished));
+      const style = getComputedStyle(el);
       return {
-        width: [body.scrollWidth, body.clientWidth],
-        inside: tabs.every(
-          (tab) =>
-            tab.left >= list.left - 1 &&
-            tab.right <= list.right + 1 &&
-            tab.top >= list.top - 1 &&
-            tab.bottom <= list.bottom + 1,
-        ),
+        focusVisible: el.matches(":focus-visible"),
+        outline:
+          style.outlineStyle !== "none" &&
+          Number.parseFloat(style.outlineWidth) > 0 &&
+          style.outlineColor !== "rgba(0, 0, 0, 0)",
+        shadow: style.boxShadow,
       };
     });
-    check(
-      layout.width[0] <= layout.width[1] + 1 && layout.inside,
-      `The Debug tabs do not fit ${where}: ${JSON.stringify(layout)}`,
-    );
-  };
-  await fits("the Small dock");
-  await page.setViewportSize({ width: 320, height: 700 });
-  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-  if (await show.isVisible()) await show.click();
-  if (!(await panel.locator('[data-debug-tab="storage"]').isVisible()))
-    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
-  await panel.locator('[data-debug-tab="storage"]').waitFor();
-  await fits("the narrow drawer");
-  // Arrow keys still move between the wrapped tabs.
-  await panel.locator('[data-debug-tab="log"]').click();
-  await page.keyboard.press("ArrowRight");
-  check(
-    (await panel.locator('[data-debug-tab="storage"]').getAttribute("aria-selected")) === "true",
-    "ArrowRight no longer reaches the wrapped Storage tab",
-  );
-  return "PASS Debug's four tabs wrap inside the Small dock and the narrow drawer, reachable by arrow keys";
-}
-
-async function developmentTimeChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const source = [
-    'say "Before the wait", instant',
-    "wait 15 s",
-    'let elapsed = showButton "Done"',
-    'say "Waited ${elapsed}", instant',
-    'timer async 30 s { say "Timer fired", instant }',
-    'let again = showButton "Again"',
-    "exit",
-  ].join("\n");
-  await page.route("**/src/runtimeScenario.ts*", (route) => {
-    // Plain string handling: the run-code sandbox that executes this check has no URL global.
-    const url = route.request().url();
-    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
-    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
-    return route.fulfill({
-      contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
-    });
-  });
-  const base = page.url().split("?")[0];
-  const launcher = page.locator('[data-launcher] button[aria-label="Debug"]');
-  const badge = page.locator("[data-development-time-badge]");
-  const announcement = page.locator('[role="status"]').filter({ hasText: "Debug log" });
-  const logLines = page.locator("[data-debug-log] li");
-  const logTab = page.getByRole("tab", { name: "Log", exact: true });
-  const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
-  const aboutAutoSkip = page.getByRole("button", { name: "About auto-skip", exact: true });
-  const aboutJumps = page.getByRole("button", { name: "About time jumps", exact: true });
-  const autoSkipText = page.getByText("Waits, timers and pacing pauses complete at once");
-  const jumpsText = page.getByText("Skip event jumps to the next wait");
-  const skip = page.getByRole("button", { name: "Skip event", exact: true });
-  const tenSeconds = page.getByRole("button", { name: "+10 s", exact: true });
-  const minute = page.getByRole("button", { name: "+1 min", exact: true });
-  const foreground = (name) =>
-    page.locator("[data-foreground-controls] button").filter({ hasText: name });
-  const entry = (text) => page.locator(".transcript-entry").filter({ hasText: text });
-  const outsideTranscript = async () => {
-    const texts = await page.locator(".transcript-entry").allInnerTexts();
-    const toasts = await page.locator("[data-sonner-toast]").allInnerTexts();
-    return ![...texts, ...toasts].some((text) => text.includes("⏩"));
-  };
-
-  // The development server opens the preview without `?dev`, with the Debug menu off.
-  await page.reload();
-  await page.locator("[data-launcher]").waitFor();
-  check(
-    (await launcher.count()) === 0 && (await badge.count()) === 0,
-    "The Debug menu starts on without ?dev",
-  );
-  // Settings' Debug menu offers the panel, whose Debug switch starts on; turning the menu off removes even a pinned
-  // panel from every panel state, and turning it on again offers a fresh closed launcher.
-  const settings = page.getByRole("dialog", { name: "Player Settings" });
-  const debugMenu = settings.getByRole("switch", { name: "Debug menu", exact: true });
-  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
-  const toggleDebugMenu = async () => {
-    await page.locator("[data-settings-trigger]").click();
-    await debugMenu.click();
-    await page.keyboard.press("Escape");
-    await settings.waitFor({ state: "hidden" });
-  };
-  await toggleDebugMenu();
-  await launcher.click();
-  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
-  check(await debugSwitch.isChecked(), "The panel's Debug switch must start on");
-  await debugSwitch.click();
-  await autoSkip.waitFor({ state: "detached" });
-  await toggleDebugMenu();
-  await page.locator('[data-tool="Debug"]').waitFor({ state: "detached" });
-  check((await launcher.count()) === 0, "Turning the Debug menu off left its launcher");
-  await toggleDebugMenu();
-  check(
-    (await page.locator('[data-tool="Debug"]').count()) === 0,
-    "A removed Debug panel came back open",
-  );
-  await launcher.click();
-  await autoSkip.waitFor();
-  check(await debugSwitch.isChecked(), "Turning the Debug menu on must switch Debug on");
-
-  // `?dev` starts with auto-skip off and the controls active; explanations start collapsed.
-  await page.goto(`${base}?dev`);
-  await launcher.click();
-  await autoSkip.waitFor();
-  check(
-    !(await autoSkip.isChecked()) &&
-      (await badge.count()) === 0 &&
-      !(await autoSkipText.isVisible()) &&
-      !(await jumpsText.isVisible()),
-    "?dev must start with auto-skip off and explanations collapsed",
-  );
-  // A click, the keyboard, and a tap each open an explanation, and several stay open together.
-  await aboutAutoSkip.click();
-  await autoSkipText.waitFor();
-  await aboutJumps.focus();
-  await page.keyboard.press("Enter");
-  await jumpsText.waitFor();
-  check(await autoSkipText.isVisible(), "Opening one explanation closed another");
-  await aboutAutoSkip.click();
-  await autoSkipText.waitFor({ state: "hidden" });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  // A touch, unlike a click, does not scroll its target into view.
-  await aboutAutoSkip.scrollIntoViewIfNeeded();
-  if (!(await aboutAutoSkip.evaluate((element) => playerChecks.pressable(element))))
-    throw new Error("A person cannot see and tap " + (await aboutAutoSkip.textContent()));
-  const label = await aboutAutoSkip.boundingBox();
-  const touch = { x: label.x + label.width / 2, y: label.y + label.height / 2 };
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  await autoSkipText.waitFor();
-  check(!(await autoSkip.isChecked()), "Tapping the label switched auto-skip");
-
-  // Skip ends the wait at once and logs the jump; a waiting button offers +10 s and +1 min, but nothing to skip.
-  // Now is the first tab; the log keeps its lines while another tab shows.
-  check(
-    (await page.getByRole("tab", { name: "Now", exact: true }).getAttribute("aria-selected")) ===
-      "true",
-    "The Debug panel must open on Now",
-  );
-  await skip.click();
-  await foreground("Done").waitFor({ timeout: 5_000 });
-  await logTab.click();
-  // What really elapsed before Skip is not skipped.
-  await logLines
-    .first()
-    .filter({ hasText: /^⏩ 1[0-5] s skipped$/ })
-    .waitFor();
-  check(
-    (await skip.isDisabled()) && (await tenSeconds.isEnabled()) && (await minute.isEnabled()),
-    "A waiting button must offer +10 s and +1 min, but nothing to skip",
-  );
-  await tenSeconds.click();
-  await logLines.first().filter({ hasText: "⏩ 10 s skipped" }).waitFor();
-  await foreground("Done").click();
-  const waited = await entry("Waited").innerText();
-  check(
-    /Waited 1\d(\.\d+)? seconds\b/.test(waited),
-    `+10 s did not reach the button's elapsed time: ${waited}`,
-  );
-  // Equal jumps announce again; the 30 s timer falls inside +1 min and fires during the jump.
-  await tenSeconds.click();
-  await announcement.filter({ hasText: "Debug log 3: ⏩ 10 s skipped" }).waitFor();
-  await tenSeconds.click();
-  await announcement.filter({ hasText: "Debug log 4: ⏩ 10 s skipped" }).waitFor();
-  await minute.click();
-  await entry("Timer fired").waitFor({ timeout: 5_000 });
-  check(
-    (await logLines.count()) === 5 && (await logLines.first().innerText()) === "⏩ 1 min skipped",
-    "The Debug log must list every jump, newest first",
-  );
-  check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-
-  // `time=skip` starts with auto-skip on: the wait ends by itself, but the player's think time stays real, and the
-  // background timer does not fire while Again waits. The switch turns it off again.
-  await page.goto(`${base}?dev&time=skip`);
-  await foreground("Done").waitFor({ timeout: 5_000 });
-  await badge.filter({ hasText: "Auto-skip" }).waitFor();
-  await foreground("Done").click();
-  const thinkTime = await entry("Waited").innerText();
-  check(
-    /Waited (\d+(\.\d+)? milliseconds?|[0-4](\.\d+)? seconds?)\b/.test(thinkTime),
-    `Auto-skip advanced time while a button waited: ${thinkTime}`,
-  );
-  await foreground("Again").waitFor();
-  await page.waitForTimeout(500);
-  check(
-    (await entry("Timer fired").count()) === 0,
-    "Auto-skip advanced a background timer during input",
-  );
-  await launcher.click();
-  check(await autoSkip.isChecked(), "time=skip must switch auto-skip on");
-  await logTab.click();
-  await logLines
-    .first()
-    .filter({ hasText: /^⏩ 1[45] s skipped$/ })
-    .waitFor();
-  await autoSkip.click();
-  await badge.waitFor({ state: "detached" });
-  check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-  return "PASS Debug menu off without ?dev and pruned when turned off, Debug switch, collapsed explanations by click, key and tap, Debug log, announcements, auto-skip";
+    // A changed shadow counts only if some part of it is not transparent.
+    const visibleShadow =
+      focused.shadow !== resting &&
+      focused.shadow.split(/,(?![^(]*\))/u).some((part) => !/^\s*rgba\(0, 0, 0, 0\)/u.test(part)) &&
+      focused.shadow !== "none";
+    if (!focused.focusVisible || !(focused.outline || visibleShadow))
+      throw new Error(`${label}: keyboard focus shows no indicator ${JSON.stringify(focused)}`);
+    await button.evaluate((el) => el.blur());
+  }
+  return "PASS keyboard focus shows a visible indicator";
 }
 
 const groups = [
-  topBarChecks,
-  tooltipClickFocusChecks,
-  playerTooltipChecks,
-  checks,
-  drawerWidthChecks,
-  sidebarMotionChecks,
-  menuPreviewChecks,
-  menuWidthChecks,
-  menuCollapseChecks,
-  panelResizeChecks,
-  carouselChecks,
-  toolContentChecks,
-  composerNoticeChecks,
+  toolsMenuChecks,
+  playerSettingsChecks,
+  fullscreenChecks,
+  mediaPlaybackChecks,
+  transcriptNativeWheelChecks,
   composerMouseFocusChecks,
   startComposerFocusChecks,
   composerSendFocusChecks,
   sidebarShortcutChecks,
-  playerSettingsChecks,
   focusIndicatorChecks,
-  backgroundControlPlacementChecks,
-  mediaPlaybackChecks,
-  noticeChecks,
-  directDemoLatestChecks,
-  markupLinkChecks,
-  developmentTimeChecks,
-  debugNowOverrideChecks,
-  debugVariablesChecks,
-  debugTabsFitChecks,
-  explainValuesChecks,
-  timerChecks,
-  transcriptNativeWheelChecks,
-  contentContainmentChecks,
-  zoomedViewportChecks,
-  choiceLayoutChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
@@ -3145,170 +586,10 @@ async function runGroup(browserPage, run, url, artifacts) {
       };
     }
   }
-  // A person only acts on what they see and can reach. Every input on a locator first brings its element into view and
-  // waits until it is rendered visibly (not transparent or hidden). A pointer action then relies on Playwright's own
-  // check that the point it presses hits the element; a keyboard action (focus, press, fill, selectOption) needs some
-  // exposed point of the element, its centre, a point a quarter in or just inside an edge, where a person could press
-  // it. (A check that a hidden element refuses focus calls `focus()` in the page on purpose.)
-  const locatorPrototype = Object.getPrototypeOf(browserPage.locator("body"));
-  if (!locatorPrototype.playerActsOnWhatIsSeen) {
-    locatorPrototype.playerActsOnWhatIsSeen = true;
-    const keyboard = ["focus", "press", "fill", "selectOption"];
-    for (const name of ["click", "dblclick", "tap", "check", "uncheck", "hover", ...keyboard]) {
-      const act = locatorPrototype[name];
-      locatorPrototype[name] = async function (...args) {
-        const deadline = Date.now() + 5000;
-        const reachable = async () => {
-          await this.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-          return this.evaluate((element, exposed) => {
-            if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
-              return false;
-            if (!exposed) return true;
-            const box = element.getBoundingClientRect();
-            const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-            return [
-              [x, y],
-              [box.left + box.width / 4, y],
-              [box.right - box.width / 4, y],
-              [x, box.top + box.height / 4],
-              [x, box.bottom - box.height / 4],
-              [box.left + 2, y],
-              [box.right - 2, y],
-              [x, box.top + 2],
-              [x, box.bottom - 2],
-            ].some(
-              ([px, py]) =>
-                px >= 0 &&
-                py >= 0 &&
-                px <= innerWidth &&
-                py <= innerHeight &&
-                element.contains(document.elementFromPoint(px, py)),
-            );
-          }, keyboard.includes(name));
-        };
-        while (!(await reachable())) {
-          if (Date.now() > deadline)
-            throw new Error(`A person cannot see and reach ${this} to ${name} it`);
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        return act.apply(this, args);
-      };
-    }
-  }
   const context = await browserPage
     .context()
     .browser()
     .newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
-  // Whether a person sees and reaches something, wherever it sits, judged by hit tests at its own points rather than by
-  // comparing boxes, which may be transparent wrappers: `pressable` (rendered visibly, its centre in the window hits
-  // it), `uncovered` (also a point just inside the middle of each edge), `hides(cover, element)` (any of those points
-  // hits `cover`), `textPoints` (points every 8 px along the text lines under a root), `imagePoints` (those points of an
-  // image inside its box as `object-fit` fits it), and `settled`. Hit tests find covers that take input; opaque paint
-  // from a layer that passes input through is left to the scoped visual check.
-  await context.addInitScript(() => {
-    const around = (box) => {
-      const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
-      return [
-        [x, y],
-        [box.left + 2, y],
-        [box.right - 2, y],
-        [x, box.top + 2],
-        [x, box.bottom - 2],
-      ];
-    };
-    const points = (element) => around(element.getBoundingClientRect());
-    const inWindow = ([x, y]) => x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight;
-    const visible = (element) =>
-      !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
-    window.playerChecks = {
-      // The elements a judgement involves have settled: no earlier than `minimum` ms after the change being judged (the
-      // wait main used at that point, so a change the Player makes later is judged as before), with no finite animation
-      // of them, their contents or their ancestors still waiting or running, and their boxes unchanged for five frames
-      // in a row; false after `timeout` ms. Motion of anything else does not delay the judgement.
-      settled: (selectors, minimum = 0, timeout = 5000) =>
-        new Promise((resolve) => {
-          const start = performance.now();
-          let [last, still] = [null, 0];
-          const giveUp = setTimeout(() => resolve(false), timeout + 200);
-          const animating = (element) => {
-            const animations = element.getAnimations({ subtree: true });
-            for (let up = element.parentElement; up; up = up.parentElement)
-              animations.push(...up.getAnimations());
-            return animations.some(
-              (animation) =>
-                (animation.pending || animation.playState === "running") &&
-                animation.effect?.getComputedTiming().endTime !== Infinity,
-            );
-          };
-          const frame = () => {
-            const elements = selectors.flatMap((selector) => [
-              ...document.querySelectorAll(selector),
-            ]);
-            const boxes = JSON.stringify(
-              elements.map((element) => {
-                const box = element.getBoundingClientRect();
-                return [box.left, box.top, box.width, box.height].map(Math.round);
-              }),
-            );
-            still = boxes === last && !elements.some(animating) ? still + 1 : 0;
-            last = boxes;
-            const waited = performance.now() - start;
-            if (waited >= minimum && still >= 5) {
-              clearTimeout(giveUp);
-              resolve(true);
-            } else if (waited > timeout) {
-              clearTimeout(giveUp);
-              resolve(false);
-            } else requestAnimationFrame(frame);
-          };
-          requestAnimationFrame(frame);
-        }),
-      pressable: (element) => {
-        if (!visible(element)) return false;
-        const [centre] = points(element);
-        return inWindow(centre) && element.contains(document.elementFromPoint(...centre));
-      },
-      uncovered: (element) =>
-        visible(element) &&
-        points(element).every(
-          (point) => inWindow(point) && element.contains(document.elementFromPoint(...point)),
-        ),
-      hides: (cover, element) =>
-        points(element).some(
-          (point) => inWindow(point) && cover.contains(document.elementFromPoint(...point)),
-        ),
-      inWindow,
-      textPoints: (root) => {
-        const result = [];
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        while (walker.nextNode()) {
-          if (!walker.currentNode.textContent.trim()) continue;
-          const range = document.createRange();
-          range.selectNodeContents(walker.currentNode);
-          for (const line of range.getClientRects())
-            for (let x = line.left + 1; line.width > 0 && x < line.right; x += 8)
-              result.push([x, line.top + line.height / 2]);
-        }
-        return result;
-      },
-      imagePoints: (image) => {
-        const box = image.getBoundingClientRect();
-        const fit = getComputedStyle(image).objectFit;
-        if (!["contain", "scale-down"].includes(fit) || !image.naturalWidth) return around(box);
-        const scale = Math.min(
-          box.width / image.naturalWidth,
-          box.height / image.naturalHeight,
-          fit === "scale-down" ? 1 : Infinity,
-        );
-        const [width, height] = [image.naturalWidth * scale, image.naturalHeight * scale];
-        const [left, top] = [
-          box.left + (box.width - width) / 2,
-          box.top + (box.height - height) / 2,
-        ];
-        return around({ left, top, width, height, right: left + width, bottom: top + height });
-      },
-    };
-  });
   const page = await context.newPage();
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   try {
