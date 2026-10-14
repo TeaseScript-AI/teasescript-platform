@@ -25,6 +25,8 @@ import {
 } from "../../image-file.js";
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import { FileStoreService } from "../../stored-files.js";
+import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
+import { loadTlock, type LockServices } from "../../encryption/lock.js";
 import {
   activePlayerRuntimeInteraction,
   beginPlayerRuntimeRecording,
@@ -136,6 +138,8 @@ export interface PlayerSessionOptions {
    * neither author syntax nor a manifest format.
    */
   capabilities?: { readonly camera?: boolean };
+  /** The time lock's code, the drand relays, and the device clock that locks use; the browser's by default. */
+  lockServices?: LockServices;
   /**
    * Durable storage for captured photos and chosen images that a saved value references, in the script storage's scope.
    * Without a repository, they stay session media, and a persistent save that references one fails. A host with
@@ -554,6 +558,36 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     later: (task) => setTimeout(task, 0),
   });
   watch(servicedSession, () => fileStores.request());
+  // Locks and opens text and stored files for encryptText, encryptFile, decryptText, and decryptFile, and presents
+  // their dialogs; what the player types in them stays in the service's memory.
+  const lockDialog = shallowRef<{ readonly dialog: LockDialog; readonly busy: boolean } | null>(
+    null,
+  );
+  const locks = new LockService({
+    session: () => servicedSession.value,
+    generation: () => generation.value,
+    observe: observeForInput,
+    publish: (next) => (session.value = next),
+    media: capturedMedia,
+    diagnostic: reportDiagnostic,
+    dialog: (dialog, busy) => (lockDialog.value = dialog === null ? null : { dialog, busy }),
+    later: (task) => setTimeout(task, 0),
+    after: (delayMs, task) => {
+      const timer = setTimeout(task, delayMs);
+      return () => clearTimeout(timer);
+    },
+    subtle: globalThis.crypto?.subtle,
+    ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
+  });
+  watch(servicedSession, () => locks.request());
+  // A script that locks or opens loads the time lock's code while the Player is online, so locking works offline later.
+  watch(
+    () => servicedSession.value?.plan,
+    (plan) => {
+      if (plan?.instructions.some((instruction) => instruction.kind === "lock") === true)
+        void (options.lockServices?.tlock ?? loadTlock)().catch(() => {});
+    },
+  );
   // A session that ended releases its camera.
   watch(
     () => session.value?.state.status,
@@ -625,6 +659,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (!stop) return;
       captures.reset();
       fileStores.reset();
+      locks.reset();
       camera.release();
       captureCamera.release();
       loads.clear();
@@ -684,6 +719,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     captures.stop();
     fileStores.stop();
+    locks.stop();
     camera.release();
     captureCamera.release();
     // Issued saves still finish and store their photos before the live lock and the session media are released.
@@ -1115,6 +1151,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activation.value = null;
     captures.reset();
     fileStores.reset();
+    locks.reset();
     camera.release();
     captureCamera.release();
     device.reset();
@@ -2025,6 +2062,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * step's viewfinder on the Stage or in the script's camera window; its `view` is `null` without such a request.
      */
     imageCapture,
+    /**
+     * The dialog of the lock step the session waits for, while it shows, and whether the Player is busy with what the
+     * player gave in it; `submit` answers it, and `cancel` cancels an unlock dialog, which gives the call's default.
+     */
+    lock: {
+      dialog: lockDialog,
+      submit: (input: LockDialogInput) => locks.submit(input),
+      cancel: () => locks.cancel(),
+    },
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */

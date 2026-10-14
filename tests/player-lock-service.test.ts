@@ -1,0 +1,282 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { CapturedMediaStore } from "../player/captured-media.js";
+import { loadTlock, type LockServices } from "../player/encryption/lock.js";
+import { roundTimeMs } from "../player/encryption/drand.js";
+import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
+import {
+  createPlayerRuntimeSession,
+  playerRuntimeSnapshot,
+  type PlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
+import type { SerializableRuntimeValue } from "../src/index.js";
+
+/*
+ * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,
+ * and keeps what the player types out of the engine. drand's relays are answered from recorded beacons.
+ */
+
+const ROUND_1 = {
+  round: 1,
+  randomness: "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",
+  signature:
+    "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b",
+};
+const LATEST = {
+  round: 33_045_040,
+  randomness: "60013860a3dbfc4462654b0392a44c31f085c7aef2c41fd2d476d3d7195d92af",
+  signature:
+    "999d2976ae6302c825c14db2a9becdbd491cb1ab042286fe0d7b04eb1acf550e9238eecab3edd47a5c3247c3b00ab763",
+};
+/** The device clock of these tests: just after the latest recorded round. */
+const NOW_MS = roundTimeMs(LATEST.round) + 1_000;
+const urls = { create: (data: Blob) => `blob:${data.type}`, revoke: () => {} };
+
+/** Relays that answer the recorded beacons, or none at all when `down`. */
+function relays(down: () => boolean): typeof fetch {
+  return async (input) => {
+    if (down()) throw new TypeError("Failed to fetch");
+    const url = String(input instanceof Request ? input.url : input);
+    const round = url.slice(url.lastIndexOf("/") + 1);
+    const beacon =
+      round === "latest" ? LATEST : [ROUND_1, LATEST].find((one) => String(one.round) === round);
+    return beacon === undefined
+      ? new Response("Requested future beacon", { status: 425 })
+      : Response.json(beacon);
+  };
+}
+
+/** A Player around one session: it services lock steps and records the dialogs it shows. */
+class Harness {
+  session: PlayerRuntimeSession;
+  readonly media: CapturedMediaStore;
+  readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
+  readonly diagnostics: unknown[] = [];
+  relaysDown = false;
+  readonly service: LockService;
+
+  constructor(
+    source: string,
+    options: {
+      readonly subtle?: SubtleCrypto | undefined;
+      readonly media?: CapturedMediaStore;
+      readonly files?: readonly string[];
+    } = {},
+  ) {
+    this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
+    this.session = createPlayerRuntimeSession(source, {
+      wallClockMs: NOW_MS,
+      storedFiles: options.files ?? [],
+    });
+    const services: LockServices = {
+      tlock: loadTlock,
+      fetch: relays(() => this.relaysDown),
+      nowMs: () => NOW_MS,
+    };
+    this.service = new LockService({
+      session: () => this.session,
+      generation: () => 1,
+      observe: () => this.session,
+      publish: (next) => {
+        this.session = next;
+        this.service.request();
+      },
+      media: this.media,
+      diagnostic: (diagnostic) => this.diagnostics.push(diagnostic),
+      dialog: (dialog, busy) => this.dialogs.push(dialog === null ? null : { dialog, busy }),
+      later: (task) => setTimeout(task, 0),
+      after: (delayMs, task) => {
+        const timer = setTimeout(task, delayMs);
+        return () => clearTimeout(timer);
+      },
+      subtle: "subtle" in options ? options.subtle : crypto.subtle,
+      crypto: services,
+    });
+    this.service.request();
+  }
+
+  /** The dialog shown now, not busy, once one is. */
+  async dialog(): Promise<LockDialog> {
+    await this.until(() => {
+      const shown = this.dialogs.at(-1);
+      return shown !== undefined && shown !== null && !shown.busy;
+    });
+    return this.dialogs.at(-1)!.dialog;
+  }
+
+  answer(input: LockDialogInput): void {
+    this.service.submit(input);
+  }
+
+  async ended(): Promise<Record<string, SerializableRuntimeValue>> {
+    await this.until(
+      () => this.session.state.status === "halted" || this.session.state.status === "failed",
+    );
+    const snapshot = playerRuntimeSnapshot(this.session);
+    assert.equal(snapshot.failure, null, JSON.stringify(snapshot.failure));
+    return Object.fromEntries(
+      snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
+    );
+  }
+
+  async until(done: () => boolean): Promise<void> {
+    const deadline = Date.now() + 20_000;
+    while (!done()) {
+      assert.ok(Date.now() < deadline, `timed out at ${this.session.state.status}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  stop(): void {
+    this.service.stop();
+  }
+}
+
+test("locks with a written password and time lock open with the password, and once passed with the time lock", async () => {
+  const player = new Harness(
+    [
+      'let friday = toAbsoluteDateTime("2023-08-23T15:09:27Z")',
+      'let locked = encryptText("corner time", password: "corner", openAt: friday)',
+      'let byPassword = decryptText(locked, password: "corner", default: null)',
+      'let wrong = decryptText(locked, password: "Corner", default: "no")',
+      "let byTime = decryptText(locked, default: null)",
+      'let notALock = decryptText("aGVsbG8=", default: "none")',
+      "exit",
+    ].join("\n"),
+  );
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.byPassword, "corner time");
+  assert.equal(values.wrong, "no");
+  assert.equal(values.byTime, "corner time");
+  assert.equal(values.notALock, "none");
+  assert.deepEqual(
+    player.dialogs.filter((shown) => shown !== null),
+    [],
+  );
+});
+
+test("the lock dialog suggests 7 days, locks with what the player chose, and the unlock dialog asks again after a wrong password", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("chosen")',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const lock = await player.dialog();
+  assert.equal(lock.kind, "lock");
+  assert.equal(lock.kind === "lock" && lock.suggestedOpenAtMs, NOW_MS + 7 * 24 * 60 * 60 * 1000);
+  const moment = NOW_MS + 3_600_000;
+  player.answer({ password: "secret words", openAtMs: moment });
+  const unlock = await player.dialog();
+  assert.equal(unlock.kind, "unlock");
+  assert.deepEqual(unlock.kind === "unlock" && [unlock.password, unlock.notice], [true, null]);
+  // Its time lock opens at the first round at or after the chosen moment.
+  assert.ok(
+    unlock.kind === "unlock" && unlock.moments[0]! >= moment && unlock.moments[0]! < moment + 3_000,
+  );
+  player.answer({ password: "not the password 7", openAtMs: null });
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "unlock" && again.notice, "wrongPassword");
+  player.answer({ password: "secret words", openAtMs: null });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "chosen");
+  // The dialog stayed, busy, while the Player locked or opened with what was typed.
+  assert.ok(player.dialogs.some((shown) => shown?.busy === true));
+  // What the player typed reached neither the state nor an event.
+  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  assert.ok(!recorded.includes("secret words"));
+  assert.ok(!recorded.includes("not the password 7"));
+});
+
+test("a cancelled unlock dialog gives the default, and a passed time lock out of reach asks only when a password can open it", async () => {
+  const cancelled = new Harness(
+    [
+      'let locked = encryptText("x", password: "p")',
+      'let opened = decryptText(locked, default: "default")',
+      "exit",
+    ].join("\n"),
+  );
+  const dialog = await cancelled.dialog();
+  assert.deepEqual(dialog.kind === "unlock" && dialog.moments.length, 1);
+  cancelled.service.cancel();
+  assert.equal((await cancelled.ended()).opened, "default");
+  cancelled.stop();
+
+  // Locking needs no network; opening a passed time lock does.
+  const past = 'let past = toAbsoluteDateTime("2023-08-23T15:09:27Z")';
+  const unreachable = new Harness(
+    [
+      past,
+      'let both = encryptText("x", password: "p", openAt: past)',
+      'let opened = decryptText(both, default: "default")',
+      "exit",
+    ].join("\n"),
+  );
+  unreachable.relaysDown = true;
+  const asked = await unreachable.dialog();
+  assert.deepEqual(asked.kind === "unlock" && asked.notice, "unreachable");
+  // "Try again" with the relays back opens it.
+  unreachable.relaysDown = false;
+  unreachable.answer({ password: null, openAtMs: null });
+  assert.equal((await unreachable.ended()).opened, "x");
+  unreachable.stop();
+
+  const timeOnly = new Harness(
+    [
+      past,
+      'let locked = encryptText("y", openAt: past)',
+      'let opened = decryptText(locked, default: "default")',
+      "exit",
+    ].join("\n"),
+  );
+  timeOnly.relaysDown = true;
+  assert.equal((await timeOnly.ended()).opened, "default");
+  timeOnly.stop();
+  assert.deepEqual(
+    timeOnly.dialogs.filter((shown) => shown !== null),
+    [],
+  );
+});
+
+test("encryptFile locks a stored file into a locked file, and decryptFile opens it into an image again", async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const media = new CapturedMediaStore(null, urls, "locks");
+  const photo = media.add("image", new Blob([png], { type: "image/png" })).reference;
+  const player = new Harness(
+    [
+      `let photo = "${photo}"`,
+      'let locked = encryptFile(photo, password: "p")',
+      'let opened = decryptFile(locked, password: "p", default: null)',
+      'let wrong = decryptFile(locked, password: "q", default: null)',
+      "exit",
+    ].join("\n"),
+    { media, files: [photo] },
+  );
+  const values = await player.ended();
+  player.stop();
+  const { locked, opened, wrong } = values;
+  assert.ok(typeof locked === "string" && typeof opened === "string");
+  assert.equal(wrong, null);
+  assert.equal(media.holds(locked, "file"), true);
+  assert.equal(media.holds(opened, "image"), true);
+  const record = await media.read(opened);
+  assert.deepEqual(new Uint8Array(await record!.data.arrayBuffer()), png);
+  assert.equal(record!.data.type, "image/png");
+  // The locked file is the lock's bytes: its content is not the photo's.
+  const lockedBytes = new Uint8Array(await (await media.read(locked))!.data.arrayBuffer());
+  assert.deepEqual([...lockedBytes.subarray(0, 4)], [0x54, 0x53, 0x4c, 0x4b]);
+});
+
+test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with TSR086", async () => {
+  const player = new Harness(['let locked = encryptText("x", password: "p")', "exit"].join("\n"), {
+    subtle: undefined,
+  });
+  await player.until(() => player.session.state.status === "failed");
+  player.stop();
+  const failure = playerRuntimeSnapshot(player.session).failure;
+  assert.equal(failure?.code, "TSR086");
+});

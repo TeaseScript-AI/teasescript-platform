@@ -60,7 +60,23 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   save: "Save",
   photo: "Photo",
   file: "Stored file",
+  lock: "Lock",
+  unlock: "Unlock",
 };
+/** A lock step's openers as Debug shows them; never its text, password, or key. */
+function lockDetail(
+  kind: PlayerDebugWaitKind,
+  lock: { dialog: boolean; password: boolean; openAtMs: number | null },
+): string {
+  const moment = lock.openAtMs === null ? null : new Date(lock.openAtMs).toISOString();
+  if (lock.dialog) return moment === null ? "dialog" : `dialog, suggests ${moment}`;
+  const parts = [
+    ...(lock.password ? ["password"] : []),
+    ...(moment === null ? [] : [`time lock ${moment}`]),
+  ];
+  if (parts.length > 0) return parts.join(", ");
+  return kind === "lock" ? "as the player chose" : "time lock";
+}
 const callLabels = {
   function: (name: string) => `${name}()`,
   file: (name: string) => `call ${name}`,
@@ -129,6 +145,9 @@ const imageOrigin = computed(() => {
             <template v-if="now.waitingAt">
               {{ waitLabels[now.waitingAt.kind] }} ·
               <span class="break-all font-mono">{{ at(now.waitingAt.at) }}</span>
+              <span v-if="now.waitingAt.lock" class="block" data-debug-now-lock>
+                {{ lockDetail(now.waitingAt.kind, now.waitingAt.lock) }}
+              </span>
             </template>
             <template v-else>Nothing</template>
           </dd>
