@@ -130,13 +130,21 @@ const optional = computed(
     given.value.timeLock ||
     given.value.publicKeys > 0,
 );
+/** How the dialog names an opener the player can set. */
+const choiceName = {
+  timeLock: "a time",
+  password: "a password",
+  publicKey: "a public key",
+} as const;
 /** Why Lock waits: the openers the player can still set. */
 const reason = computed(() => {
-  const names = choices.value.map((choice) =>
-    choice === "timeLock" ? "a time" : choice === "password" ? "a password" : "a public key",
-  );
+  const names = choices.value.map((choice) => choiceName[choice]);
   return `Set ${names.length < 3 ? names.join(" or ") : `${names.slice(0, -1).join(", ")}, or ${names.at(-1)}`}.`;
 });
+/** The openers the player can set instead of a public key. */
+const keyAlternatives = computed(() =>
+  choices.value.filter((choice) => choice !== "publicKey").map((choice) => choiceName[choice]),
+);
 /** The warning of a lock without a time lock: what still opens it, by the openers it has. */
 const untimedWarning = computed(() => {
   const keys = keyCount.value;
@@ -424,7 +432,7 @@ function heldKey(event: KeyboardEvent) {
                   : ""
             }}
           </p>
-          <PublicKeyHelp />
+          <PublicKeyHelp :others="keyAlternatives" />
         </div>
         <p id="lock-dialog-status" role="status" class="min-h-5 text-sm" data-lock-status>
           <span v-if="openerless" class="text-destructive" data-lock-no-opener>{{ reason }}</span>
@@ -467,9 +475,14 @@ function heldKey(event: KeyboardEvent) {
           </div>
         </div>
         <div v-if="dialog.ageText !== null" class="grid gap-2" data-unlock-age>
-          <label for="unlock-dialog-age" class="text-sm font-medium"
-            >Send this to the owner of the private key</label
-          >
+          <div class="grid gap-1.5">
+            <label for="unlock-dialog-age" class="text-sm font-medium"
+              >Send this to the person who gave you the public key.</label
+            >
+            <p id="unlock-dialog-age-text" class="text-sm text-muted-foreground">
+              They send back an unlock key: paste it below.
+            </p>
+          </div>
           <Textarea
             id="unlock-dialog-age"
             ref="ageField"
@@ -479,6 +492,7 @@ function heldKey(event: KeyboardEvent) {
             spellcheck="false"
             variant="code"
             class="max-h-40"
+            aria-describedby="unlock-dialog-age-text"
             data-unlock-age-text
           />
           <div class="flex flex-wrap items-center gap-2" :class="{ 'opacity-50': busy }">
@@ -514,7 +528,6 @@ function heldKey(event: KeyboardEvent) {
                   : ""
             }}
           </p>
-          <PublicKeyHelp />
           <div class="grid gap-1.5">
             <label for="unlock-dialog-key" class="text-sm font-medium">Unlock key</label>
             <Input
