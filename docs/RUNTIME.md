@@ -1693,16 +1693,16 @@ A locked file is accepted only when `ActionCompletionOptions.capturedMedia.holds
 opened file when it holds it with the kind of its type; both join `storedFiles`. `ask` comes only from a decrypt step
 without a written password, its `notice` `"unreachable"` (a passed time lock whose relays the Player cannot reach) or,
 after a dialog, `"wrongPassword"`; from an encrypt step, and from a step after a password field, it comes only after a
-dialog or field whose typed answer the Player no longer has, as after a reload, and without a notice. A password
-field's `ask` step takes no `cancelled`. The completion retains the settlement, with its `outcome` and the stored file, as
+dialog or field whose typed answer the Player no longer has, as after a reload, and without a notice. A password field's
+`ask` step takes no `cancelled`. The completion retains the settlement, with its `outcome` and the stored file, as
 `lastSettlement`, and hands the answer off, a list of the outcome and its text, file, or notice. The instruction then
 runs again with it, before any block: it gives the lock or the opened text or file (`TSR084` for a text too long), the
 default for `notOpened` or `cancelled`, fails with `TSR085` for `unreadable` and `TSR086` for `failed`, or waits again
 in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the dialog or field, which locks
 with the call's own openers and, for its password field and `choices`, what the player gave; a password field's decrypt
 call opens with the typed password alone, a wrong one giving the default. The player's typed password stays in the
-Player and never reaches the engine; the engine records only each step's outcome and result, so a
-restore or a replay of recorded completions needs neither the network, the store, nor a secret.
+Player and never reaches the engine; the engine records only each step's outcome and result, so a restore or a replay of
+recorded completions needs neither the network, the store, nor a secret.
 
 The Player (`player/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
 file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field

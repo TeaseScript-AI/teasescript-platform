@@ -2473,12 +2473,12 @@ let next = askChoice 6, 7, 8, 9, prefill: level
 2026-10-05; an ask's starting answer is `prefill:`: Owner decision on #512, 2026-10-08)
 
 `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, `askDateTime`, and `askPassword` are implemented in this
-parenthesized form with the arguments of their compact form
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question,
-an optional `prefill:`, which `askPassword` does not take, and an optional `hint:`. Both forms mean the same: `askText()` is `askText`, and
-`askText as mistress ("Name?", prefill: "Ada")` is `askText as mistress "Name?", prefill: "Ada"`. The speaker clause
-comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
-other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
+parenthesized form with the arguments of their compact form ([ADR
+0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question, an
+optional `prefill:`, which `askPassword` does not take, and an optional `hint:`. Both forms mean the same: `askText()`
+is `askText`, and `askText as mistress ("Name?", prefill: "Ada")` is `askText as mistress "Name?", prefill: "Ada"`. The
+speaker clause comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the
+answer. Their other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
 
 The question is said in the chat by the asking speaker, as by `say` but with no reading time of its own, and the field
 opens with it (owner decision, 2026-10-11); `hint:` is help text shown in the field only
@@ -2536,12 +2536,12 @@ if code == hashText("corner") {
 }
 ```
 
-`askPassword` is a basic ask without `prefill:`, as a password is typed by the person who knows it and never
-suggested. Its field is masked, with an eye button that shows the text while the person typing chooses to, and a
-warning while Caps Lock is on. It completes once a password is typed and returns `string`: the SHA-256 of the typed
-text as `hashText(...)` gives it ([§13](#hashes)), 64 lowercase hexadecimal digits. The Player hashes, so the typed text
-never reaches the script, and the answer adds no line to the chat. Comparing the answer with `hashText(...)` of a
-password, or two answers with each other, tells whether the same password was typed.
+`askPassword` is a basic ask without `prefill:`, as a password is typed by the person who knows it and never suggested.
+Its field is masked, with an eye button that shows the text while the person typing chooses to, and a warning while Caps
+Lock is on. It completes once a password is typed and returns `string`: the SHA-256 of the typed text as `hashText(...)`
+gives it ([§13](#hashes)), 64 lowercase hexadecimal digits. The Player hashes, so the typed text never reaches the
+script, and the answer adds no line to the chat. Comparing the answer with `hashText(...)` of a password, or two answers
+with each other, tells whether the same password was typed.
 
 The hash is not the typed password. Passed to `password:` of an encrypt call, it locks with the hash text itself, which
 is recorded like any answer, so anyone who can read a save or replay data that holds it can open such a lock. Written
