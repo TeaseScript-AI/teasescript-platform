@@ -183,8 +183,8 @@ export type HelperName =
   | "askOnce"
   | "deviceId"
   | "maskUrl"
+  | "useUrl"
   | "textLines"
-  | "endsWithDigits"
   | "plainText"
   | "listPart"
   | "listText"
@@ -318,8 +318,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "askOnce",
   "deviceId",
   "maskUrl",
+  "useUrl",
   "textLines",
-  "endsWithDigits",
   "plainText",
   "listPart",
   "listText",
@@ -1161,6 +1161,50 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   // A URL for a notice, with the values of query parameters named like a key, token, or password hidden.
+  // Legacy useUrl() of a computed address: the browser opened a web address, and an error popup named any other value.
+  // The test admits only addresses that openUrl() opens: http or https, a host of letters, digits, and hyphens whose
+  // last label starts with a letter (so no IP address, which openUrl() may refuse), a short port, and no space.
+  useUrl: {
+    name: "sexscriptLegacyUseUrl",
+    build: () =>
+      fn(
+        "sexscriptLegacyUseUrl",
+        ["url"],
+        [
+          letS("address", template(v("url"))),
+          ifS(
+            call(v("address"), "matches", {
+              kind: "regex",
+              pattern: String.raw`https?:\/\/(?:[a-z0-9-]+\.)*[a-z][a-z0-9-]*(?::\d{1,4})?(?:[\/?#]\S*)?`,
+              flags: "i",
+            }),
+            [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "call",
+                  name: "openUrl",
+                  positional: [v("address")],
+                  named: {},
+                },
+                span: null,
+              },
+            ],
+            [
+              {
+                kind: "showPopup",
+                message: template(
+                  "Error ",
+                  v("address"),
+                  ": this is no web address that can open.",
+                ),
+                span: null,
+              },
+            ],
+          ),
+        ],
+      ),
+  },
   maskUrl: {
     name: "sexscriptLegacyMaskUrl",
     build: () => {
@@ -1238,46 +1282,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             },
           ]),
           ret(v("lines")),
-        ],
-      );
-    },
-  },
-  // Whether a text ends with digits and then `tail`, as a whole match of `.*\d+tail` (regex-subset parseTailPattern).
-  endsWithDigits: {
-    name: "sexscriptLegacyEndsWithDigits",
-    build: () => {
-      const method = (
-        target: IrExpression,
-        name: string,
-        ...args: IrExpression[]
-      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
-      return fn(
-        "sexscriptLegacyEndsWithDigits",
-        ["text", "tail"],
-        [
-          ifS({ kind: "unary", operator: "not", value: method(v("text"), "endsWith", v("tail")) }, [
-            ret(lit(false)),
-          ]),
-          letS(
-            "head",
-            method(
-              v("text"),
-              "substring",
-              lit(0),
-              bin("-", prop(v("text"), "length"), prop(v("tail"), "length")),
-            ),
-          ),
-          ret(
-            bin(
-              "and",
-              bin(">", prop(v("head"), "length"), lit(0)),
-              method(
-                lit("0123456789"),
-                "contains",
-                method(v("head"), "substring", bin("-", prop(v("head"), "length"), lit(1))),
-              ),
-            ),
-          ),
         ],
       );
     },
@@ -1731,7 +1735,12 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [
             ret(prop(v("value"), "length")),
           ]),
-          ret({ kind: "index", target: v("value"), index: lit("size"), dict: true }),
+          ret({
+            kind: "methodCall",
+            target: v("value"),
+            name: "get",
+            arguments: [lit("size"), lit(null)],
+          }),
         ],
       ),
   },

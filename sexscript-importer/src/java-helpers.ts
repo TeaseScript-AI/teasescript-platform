@@ -21,7 +21,6 @@ export type JavaHelperName =
   | "indexFrom"
   | "character"
   | "insert"
-  | "aroundText"
   | "fileName"
   | "clockText"
   | "reversed";
@@ -42,7 +41,6 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "indexFrom",
   "character",
   "insert",
-  "aroundText",
   "fileName",
   "clockText",
   "reversed",
@@ -665,52 +663,6 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
           ),
         ],
       ),
-  },
-  // Java matches() of `.{a,b}text.{c,d}` (a maximum below 0 has no limit): the text has no line break, which `.` does
-  // not match, and an occurrence of the part splits it into counts in both ranges.
-  aroundText: {
-    name: "sexscriptLegacyAroundText",
-    build: () => {
-      const within = (count: IrExpression, low: string, high: string): IrExpression =>
-        bin(
-          "and",
-          bin(">=", count, v(low)),
-          bin("or", bin("<", v(high), lit(0)), bin("<=", count, v(high))),
-        );
-      return fn(
-        "sexscriptLegacyAroundText",
-        ["text", "part", "minBefore", "maxBefore", "minAfter", "maxAfter"],
-        [
-          forS(
-            "lineBreak",
-            {
-              kind: "list",
-              items: ["\n", "\r", "\u0085", "\u2028", "\u2029"].map((lineBreak) => lit(lineBreak)),
-            },
-            [ifS(method(v("text"), "contains", v("lineBreak")), [ret(lit(false))])],
-          ),
-          letS("before", lit(0)),
-          letS("rest", v("text")),
-          letS("found", method(v("rest"), "indexOf", v("part"))),
-          whileS(bin(">=", v("found"), lit(0)), [
-            set("before", v("found"), "+="),
-            letS("after", bin("-", bin("-", length(v("text")), v("before")), length(v("part")))),
-            ifS(
-              bin(
-                "and",
-                within(v("before"), "minBefore", "maxBefore"),
-                within(v("after"), "minAfter", "maxAfter"),
-              ),
-              [ret(lit(true))],
-            ),
-            set("rest", method(v("rest"), "substring", bin("+", v("found"), lit(1)))),
-            set("before", lit(1), "+="),
-            set("found", method(v("rest"), "indexOf", v("part"))),
-          ]),
-          ret(lit(false)),
-        ],
-      );
-    },
   },
   // java.io.File getName() as on Windows: the part after the last / or \\, without separators at the end.
   fileName: {

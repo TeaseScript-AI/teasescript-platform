@@ -122,9 +122,8 @@ test("reads package text files that no script writes as converted", { skip }, as
   ]);
 });
 
-// A JsonSlurper's parse() of a package file that no script writes is the value it gave, written out at conversion
-// time: an object whose keys are names is an object, another a dict, and a number with a fraction a decimal, as
-// trick_or_treat_poker reads its mistress and GuessMyNumber its dommes.
+// A JsonSlurper's parse() of a package file that no script writes is fromJson() of the file's text at conversion time,
+// whose maps are dicts, as trick_or_treat_poker reads its mistress and GuessMyNumber its dommes.
 test("writes out a package JSON file that JsonSlurper parses", { skip }, async () => {
   const source = await convert(
     [
@@ -142,8 +141,10 @@ test("writes out a package JSON file that JsonSlurper parses", { skip }, async (
   );
   assert.doesNotMatch(source, /TODO|jsonSluper/u);
   assert.match(source, /NOTE SX_PACKAGE_TEXT_SNAPSHOT/u);
-  assert.match(source, /shockTimeStart: 1\.0/u);
-  assert.match(source, /"Miss D": \{ shockTimeStart: 0\.5 \}/u);
+  assert.match(
+    source,
+    /^let doms = fromJson\(".*\\"shockTimeStart\\": 0\.5\}\}", default: null\)$/mu,
+  );
   assert.deepEqual(run(source), ["Faye 2 b.jpg", "2 15"]);
 });
 

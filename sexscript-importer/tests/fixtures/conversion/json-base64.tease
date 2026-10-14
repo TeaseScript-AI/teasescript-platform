@@ -23,7 +23,7 @@ function sexscriptLegacyJsonSize(value) {
   if value is list {
     return value.length
   }
-  return value["size"]
+  return value.get("size", default: null)
 }
 // JSON and Base64 text (V30 §30): JsonOutput.toJson() is toJson(), a text's bytes in Base64 toBase64(), decodeBase64()
 // bytes that new String() makes text again fromBase64(), and a JsonSlurper's parseText() fromJson(). Text that is not
@@ -46,31 +46,22 @@ function decode(reportValue) {
 // The parsed object's keys read as a map's, through the function that returns it.
 let config = { title: "Toy-ID-1", durationRange: { minimum: 30, maximum: 35 } }
 let report = decode(encode({ presetTitle: config.title, violations: 2 }))
-// NOTE SX_DICT_MISSING_KEY line 23: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 24: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 24: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 if not sexscriptLegacyTruth(report) {
   say prose "I cannot read your report", instant
-} else if config.title != report["presetTitle"] {
+} else if config.title != report.get("presetTitle", default: null) {
   say prose "That is not the corner time I ordered", instant
-} else if report["violations"] > 1 {
-  say prose "You moved ${report["violations"]} times", instant
+} else if report.get("violations", default: null) > 1 {
+  say prose "You moved ${report.get("violations", default: null)} times", instant
 }
 // A nested map's keys read as a map's too, a key "size" also; an array keeps its positions.
 // NOTE SX_JSON_PARSE line 26: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
 let data = fromJson("{\"config\": {\"title\": \"Yes\", \"size\": 3}, \"rolls\": [4, 6]}", default: null)
-// NOTE SX_DICT_MISSING_KEY line 27: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-let inner = data["config"]
-// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 28: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-say prose "${data["config"]["title"]} ${sexscriptLegacyJsonSize(inner)} ${data["rolls"][1]}", instant
+let inner = data.get("config", default: null)
+say prose "${data.get("config", default: null).get("title", default: null)} ${sexscriptLegacyJsonSize(inner)} ${data.get("rolls", default: null)[1]}", instant
 // A map that takes the place of a parse is a dict as well, and a list's size is its length.
 // NOTE SX_JSON_PARSE line 30: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
 let fallbackValue = fromJson("null", default: null)
-// NOTE SX_JSON_VALUE line 31: This variable holds parsed JSON, whose keys its reads read as a dict's; Groovy kept this value as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.
+// NOTE SX_JSON_VALUE line 31: This value goes where parsed JSON goes, whose keys reads read as a dict's; Groovy kept it as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.
 fallbackValue = fallbackValue otherwise fromJson(toJson({ title: "Fallback" }, files: false), default: null, files: false)
-// NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-// NOTE SX_DICT_MISSING_KEY line 32: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
-say prose "${fallbackValue["title"]} ${sexscriptLegacyJsonSize(data["rolls"])}", instant
+say prose "${fallbackValue.get("title", default: null)} ${sexscriptLegacyJsonSize(data.get("rolls", default: null))}", instant
 exit

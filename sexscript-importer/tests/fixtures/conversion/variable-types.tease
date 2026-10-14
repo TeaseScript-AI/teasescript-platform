@@ -390,7 +390,7 @@ function innerCallback1(it = null) {
   let amountValue = "nested"
   return amountValue
 }
-function recount {
+function recount: string | integer {
   amount = 3
   return amount
 }

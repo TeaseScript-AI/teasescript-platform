@@ -18,6 +18,11 @@ show("You knelt ${seconds} seconds")
 useUrl("https://example.com/rules")
 useUrl("cornertime.github.io")
 useUrl("")
+// A computed address opens where it is a web address, and legacy showed an error popup for any other value; a written
+// one with a computed query opens as it is.
+def site = getString("Which site?", "")
+useUrl(site)
+useUrl("https://example.com/search?q=" + site)
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
 def photo = getFile("Pick a photo of yourself")
 // Without a title, there is nothing to say before the request.

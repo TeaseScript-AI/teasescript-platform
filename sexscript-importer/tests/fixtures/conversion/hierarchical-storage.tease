@@ -163,7 +163,7 @@ sexscriptLegacySave("club.toys", ["gag", null])
 // NOTE SX_LENGTH_RECEIVER line 28: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 // NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 let savedToys = sexscriptLegacyLoad("club.toys")
-say prose "Again ${sexscriptLegacyLoad("club.toys", []).length} ${sexscriptLegacyItemAt(savedToys, 1) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
+say prose "Again ${savedToys.length} ${sexscriptLegacyItemAt(sexscriptLegacyLoad("club.toys"), 1) == null} ${load("club.toys.1", default: "")} ${load("club.toys.2", default: "") == ""}", instant
 // save(key, null) removes the key with all its elements.
 sexscriptLegacySave("club", null)
 let savedKink: integer? = load "club.level.kink", default: null

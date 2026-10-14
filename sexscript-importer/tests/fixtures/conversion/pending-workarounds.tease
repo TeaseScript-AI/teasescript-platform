@@ -1,3 +1,11 @@
+function sexscriptLegacyUseUrl(url) {
+  let address = "${url}"
+  if address.matches(/https?:\/\/(?:[a-z0-9-]+\.)*[a-z][a-z0-9-]*(?::\d{1,4})?(?:[\/?#]\S*)?/i) {
+    openUrl(address)
+  } else {
+    showPopup "Error ${address}: this is no web address that can open."
+  }
+}
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript, and forms
 // that main implements now are native.
 // getBooleans: a form of toggles; its Cancel, which gave null, where the next statement tests the answers for null.
@@ -31,11 +39,17 @@ openUrl("https://example.com/rules")
 // NOTE SX_OPEN_URL_SCHEME line 19: useUrl() named this address without its scheme, which the computer's browser completed; openUrl() opens it with https://.
 openUrl("https://cornertime.github.io")
 // NOTE SX_OPEN_URL_EMPTY line 20: useUrl() of empty text opened no page, so nothing opens here.
+// A computed address opens where it is a web address, and legacy showed an error popup for any other value; a written
+// one with a computed query opens as it is.
+let site = askText prose() ("Which site?").replace("\n", " ")
+// NOTE SX_OPEN_URL_TEXT line 24: useUrl() took any value and showed an error popup for one it could not open, such as null or text that is no address; a helper opens a web address with openUrl() and shows such a popup for any other value.
+sexscriptLegacyUseUrl(site)
+openUrl("https://example.com/search?q=${site}")
 // getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
-// NOTE SX_FILE_PHOTO line 22: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did.
+// NOTE SX_FILE_PHOTO line 27: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera, or skips, which gives null, as a chooser the player cancelled did.
 let photo = askImage prose ("Pick a photo of yourself", allowSkip: true)
 // Without a title, there is nothing to say before the request.
-// NOTE SX_FILE_PHOTO line 24: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+// NOTE SX_FILE_PHOTO line 29: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 let another = askImage()
 if photo == null {
   say prose "No photo, then", instant

@@ -1,7 +1,7 @@
 /**
  * Java and Groovy text, number, collection, and random APIs as TeaseScript values and generated helpers: URL form
- * encoding, Math functions, Random draws, character arrays, number predicates, overlapping text counts, Java number
- * conversions, and collection constructors. Each rule converts only when the receiver and the arguments are proven
+ * encoding, Math functions, Random draws, character arrays, number predicates, overlapping text counts, regular
+ * expressions, Java number conversions, and collection constructors. Each rule converts only when the receiver and the arguments are proven
  * to have the types its Java method needs; anything else keeps the lowering's own diagnostic.
  */
 import { constantString, isAstNode, variableName, type AstNode, type SourceSpan } from "./ast.ts";
@@ -16,7 +16,9 @@ import {
   type Tree,
 } from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
+import { javaRegex } from "./java-regex.ts";
 import { whole } from "./java-time.ts";
+import { parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import { LIST, NULL, NUMBER, OBJECT, onlyOf, STRING } from "./types.ts";
 
 /** The values of a body that Java text, number, and random rules recognize. */
@@ -88,8 +90,6 @@ const MAP_METHODS = new Set([
   "values",
 ]);
 const CHARACTER_CLASSES = new Set(["Character", "java.lang.Character"]);
-/** Java regex `.` matches any character except these line terminators. */
-const LINE_TERMINATORS = ["\n", "\r", "\u0085", "\u2028", "\u2029"];
 const URL_ENCODER = new Set(["URLEncoder", "java.net.URLEncoder"]);
 const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 
@@ -528,11 +528,12 @@ export function textCall(
   const maybeText = (type & STRING) !== 0;
   switch (name) {
     case "matches": {
-      // A full match of `.{a,b}` text `.{c,d}`, such as the rough email shape `.{1,50}@.{5,50}`.
-      const shape = args.length === 1 ? aroundShape(constantString(args[0])) : null;
-      if (shape === null || (type & (NUMBER | LIST)) !== 0) return undefined;
+      // Java's match of the whole text, such as the rough email shape `.{1,50}@.{5,50}`.
+      if (args.length !== 1 || !maybeText) return undefined;
+      const regex = regexLiteral(args[0]!, "whole", host);
+      if (regex === undefined || regex === null) return regex;
       const value = host.lower(receiver);
-      return value === null ? null : aroundCall(value, shape, host);
+      return value === null ? null : method(matchedText(value, type), "matches", regex);
     }
     case "get": {
       // Java List.get(index) reads a position; a negative one fails in both.
@@ -858,58 +859,99 @@ function characterCode(node: AstNode): AstNode | null {
   return asNode(node.value);
 }
 
-interface AroundShape {
-  part: string;
-  before: [number, number];
-  after: [number, number];
+/**
+ * A legacy regular expression as a TeaseScript regex literal (java-regex.ts), for a match of the whole text or a test
+ * of a match anywhere; null after a TODO that says why it has none, undefined for a pattern that is no constant text.
+ */
+export function regexLiteral(
+  node: AstNode,
+  within: "whole" | "find",
+  host: JavaRuleHost,
+): IrExpression | null | undefined {
+  const pattern = constantString(node);
+  if (pattern === null) return undefined;
+  const regex = javaRegex(pattern, within);
+  if ("reason" in regex) {
+    host.diagnostic(
+      "SX_JAVA_REGEX",
+      "error",
+      `Java's regular expression /${pattern}/ has no TeaseScript regex that matches the same text: it uses ${regex.reason}.`,
+      node.span,
+    );
+    return null;
+  }
+  return { kind: "regex", pattern: regex.pattern, flags: regex.flags };
+}
+
+/** The text Groovy matched a regular expression against: a value that may be no text as `${value}`. */
+function matchedText(value: IrExpression, type: number): IrExpression {
+  return onlyOf(type, STRING) ? value : { kind: "template", parts: [{ value }] };
 }
 
 /**
- * A regular expression `.{a,b}text.{c,d}` (each count also `*`, `+`, `?`, `{n}`, `{n,}`, or none), whose text is
- * literal characters or escaped punctuation without a line break.
+ * `text ==~ /pattern/`, Groovy's whole match of a regular expression: a pattern that a text matches by its end
+ * (parseTailPattern) as `endsWith`, any other as a TeaseScript regex.
  */
-function aroundShape(pattern: string | null): AroundShape | null {
-  if (pattern === null) return null;
-  const count = String.raw`(\{\d+(?:,\d*)?\}|[*+?])?`;
-  const match = new RegExp(
-    String.raw`^\.${count}((?:\\[^A-Za-z0-9]|[^\\.[\]{}()*+?^$|])+)\.${count}$`,
-    "u",
-  ).exec(pattern);
-  if (match === null) return null;
-  const part = match[2]!.replace(/\\(.)/gu, "$1");
-  if (LINE_TERMINATORS.some((terminator) => part.includes(terminator))) return null;
-  const bounds = (quantifier: string | undefined): [number, number] => {
-    if (quantifier === undefined) return [1, 1];
-    if (quantifier === "*") return [0, -1];
-    if (quantifier === "+") return [1, -1];
-    if (quantifier === "?") return [0, 1];
-    const [low, high] = quantifier.slice(1, -1).split(",");
-    return [Number(low), high === undefined ? Number(low) : high === "" ? -1 : Number(high)];
-  };
-  return { part, before: bounds(match[1]), after: bounds(match[3]) };
-}
-
-function aroundCall(value: IrExpression, shape: AroundShape, host: JavaRuleHost): IrExpression {
-  return host.helper("aroundText", [
-    value,
-    literal(shape.part),
-    literal(shape.before[0]),
-    literal(shape.before[1]),
-    literal(shape.after[0]),
-    literal(shape.after[1]),
-  ]);
-}
-
-/** `text ==~ /.{a,b}text.{c,d}/`, Groovy's full match of a regular expression. */
 export function textMatch(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
   if (node.operator !== "==~") return undefined;
   const left = asNode(node.left);
   const right = asNode(node.right);
-  const shape = right === null ? null : aroundShape(constantString(right));
-  if (left === null || shape === null || (host.valueType(left) & (NUMBER | LIST)) !== 0)
+  const pattern = right === null ? null : constantString(right);
+  // Groovy matched the text of the value; a value that is never text stays manual.
+  const type = left === null ? 0 : host.valueType(left);
+  if (left === null || right === null || pattern === null || (type & STRING) === 0)
     return undefined;
+  const tail = parseTailPattern(pattern);
+  if (tail !== null) {
+    const value = host.lower(left);
+    if (value === null) return null;
+    const text = matchedText(value, type);
+    return tail.insensitive
+      ? method(method(text, "lowercase"), "endsWith", literal(tail.tail.toLowerCase()))
+      : method(text, "endsWith", literal(tail.tail));
+  }
+  const regex = regexLiteral(right, "whole", host);
+  if (regex === null) return null;
   const value = host.lower(left);
-  return value === null ? null : aroundCall(value, shape, host);
+  return value === null ? null : method(matchedText(value, type), "matches", regex!);
+}
+
+/**
+ * `text =~ /pattern/` as a condition: Groovy's Matcher was true when find() found a match anywhere in the text. A
+ * literal pattern is a test for the text, any other one for a TeaseScript regex. Undefined for another node.
+ */
+export function textFind(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  if (node.kind !== "binary" || node.operator !== "=~") return undefined;
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  const pattern = right === null ? null : constantString(right);
+  const type = left === null ? 0 : host.valueType(left);
+  if (left === null || right === null || pattern === null || (type & STRING) === 0)
+    return undefined;
+  const subset = parseRegexSubset(pattern);
+  const search =
+    subset?.kind === "literal" ? literal(subset.text) : regexLiteral(right, "find", host);
+  if (search === null) return null;
+  const value = host.lower(left);
+  return value === null ? null : method(matchedText(value, type), "contains", search!);
+}
+
+/** `(text =~ /pattern/).count > 0`, a count of matches above zero, as the test of a match (textFind). */
+export function matchCount(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  if (node.operator !== ">" && node.operator !== "!=") return undefined;
+  const count = asNode(node.left);
+  const matcher = count?.kind === "property" ? asNode(count.object) : null;
+  if (
+    !isZero(asNode(node.right)) ||
+    matcher === null ||
+    constantString(count!.property) !== "count"
+  )
+    return undefined;
+  return textFind(matcher, host);
+}
+
+function isZero(node: AstNode | null): boolean {
+  return node?.kind === "constant" && node.value === 0;
 }
 
 /** `def rnd = new Random()`: the draws use the session's random numbers, so the object goes. */

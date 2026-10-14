@@ -47,6 +47,8 @@ import {
   textConstructor,
   textDeclaration,
   powerOperation,
+  matchCount,
+  textFind,
   textMatch,
   textProperty,
   textStatement,
@@ -558,11 +560,17 @@ const BASE64_ENCODE_NOTE =
  * Whether a node is a JsonSlurper's `parseText(text)`, of a `new JsonSlurper()` or of a variable `slurper` names, whose
  * result jsonCall lowers to fromJson(), and whose keys Groovy read as a map's.
  */
-export function isJsonParse(node: AstNode, slurper: (name: string) => boolean): boolean {
+export function isJsonParse(
+  node: AstNode,
+  slurper: (name: string) => boolean,
+  /** Also `parse(file)` of a package file, which packageJsonRead reads with fromJson() as well. */
+  files = false,
+): boolean {
   const receiver = asNode(node.object);
+  const method = constantString(node.method);
   return (
     node.kind === "methodCall" &&
-    constantString(node.method) === "parseText" &&
+    (method === "parseText" || (files && method === "parse")) &&
     argumentsOf(node).length === 1 &&
     receiver !== null &&
     ((receiver.kind === "constructorCall" &&
@@ -1313,7 +1321,17 @@ export function javaProperty(
 
 /** Groovy operators on Java values, such as `date + days`. */
 export function javaBinary(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
-  return temporalBinary(node, host) ?? textMatch(node, host) ?? powerOperation(node, host);
+  // A rule's null comes after its diagnostic, so it ends the search like a converted value.
+  for (const rule of [temporalBinary, textMatch, matchCount, powerOperation]) {
+    const converted = rule(node, host);
+    if (converted !== undefined) return converted;
+  }
+  return undefined;
+}
+
+/** Groovy truth of Java values, such as a Matcher's `text =~ /pattern/`. */
+export function javaCondition(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  return textFind(node, host);
 }
 
 /** Groovy assignments to parts of Java values, such as `buffer[1..2] = text`. */
@@ -1837,18 +1855,9 @@ function packageJsonRead(node: AstNode, file: AstNode, host: JavaRuleHost): IrEx
     );
     return null;
   }
-  // A number's own text tells a whole number from a decimal, which JSON.parse alone does not.
-  class Decimal {
-    readonly value: number;
-    constructor(value: number) {
-      this.value = value;
-    }
-  }
-  let parsed: unknown;
+  // Text that is no strict JSON, which fromJson() would read as null, stays a conversion error.
   try {
-    parsed = JSON.parse(lines.join("\n"), (_key, item: unknown, context?: { source?: string }) =>
-      typeof item === "number" && /[.eE]/u.test(context?.source ?? "") ? new Decimal(item) : item,
-    );
+    JSON.parse(lines.join("\n"));
   } catch {
     host.diagnostic(
       "SX_PACKAGE_JSON",
@@ -1859,36 +1868,15 @@ function packageJsonRead(node: AstNode, file: AstNode, host: JavaRuleHost): IrEx
     return null;
   }
   noteOnce(host, "SX_PACKAGE_TEXT_SNAPSHOT", SNAPSHOT_NOTE, node.span);
-  const value = (item: unknown): IrExpression => {
-    if (item instanceof Decimal) return { kind: "literal", value: item.value, decimal: true };
-    if (Array.isArray(item)) return { kind: "list", items: item.map(value) };
-    if (item !== null && typeof item === "object") {
-      const entries = Object.entries(item);
-      const named = entries.every(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key));
-      return named
-        ? {
-            kind: "object",
-            properties: entries.map(([name, field]) => ({ name, value: value(field) })),
-          }
-        : {
-            kind: "object",
-            dict: true,
-            properties: entries.map(([key, field]) => ({
-              name: key,
-              key: { kind: "literal", value: key },
-              value: value(field),
-            })),
-          };
-    }
-    return {
-      kind: "literal",
-      value:
-        typeof item === "string" || typeof item === "number" || typeof item === "boolean"
-          ? item
-          : null,
-    };
+  noteOnce(host, "SX_JSON_PARSE", JSON_PARSE_NOTE, node.span);
+  // Its text as it was at conversion time, read as fromJson() reads any JSON (V30 §30), so that the value is what a
+  // parsed text is: dicts and lists, whose keys reads read as a dict's (isJsonValue in lower.ts).
+  return {
+    kind: "call",
+    name: "fromJson",
+    positional: [{ kind: "literal", value: lines.join("\n") }],
+    named: { default: { kind: "literal", value: null } },
   };
-  return value(parsed);
 }
 
 /** `new File(path).exists()` for a resource that the conversion represents by its path text. */

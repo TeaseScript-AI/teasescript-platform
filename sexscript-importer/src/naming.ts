@@ -346,6 +346,7 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         ),
       };
     case "duration":
+    case "regex":
       return expression;
     case "button":
       return {

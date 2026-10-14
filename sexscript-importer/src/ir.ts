@@ -370,6 +370,8 @@ export type IrExpression =
    * `text` changes the message in place (V30 "Updatable messages").
    */
   | { kind: "message"; value: IrExpression; speaker?: string }
+  /** A regex literal (V30 §8 "Regexes"): its RE2 pattern as written between the slashes, and its flags. */
+  | { kind: "regex"; pattern: string; flags: string }
   /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
   | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }

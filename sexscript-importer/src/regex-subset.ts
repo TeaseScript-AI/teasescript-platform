@@ -39,21 +39,16 @@ export function parseRegexSubset(pattern: string): RegexSubset | null {
 }
 
 /**
- * A pattern that a whole text matches by its end (Groovy `==~`): any text, then optionally a run of digits, then fixed
- * text, `.*\d+\.jpg` or `.*\.png`, also case-insensitive with `(?i)`. Null for any other pattern.
+ * A pattern that a whole text matches by its end (Groovy `==~`): any text, then fixed text, `.*\.png`, also
+ * case-insensitive with `(?i)`. Null for any other pattern.
  */
-export function parseTailPattern(
-  pattern: string,
-): { insensitive: boolean; digits: boolean; tail: string } | null {
+export function parseTailPattern(pattern: string): { insensitive: boolean; tail: string } | null {
   let rest = pattern;
   const insensitive = rest.startsWith("(?i)");
   if (insensitive) rest = rest.slice(4);
   if (!rest.startsWith(".*")) return null;
-  rest = rest.slice(2);
-  const digits = rest.startsWith("\\d+");
-  if (digits) rest = rest.slice(3);
-  const tail = literalText(rest);
-  return tail === null || tail === "" ? null : { insensitive, digits, tail };
+  const tail = literalText(rest.slice(2));
+  return tail === null || tail === "" ? null : { insensitive, tail };
 }
 
 /** A Java replacement text as plain text: `\$` and `\\` are escapes, and an unescaped `$` names a group (null). */
@@ -99,14 +94,17 @@ function splitAlternatives(pattern: string): string[] | null {
   return parts;
 }
 
-/** The text a pattern of literal characters and escaped metacharacters matches; null for any other pattern. */
+/**
+ * The text a pattern of literal characters and escaped characters matches, where Java escapes any character but a
+ * letter or digit as itself (`\\#`); null for any other pattern.
+ */
 function literalText(pattern: string): string | null {
   let text = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
     if (character === "\\") {
       const next = pattern[index + 1];
-      if (next === undefined || !META.has(next)) return null;
+      if (next === undefined || /[A-Za-z0-9]/u.test(next)) return null;
       text += next;
       index += 1;
       continue;

@@ -939,6 +939,24 @@ function analyse(
       )
     ) {
       const type = bindingType(target);
+      // A key read of parsed JSON gives null for a missing key, as Groovy did: the variable takes it (jsonRead).
+      const jsonGet =
+        (statement.kind === "assign" || statement.kind === "let") &&
+        statement.value.kind === "methodCall" &&
+        statement.value.dict !== true &&
+        statement.value.name === "get" &&
+        statement.value.arguments.length === 2 &&
+        statement.value.arguments[1]!.kind === "literal" &&
+        statement.value.arguments[1]!.value === null;
+      if (
+        jsonGet &&
+        value.kind === "optional" &&
+        target.declaration !== null &&
+        type !== undefined &&
+        type.kind !== "optional" &&
+        type.kind !== "unknown"
+      )
+        return change(() => (target.optional = true));
       if (
         value.kind === "optional" &&
         statement.kind === "assign" &&
@@ -1275,6 +1293,18 @@ function analyse(
               storeElement(target, typeOf(element, scope), item);
             return;
           }
+          // `list = list + [element]` adds its elements, as the add() it becomes.
+          const added = item.value;
+          if (
+            added.kind === "binary" &&
+            added.operator === "+" &&
+            added.left.kind === "variable" &&
+            added.left.name === item.target.name &&
+            added.right.kind === "list" &&
+            list?.kind === "list"
+          )
+            for (const element of added.right.items)
+              storeElement(target, typeOf(element, scope), item);
           return store(target, value, item);
         }
         const current = type ?? (target.integer ? scalar("integer") : UNKNOWN);
@@ -1474,6 +1504,11 @@ function analyse(
     if (isAssignable(collection.element, value)) return;
     if (list.declaration !== null && canWiden(collection.element, value) && !list.widened)
       return change(() => (list.widened = true));
+    // A list of lists that gets a list whose elements may be null holds such lists, `(string | integer | null)[][]`, also
+    // where a type is written: Groovy's lists of any type held null.
+    const nullable = nullableElements(collection.element, value);
+    if (list.declaration !== null && nullable !== null && annotation(listOf(nullable)) !== null)
+      return change(() => (list.union = listOf(nullable)));
     const element =
       list.declaration !== null && list.fixed === undefined
         ? unionOf(collection.element, value)
@@ -2156,6 +2191,7 @@ function isKindMember(type: TeaseType): boolean {
 /** Whether a list's elements, possibly lists themselves, end in scalars or unions an annotation can name. */
 function writableElements(type: TeaseType): boolean {
   if (type.kind === "list") return writableElements(type.element);
+  if (type.kind === "optional") return type.value.kind !== "list" && writableElements(type.value);
   return type.kind === "scalar" || (type.kind === "union" && type.members.every(isWritableMember));
 }
 
@@ -2174,7 +2210,9 @@ function isWritableMember(type: TeaseType): boolean {
     (type.kind === "list" &&
       (type.element.kind === "scalar" ||
         type.element.kind === "temporal" ||
-        type.element.kind === "unknown"))
+        type.element.kind === "unknown" ||
+        (type.element.kind === "optional" &&
+          (type.element.value.kind === "scalar" || type.element.value.kind === "temporal"))))
   );
 }
 
@@ -2197,27 +2235,66 @@ function unionOf(left: TeaseType, right: TeaseType): TeaseType | null {
   return members.length < 2 ? null : { kind: "union", members };
 }
 
+/**
+ * The type an annotation names, as typeName writes it: scalars, `T?`, `T[]`, and unions in parentheses or with `null`,
+ * such as `(string | integer | null)[][]`. Another name, such as a kind (`list`) or a date, is unknown.
+ */
 function parseAnnotation(text: string): TeaseType {
-  const optional = text.endsWith("?");
-  const core = optional ? text.slice(0, -1) : text;
-  const list = core.endsWith("[]");
-  const name = list ? core.slice(0, -2) : core;
-  const scalarName = SCALAR_NAMES.find((candidate) => candidate === name);
-  const base: TeaseType = scalarName === undefined ? UNKNOWN : scalar(scalarName);
-  const value = list ? listOf(base) : base;
-  return optional ? { kind: "optional", value } : value;
+  const tokens = text.match(/\(|\)|\||\?|\[\]|[A-Za-z]+/gu) ?? [];
+  let position = 0;
+  const union = (): TeaseType => {
+    const members: TeaseType[] = [];
+    let nullable = false;
+    do {
+      if (tokens[position] === "null") {
+        position += 1;
+        nullable = true;
+      } else members.push(member());
+    } while (tokens[position] === "|" && ++position);
+    const value: TeaseType =
+      members.length === 1
+        ? members[0]!
+        : members.some((type) => type.kind === "unknown")
+          ? UNKNOWN
+          : { kind: "union", members };
+    return nullable && value.kind !== "unknown" ? { kind: "optional", value } : value;
+  };
+  const member = (): TeaseType => {
+    let type: TeaseType;
+    if (tokens[position] === "(") {
+      position += 1;
+      type = union();
+      position += 1;
+    } else {
+      const scalarName = SCALAR_NAMES.find((candidate) => candidate === tokens[position]);
+      position += 1;
+      type = scalarName === undefined ? UNKNOWN : scalar(scalarName);
+    }
+    for (;;) {
+      if (tokens[position] === "?") type = { kind: "optional", value: type };
+      else if (tokens[position] === "[]") type = listOf(type);
+      else return type;
+      position += 1;
+    }
+  };
+  const type = union();
+  // Another form, such as a dict's value type in `string? dict`, is unknown.
+  return position === tokens.length ? type : UNKNOWN;
 }
 
 function typeName(type: TeaseType): string {
   switch (type.kind) {
     case "scalar":
       return type.name;
-    case "list":
-      return type.element.kind === "unknown"
-        ? "list"
-        : type.element.kind === "union"
-          ? `(${typeName(type.element)})[]`
-          : `${typeName(type.element)}[]`;
+    case "list": {
+      if (type.element.kind === "unknown") return "list";
+      // A union, also with null, is written in parentheses: `(string | integer | null)[]`.
+      const element = typeName(type.element);
+      const union =
+        type.element.kind === "union" ||
+        (type.element.kind === "optional" && element.endsWith(" | null"));
+      return union ? `(${element})[]` : `${element}[]`;
+    }
     case "optional":
       return type.value.kind === "union" || isKindMember(type.value)
         ? `${typeName(type.value)} | null`
@@ -2334,15 +2411,39 @@ function arithmeticType(
  * The element type of a list literal: the common type, or a union that a declaration can write when Groovy mixed
  * types, such as `(number | boolean)` (ADR 0021 rule 1.3).
  */
+/**
+ * The list type that holds both lists of `held` and `added`, whose elements may be null; null for another pair, such as
+ * one that is no list or whose elements never hold null.
+ */
+function nullableElements(held: TeaseType, added: TeaseType): TeaseType | null {
+  const value = nonNull(added);
+  if (held.kind !== "list" || value.kind !== "list" || value.element.kind !== "optional")
+    return null;
+  const element = nonNull(value.element);
+  const joined = isAssignable(held.element, element)
+    ? held.element
+    : isAssignable(element, held.element)
+      ? element
+      : unionOf(held.element, element);
+  return joined === null ? null : listOf({ kind: "optional", value: joined });
+}
+
 function elementsType(types: readonly TeaseType[]): TeaseType {
+  // An element that may be null makes the others' type optional, such as `integer?` for Sequence's `[chosen, num]`.
+  if (types.some((type) => type.kind === "optional" || type.kind === "null")) {
+    const values = types.filter((type) => type.kind !== "null").map(nonNull);
+    const element = values.length === 0 ? UNKNOWN : elementsType(values);
+    return element.kind === "unknown" ? UNKNOWN : { kind: "optional", value: element };
+  }
   const common = commonType(types);
   if (
     common.kind !== "unknown" ||
     types.length === 0 ||
-    !types.every((type) => type.kind === "scalar" || type.kind === "list")
+    !types.every((type) => type.kind === "scalar" || type.kind === "list" || type.kind === "union")
   )
     return common;
-  // Lists of lists keep their elements' list type, such as `(string | integer)[]` for Groovy pairs.
+  // Lists of lists keep their elements' list type, such as `(string | integer)[]` for Groovy pairs, and so do elements
+  // of several types.
   let merged: TeaseType | null = types[0]!;
   for (const type of types.slice(1)) {
     if (merged === null) return UNKNOWN;
@@ -2601,6 +2702,8 @@ export function expressionType(
     case "duration":
     case "button":
       return scalar("duration");
+    case "regex":
+      return UNKNOWN;
     case "message":
       return UNKNOWN;
     case "template":
@@ -2639,6 +2742,14 @@ export function expressionType(
           ? type(value.arguments[1]!)
           : UNKNOWN;
       }
+      // A key read of parsed JSON, which gives null for a missing key (jsonRead in lower.ts).
+      if (
+        value.name === "get" &&
+        value.arguments.length === 2 &&
+        value.arguments[1]!.kind === "literal" &&
+        value.arguments[1]!.value === null
+      )
+        return { kind: "optional", value: UNKNOWN };
       const target = nonNull(type(value.target));
       if (target.kind === "list") {
         if (["removeAt", "removeFirst", "removeLast"].includes(value.name)) return target.element;
@@ -3186,6 +3297,7 @@ export function mapChildren(
     case "literal":
     case "variable":
     case "duration":
+    case "regex":
       return value;
     case "list":
       return { ...value, items: value.items.map(map) };

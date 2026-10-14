@@ -42,6 +42,7 @@ import {
   javaFileState,
   jsonSlurperNames,
   javaMethodCall,
+  javaCondition,
   javaProperty,
   viewedText,
   type JavaFileState,
@@ -85,7 +86,7 @@ import {
   withTupleAssignments,
 } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
-import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
+import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import { menuIndexes } from "./menu-indexes.ts";
@@ -631,6 +632,7 @@ export interface MapUses {
   jsonFunctions: Set<string>;
   jsonClosures: Map<string, Map<string, boolean>>;
   jsonMixed: Set<string>;
+  jsonParameters: Map<string, Array<string | null>>;
   /** Fields used on maps that stay objects, which their literals declare (null when Groovy added them later). */
   recordFields: Map<string, string[]>;
   /** Legacy types of the values each dict holds. */
@@ -970,6 +972,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     jsonFunctions: json.functions,
     jsonClosures: json.closures,
     jsonMixed: json.mixed,
+    jsonParameters: json.parameters,
     recordFields: new Map(),
     dictionaryValues: new Map(),
     dictionaryElements: new Map(),
@@ -3940,6 +3943,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "literal":
     case "duration":
     case "variable":
+    case "regex":
       return false;
     case "list":
       return expression.items.some(hasIrCall);
@@ -5267,6 +5271,7 @@ const PURE_OBJECT_METHODS = new Set([
   "isEmpty",
   "keySet",
   "length",
+  "matches",
   "size",
   "split",
   "toList",
@@ -8002,9 +8007,7 @@ function lowerCallStatement(
     case "showPopup":
       return oneArgumentStatement(args, context, node, (message) => popupStatements(message, span));
     case "useUrl":
-      return oneArgumentStatement(args, context, node, (url) =>
-        urlStatements(url, span, context, onlyOf(inferType(args[0]!, context.types), STRING)),
-      );
+      return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
     case "setImage": {
       // A function given an image that it draws into a frame and shows, such as a zoom-in, shows the image itself.
       const given = args.length === 2 ? givenImage(context) : null;
@@ -12158,13 +12161,73 @@ function jsonShaped(
         (target.kind === "binary" &&
           target.operator === "[" &&
           isJsonValue(asNode(target.left), context));
-  if (value === null || !into || (right.kind !== "map" && right.kind !== "list")) return value;
+  if (value === null || !into || !holdsMap(right)) return value;
+  return jsonRoundTrip(value, right, context);
+}
+
+/** The arguments of a call of a script closure, with a map or list literal given the JSON shape where its parameter
+ * holds parsed JSON (jsonValueBindings). */
+function jsonArguments(
+  name: string,
+  nodes: readonly AstNode[],
+  args: IrExpression[],
+  context: LowerContext,
+): IrExpression[] {
+  const keys = context.mapUses.jsonParameters.get(name);
+  if (keys === undefined) return args;
+  return args.map((arg, index) => {
+    const node = nodes[index];
+    const key = keys[index];
+    return node !== undefined &&
+      holdsMap(node) &&
+      key !== null &&
+      key !== undefined &&
+      context.mapUses.jsonValues.has(key)
+      ? jsonRoundTrip(arg, node, context)
+      : arg;
+  });
+}
+
+/**
+ * A key read of what a JsonSlurper's parse gave: Groovy read a missing key as null, which `get(key, default: null)`
+ * gives (V30 §40); a write target keeps the index.
+ */
+function jsonRead(target: IrExpression, key: IrExpression, write: boolean): IrExpression {
+  return write
+    ? { kind: "index", target, index: key, dict: true }
+    : {
+        kind: "methodCall",
+        target,
+        name: "get",
+        arguments: [key, { kind: "literal", value: null }],
+      };
+}
+
+/** List methods whose closure's first parameter takes each element in turn. */
+const ELEMENT_CLOSURES = new Set([
+  "each",
+  "eachWithIndex",
+  "collect",
+  "findAll",
+  "find",
+  "any",
+  "every",
+]);
+
+/** Whether a map or list literal is or holds a map literal, which the JSON shape makes a dict; other literals keep it. */
+function holdsMap(node: AstNode | null): boolean {
+  if (node?.kind === "map") return true;
+  return node?.kind === "list" && nodeArray(node.items).some(holdsMap);
+}
+
+/** A value through toJson() and fromJson(), whose maps are dicts then, as parsed JSON's are, with its text kept. */
+function jsonRoundTrip(value: IrExpression, node: AstNode, context: LowerContext): IrExpression {
   addDiagnostic(
     context,
     "SX_JSON_VALUE",
     "warning",
-    "This variable holds parsed JSON, whose keys its reads read as a dict's; Groovy kept this value as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.",
-    right.span,
+    "This value goes where parsed JSON goes, whose keys reads read as a dict's; Groovy kept it as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.",
+    node.span,
   );
   const plain = { files: { kind: "literal" as const, value: false } };
   return {
@@ -12426,10 +12489,6 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   const java = javaBinary(node, javaHost(context));
   if (java !== undefined) return java;
   const operator = text(node.operator);
-  if (operator === "==~") {
-    const matched = tailMatch(node, context);
-    if (matched !== undefined) return matched;
-  }
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
@@ -12639,12 +12698,21 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
       return { kind: "property", target, name: "random" };
     }
+    // A text key of what a JsonSlurper's parse gave reads it as a dict's (V30 §30); a number reads a list's position.
+    const jsonKey =
+      targetNode !== null &&
+      isJsonValue(targetNode, context) &&
+      onlyOf(inferType(indexNode, context.types), STRING);
     if (targetNode !== null && isDictionary(targetNode, context)) {
       // A lookup in a map used as a lookup table: a dict (#536).
       const key = dictKey(indexNode, node, context, dictKeyTypes(targetNode, context));
       if (key !== null)
         noteMissingKey(node, { receiver: targetNode, key: indexNode, name: null }, context);
       return key === null ? null : { kind: "index", target, index: key, dict: true };
+    }
+    if (jsonKey) {
+      const key = lowerExpression(indexNode, context);
+      return key === null ? null : jsonRead(target, key, context.writeTargets.has(node));
     }
     const propertyName = constantString(indexNode);
     if (propertyName !== null) {
@@ -12946,6 +13014,8 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
       right: { kind: "binary", operator: "!=", left: read(), right: legacyLoad.falseValue },
     };
   }
+  const java = javaCondition(node, javaHost(context));
+  if (java !== undefined) return java;
   const lookup = dictLookup(node, context);
   if (lookup !== undefined) {
     // A missing key read as null, which is false; a dict reports a missing key, so the test comes first.
@@ -14649,17 +14719,26 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     return target === null ? null : { kind: "property", target, name: "length" };
   }
   // Groovy read `value.size` of what a JsonSlurper's parseText() gave as a map's key, or a list's length.
-  if (property === "size" && !context.writeTargets.has(node) && isJsonValue(targetNode, context)) {
+  // A spread read, `list*.name`, reads each element's key, which is no dict read.
+  const jsonTarget = node.spreadSafe !== true && isJsonValue(targetNode, context);
+  if (property === "size" && !context.writeTargets.has(node) && jsonTarget) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : useHelper(context, "jsonSize", [target]);
   }
-  // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536), as does what a JsonSlurper's
-  // parseText() gave, also a map nested in it (V30 §30).
-  if (isDictionary(targetNode, context) || isJsonValue(targetNode, context)) {
+  // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536).
+  if (isDictionary(targetNode, context)) {
     const target = lowerExpression(targetNode, context);
     if (target === null) return null;
     noteMissingKey(node, { receiver: targetNode, key: null, name: property }, context);
     return { kind: "index", target, index: { kind: "literal", value: property }, dict: true };
+  }
+  // So does what a JsonSlurper's parse gave, also a map nested in it (V30 §30), whose missing key Groovy read as
+  // null: jsonRead.
+  if (jsonTarget) {
+    const target = lowerExpression(targetNode, context);
+    return target === null
+      ? null
+      : jsonRead(target, { kind: "literal", value: property }, context.writeTargets.has(node));
   }
   if (!isRecordFieldAccess(targetNode, property, context)) {
     return unsupportedExpression(
@@ -15076,7 +15155,15 @@ function lowerObjectMethodCallExpression(
     const right = lowerExpression(argumentsNodes[0]!, context);
     return left === null || right === null ? null : { kind: "binary", operator: "==", left, right };
   }
-  if (targetNode !== null && isDictionary(targetNode, context)) {
+  // What a JsonSlurper's parse gave takes a map's methods as a dict where only a map has them (V30 §30).
+  const jsonMap =
+    targetNode !== null &&
+    (["containsKey", "keySet", "values"].includes(name) ||
+      (name === "get" &&
+        argumentsNodes.length === 1 &&
+        onlyOf(inferType(argumentsNodes[0]!, context.types), STRING))) &&
+    isJsonValue(targetNode, context);
+  if (targetNode !== null && (isDictionary(targetNode, context) || jsonMap)) {
     const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
     if (operation !== undefined) return operation;
   }
@@ -15995,6 +16082,8 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
   closures: Map<string, Map<string, boolean>>;
   /** Left-out bindings that also hold such a value (SX_JSON_MIXED). */
   mixed: Set<string>;
+  /** The parameter bindings of the closures whose calls the analysis follows, by name. */
+  parameters: Map<string, Array<string | null>>;
 } {
   const variables = new Set<string>();
   const functions = new Set<string>();
@@ -16004,6 +16093,17 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
     // Bindings that take values the analysis does not follow.
     const unfollowed = new Set<string>();
     const closures = new Map<string, AstNode[] | null>();
+    // The parameters of the closures kept in a variable, by its name; null for one with a default value.
+    const parameters = new Map<string, Array<string | null>>();
+    const namedClosures = new Set<AstNode>();
+    // Calls of closures by name, and the names read as values (a closure passed on, whose calls are not known).
+    const calls: Array<{ name: string; args: AstNode[] }> = [];
+    const declared = new Set<AstNode>();
+    const read = new Set<string>();
+    const elements: Array<[string, AstNode]> = [];
+    const appends: Array<[string, AstNode]> = [];
+    // The closures of each() and its relatives, with the collection whose elements they take.
+    const iterated = new Map<AstNode, AstNode>();
     const endsInReturn = (node: AstNode | null): boolean => {
       if (node === null) return false;
       if (node.kind === "return") return true;
@@ -16025,14 +16125,81 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       return false;
     };
     walkAst(body, (node) => {
-      if (node.kind === "closure" && source !== undefined) {
-        for (const parameter of groovyParameters(node.parameters) ?? [])
-          unfollowed.add(scopedBindingKey(parameter.name, node.span, source));
+      // A closure kept in a variable takes the values its calls pass (callParameters); another, such as one a list's
+      // each() calls, any value.
+      if (node.kind === "closure" && source !== undefined && !namedClosures.has(node)) {
+        const elementOf = iterated.get(node);
+        for (const [index, parameter] of (groovyParameters(node.parameters) ?? []).entries()) {
+          const key = scopedBindingKey(parameter.name, node.span, source);
+          // The first parameter of a closure that each() or its relatives call takes the elements (elements).
+          if (index === 0 && elementOf !== undefined) elements.push([key, elementOf]);
+          else unfollowed.add(key);
+        }
       }
+      if (node.kind === "methodCall" && node.implicitThis !== true && source !== undefined) {
+        const items = nodeArray(asNode(node.arguments)?.items);
+        const closure = items.at(-1);
+        const receiver = asNode(node.object);
+        if (
+          ELEMENT_CLOSURES.has(constantString(node.method) ?? "") &&
+          items.length === 1 &&
+          closure?.kind === "closure" &&
+          receiver !== null &&
+          (groovyParameters(closure.parameters) ?? []).length > 0
+        )
+          iterated.set(closure, receiver);
+      }
+      if (node.kind === "declaration") {
+        const target = asNode(node.left);
+        const closure = asNode(node.right);
+        if (target !== null) declared.add(target);
+        const name = variableName(target);
+        if (name !== null && closure?.kind === "closure" && source !== undefined) {
+          namedClosures.add(closure);
+          parameters.set(
+            name,
+            (groovyParameters(closure.parameters) ?? []).map((parameter) =>
+              parameter.defaultValue === null
+                ? scopedBindingKey(parameter.name, closure.span, source)
+                : null,
+            ),
+          );
+        }
+      }
+      if (node.kind === "methodCall" && node.implicitThis === true) {
+        const name = constantString(node.method);
+        if (name !== null) calls.push({ name, args: nodeArray(asNode(node.arguments)?.items) });
+      }
+      // A for-in loop's variable takes the elements of its collection.
+      const loop =
+        node.kind === "for" && typeof node.variable === "string"
+          ? (keys.get(node) ?? node.variable)
+          : null;
+      const collection = asNode(node.collection);
+      if (loop !== null && collection !== null && node.variable !== undefined)
+        elements.push([loop, collection]);
+      if (node.kind === "variable" && !declared.has(node)) {
+        const name = variableName(node);
+        if (name !== null) read.add(name);
+      }
+      // A list that such values are appended to, `list << value` or `list.add(value)`, holds them (appends).
+      const appended =
+        node.kind === "binary" && node.operator === "<<"
+          ? asNode(node.right)
+          : node.kind === "methodCall" &&
+              constantString(node.method) === "add" &&
+              nodeArray(asNode(node.arguments)?.items).length === 1
+            ? nodeArray(asNode(node.arguments)?.items)[0]!
+            : null;
+      const list =
+        appended === null
+          ? null
+          : bindingKey(node.kind === "binary" ? node.left : node.object, keys);
+      if (appended !== null && list !== null) appends.push([list, appended]);
       const compound =
         node.kind === "binary" &&
         typeof node.operator === "string" &&
-        /^(?:[-+*/%&|^]|<<|>>>?|\*\*)=$|^<<$/u.test(node.operator);
+        /^(?:[-+*/%&|^]|>>>?|\*\*)=$|^<<=$/u.test(node.operator);
       if (compound || node.kind === "postfix" || node.kind === "prefix") {
         const changed = bindingKey(compound ? node.left : node.value, keys);
         if (changed !== null) unfollowed.add(changed);
@@ -16076,15 +16243,27 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       functions: new Set<string>(),
       source,
       unfollowed,
+      parameters,
+      calls,
+      read,
+      elements,
+      appends,
     };
   });
+  // The parameters of the package's closures that all their calls give such a value, which take it: a closure that one
+  // file only defines, that no code passes on as a value, and whose calls all pass one at that position.
+  const defining = new Map<string, (typeof parts)[number] | null>();
+  for (const part of parts)
+    for (const name of part.parameters.keys()) defining.set(name, defining.has(name) ? null : part);
+  const passedOn = new Set(parts.flatMap((part) => [...part.read]));
   const excluded = new Set(parts.flatMap((part) => [...part.unfollowed]));
   // Rounds of the analysis without the excluded bindings, until no variable it finds takes another value.
   for (let settled = false; !settled;) {
     variables.clear();
     functions.clear();
     for (const part of parts) part.functions.clear();
-    // Rounds until no file finds another variable or closure.
+    // Rounds until no file finds another variable or closure; each file's test of a value, for the parameters.
+    const jsonTests = new Map<(typeof parts)[number], (node: AstNode | null) => boolean>();
     const found = (): number =>
       variables.size + parts.reduce((total, part) => total + part.functions.size, 0);
     for (let size = -1; size !== found();) {
@@ -16098,7 +16277,7 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
       for (const part of parts) {
         const isJson = (node: AstNode | null): boolean => {
           if (node === null) return false;
-          if (isJsonParse(node, (name) => part.slurpers.has(name))) return true;
+          if (isJsonParse(node, (name) => part.slurpers.has(name), true)) return true;
           if (node.kind === "variable") return variables.has(bindingKey(node, part.keys) ?? "");
           if (node.kind === "property")
             return node.spreadSafe !== true && isJson(asNode(node.object));
@@ -16114,7 +16293,7 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
         };
         for (let changed = true; changed;) {
           changed = false;
-          for (const [target, value] of part.assignments) {
+          for (const [target, value] of [...part.assignments, ...part.elements, ...part.appends]) {
             if (!variables.has(target) && !excluded.has(target) && isJson(value)) {
               variables.add(target);
               changed = true;
@@ -16128,6 +16307,30 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
             changed = true;
           }
         }
+        jsonTests.set(part, isJson);
+      }
+      for (const [name, owner] of defining) {
+        if (owner === null || passedOn.has(name)) continue;
+        const keys = owner.parameters.get(name) ?? [];
+        const given = parts.flatMap((part) =>
+          part.calls
+            .filter((call) => call.name === name && (part === owner || !part.parameters.has(name)))
+            .map((call) => ({ call, isJson: jsonTests.get(part)! })),
+        );
+        if (given.length === 0) continue;
+        keys.forEach((key, index) => {
+          if (key === null || variables.has(key) || excluded.has(key)) return;
+          // A map or list literal, which the call gives the JSON shape (jsonArguments), counts as well, where another
+          // call gives such a value.
+          const args = given.map(({ call, isJson }) => ({ arg: call.args[index] ?? null, isJson }));
+          if (
+            args.some(({ arg, isJson }) => isJson(arg)) &&
+            args.every(
+              ({ arg, isJson }) => isJson(arg) || arg?.kind === "map" || arg?.kind === "list",
+            )
+          )
+            variables.add(key);
+        });
       }
     }
 
@@ -16136,7 +16339,7 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
     for (const part of parts) {
       const isJson = (node: AstNode | null): boolean =>
         node !== null &&
-        (isJsonParse(node, (name) => part.slurpers.has(name)) ||
+        (isJsonParse(node, (name) => part.slurpers.has(name), true) ||
           (node.kind === "variable" && variables.has(bindingKey(node, part.keys) ?? "")) ||
           (node.kind === "property" && node.spreadSafe !== true && isJson(asNode(node.object))) ||
           (node.kind === "binary" && node.operator === "[" && isJson(asNode(node.left))) ||
@@ -16159,13 +16362,20 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
           settled = false;
         }
       }
+      // A list that gets another value appended holds more than such values.
+      for (const [target, value] of part.appends) {
+        if (variables.has(target) && !excluded.has(target) && !isJson(value)) {
+          excluded.add(target);
+          settled = false;
+        }
+      }
     }
   }
   // The left-out variables that hold such a value too.
   const mixed = new Set<string>();
   for (const part of parts)
     for (const [target, value] of part.assignments)
-      if (excluded.has(target) && isJsonParse(value, (name) => part.slurpers.has(name)))
+      if (excluded.has(target) && isJsonParse(value, (name) => part.slurpers.has(name), true))
         mixed.add(target);
   // A name that a file defines as another closure is no such function for calls of other files; a file's own calls
   // go to its own closures (jsonClosures).
@@ -16179,13 +16389,17 @@ function jsonValueBindings(bodies: readonly MapBody[]): {
     }
     closures.set(file, known);
   }
-  return { variables, functions, closures, mixed };
+  const parameters = new Map<string, Array<string | null>>();
+  for (const [name, owner] of defining)
+    if (owner !== null && !passedOn.has(name))
+      parameters.set(name, owner.parameters.get(name) ?? []);
+  return { variables, functions, closures, mixed, parameters };
 }
 
 /** Whether a node is or holds what a JsonSlurper's parseText() gave, as a value or a key's value in it (jsonValueBindings). */
 function isJsonValue(node: AstNode | null, context: LowerContext): boolean {
   if (node === null) return false;
-  if (isJsonParse(node, (name) => context.java.analysis.jsonParsers.has(name))) return true;
+  if (isJsonParse(node, (name) => context.java.analysis.jsonParsers.has(name), true)) return true;
   if (node.kind === "variable") {
     const key = bindingKey(node, context.bindings);
     return (
@@ -16949,8 +17163,8 @@ function lowerRegexWorkaround(
     "SX_REGEX_WORKAROUND",
     "warning",
     kind === "words"
-      ? "Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop over the parts between spaces stands in for split(/\\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part."
-      : 'Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").',
+      ? "Workaround: a TeaseScript regex cannot split text yet, so a loop over the parts between spaces stands in for split(/\\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part."
+      : 'Workaround: a TeaseScript regex cannot replace text yet, so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").',
     span,
   );
   if (kind === "words") {
@@ -18542,7 +18756,13 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     const args = lowerArguments(call.arguments, context);
     return args === null
       ? null
-      : { kind: "call", name: call.name, positional: args, named: {}, local: true };
+      : {
+          kind: "call",
+          name: call.name,
+          positional: jsonArguments(call.name, call.arguments, args, context),
+          named: {},
+          local: true,
+        };
   }
   if (
     context.helperMainParameter !== null &&
@@ -18787,14 +19007,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "useUrl() must have one argument.",
         );
       // Legacy useUrl returned nothing; the address opens before the statement.
-      context.prelude.push(
-        ...urlStatements(
-          args[0]!,
-          node.span,
-          context,
-          onlyOf(inferType(call.arguments[0]!, context.types), STRING),
-        ),
-      );
+      context.prelude.push(...urlStatements(args[0]!, node.span, context));
       return { kind: "literal", value: null };
     }
     case "getFile": {
@@ -21044,36 +21257,6 @@ export function maskedUrl(url: string): string {
 }
 
 /**
- * `text ==~ /.*\d+\.jpg/`, Groovy's whole match of a pattern that a text matches by its end (parseTailPattern), as
- * text operations; undefined for another pattern.
- */
-function tailMatch(node: AstNode, context: LowerContext): IrExpression | null | undefined {
-  const leftNode = asNode(node.left);
-  const pattern = constantString(node.right);
-  const tail = pattern === null ? null : parseTailPattern(pattern);
-  // Groovy matched the text of the value; a proven number or list stays manual.
-  const type = leftNode === null ? 0 : inferType(leftNode, context.types);
-  if (leftNode === null || tail === null || (type & STRING) === 0) return undefined;
-  const value = lowerExpression(leftNode, context);
-  if (value === null) return null;
-  const text: IrExpression = tail.insensitive
-    ? {
-        kind: "methodCall",
-        target: templateOrLiteral([{ value }]),
-        name: "lowercase",
-        arguments: [],
-      }
-    : templateOrLiteral([{ value }]);
-  const ending: IrExpression = {
-    kind: "literal",
-    value: tail.insensitive ? tail.tail.toLowerCase() : tail.tail,
-  };
-  return tail.digits
-    ? useHelper(context, "endsWithDigits", [text, ending])
-    : { kind: "methodCall", target: text, name: "endsWith", arguments: [ending] };
-}
-
-/**
  * `new File(imagesFolder).eachFile { file -> ... }`: a loop over the package paths of the folder's images, found by the
  * tag of the folder's path (imageFolderListing); the loop variable answers what the closure asked of each File
  * (listedImageMember). The legacy walk also visited subfolders and other files. Undefined for another receiver.
@@ -22598,6 +22781,12 @@ function popupStatements(message: IrExpression, span: SourceSpan | null): IrStat
   return [{ kind: "showPopup", message, span }];
 }
 
+/**
+ * The start of a web address up to its host, which openUrl() opens whatever follows: http or https, a host of letters,
+ * digits, and hyphens whose last label starts with a letter, a short port, and the end of the host (helpers.ts useUrl).
+ */
+const WEB_ADDRESS_START = /^https?:\/\/(?:[a-z0-9-]+\.)*[a-z][a-z0-9-]*(?::\d{1,4})?[/?#]/iu;
+
 /** File types a written address without a scheme names a page of the package by, not a web site. */
 const PAGE_EXTENSIONS = new Set(["html", "htm", "txt", "pdf", "jpg", "jpeg", "png", "gif"]);
 
@@ -22609,20 +22798,23 @@ function urlStatements(
   url: IrExpression,
   span: SourceSpan | null,
   context: LowerContext,
-  /** Whether the address is proven text, never null. */
-  text: boolean,
 ): IrStatement[] {
   let address = url;
-  if (url.kind !== "literal" && !text) {
-    // openUrl() takes text; legacy failed to open null or another value, as openUrl() fails on one that is no address.
+  const written = url.kind === "template" ? url.parts[0] : undefined;
+  // A written web address with computed parts after its host, such as a query, opens as it is.
+  if (
+    url.kind !== "literal" &&
+    !(written !== undefined && "text" in written && WEB_ADDRESS_START.test(written.text))
+  ) {
+    // Legacy showed an error popup for a value that was no address it could open, where openUrl() stops the script.
     addDiagnostic(
       context,
       "SX_OPEN_URL_TEXT",
       "warning",
-      "useUrl() took any value; the address that openUrl() opens is its text, and a value that is no http or https address, such as null, stops the script, where legacy failed to open it.",
+      "useUrl() took any value and showed an error popup for one it could not open, such as null or text that is no address; a helper opens a web address with openUrl() and shows such a popup for any other value.",
       span,
     );
-    address = { kind: "template", parts: [{ value: url }] };
+    return [{ kind: "expression", expression: useHelper(context, "useUrl", [url]), span }];
   }
   if (
     url.kind === "literal" &&

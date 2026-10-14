@@ -151,6 +151,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
       case "literal":
       case "duration":
       case "variable":
+      case "regex":
         return value;
     }
   };

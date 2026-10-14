@@ -305,6 +305,8 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
 
 export function emitExpression(expression: IrExpression): string {
   switch (expression.kind) {
+    case "regex":
+      return `/${expression.pattern}/${expression.flags}`;
     case "literal":
       return typeof expression.value === "string"
         ? (blockString([{ text: expression.value }]) ?? `"${escapeStringText(expression.value)}"`)
