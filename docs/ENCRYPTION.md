@@ -12,10 +12,11 @@
 A lock encrypts its content once and gives each way to open it, an opener, its own copy of the key:
 
 1. The Player makes a fresh random 256-bit content key K and a random 96-bit nonce with `crypto.getRandomValues`.
-2. **Password opener:** PBKDF2-HMAC-SHA-256 derives a key-encryption key (KEK) from exactly the password's UTF-8 (a lone
-   surrogate as U+FFFD), a fresh random 16-byte salt, and 600,000 iterations, OWASP's current work factor for this hash.
-   AES-256-GCM seals K under the KEK with a zero nonce, which is safe because the fresh salt makes the KEK seal only
-   this one key.
+2. **Password opener:** PBKDF2-HMAC-SHA-256 derives a key-encryption key (KEK) from the fixed prefix
+   `teasescript-lock-password:` followed by exactly the password's UTF-8 (a lone surrogate as U+FFFD), a fresh random
+   16-byte salt, and 600,000 iterations, OWASP's current work factor for this hash. The prefix keeps the input from
+   being empty, which WebKit's PBKDF2 refuses, so an empty password locks in every browser. AES-256-GCM seals K under
+   the KEK with a zero nonce, which is safe because the fresh salt makes the KEK seal only this one key.
 3. **Time opener:** K is sealed with drand's tlock to the round of the moment: identity-based encryption on BLS12-381
    for the quicknet chain (`bls-unchained-g1-rfc9380`, chain hash `52db9ba7…e971`, a round every 3 s since
    2023-08-23T15:09:27Z). The identity is the SHA-256 of the round as 8 bytes; only the round's beacon signature, which

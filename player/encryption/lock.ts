@@ -7,7 +7,8 @@
 //   per opener: kind (1 byte) | body length (uint16 BE) | body
 //   nonce (12) | AES-256-GCM(K, nonce, content), with every byte before the nonce as additional data
 // Opener bodies:
-//   1, password: PBKDF2 iterations (uint32 BE) | salt (16) | AES-256-GCM(KEK, zero nonce, K) (48)
+//   1, password: PBKDF2 iterations (uint32 BE) | salt (16) | AES-256-GCM(KEK, zero nonce, K) (48), where the KEK is
+//      PBKDF2-HMAC-SHA-256 of "teasescript-lock-password:" and the password's UTF-8
 //   2, time:     round (uint64 BE) | drand tlock IBE ciphertext of K for quicknet (160)
 
 import {
@@ -260,7 +261,13 @@ async function passwordOpener(password: string, key: Uint8Array): Promise<Uint8A
   return opener(PASSWORD_OPENER, iterations, salt, wrapped);
 }
 
-/** The key that PBKDF2-HMAC-SHA-256 derives from exactly the password's UTF-8. */
+/**
+ * What PBKDF2 derives a password's key from: a fixed prefix, then exactly the password's UTF-8. The prefix separates
+ * these keys from other uses of a password and keeps the input from being empty, which WebKit's PBKDF2 refuses.
+ */
+const PASSWORD_PREFIX = new TextEncoder().encode("teasescript-lock-password:");
+
+/** The key that PBKDF2-HMAC-SHA-256 derives from the prefix and exactly the password's UTF-8. */
 async function passwordKey(
   password: string,
   salt: Uint8Array<ArrayBuffer>,
@@ -268,7 +275,7 @@ async function passwordKey(
 ): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(password),
+    concat(PASSWORD_PREFIX, new TextEncoder().encode(password)),
     "PBKDF2",
     false,
     ["deriveBits"],

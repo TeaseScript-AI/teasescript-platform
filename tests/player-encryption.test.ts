@@ -132,6 +132,12 @@ test("a password lock opens with exactly its password, and its header and conten
   assert.deepEqual(await openWithPassword(read, "corner"), content);
   for (const wrong of ["Corner", "corner ", ""])
     assert.equal(await openWithPassword(read, wrong), null, wrong);
+  // An empty password is a password too, exactly as given.
+  const empty = readLock(
+    (await lock(content, { password: "", openAtMs: null }, services(fetch, 0))).bytes,
+  )!;
+  assert.deepEqual(await openWithPassword(empty, ""), content);
+  assert.equal(await openWithPassword(empty, " "), null);
   // A changed byte anywhere, the opener's salt, the nonce, or the content, opens nothing.
   for (const at of [10, 6 + 71 + 2, made.bytes.length - 1]) {
     const changed = new Uint8Array(made.bytes);
