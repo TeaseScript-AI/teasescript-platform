@@ -116,15 +116,13 @@ async function playerSettingsChecks(page) {
   };
   const secondaryText = () =>
     page.evaluate(() => document.documentElement.style.getPropertyValue("--theme-text-secondary"));
-  // Owner decision: contrast and the title-bar A/B are user settings in every build.
+  // Owner decision: contrast is a user setting in every build.
   await openSettings();
   const contrast = page.locator('[data-player-setting="contrast"]');
   const labelMode = page.locator('[data-tools-focus="label-mode"]');
-  const variantA = page.getByRole("radio", { name: "A · Always visible, controls left" });
   // A fresh browser profile shows the defaults; invalid stored values must fall back to them.
   const current = async () => ({
     contrast: await contrast.inputValue(),
-    variantA: await variantA.isChecked(),
     labelMode: await labelMode.inputValue(),
   });
   const defaults = await current();
@@ -135,7 +133,13 @@ async function playerSettingsChecks(page) {
       document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
     standard,
   );
-  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
+  // The A/B tests switch removes the A/B tests panel from the tools menu and adds it back (owner decision 2026-10-14).
+  const abTests = page.locator('[data-tools-focus="launcher:A/B tests"]');
+  await abTests.waitFor({ state: "attached" });
+  await page.locator('[data-player-setting="ab-tests-menu"]').click();
+  await abTests.waitFor({ state: "detached" });
+  await page.locator('[data-player-setting="ab-tests-menu"]').click();
+  await abTests.waitFor({ state: "attached" });
   await closeSettings();
   await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
   await openSettings();
@@ -146,16 +150,12 @@ async function playerSettingsChecks(page) {
   // Settings are browser-local presentation preferences that survive a reload.
   await page.reload();
   await openSettings();
-  if (
-    (await contrast.inputValue()) !== "high" ||
-    !(await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).isChecked())
-  )
+  if ((await contrast.inputValue()) !== "high")
     throw new Error("Player Settings were not restored after reload");
   await closeSettings();
   // Stored text is external input: unknown values fall back to the defaults.
   await page.evaluate(() => {
     localStorage.setItem("player-contrast", "bogus");
-    localStorage.setItem("player-titlebar-variant", "bogus");
   });
   await page.reload();
   await openSettings();
@@ -180,7 +180,6 @@ async function playerSettingsChecks(page) {
       document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
     beforeTab,
   );
-  await otherTab("player-titlebar-variant", "bogus");
   await otherTab("player-menu-label-mode", "bogus");
   await openSettings();
   if (JSON.stringify(await current()) !== JSON.stringify({ ...defaults, contrast: "high" }))
@@ -190,7 +189,7 @@ async function playerSettingsChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => {
     localStorage.removeItem("player-contrast");
-    localStorage.removeItem("player-titlebar-variant");
+    localStorage.removeItem("player-ab-tests-menu");
     localStorage.setItem("player-menu-label-mode", "icons");
   });
   return "PASS Player Settings open and close, apply, persist, and validate stored and cross-tab values";

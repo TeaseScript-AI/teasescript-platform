@@ -30,7 +30,7 @@ before(async () => {
 
 // Distinct swatches per photo; only their identity matters here.
 function colours(): PhotoSwatches {
-  const colour = { rgb: [60, 140, 60] as const, population: 1 };
+  const colour = { rgb: [60, 140, 60] as const, population: 1, share: 1 };
   return {
     Vibrant: colour,
     LightVibrant: null,

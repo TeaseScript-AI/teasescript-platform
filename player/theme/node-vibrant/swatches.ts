@@ -7,7 +7,8 @@
  * 1. `colourHistogram` counts the readable pixels in a 32 x 32 x 32 RGB grid.
  * 2. `quantize` cuts the grid's colour box at its median along its longest side, always the box with the most pixels,
  *    until there are 48 boxes or no box can be cut. Each box's average is one colour.
- * 3. `pickSwatches` scores the colours for six lightness and saturation targets and takes the best one per target.
+ * 3. `pickSwatches` scores the colours for six lightness and saturation targets and takes the best one per target,
+ *    with the share of the measured pixels it stands for.
  *
  * Unlike node-vibrant, a target without a colour in its ranges stays `null` instead of being invented from another
  * swatch, so a caller can tell a measured colour from a guess.
@@ -21,6 +22,12 @@ export interface PhotoColour {
   readonly population: number;
 }
 
+/** A swatch: one of the photo's colours, and how much of the photo it covers. */
+export interface Swatch extends PhotoColour {
+  /** The share of the photo's measured pixels this colour stands for, 0..1. */
+  readonly share: number;
+}
+
 export const SWATCH_NAMES = [
   "Vibrant",
   "LightVibrant",
@@ -30,7 +37,7 @@ export const SWATCH_NAMES = [
   "DarkMuted",
 ] as const;
 export type SwatchName = (typeof SWATCH_NAMES)[number];
-export type PhotoSwatches = Readonly<Record<SwatchName, PhotoColour | null>>;
+export type PhotoSwatches = Readonly<Record<SwatchName, Swatch | null>>;
 
 const BITS = 5;
 const SHIFT = 8 - BITS;
@@ -255,8 +262,9 @@ const WEIGHTS = { saturation: 3, lightness: 6.5, population: 0.5 };
  */
 export function pickSwatches(colours: readonly PhotoColour[]): PhotoSwatches {
   const maxPopulation = Math.max(0, ...colours.map((colour) => colour.population));
+  const measured = colours.reduce((total, colour) => total + colour.population, 0);
   const taken = new Set<PhotoColour>();
-  const swatches: Record<SwatchName, PhotoColour | null> = {
+  const swatches: Record<SwatchName, Swatch | null> = {
     Vibrant: null,
     LightVibrant: null,
     DarkVibrant: null,
@@ -292,7 +300,7 @@ export function pickSwatches(colours: readonly PhotoColour[]): PhotoSwatches {
       }
     }
     if (best) taken.add(best);
-    swatches[name] = best;
+    swatches[name] = best && { ...best, share: best.population / measured };
   }
   return swatches;
 }

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
-import { Bug } from "@lucide/vue";
+import { Bug, SquareSplitHorizontal } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
+import { PHOTO_FAMILIES } from "../../theme/photo-theme.js";
+import AbTestsPanel from "./AbTestsPanel.vue";
 import DebugPanel from "./DebugPanel.vue";
 import DebugStorage from "./DebugStorage.vue";
 import DebugStatus from "./DebugStatus.vue";
@@ -51,7 +53,7 @@ import { playerNoticeKeys, playerNotices } from "../../notices.js";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerNotifications } from "./usePlayerNotifications";
 import { useMessageUpdateAnnouncements } from "./useMessageUpdateAnnouncements";
-import { usePlayerPreference } from "./usePlayerPreference";
+import { usePlayerNumberPreference, usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
@@ -126,8 +128,7 @@ provide(
 provide(speakerAvatarSource, props.player.resolveAsset);
 provide(speakerAvatarFailure, props.player.avatarFailed);
 // Each mode starts from its own default palette; the contrast choice carries over.
-// Player Settings persist in this browser. Contrast is part of the theme intent; the
-// title-bar and photo-accent A/B tests default to A.
+// Player Settings and the A/B tests panel persist in this browser. Contrast is part of the theme intent.
 const storedContrast = usePlayerPreference("player-contrast", ["standard", "high"], "standard");
 const contrast = computed({
   get: () => themeIntent.value.contrast,
@@ -139,8 +140,21 @@ watch(contrast, (value) => (storedContrast.value = value));
 watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
+// The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, the
+// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, and the photo colour
+// transition to A, 0.6 s in Oklab.
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
-const photoAccentOption = usePlayerPreference("player-photo-accent", ["photo", "theme"], "photo");
+// A new key: until B became the default, every browser stored the default A on its first load.
+const photoAccentOption = usePlayerPreference("player-photo-accent-v2", ["photo", "theme"], "theme");
+const photoFamily = usePlayerPreference("player-photo-family", PHOTO_FAMILIES, "large-vibrant");
+const photoFamilyShare = usePlayerNumberPreference("player-photo-family-share", { min: 0, max: 100 }, 3);
+const photoTransition = usePlayerPreference("player-photo-transition", ["oklab", "srgb"], "oklab");
+// Settings' switch for the A/B tests panel, on unless turned off.
+const storedAbTestsMenu = usePlayerPreference("player-ab-tests-menu", ["on", "off"], "on");
+const abTestsMenu = computed({
+  get: () => storedAbTestsMenu.value === "on",
+  set: (on) => (storedAbTestsMenu.value = on ? "on" : "off"),
+});
 function toggleThemeMode() {
   themeIntent.value = {
     ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],
@@ -223,6 +237,7 @@ onErrorCaptured((error) => {
   props.player.reportHostError(error);
 });
 const debugTool: PlayerTool = { name: "Debug", icon: Bug };
+const abTestsTool: PlayerTool = { name: "A/B tests", icon: SquareSplitHorizontal };
 const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
 // Session end and failure (PLAYER-UI "Session end and failure"). An ordinary end opens the end dialog by itself; the
 // error dialog opens only from the error line or its notice, which stays until a new session starts. Like the debug
@@ -338,7 +353,11 @@ const rewindFuture = computed(() => {
   if (!props.player.rewind.inspecting.value || !state?.shown || !state.future) return null;
   return rewindFutureTranscript(state.shown, state.future);
 });
-const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
+const tools = computed(() => [
+  ...(debug.menu.value ? [debugTool] : []),
+  ...(abTestsMenu.value ? [abTestsTool] : []),
+  ...props.tools,
+]);
 const savedData = computed(() =>
   props.player.hasSavedData
     ? {
@@ -418,8 +437,8 @@ useResizeObserver(stageElement, ([entry]) => {
 
 // Photo colours (PLAYER-UI "Stage and media presentation"): the photo the Stage shows colours the
 // Player. A new photo and its colour arrive together; while the photo is prepared, the previous photo
-// and its colour stay. Without a photo, also after an image failed, the theme's colours apply. Whether
-// the accent follows the photo is an A/B test.
+// and its colour stay. Without a photo, also after an image failed, the theme's colours apply. Which
+// swatch family colours it, and whether the accent follows the photo, are A/B tests.
 const stagePhoto = useStagePhoto(stageMedia, prepareStagePhoto);
 // Every Stage image the script names is downloaded and measured in the background once its session runs, so such a
 // photo and its colour are ready when it shows. They stay between sessions of the same script.
@@ -457,6 +476,8 @@ const photoColours = usePhotoColour(
       : stagePhoto.swatches.value,
   ),
   computed(() => themeIntent.value.mode),
+  computed(() => ({ family: photoFamily.value, minShare: photoFamilyShare.value / 100 })),
+  photoTransition,
   { canvas: computed(() => toolsShell.value?.$el as HTMLElement | undefined), stage: stageElement },
 );
 usePlayerTheme(
@@ -465,6 +486,7 @@ usePlayerTheme(
     return accent ? { ...themeIntent.value, accentSeed: accent } : themeIntent.value;
   }),
   computed(() => photoColours.value?.surfaces ?? null),
+  photoTransition,
 );
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
@@ -498,8 +520,7 @@ async function toggleFullscreen() {
     :saved-data="savedData"
     :debug-export="{ available: debugExport.available.value, open: openDebugExport }"
     v-model:contrast="contrast"
-    v-model:titlebar-option="titlebarOption"
-    v-model:photo-accent-option="photoAccentOption"
+    v-model:ab-tests-menu="abTestsMenu"
     :debug-menu="debug.menu.value"
     @update:debug-menu="setDebugMenu"
   >
@@ -522,6 +543,14 @@ async function toggleFullscreen() {
           <DebugStorage :player="player" />
         </template>
       </DebugPanel>
+      <AbTestsPanel
+        v-else-if="scope.tool === abTestsTool.name"
+        v-model:titlebar="titlebarOption"
+        v-model:photo-accent="photoAccentOption"
+        v-model:photo-family="photoFamily"
+        v-model:photo-family-share="photoFamilyShare"
+        v-model:photo-transition="photoTransition"
+      />
       <slot v-else name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">

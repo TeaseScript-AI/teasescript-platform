@@ -91,6 +91,7 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   again while the reader scrolls up.
   The preview only passes the initial `?dev` and `time=skip` state.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
+  `PlayerApp.vue` adds the Debug panel and `AbTestsPanel.vue`, the A/B tests, while their Settings switches are on.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
   `components/ui/scroll-area` supports per-location visibility without reserving width. The transcript currently
