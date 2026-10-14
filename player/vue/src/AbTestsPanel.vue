@@ -3,9 +3,10 @@ import { Button } from "@/components/ui/button";
 import { PHOTO_FAMILIES, type PhotoFamily } from "../../theme/photo-theme.js";
 import type { PhotoFadeTime } from "./usePhotoColour";
 
-// The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison. Each
-// test's Next option steps to its following option and wraps around, so the variants can be flipped while watching the
-// Player; the button keeps focus, so Enter or Space flips again. The choices are browser-local Player preferences.
+// The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison, so
+// they can be flipped while watching the Player. A radio button takes either option in one click; a dropdown test's
+// Next option steps to its following option and wraps around without opening the dropdown, and keeps focus, so Enter or
+// Space steps again. The choices are browser-local Player preferences.
 const titlebar = defineModel<"left" | "overlap">("titlebar", { required: true });
 const photoAccent = defineModel<"photo" | "theme">("photoAccent", { required: true });
 const photoFamily = defineModel<PhotoFamily>("photoFamily", { required: true });
@@ -46,16 +47,6 @@ function setShare(event: Event) {
         <input v-model="titlebar" type="radio" name="titlebar-option" value="overlap" />
         B · Auto-hide, controls right
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Title bar on short screens"
-          @click="titlebar = next(['left', 'overlap'] as const, titlebar)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-accent">
       <legend class="font-medium">Photo accent</legend>
@@ -67,16 +58,6 @@ function setShare(event: Event) {
         <input v-model="photoAccent" type="radio" name="photo-accent-option" value="theme" />
         B · Theme accent
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Photo accent"
-          @click="photoAccent = next(['photo', 'theme'] as const, photoAccent)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-family">
       <legend class="font-medium">Photo colour family</legend>
@@ -126,16 +107,6 @@ function setShare(event: Event) {
         <input v-model="photoFadeTime" type="radio" name="photo-fade-time-option" value="0.3s" />
         B · 0.3 s, like Milovana
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Photo colour fade time"
-          @click="photoFadeTime = next(['0.6s', '0.3s'] as const, photoFadeTime)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-blending">
       <legend class="font-medium">Photo colour blending</legend>
@@ -147,16 +118,6 @@ function setShare(event: Event) {
         <input v-model="photoBlending" type="radio" name="photo-blending-option" value="srgb" />
         B · sRGB, like Milovana
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Photo colour blending"
-          @click="photoBlending = next(['oklab', 'srgb'] as const, photoBlending)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
   </div>
 </template>

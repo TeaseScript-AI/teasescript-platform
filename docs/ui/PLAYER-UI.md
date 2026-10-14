@@ -277,13 +277,15 @@ available in every build to every user. It currently offers:
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
   started, also with the Debug menu off;
 - **Testing · A/B tests** (on by default): adds the **A/B tests** panel to the tools menu, after Debug. It holds only
-  the A/B tests the owner approved, each with its options and a **Next option** button that steps to the following
-  option and wraps around, so a variant can be flipped while the panel stays open beside the playing Player:
+  the A/B tests the owner approved, each with its options, so a variant can be flipped while the panel stays open
+  beside the playing Player. A test shown as radio buttons takes either option in one click; a test shown as a
+  dropdown, today the photo colour family, also has a **Next option** button that steps to the following option and
+  wraps around without opening the dropdown:
   - **Title bar on short screens:** A or B above (default A);
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
   - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
     photo from which a swatch counts as large enough (default 3 %);
-  - **Photo colour fade time:** A, 0.6 s (default), or B, 0.3 s, for the photo colour fade
+  - **Photo colour fade time:** A, 0.6 s, or B, 0.3 s (default), for the photo colour fade
     ([Stage and media presentation](#stage-and-media-presentation));
   - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
 
@@ -646,7 +648,7 @@ Player reuses recent image measurements, also when the photo colour family or it
 colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
 a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
 message bubbles, the buttons, the accent, and the composer. Two A/B tests set the fade, each B as in Milovana's player:
-Photo colour fade time, 0.6 s (A, the default) or 0.3 s (B), and Photo colour blending, in Oklab (A, the default) or in
+Photo colour fade time, 0.6 s (A) or 0.3 s (B, the default), and Photo colour blending, in Oklab (A, the default) or in
 sRGB (B). Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).
 
