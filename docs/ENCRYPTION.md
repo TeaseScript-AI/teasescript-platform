@@ -67,9 +67,9 @@ from relays out of reach. A round's signature stays valid for ever, so a time lo
 
 `player/encryption/lock.ts` writes and reads locks with the browser's WebCrypto: AES-GCM, PBKDF2, SHA-256, and
 randomness. Browsers have no pairing cryptography, so `player/encryption/tlock.ts` uses `@noble/curves` and
-`@noble/hashes`, both 2.4.0 (MIT; curves' only dependency is hashes), and the Player loads it with `import()` only when
-a lock has a time opener; a Player start without encryption does not load it, and a session whose script locks or opens
-loads it at its start, so that locking still works when the Player goes offline later.
+`@noble/hashes`, both 2.4.0 (MIT; curves' only dependency is hashes). The Player loads both modules with `import()`: a
+Player start without encryption loads neither, and a session whose script locks or opens loads them at its start, so
+that locking still works when the Player goes offline later.
 
 - **Need:** the time lock's identity-based encryption and beacon verification need BLS12-381 pairings, hash-to-curve
   (RFC 9380), and field arithmetic.
