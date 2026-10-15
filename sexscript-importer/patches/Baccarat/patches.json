@@ -27,6 +27,13 @@
       "category": "e",
       "reason": "Two author errors. The female bikini top image is chosen when the clothes name contains \"bikini\" and no \"top\", so \"bikini top\" fell through to the bikini bottom image: test that the name contains \"top\". Chemin de fer accepts 0 or fewer decks and saves them under Baccarat.NoDecks, which both scripts read, so every later deal of either script failed on an empty shoe: replace them with six, as Baccarat.groovy does at the same question.",
       "diff": "bikini-decks.diff"
+    },
+    {
+      "id": "deck-count",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): both Baccarat and Chemin de fer take any number of decks the player types and build the shoe from it (52 cards per deck), so a huge number, such as 111,111,111 decks, made Groovy build 5.8 billion cards and TeaseScript stop (TSR037 at Baccarat.tease:302 and Baccarat-chemin-de-fer.tease:145, V2 explorer). The script says the game is usually played with six decks, and real Baccarat uses up to eight: ask again until the number is 1 to 8, in place of the earlier replacement of 0 or fewer by six.",
+      "diff": "deck-count.diff"
     }
   ]
 }

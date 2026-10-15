@@ -34,6 +34,13 @@
       "category": "b",
       "reason": "Counting a hand's points, finding a queen and choosing the dealer's cheat card read a card's rank as the first character of its text, such as \"6S\"[0]. TeaseScript indexes only lists and dicts, and where the card came through a parameter the conversion could not tell it was text, so the play stopped at the first count. The rank is read as substring(0, 1), which is the same one-character text Groovy gave, so every count, test and pick stays the same.",
       "diff": "card-ranks.diff"
+    },
+    {
+      "id": "range-parts",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the pain-level and shock-time settings read a range typed as min-max with strRange.split('-') and then take range[0] and range[1] once every part is a whole number; Java's split drops empty trailing parts, so \"-\" left no part and \"5-\" one, and the setting stopped the script (Groovy failed on the missing part, as TeaseScript does at ShockJack.tease:1238 and :1280, V2 explorer). Evident intent: a range needs two numbers; with fewer, the question comes again, as it does for any other unusable answer.",
+      "diff": "range-parts.diff"
     }
   ]
 }
