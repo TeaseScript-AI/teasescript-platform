@@ -186,7 +186,12 @@ test("invalid random built-in arguments fail with source-associated errors", () 
       "randomInteger(low..=3)",
       "TSR045",
     ],
-    ["say randomInteger(3..3)\nexit", "randomInteger(3..3)", "TSR041"],
+    // So does an empty range whose bounds the compiler cannot know; one it knows is rejected below.
+    [
+      "function draw(low) {\n    return randomInteger(low..3)\n}\nsay draw(3)\nexit",
+      "randomInteger(low..3)",
+      "TSR041",
+    ],
     [
       "function draw(bounds) {\n    return randomInteger(bounds)\n}\nsay draw(6)\nexit",
       "randomInteger(bounds)",
@@ -207,20 +212,24 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     );
   }
 
-  const staticSource = "say randomInteger(1.5..=3)";
-  const staticRange = "1.5..=3";
-  const rejected = compileSource(staticSource);
-  assert.equal(rejected.plan, null);
-  assert.deepEqual(
-    rejected.diagnostics.map(({ code, span }) => [code, span.start.offset, span.end.offset]),
-    [
-      [
-        "TSV010",
-        staticSource.indexOf(staticRange),
-        staticSource.indexOf(staticRange) + staticRange.length,
-      ],
-    ],
-  );
+  for (const [staticRange, message] of [
+    ["1.5..=3", "A statically known randomInteger range must have integer bounds."],
+    // As for a wait or timer range, also when the compiler computes a bound.
+    ["3..3", "A randomInteger range must contain at least one whole number."],
+    ["(2 + 1)..=1", "A randomInteger range must contain at least one whole number."],
+  ]) {
+    const staticSource = `say randomInteger(${staticRange})`;
+    const rejected = compileSource(staticSource);
+    assert.equal(rejected.plan, null);
+    assert.deepEqual(
+      rejected.diagnostics.map(({ code, message, span }) => [
+        code,
+        message,
+        staticSource.slice(span.start.offset, span.end.offset),
+      ]),
+      [["TSV010", message, staticRange]],
+    );
+  }
 });
 
 test("chance at both ends of the percentage range is certain", () => {

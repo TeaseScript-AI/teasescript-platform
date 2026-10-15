@@ -2301,16 +2301,31 @@ class SemanticValidator {
           expression.callee.name === "randomInteger" &&
           expression.arguments.length === 1
         ) {
-          const argument = expression.arguments[0]!.value;
-          if (
-            argument.kind === "rangeExpression" &&
-            (!isKnownInteger(argument.start) || !isKnownInteger(argument.end))
-          ) {
-            this.#report(
-              semanticCode.invalidRangeOperand,
-              "A statically known randomInteger range must have integer bounds.",
-              argument.span,
-            );
+          const written = expression.arguments[0]!.value;
+          const argument = unwrapParentheses(written);
+          if (argument.kind === "rangeExpression") {
+            const start = staticNumber(argument.start);
+            const end = staticNumber(argument.end);
+            if (!isKnownInteger(argument.start) || !isKnownInteger(argument.end)) {
+              // The type check names the rounding fix for a range in parentheses.
+              if (written === argument)
+                this.#report(
+                  semanticCode.invalidRangeOperand,
+                  "A statically known randomInteger range must have integer bounds.",
+                  argument.span,
+                );
+            } else if (
+              start !== undefined &&
+              end !== undefined &&
+              (argument.inclusive ? end < start : end <= start)
+            ) {
+              // As for a wait or timer range (`#validateDelayDuration`); bounds it cannot see fail at runtime (TSR041).
+              this.#report(
+                semanticCode.invalidRangeOperand,
+                "A randomInteger range must contain at least one whole number.",
+                argument.span,
+              );
+            }
           }
         }
         return;
