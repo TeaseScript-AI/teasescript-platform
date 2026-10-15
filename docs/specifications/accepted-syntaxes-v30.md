@@ -520,7 +520,7 @@ Expression precedence from strongest to weakest:
 Postfix operations such as property access, indexing, and function calls associate from left to right:
 
 ```text
-account.toys[0].name
+items[0].name
 ```
 
 Arithmetic operators and `otherwise` associate from left to right within the same precedence level:
