@@ -6484,7 +6484,9 @@ class TypeChecker {
     if (method === "toList") {
       this.#checkWholeRangeBounds(callee.object, "A toList range bound");
       this.#checkRangeListLength(callee.object);
-      this.#warnEmptyRange(callee.object, "toList() returns []");
+      // A call with arguments is an error, which says enough.
+      if (expression.arguments.length === 0)
+        this.#warnEmptyRange(callee.object, "toList() returns []");
     }
     // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
     // another member has the method, the runtime checks a speaker.

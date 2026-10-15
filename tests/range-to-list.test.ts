@@ -115,6 +115,10 @@ test("toList gives [] for a range that contains no numbers, with a warning when 
     "[]",
     "[]",
   ]);
+  // A call with an argument is an error, without the warning on top.
+  assert.deepEqual(diagnostics("say (4..1).toList(1)\nexit"), [
+    ["TSV020", "toList() takes no arguments, received 1.", "(4..1).toList(1)"],
+  ]);
 });
 
 test("toList needs whole-number bounds, checked when the script compiles where it can and otherwise when it runs", () => {
