@@ -10400,13 +10400,19 @@ function operatorMessage(
   if (joined !== undefined) return joined;
   const angle = (type: StaticType): boolean => isScalar(type, "angle");
   if (angle(left!) || angle(right!)) {
+    const binary = expression.kind === "binaryExpression" ? expression : null;
+    // A unit binds tighter than an operator, so `pi / 6 rad` divides a number by an angle.
+    const grouped = binary !== null && isNumeric(left!) ? groupedAngleText(binary) : null;
+    const group =
+      grouped === null ? "" : ` Or group the numbers before the unit, as in '${grouped}'.`;
     if (
       (operator === "+" || operator === "-") &&
-      expression.kind === "binaryExpression" &&
+      binary !== null &&
       (isNumeric(left!) || isNumeric(right!))
-    ) {
-      return `An angle and a number cannot be combined with '${operator}'. ${unitFix(isNumeric(left!) ? expression.left : expression.right, "deg")}`;
-    }
+    )
+      return `An angle and a number cannot be combined with '${operator}'. ${unitFix(isNumeric(left!) ? binary.left : binary.right, angleUnitOf(isNumeric(left!) ? binary.right : binary.left))}${group}`;
+    if (grouped !== null)
+      return `'${operator}' cannot combine a number and an angle. Group the numbers before the unit, as in '${grouped}'.`;
     return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}. ${ANGLE_ARITHMETIC_ROUTE}`;
   }
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
@@ -10608,9 +10614,30 @@ function timeUnitFix(
     : `Give the ${range ? "range" : "number"} a unit, such as '${written} ${form}'.`;
 }
 
-/** Give a number a unit: `'5 s'`, `'count s'`, or `'(count + 1) s'`, or with `deg` an angle unit, as in `'90 deg'`. */
-function unitFix(number: Expression | null, unit: "s" | "deg" = "s"): string {
-  const form = number === null ? (unit === "s" ? "5 s" : "90 deg") : unitForm(number, unit);
+/**
+ * `n op a unit` as the author likely meant it, `(n op a) unit`, when the right operand is an angle with its unit written
+ * directly after it; `null` otherwise, or when the source is too long to show.
+ */
+function groupedAngleText(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+): string | null {
+  const right = expression.right;
+  if (right.kind !== "angleExpression") return null;
+  const left = expressionText(expression.left);
+  const amount = expressionText(right.operand);
+  return left === null || amount === null
+    ? null
+    : `(${left} ${expression.operator} ${amount}) ${right.unit}`;
+}
+
+/** The angle unit written on an angle operand, or `deg` when none is written there. */
+function angleUnitOf(operand: Expression): "deg" | "rad" {
+  return operand.kind === "angleExpression" ? operand.unit : "deg";
+}
+
+/** Give a number a unit: `'5 s'`, `'count s'`, or `'(count + 1) s'`, or an angle unit, as in `'90 deg'`. */
+function unitFix(number: Expression | null, unit: "s" | "deg" | "rad" = "s"): string {
+  const form = number === null ? (unit === "s" ? "5 s" : `90 ${unit}`) : unitForm(number, unit);
   return form === null
     ? "Put the expression in parentheses with a unit after them."
     : `Give the number a unit, such as '${form}'.`;

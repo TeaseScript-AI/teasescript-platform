@@ -230,6 +230,16 @@ test("a plain number where an angle is needed, and other combinations, are error
       "90 deg + 3",
     ],
     [
+      "let s = sin(pi / 6 rad)",
+      "'/' cannot combine a number and an angle. Group the numbers before the unit, as in '(pi / 6) rad'.",
+      "pi / 6 rad",
+    ],
+    [
+      "let a = 3 - 90 deg",
+      "An angle and a number cannot be combined with '-'. Give the number a unit, such as '3 deg'. Or group the numbers before the unit, as in '(3 - 90) deg'.",
+      "3 - 90 deg",
+    ],
+    [
       "let a = 90 deg * 2 deg",
       "'*' cannot combine an angle and an angle. Add or subtract two angles, or multiply or divide an angle by a number.",
       "90 deg * 2 deg",
