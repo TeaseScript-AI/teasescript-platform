@@ -81,10 +81,7 @@ spell()
 // loadInteger0 over loadIntegerVal.
 function loadOr(key, fallbackValue) {
   let stored = sexscriptLegacyLoadInteger(key)
-  if stored == null {
-    return fallbackValue
-  }
-  return stored
+  return stored otherwise fallbackValue
 }
 function loadSet(key, fallbackValue2) {
   let value = loadOr(key, fallbackValue2)

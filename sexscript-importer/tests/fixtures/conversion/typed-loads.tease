@@ -9,11 +9,7 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
   return sexscriptLegacyValue(toInteger(value))
 }
 function sexscriptLegacyLoadIntegerOr(key, whenMissing: integer): integer {
-  let value = load key, default: null
-  if value == null {
-    return whenMissing
-  }
-  return toInteger(value)
+  return toInteger(load(key, default: null) otherwise whenMissing)
 }
 function sexscriptLegacyLoadFloat(key, whenMissing = null) {
   let value = load key, default: null
@@ -85,11 +81,7 @@ say prose "Picture ${picture}", instant
 // A read of the script's own with a default, which a whole-number default makes a whole number.
 function loadIntegerVal(keyword, defaultValue) {
   let stored = sexscriptLegacyLoadInteger(keyword)
-  if stored == null {
-    return defaultValue
-  } else {
-    return stored
-  }
+  return stored otherwise defaultValue
 }
 let squares = null
 if squares == null {
@@ -102,11 +94,7 @@ let defaultNumber = 1.0
 say prose "Decimal default ${loadIntegerVal("game.missing", defaultNumber)}", instant
 function loadAsText(keyword, defaultValue) {
   let stored: string? = sexscriptLegacyText(sexscriptLegacyLoadInteger(keyword))
-  if stored == null {
-    return defaultValue
-  } else {
-    return stored
-  }
+  return stored otherwise defaultValue
 }
 say prose "Text ${loadAsText("game.squares", "none")}", instant
 exit

@@ -9,7 +9,8 @@ import { mapChildren } from "./variable-types.ts";
  * block may run): the test read the null that `e` gave, where `d` now runs before `x` changes; a storage read keeps
  * its own assignment, which gives it the variable's declared type (V30 §25). A test whose default reads storage stays as
  * it is (hasLoad). Elsewhere the test becomes `x = x otherwise d`, also after a `let`, whose variable's type comes from
- * its first value, which `otherwise` would make one without null.
+ * its first value, which `otherwise` would make one without null. A test that returns the default where `x` is null and
+ * `x` itself otherwise, `if x == null { return d } return x`, also with `else`, returns `x otherwise d`.
  */
 export function withNullDefaults(
   statements: IrStatement[],
@@ -24,6 +25,12 @@ export function withNullDefaults(
         continue;
       }
       const item = withNestedBlocks(original, block);
+      const returned = nullReturn(item, result.at(-1));
+      if (returned !== null) {
+        if (item.kind === "return") result.pop();
+        result.push(returned);
+        continue;
+      }
       const found = nullDefault(item);
       if (found === null) {
         result.push(item);
@@ -85,6 +92,36 @@ function nullDefault(statement: IrStatement): { path: IrExpression; value: IrExp
   return tested !== null && isPath(tested) && samePath(tested, set.target)
     ? { path: set.target, value: set.value }
     : null;
+}
+
+/**
+ * `return path otherwise value` for `if path == null { return value } else { return path }`, or for `return path` after
+ * `if path == null { return value }`, the statement before it; null for another statement.
+ */
+function nullReturn(statement: IrStatement, before: IrStatement | undefined): IrStatement | null {
+  const test = statement.kind === "return" ? before : statement;
+  if (test?.kind !== "if" || test.then.length !== 1 || test.condition.kind !== "binary")
+    return null;
+  const [fallback] = test.then;
+  const otherReturn =
+    statement.kind === "return" ? (test.else.length === 0 ? statement : undefined) : test.else[0];
+  if (
+    fallback?.kind !== "return" ||
+    fallback.value === null ||
+    otherReturn?.kind !== "return" ||
+    otherReturn.value === null ||
+    (statement.kind !== "return" && test.else.length !== 1) ||
+    test.condition.operator !== "=="
+  )
+    return null;
+  const { left, right } = test.condition;
+  const tested = isNull(right) ? left : isNull(left) ? right : null;
+  if (tested === null || !isPath(tested) || !samePath(tested, otherReturn.value)) return null;
+  // A null default leaves the value as it is.
+  const value = isNull(fallback.value)
+    ? otherReturn.value
+    : otherwise(otherReturn.value, fallback.value);
+  return { kind: "return", value, span: test.span };
 }
 
 function isNull(value: IrExpression): boolean {
