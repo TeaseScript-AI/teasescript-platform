@@ -1,0 +1,235 @@
+{
+  "reason": "The twins Julie (straight hair, the mean one) and Laura (curly hair, the sweet one) take turns. Julie introduces herself and speaks the opening; after each coin flip the heads (treat) branch is Laura's and the tails (punishment) branch is Julie's, as the opening rule at lines 132-134 says; the in-between sections spoken as \"we\" are both.",
+  "speakers": {
+    "julie": {
+      "firstName": "Julie"
+    },
+    "laura": {
+      "firstName": "Laura"
+    },
+    "twins": {
+      "displayName": "Julie and Laura"
+    }
+  },
+  "default": "julie",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Night and Day.groovy:22",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:150",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:166",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:229",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:249",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:292",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:308",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:332",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:348",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:369",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:401",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:419",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:497",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:515",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:546",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:570",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:617",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:631",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:664",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:678",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:701",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:715",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:744",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:780",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:816",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:836",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:859",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:876",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:900",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:917",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:938",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:993",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1005",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1026",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1038",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1062",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1092",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1108",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1118",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1169",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1271",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1290",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1310",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1324",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1352",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1372",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1388",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1412",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1445",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1472",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1592",
+      "speaker": "julie"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1619",
+      "speaker": "laura"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1651",
+      "speaker": "twins"
+    },
+    {
+      "at": "scripts/Night and Day.groovy:1654",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,484 @@
+{
+  "reason": "A hub of Banjo's spanking games. In nine games one opponent the player picks from a menu (variable opponent: Gemma, Sandy, Khyanna, Raven, Nicole, Gracie, Melanie, Ann, Valentina, Kitty, Bryci, Tyler, Tere, Kiara; or The White Queen, Nicole, Bryci, Kiara) speaks every game message from her intro on; the hub, implement setup, opponent menu, config menus, core-file check and 'Return to Game Hub?' have no speaker. Penalty Box is a TV game show: the host (Miss Kitty) speaks, and the AI contestants (opponent1/opponent2, current one in opponent) answer with short reactions.",
+  "speakers": {
+    "opponent": {
+      "displayName": "Opponent"
+    },
+    "host": {
+      "title": "Miss",
+      "firstName": "Kitty"
+    },
+    "contestant": {
+      "displayName": "Contestant"
+    },
+    "contestant1": {
+      "displayName": "Contestant 1"
+    },
+    "contestant2": {
+      "displayName": "Contestant 2"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Banjo/gamehub.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/system/implements.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/fourheroes.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/fourheroes.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/fourheroes.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/fourheroes.groovy:827",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/fourheroes.groovy:1473",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/gameofchance_ee.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/gameofchance_ee.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/gameofchance_ee.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/gameofchance_ee.groovy:653",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/gameofchance_ee.groovy:1055",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/guessthenumber_ee.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/guessthenumber_ee.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/guessthenumber_ee.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/guessthenumber_ee.groovy:441",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/guessthenumber_ee.groovy:1609",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/guessthenumber_ee.groovy:showLivesOpponent",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/guessthenumber_ee.groovy:1327",
+      "speaker": "opponent"
+    },
+    {
+      "entry": "scripts/Banjo/hitorstay_ee.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/hitorstay_ee.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/hitorstay_ee.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/hitorstay_ee.groovy:601",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/hitorstay_ee.groovy:1046",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/hundredpoints_ee.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/hundredpoints_ee.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/hundredpoints_ee.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/hundredpoints_ee.groovy:688",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/hundredpoints_ee.groovy:1221",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/matchem.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/matchem.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/matchem.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/matchem.groovy:689",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/matchem.groovy:1657",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/rockpaperscissors.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/rockpaperscissors.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/rockpaperscissors.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/rockpaperscissors.groovy:597",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/rockpaperscissors.groovy:1063",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/spankblackjack.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/spankblackjack.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/spankblackjack.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/spankblackjack.groovy:504",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/spankblackjack.groovy:1130",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/wheelofdiscipline.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/wheelofdiscipline.groovy:intro",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Banjo/wheelofdiscipline.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/wheelofdiscipline.groovy:736",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/wheelofdiscipline.groovy:1664",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/penaltybox.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:intro",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:explainRules",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:showBoard",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:chooseSpanks",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:chooseSpanksP2",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:opponentSpanks",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:chooseImplement",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:chooseImplementP2",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:opponentImplement",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:getReward",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:getRewardP2",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:opponentReward",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:rewardOffer",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:rewardOfferP2",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:opponentOffer",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:checkScores",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:finale",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:getSpanked",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:getSpankedP2",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:opponentSpanked",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/penaltybox.groovy:setOpponents",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:578",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:583",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:590",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:643",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:656",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:662",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:704",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:764",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:771",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:785",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:366",
+      "speaker": "contestant"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:920",
+      "speaker": "contestant1"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:925",
+      "speaker": "contestant2"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:930",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:941",
+      "speaker": "contestant1"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:946",
+      "speaker": "contestant2"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:950",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:955",
+      "speaker": "contestant1"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:960",
+      "speaker": "contestant2"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:966",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:980",
+      "speaker": "contestant1"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:983",
+      "speaker": "contestant2"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:986",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:1006",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:1194",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:1248",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/penaltybox.groovy:1255",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "opponent",
+      "files": [
+        "scripts/Banjo/fourheroes.groovy",
+        "scripts/Banjo/gameofchance_ee.groovy",
+        "scripts/Banjo/hitorstay_ee.groovy",
+        "scripts/Banjo/hundredpoints_ee.groovy",
+        "scripts/Banjo/matchem.groovy",
+        "scripts/Banjo/rockpaperscissors.groovy",
+        "scripts/Banjo/wheelofdiscipline.groovy"
+      ],
+      "speaker": "opponent",
+      "template": "{}"
+    },
+    {
+      "variable": "opponent",
+      "files": [
+        "scripts/Banjo/guessthenumber_ee.groovy",
+        "scripts/Banjo/spankblackjack.groovy"
+      ],
+      "speaker": "opponent",
+      "values": {
+        "White Queen": "The White Queen",
+        "Nicole": "Nicole",
+        "Bryci": "Bryci",
+        "Kiara": "Kiara"
+      },
+      "otherwise": "Opponent"
+    },
+    {
+      "variable": "host",
+      "files": [
+        "scripts/Banjo/penaltybox.groovy"
+      ],
+      "speaker": "host",
+      "values": {
+        "Kitty": "Miss Kitty",
+        "Kiara": "Mistress Kiara"
+      },
+      "otherwise": "Host"
+    },
+    {
+      "variable": "opponent",
+      "files": [
+        "scripts/Banjo/penaltybox.groovy"
+      ],
+      "speaker": "contestant",
+      "template": "{}"
+    },
+    {
+      "variable": "opponent1",
+      "files": [
+        "scripts/Banjo/penaltybox.groovy"
+      ],
+      "speaker": "contestant1",
+      "template": "{}"
+    },
+    {
+      "variable": "opponent2",
+      "files": [
+        "scripts/Banjo/penaltybox.groovy"
+      ],
+      "speaker": "contestant2",
+      "template": "{}"
+    }
+  ]
+}

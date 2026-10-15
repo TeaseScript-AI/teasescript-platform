@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Melanie (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Melanie"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

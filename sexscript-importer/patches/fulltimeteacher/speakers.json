@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Miss Martin (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Miss",
+      "lastName": "Martin"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

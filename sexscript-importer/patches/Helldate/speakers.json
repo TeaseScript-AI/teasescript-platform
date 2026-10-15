@@ -1,0 +1,225 @@
+{
+  "reason": "A narrated story in five scripts: the narrator (no speaker) tells what happens, and the succubus Mistress Lilith speaks inside it, mostly in quotation marks (parts 1, 2, 4 and the German part 1) and in her own unquoted voice throughout part 3; a demon priest speaks the wedding vows in part 4. No prefix, variable or picture marks the speaker, so each change is an at switch from the text.",
+  "speakers": {
+    "lilith": {
+      "title": "Mistress",
+      "firstName": "Lilith"
+    },
+    "demon": {
+      "displayName": "Demon"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/helldate.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/helldate.groovy:51",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate.groovy:73",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate.groovy:124",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate.groovy:224",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate.groovy:231",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate.groovy:258",
+      "speaker": "narrator"
+    },
+    {
+      "entry": "scripts/helldate_de.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:51",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:73",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:124",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:224",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:231",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate_de.groovy:258",
+      "speaker": "narrator"
+    },
+    {
+      "entry": "scripts/helldate2.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/helldate2.groovy:26",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate2.groovy:33",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate2.groovy:54",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate2.groovy:82",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate2.groovy:116",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate2.groovy:168",
+      "speaker": "narrator"
+    },
+    {
+      "entry": "scripts/helldate3.groovy",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:22",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate3.groovy:29",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:36",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate3.groovy:50",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:79",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:79",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:91",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:91",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:112",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:112",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:119",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:119",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:151",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:151",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:158",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:158",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:165",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/helldate3.groovy:165",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate3.groovy:362",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate3.groovy:368",
+      "speaker": "lilith"
+    },
+    {
+      "entry": "scripts/helldate4.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/helldate4.groovy:145",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate4.groovy:152",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate4.groovy:159",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate4.groovy:172",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/helldate4.groovy:201",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate4.groovy:208",
+      "speaker": "lilith"
+    },
+    {
+      "at": "scripts/helldate4.groovy:263",
+      "speaker": "demon"
+    },
+    {
+      "at": "scripts/helldate4.groovy:300",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:185",
+      "speaker": "player"
+    }
+  ],
+  "names": []
+}

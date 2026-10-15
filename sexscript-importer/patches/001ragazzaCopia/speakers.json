@@ -1,0 +1,208 @@
+{
+  "reason": "The player is Valeria (all her words are buttons). Her boyfriend Boscy and the visitor Elisa talk in turns; every one of Elisa's recorded lines carries a commented-out playSound voice file (01-57), Boscy's lines never do. Switches follow that marker line by line.",
+  "speakers": {
+    "boscy": {
+      "firstName": "Boscy"
+    },
+    "elisa": {
+      "firstName": "Elisa"
+    }
+  },
+  "default": "boscy",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:26",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:74",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:78",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:83",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:134",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:147",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:151",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:161",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:175",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:235",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:242",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:279",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:286",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:391",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:400",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:415",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:420",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:425",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:429",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:434",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:446",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:451",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:460",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:470",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:474",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:479",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:483",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:495",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:499",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:504",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:508",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:532",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:538",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:543",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:558",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:563",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:567",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:572",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:588",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:593",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:597",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:602",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:614",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:623",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:628",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:633",
+      "speaker": "boscy"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:637",
+      "speaker": "elisa"
+    },
+    {
+      "at": "scripts/Esterna/001ragazzaCopia.groovy:659",
+      "speaker": "boscy"
+    }
+  ],
+  "names": []
+}

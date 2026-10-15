@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Jennifer (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Jennifer"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

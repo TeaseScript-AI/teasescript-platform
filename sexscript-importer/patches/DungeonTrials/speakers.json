@@ -1,0 +1,7314 @@
+{
+  "reason": "A narrated dungeon adventure in the second person with -instructions- in the narrator's voice. Each creature or person speaks in double quotes inside the narration of their own scene; a message holding a character's direct speech is that character's, every other message the narrator's; menus, info and save screens are system. No code signal marks the speaker, so every character message has its own at/after switch (generated from a per-message table).",
+  "speakers": {
+    "priest": {
+      "displayName": "Priest"
+    },
+    "soldier": {
+      "displayName": "Soldier"
+    },
+    "guard": {
+      "displayName": "Guard"
+    },
+    "elaina": {
+      "firstName": "Elaina"
+    },
+    "woman": {
+      "displayName": "Woman"
+    },
+    "guards": {
+      "displayName": "Guards"
+    },
+    "ghoul": {
+      "displayName": "Ghoul"
+    },
+    "ogre": {
+      "displayName": "Ogre"
+    },
+    "executioner": {
+      "displayName": "Executioner"
+    },
+    "catwoman": {
+      "displayName": "Cat Woman"
+    },
+    "vampire": {
+      "displayName": "Vampire"
+    },
+    "goblinking": {
+      "displayName": "Goblin King"
+    },
+    "goblin": {
+      "displayName": "Female Goblin"
+    },
+    "elf": {
+      "displayName": "Elf"
+    },
+    "amazon": {
+      "displayName": "Amazon"
+    },
+    "kareen": {
+      "firstName": "Kareen"
+    },
+    "lady": {
+      "displayName": "Lady of the Lake"
+    },
+    "nymph": {
+      "displayName": "Nymph"
+    },
+    "mermaid": {
+      "displayName": "Mermaid"
+    },
+    "dragon": {
+      "displayName": "Dragon"
+    }
+  },
+  "default": "narrator",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/DungeonTrials.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:531",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:531",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:534",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:534",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:681",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:684",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:684",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:689",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:689",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:691",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:691",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:694",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:694",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:697",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:697",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:709",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:726",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:726",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:727",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:727",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:731",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:733",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:733",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:735",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:735",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:737",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:768",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:768",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:770",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:775",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:775",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:786",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:790",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:790",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:796",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:822",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:822",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:825",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:828",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:828",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:832",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:832",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:835",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:835",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:837",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:840",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:840",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:844",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:849",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:849",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:853",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:853",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:857",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:866",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:866",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:869",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:872",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:872",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:874",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:878",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:878",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:880",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1402",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1402",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1404",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1404",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1406",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1406",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1408",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1408",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1415",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1855",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1855",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1857",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1871",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1871",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1874",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1896",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1896",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1899",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1901",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1901",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1904",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1904",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1909",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1923",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1923",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1930",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1930",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1932",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1940",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1940",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1951",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1951",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1960",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1960",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1967",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1977",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1977",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1984",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1989",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1989",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1992",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1997",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:1997",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:1999",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2005",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2005",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2007",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2024",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2024",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2027",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2037",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2037",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2040",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2044",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2044",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2047",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2060",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2060",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2063",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2063",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2069",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2088",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2088",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2090",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2090",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2092",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2092",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2094",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2102",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2102",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2106",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2128",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2128",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2140",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2142",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2142",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2144",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2170",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2170",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2173",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2194",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2194",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2200",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2204",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2204",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2207",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2216",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2216",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2222",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2226",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2226",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2231",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2319",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2319",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2322",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2332",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2332",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2334",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2369",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2369",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2372",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2372",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2375",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2389",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2389",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2391",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2430",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2430",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2433",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2433",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2436",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2444",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2444",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2448",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2448",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2451",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2474",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2474",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2477",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2498",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2498",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2505",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2532",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2532",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2540",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2568",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2568",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2576",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2586",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2586",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2594",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2605",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2605",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2608",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2613",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2613",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2618",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2630",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2630",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2633",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2635",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2635",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2640",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2654",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2654",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2657",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2665",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2665",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2667",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2667",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2669",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2682",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2682",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2684",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2704",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2704",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2706",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2713",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2713",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2716",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2722",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2722",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2725",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2729",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2729",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2732",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2732",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2734",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2746",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2746",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2749",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2749",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2753",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2753",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2758",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2767",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2767",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2772",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2802",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2802",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2805",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2834",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2834",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2836",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2871",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2871",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2873",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2942",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2942",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2945",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:2945",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:2947",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3403",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3403",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3405",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3425",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3425",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3427",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3427",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3430",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3452",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3452",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3454",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3540",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3540",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3544",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3595",
+      "speaker": "goblinking"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3595",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3597",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3705",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3705",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3708",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3708",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3718",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3718",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3728",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3728",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3730",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3738",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3738",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3740",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3782",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3782",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3785",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3788",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3788",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3795",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3799",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3799",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3802",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3810",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3810",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3812",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3814",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3814",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3816",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3818",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3818",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3821",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3821",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3823",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3823",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3825",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3825",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3828",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3828",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3832",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3832",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3837",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3837",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3840",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3840",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3842",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3860",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3860",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3863",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3863",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3865",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3872",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3872",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3874",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3874",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3876",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3878",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3878",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3880",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3880",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3889",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3889",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3892",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3903",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3903",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3906",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3912",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3912",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3917",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3920",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3920",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3922",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3929",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3929",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3938",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3938",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3942",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3942",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3945",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3993",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:3993",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:3995",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4006",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4006",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4009",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4009",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4012",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4012",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4031",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4031",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4038",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4038",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4056",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4131",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4131",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4134",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4134",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4137",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4140",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4140",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4145",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4147",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4147",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4150",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4150",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4154",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4154",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4159",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4159",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4166",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4179",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4179",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4184",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4205",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4205",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4208",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4208",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4211",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4214",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4214",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4216",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4216",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4219",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4219",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4223",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4240",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4240",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4242",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4242",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4244",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4244",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4248",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4248",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4250",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4250",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4257",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4257",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4260",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4260",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4262",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4262",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4266",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4270",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4270",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4274",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4274",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4279",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4279",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4280",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4280",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4284",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4288",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4288",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4290",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4290",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4293",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4297",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4297",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4299",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4303",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4303",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4308",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4315",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4315",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4317",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4317",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4320",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4322",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4322",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4327",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4328",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4328",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4330",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4346",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4346",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4348",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4348",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4350",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4350",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4355",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4355",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4357",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4357",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4363",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4371",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4371",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4375",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4391",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4391",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4397",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4992",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4992",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4995",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:4998",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:4998",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5001",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5001",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5004",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5004",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5006",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5006",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5008",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5008",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5011",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5019",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5019",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5022",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5025",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5025",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5036",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5036",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5047",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5047",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5057",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5057",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5060",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5060",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5063",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5063",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5068",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5068",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5072",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5072",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5075",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5136",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5136",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5138",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5138",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5141",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5144",
+      "speaker": "nymph"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5144",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5147",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5147",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5150",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5160",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5160",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5165",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5186",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5186",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5188",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5188",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5191",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5237",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5237",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5240",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5240",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5243",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5243",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5246",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5246",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5249",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5259",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5259",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5262",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5262",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5265",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5265",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5270",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5270",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5273",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5275",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5275",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5290",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5298",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5298",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5300",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5485",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5485",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5488",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5488",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5490",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5490",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5493",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5493",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5498",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5498",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5500",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5514",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5514",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5516",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5516",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5518",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5527",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5527",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5529",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5539",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5539",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5541",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5541",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5550",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5550",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5552",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5552",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5556",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5567",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5567",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5570",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5573",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5573",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5588",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5591",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5591",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5593",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5593",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5595",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5601",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5601",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5602",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5602",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5603",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5603",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5606",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5615",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5615",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5616",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5616",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5617",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5617",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5620",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5631",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5631",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5633",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5635",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5635",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5638",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5638",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5643",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5654",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5654",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5661",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5661",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5663",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5682",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5682",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5684",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5692",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5692",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5695",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5695",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5697",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5710",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5710",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5714",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5777",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5777",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5782",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5878",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5878",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5883",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5895",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5895",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5897",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5974",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:5974",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5980",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6044",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6044",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6046",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6079",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6079",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6081",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6108",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6108",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6112",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6139",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6139",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6141",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6141",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6144",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6148",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6148",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6151",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6196",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6196",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6291",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6308",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6308",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6310",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6310",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6314",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6316",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6316",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6320",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6322",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6322",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6324",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6324",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6328",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6328",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6330",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6335",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6335",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6340",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6348",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6348",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6350",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6370",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6370",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6375",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6378",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6378",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6381",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6381",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6384",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6384",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6386",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6386",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6389",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6389",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6391",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6401",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6401",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6404",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6407",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6407",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6409",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6409",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6413",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6413",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6415",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6415",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6418",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6430",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6430",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6437",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6442",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6442",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6443",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6443",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6446",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6463",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6463",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6477",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6536",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6536",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6573",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6573",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6576",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6580",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6580",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6585",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6585",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6589",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6593",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6593",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6598",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6598",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6600",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6632",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6632",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6635",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6635",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6640",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6640",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6642",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6644",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6644",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6646",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6646",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6651",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6651",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6653",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6667",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6667",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6669",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6669",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6671",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6673",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6673",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6674",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6674",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6675",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6675",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6683",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6683",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6688",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6688",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6692",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6696",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6696",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6704",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6704",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6708",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6708",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6727",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6736",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6736",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6738",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6738",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6742",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6742",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6745",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6745",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6749",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6749",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6751",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6751",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6754",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6754",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6756",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6756",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6759",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6759",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6763",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6763",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6767",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6767",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6770",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6770",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6772",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6772",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6779",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6779",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6785",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6785",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6796",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6796",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6804",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6804",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6812",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6812",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6818",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6818",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6824",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6824",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6829",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6829",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6833",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6833",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6835",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6835",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6840",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6840",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6845",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6845",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6952",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6952",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6954",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6954",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6956",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6956",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6964",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6964",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6972",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6972",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6980",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6980",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:6999",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:6999",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7019",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7019",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7021",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7021",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7043",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7043",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7051",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7051",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7053",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7053",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7055",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7055",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7057",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7057",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7062",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7062",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7066",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7066",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7071",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7071",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7073",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7073",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7083",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7083",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7086",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7086",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7089",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7089",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7093",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7093",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7096",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7096",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7101",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7101",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7112",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7112",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7120",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7120",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7124",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7124",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7126",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7126",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7131",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7131",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7132",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7132",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7141",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7141",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7146",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7146",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7150",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7150",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7153",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7153",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7158",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7158",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7160",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7160",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7163",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7163",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7164",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7164",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7166",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7166",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7169",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7169",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7171",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7171",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7173",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7173",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7175",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7175",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7177",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7177",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7180",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7180",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7182",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7182",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7186",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7186",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7190",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7190",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7194",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7194",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7204",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7204",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7207",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7207",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7209",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7209",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7211",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7211",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7213",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7213",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7216",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7216",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7218",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7218",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7220",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7220",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7222",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7222",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7233",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7233",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7238",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7238",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7242",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7242",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7248",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7248",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7256",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7256",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7259",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7259",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7262",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7262",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7264",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7264",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7266",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7266",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7268",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7268",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7277",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7277",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7305",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7305",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7307",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7307",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7310",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7310",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7389",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7389",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7392",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7392",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7393",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7393",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7401",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7401",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7410",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7410",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7411",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7411",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7418",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7418",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7427",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7427",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7430",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7430",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7498",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7498",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:7511",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrials.groovy:7511",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5520",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5532",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5543",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5560",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrials.groovy:5575",
+      "speaker": "dragon"
+    },
+    {
+      "entry": "scripts/DungeonTrialsTrailer.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:531",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:531",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:534",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:534",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:673",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:673",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:676",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:676",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:681",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:684",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:684",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:687",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:687",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:699",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:715",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:715",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:716",
+      "speaker": "soldier"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:716",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:725",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:774",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:774",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:780",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:805",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:805",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:808",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:811",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:811",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:815",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:815",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:818",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:818",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:820",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:823",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:823",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:827",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:832",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:832",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:836",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:836",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:840",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:848",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:848",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:851",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:854",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:854",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:856",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:860",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:860",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:862",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1373",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1373",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1375",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1375",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1377",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1377",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1379",
+      "speaker": "woman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1379",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1386",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1884",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1884",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1891",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1891",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1893",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1910",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1910",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1920",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1935",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1935",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1942",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1947",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1947",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1950",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1990",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1990",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1993",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:1997",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:1997",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2000",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2014",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2014",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2020",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2106",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2106",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2108",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2128",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2128",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2133",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2137",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2137",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2140",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2149",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2149",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2154",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2158",
+      "speaker": "guards"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2158",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2163",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2251",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2251",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2254",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2264",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2264",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2266",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2301",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2301",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2304",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2304",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2307",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2321",
+      "speaker": "ghoul"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2321",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2323",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2362",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2362",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2365",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2365",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2368",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2373",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2373",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2377",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2478",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2478",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2486",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2493",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2493",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2501",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2509",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2509",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2512",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2517",
+      "speaker": "ogre"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2517",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2522",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2533",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2533",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2539",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2597",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2597",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2600",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2626",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2626",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2629",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2629",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2633",
+      "speaker": "executioner"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2633",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2638",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2680",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2680",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2683",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2712",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2712",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2714",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2748",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2748",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2750",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2819",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2819",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2822",
+      "speaker": "catwoman"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:2822",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:2824",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3269",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3269",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3271",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3316",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3316",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3318",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3398",
+      "speaker": "vampire"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3398",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3402",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3539",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3539",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3542",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3542",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3552",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3552",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3562",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3562",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3564",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3572",
+      "speaker": "goblin"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3572",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3574",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3616",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3616",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3619",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3622",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3622",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3629",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3633",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3633",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3636",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3647",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3647",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3649",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3649",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3651",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3651",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3654",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3654",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3662",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3662",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3664",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3695",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3695",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3697",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3697",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3705",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3705",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3708",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3719",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3719",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3722",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3728",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3728",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3731",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3740",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3740",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3743",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3743",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3752",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3752",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3755",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3755",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3758",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3806",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3806",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3808",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3819",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3819",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3822",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3822",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3825",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3825",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3835",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3835",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3842",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3842",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3860",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3935",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3935",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3938",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3944",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3944",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3949",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3951",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3951",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3954",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3954",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3958",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3958",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3963",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3963",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3970",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3983",
+      "speaker": "elf"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:3983",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:3988",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4009",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4009",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4012",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4012",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4014",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4018",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4018",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4022",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4039",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4039",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4041",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4041",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4043",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4043",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4047",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4047",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4049",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4055",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4055",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4058",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4058",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4060",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4060",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4064",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4068",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4068",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4072",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4072",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4076",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4084",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4084",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4086",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4102",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4102",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4104",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4104",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4106",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4106",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4111",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4111",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4113",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4113",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4119",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4127",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4127",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4131",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4147",
+      "speaker": "amazon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4147",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4153",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4748",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4748",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4751",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4754",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4754",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4757",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4757",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4760",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4760",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4762",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4762",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4764",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4764",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4767",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4775",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4775",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4778",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4781",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4781",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4792",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4792",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4803",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4803",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4813",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4813",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4816",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4816",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4821",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4821",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4826",
+      "speaker": "kareen"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4826",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4829",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4890",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4890",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4892",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4892",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4895",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4898",
+      "speaker": "nymph"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4898",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4901",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4901",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4904",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4914",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4914",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4919",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4940",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4940",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4942",
+      "speaker": "lady"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4942",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4945",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4986",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4986",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4989",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4989",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4992",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4992",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4995",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:4995",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:4998",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5008",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5008",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5011",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5011",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5014",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5014",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5017",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5017",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5020",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5033",
+      "speaker": "mermaid"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5033",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5035",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5216",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5216",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5219",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5219",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5221",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5221",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5224",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5224",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5229",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5229",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5231",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5245",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5245",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5247",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5247",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5249",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5258",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5258",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5260",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5270",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5270",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5272",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5272",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5281",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5281",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5283",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5283",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5287",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5298",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5298",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5301",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5304",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5304",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5319",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5322",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5322",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5324",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5349",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5349",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5351",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5353",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5353",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5356",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5356",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5361",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5372",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5372",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5379",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5379",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5381",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5400",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5400",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5402",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5410",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5410",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5413",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5413",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5415",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5428",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5428",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5432",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5495",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5495",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5500",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5581",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5581",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5586",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5598",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5598",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5600",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5676",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5676",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5682",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5746",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5746",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5748",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5781",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5781",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5783",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5810",
+      "speaker": "dragon"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5810",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5814",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5841",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5841",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5843",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5843",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5846",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5850",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5850",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5853",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5898",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:5898",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5993",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6010",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6010",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6012",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6012",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6016",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6018",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6018",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6022",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6024",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6024",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6026",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6026",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6030",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6030",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6032",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6037",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6037",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6042",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6050",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6050",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6052",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6072",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6072",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6077",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6080",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6080",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6083",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6083",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6086",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6086",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6088",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6088",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6091",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6091",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6093",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6103",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6103",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6106",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6109",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6109",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6111",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6111",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6115",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6115",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6117",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6117",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6120",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6132",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6132",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6139",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6144",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6144",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6145",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6145",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6148",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6165",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6165",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6179",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6238",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6238",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6275",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6275",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6278",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6282",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6282",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6287",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6287",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6291",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6295",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6295",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6300",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6300",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6302",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6329",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6329",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6334",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6334",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6336",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6338",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6338",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6340",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6340",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6345",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6345",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6347",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6361",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6361",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6369",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6369",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6374",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6374",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6378",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6382",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6382",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6390",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6390",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6394",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6394",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6413",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6422",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6422",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6424",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6424",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6428",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6428",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6431",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6435",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6435",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6437",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6437",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6440",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6440",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6442",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6442",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6445",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6445",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6449",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6449",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6453",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6453",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6456",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6456",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6458",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6458",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6465",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6465",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6471",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6471",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6477",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6477",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6485",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6485",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6493",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6493",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6499",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6499",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6505",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6505",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6510",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6510",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6514",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6514",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6516",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6516",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6521",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6521",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6525",
+      "speaker": "elaina"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6525",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6633",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6633",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6635",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6635",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6637",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6637",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6645",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6645",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6653",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6653",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6661",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6661",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6680",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6680",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6682",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6682",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6696",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6696",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6698",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6698",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6720",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6720",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6728",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6728",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6730",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6730",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6732",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6732",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6734",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6734",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6739",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6739",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6743",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6743",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6748",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6748",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6750",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6750",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6760",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6760",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6763",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6763",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6766",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6766",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6770",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6770",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6773",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6773",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6778",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6778",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6789",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6789",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6797",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6797",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6801",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6801",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6803",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6803",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6808",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6808",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6809",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6809",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6818",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6818",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6823",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6823",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6827",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6827",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6830",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6830",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6835",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6835",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6837",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6837",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6840",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6840",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6841",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6841",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6843",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6843",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6846",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6846",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6848",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6848",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6850",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6850",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6852",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6852",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6854",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6854",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6857",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6857",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6859",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6859",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6863",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6863",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6867",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6867",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6871",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6871",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6881",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6881",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6884",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6884",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6886",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6886",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6888",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6888",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6890",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6890",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6893",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6893",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6895",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6895",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6897",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6897",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6899",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6899",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6910",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6910",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6915",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6915",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6919",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6919",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6925",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6925",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6933",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6933",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6936",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6936",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6939",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6939",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6941",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6941",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6943",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6943",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6945",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6945",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6954",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6954",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6982",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6982",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6984",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6984",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:6987",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:6987",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7066",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7066",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7069",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7069",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7070",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7070",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7078",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7078",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7087",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7087",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7088",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7088",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7095",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7095",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7104",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7104",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7107",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7107",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7175",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7175",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7188",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7188",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7519",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7519",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7521",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7521",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7524",
+      "speaker": "priest"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7524",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:7621",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DungeonTrialsTrailer.groovy:7621",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5251",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5263",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5274",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5291",
+      "speaker": "dragon"
+    },
+    {
+      "at": "scripts/DungeonTrialsTrailer.groovy:5306",
+      "speaker": "dragon"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:2442",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3003",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3046",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3076",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3120",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3162",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3189",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3191",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:3193",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:4975",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5134",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5234",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5480",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5512",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5525",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5537",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5548",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5565",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:5584",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:6119",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrials.groovy:6123",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:2880",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:2923",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:2953",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:2997",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:3039",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:4731",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:4888",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:4983",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5211",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5243",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5256",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5268",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5279",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5296",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5315",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5821",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/DungeonTrialsTrailer.groovy:5825",
+      "speaker": "player"
+    }
+  ],
+  "names": []
+}

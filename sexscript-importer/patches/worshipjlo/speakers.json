@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Jennifer Lopez (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Jennifer",
+      "lastName": "Lopez"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

@@ -1,0 +1,12 @@
+{
+  "reason": "One unnamed character, a man the texts call Monsieur (33 times); the speaker check found the first data's Mistress wrong.",
+  "speakers": {
+    "main": {
+      "title": "Monsieur"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

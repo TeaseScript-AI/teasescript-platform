@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Ray (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Ray"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

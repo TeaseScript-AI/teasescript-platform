@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Crystal (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Crystal"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

@@ -1,0 +1,85 @@
+{
+  "reason": "A front-desk Mistress (unnamed; the package calls her the reception or records Mistress) runs the intro, the Mistress introductions, the daily choice and the progress report; the player then spends the session with one of four Mistresses, each in her own script file (Jewell, Ancilla, Kitty, WaylandA/WaylandB). The file that runs tells who speaks; only WaylandReset switches inside a file, when the reception sends the player to Mistress Wayland.",
+  "speakers": {
+    "reception": {
+      "displayName": "Reception Mistress"
+    },
+    "jewell": {
+      "title": "Mistress",
+      "firstName": "Jewell"
+    },
+    "ancilla": {
+      "title": "Lady",
+      "firstName": "Ancilla"
+    },
+    "kitty": {
+      "title": "Mistress",
+      "firstName": "Kitty"
+    },
+    "wayland": {
+      "title": "Mistress",
+      "lastName": "Wayland"
+    }
+  },
+  "default": "reception",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Lines.groovy",
+      "speaker": "reception"
+    },
+    {
+      "entry": "scripts/Lines/Info.groovy",
+      "speaker": "reception"
+    },
+    {
+      "entry": "scripts/Lines/Choice.groovy",
+      "speaker": "reception"
+    },
+    {
+      "entry": "scripts/Lines/Ending.groovy",
+      "speaker": "reception"
+    },
+    {
+      "entry": "scripts/Lines/Jewell.groovy",
+      "speaker": "jewell"
+    },
+    {
+      "entry": "scripts/Lines/Ancilla.groovy",
+      "speaker": "ancilla"
+    },
+    {
+      "entry": "scripts/Lines/Kitty.groovy",
+      "speaker": "kitty"
+    },
+    {
+      "entry": "scripts/Lines/WaylandA.groovy",
+      "speaker": "wayland"
+    },
+    {
+      "entry": "scripts/Lines/WaylandB.groovy",
+      "speaker": "wayland"
+    },
+    {
+      "entry": "scripts/Lines/Reset/WaylandReset.groovy",
+      "speaker": "reception"
+    },
+    {
+      "at": "scripts/Lines/Reset/WaylandReset.groovy:13",
+      "speaker": "wayland"
+    },
+    {
+      "entry": "scripts/Lines/Reset/AncillaReset.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Lines/Reset/JewellReset.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Lines/Reset/KittyReset.groovy",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

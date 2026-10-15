@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Tiffany (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Tiffany"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

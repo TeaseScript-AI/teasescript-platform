@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Lara Croft (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Lara",
+      "lastName": "Croft"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

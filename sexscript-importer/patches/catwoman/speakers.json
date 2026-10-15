@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Catwoman (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "displayName": "Catwoman"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

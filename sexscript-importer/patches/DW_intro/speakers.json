@@ -1,0 +1,12 @@
+{
+  "reason": "One unnamed character, a Master (\"Your Master\", 90 times \"Master\" in the scripts); the speaker check found the first data's Mistress wrong.",
+  "speakers": {
+    "main": {
+      "title": "Master"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

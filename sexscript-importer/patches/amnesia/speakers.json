@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Chloe (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Chloe"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

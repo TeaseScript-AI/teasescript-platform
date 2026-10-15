@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Jewell (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Jewell"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

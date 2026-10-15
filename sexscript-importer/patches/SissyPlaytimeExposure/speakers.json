@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Miss pixy (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "displayName": "Miss pixy"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

@@ -1,0 +1,8 @@
+{
+  "reason": "A sliding-puzzle game with no character: every text is a menu prompt, a score report or a debug dump from the game itself, so no message has a speaker.",
+  "speakers": {},
+  "default": "system",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

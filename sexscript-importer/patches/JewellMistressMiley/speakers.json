@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Miley (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Miley"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

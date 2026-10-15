@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Tia Ling (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Tia",
+      "lastName": "Ling"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

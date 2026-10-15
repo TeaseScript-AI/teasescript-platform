@@ -1,0 +1,67 @@
+{
+  "reason": "One Mistress owns the player: the domme selected by the saved key toy.owner (default \"ancilla\"), titled \"Mistress\" by images/toy/domme.groovy and named by images/toy/<owner>/person.groovy (Ancilla; Emily only if toy.owner is set from outside). She speaks every present()/show() of the play modules; the lounge status, calendar, credits, debug output and error popups have no speaker.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress",
+      "firstName": "Ancilla"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/toy/intro.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy.groovy:380",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy.groovy:407",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/social.groovy:showCalendar",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy.groovy:422",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/play.groovy:sessionPlay",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy/imagery.groovy:127",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy/imagery.groovy:127",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy.groovy:201",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy.groovy:201",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "OWNER",
+      "files": [
+        "scripts/toy.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "ancilla": "Mistress Ancilla",
+        "emily": "Mistress Emily"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

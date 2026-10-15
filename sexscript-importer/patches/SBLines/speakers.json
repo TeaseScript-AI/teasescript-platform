@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Mistress Daniella (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Daniella"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

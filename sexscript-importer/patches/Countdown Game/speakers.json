@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Alisha (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Alisha"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

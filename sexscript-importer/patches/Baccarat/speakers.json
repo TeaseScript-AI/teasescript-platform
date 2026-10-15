@@ -1,0 +1,114 @@
+{
+  "reason": "In Baccarat.groovy the bank is played by one opponent, named by the variable OpponentName (default Alexis, chosen in settings from the picture folders), who speaks in the first person under her or his picture (\"Hi, I'm \"+OpponentName). Card dealing, scores, rules, settings, the clothes form, estim setup, the separate chemin-de-fer game and the extras notices are system text.",
+  "speakers": {
+    "opponent": {
+      "firstName": "Alexis"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Baccarat.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Baccarat-chemin-de-fer.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Baccarat-extras-cards-1.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Baccarat-extras-cards-2.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Baccarat-extras-opponents.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:ShowRules",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:Settings",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:ChooseDeck",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:ChooseOpponent",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:177",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:setupEstim",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Baccarat.groovy:425",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:429",
+      "speaker": "opponent"
+    },
+    {
+      "after": "scripts/Baccarat.groovy:434",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/Baccarat.groovy:CoupChemindefer",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:728",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:749",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:797",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:822",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:824",
+      "speaker": "opponent"
+    },
+    {
+      "after": "scripts/Baccarat.groovy:846",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:855",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Baccarat.groovy:870",
+      "speaker": "opponent"
+    }
+  ],
+  "names": [
+    {
+      "variable": "OpponentName",
+      "files": [
+        "scripts/Baccarat.groovy"
+      ],
+      "speaker": "opponent",
+      "template": "{}"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Kyanna (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Kyanna"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

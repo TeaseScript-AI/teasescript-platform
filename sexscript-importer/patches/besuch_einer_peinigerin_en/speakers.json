@@ -1,0 +1,34 @@
+{
+  "reason": "Two women take turns: Mistress Danielle (the player's owner) and her guest Miss Tillie. Every message follows its own setImage, and the picture folder (danielle/ or tillie/) says who speaks; the doorbell is narration.",
+  "speakers": {
+    "danielle": {
+      "title": "Mistress",
+      "firstName": "Danielle"
+    },
+    "tillie": {
+      "title": "Miss",
+      "firstName": "Tillie"
+    }
+  },
+  "default": "danielle",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "besuch_einer_peinigerin/danielle/",
+      "speaker": "danielle"
+    },
+    {
+      "image": "besuch_einer_peinigerin/tillie/",
+      "speaker": "tillie"
+    },
+    {
+      "at": "scripts/besuch_einer_peinigerin_en.groovy:61",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/besuch_einer_peinigerin_en.groovy:648",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}
