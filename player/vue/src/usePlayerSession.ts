@@ -341,13 +341,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
         if (kind !== "camera") return;
-        if (state.status === "ended") camera.revoked();
+        if (state.status === "ended") camera.ended();
         cameraRevision.value++;
       }),
       capturedMedia,
     ),
     reportDiagnostic,
-    () => chosenCamera.value,
+    { chosen: () => chosenCamera.value },
   );
   /** Captured media resolves only through the trusted store, never as a package asset. */
   const resolveAsset = (path: string): string | null => {
@@ -573,13 +573,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
         if (kind !== "camera") return;
-        if (state.status === "ended") captureCamera.revoked();
+        if (state.status === "ended") captureCamera.ended();
         cameraRevision.value++;
       }),
       capturedMedia,
     ),
     () => {},
-    () => chosenCamera.value,
+    { chosen: () => chosenCamera.value },
+  );
+  // A phone's camera often stops while the page is in the background, as when another app takes it: once the page is
+  // shown again, an open camera that ended or stays muted opens again.
+  const cameraShown = () => {
+    if (document.visibilityState === "hidden") return;
+    camera.shown();
+    captureCamera.shown();
+  };
+  useEventListener(
+    () => (typeof document === "undefined" ? undefined : document),
+    "visibilitychange",
+    cameraShown,
+  );
+  useEventListener(
+    () => (typeof window === "undefined" ? undefined : window),
+    "pageshow",
+    cameraShown,
   );
   const cameraChoice = useCameraChoice({
     cameras: [camera, captureCamera],

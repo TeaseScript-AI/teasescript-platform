@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useEventListener, useIntervalFn } from "@vueuse/core";
 import { onBeforeUnmount, ref, watch } from "vue";
 
 // A live, local preview of the session camera. It never captures: the script takes photos through `takePhoto()`.
@@ -7,7 +8,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 const props = withDefaults(defineProps<{ track: MediaStreamTrack; mirrored?: boolean }>(), {
   mirrored: true,
 });
-const emit = defineEmits<{ aspect: [ratio: number] }>();
+const emit = defineEmits<{ aspect: [ratio: number]; stalled: [] }>();
 const video = ref<HTMLVideoElement | null>(null);
 // The camera's aspect ratio once a frame has a size; webcams commonly deliver 4:3. A browser may play frames before
 // they have a size, as Firefox does with some cameras, so playing frames are measured too; only a change is reported.
@@ -22,16 +23,54 @@ function measured() {
   emit("aspect", measuredRatio);
 }
 
+// A picture that stops while the page is shown, as when another app took the camera, is reported once, so the camera
+// can open again. Frames are counted as the browser presents them, or, without that, as the video's time advances.
+const STALL_MS = 3_000;
+let lastFrame = performance.now();
+let stallReported = false;
+let lastTime = -1;
+function framed() {
+  lastFrame = performance.now();
+  stallReported = false;
+}
+function counted(element: HTMLVideoElement) {
+  if (video.value !== element) return;
+  framed();
+  element.requestVideoFrameCallback(() => counted(element));
+}
+function timed() {
+  const time = video.value?.currentTime ?? -1;
+  if (time !== lastTime) framed();
+  lastTime = time;
+}
+useIntervalFn(() => {
+  const element = video.value;
+  // A hidden page renders no frames, and a refused play() of a live camera is not the camera's fault; Firefox also
+  // pauses a video whose camera ended.
+  const refused = element?.paused === true && props.track.readyState === "live";
+  if (!element || refused || document.visibilityState === "hidden" || stallReported) return;
+  if (!("requestVideoFrameCallback" in element)) timed();
+  if (performance.now() - lastFrame < STALL_MS) return;
+  stallReported = true;
+  emit("stalled");
+}, 1_000);
+// Frames resume some time after the page is shown again.
+useEventListener(document, "visibilitychange", framed);
+
 watch(
   [video, () => props.track],
   ([element, track]) => {
     if (!element) return;
     element.srcObject = new MediaStream([track]);
+    framed();
     // Muted inline video may play without a user activation; a refusal leaves the element showing its first frame.
     element.play().catch(() => {});
   },
   { immediate: true },
 );
+watch(video, (element) => {
+  if (element && "requestVideoFrameCallback" in element) counted(element);
+});
 onBeforeUnmount(() => {
   // Detaching never stops the track: the session camera stays open for `takePhoto()`.
   if (video.value) video.value.srcObject = null;

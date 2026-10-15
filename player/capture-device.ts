@@ -15,8 +15,10 @@ export interface CaptureTrack {
   readonly kind: string;
   readonly label: string;
   readonly readyState: "live" | "ended";
+  /** Whether the source delivers no frames for now, as a phone's camera while the page is in the background. */
+  readonly muted?: boolean;
   stop(): void;
-  addEventListener(type: "ended", listener: () => void): void;
+  addEventListener(type: "ended" | "mute", listener: () => void): void;
 }
 
 export interface CameraRequest {

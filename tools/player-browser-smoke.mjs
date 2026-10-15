@@ -1986,7 +1986,8 @@ async function cameraScenario(cdp, origin) {
 }
 
 // On a phone-sized screen the camera view's controls take real clicks in the window and over the Stage, whose top lies
-// under the Player's top controls: the mirror button flips the picture, and the switch opens the other fake camera.
+// under the Player's top controls: the mirror button flips the picture, and the switch opens the other fake camera. A
+// camera that stops delivering frames opens again.
 async function viewfinderScenario(cdp, origin) {
   const video = (view) => `document.querySelector('${view} [data-viewfinder] video')`;
   const playing = (view) => `${video(view)}?.readyState >= 2 && !${video(view)}.paused`;
@@ -2031,6 +2032,15 @@ async function viewfinderScenario(cdp, origin) {
     `${playing("[data-stage-camera]")} && ${camera("[data-stage-camera]")} !== ${JSON.stringify(before)}`,
     8_000,
     "The camera switch did not open the other camera",
+  );
+  // A camera whose frames stop, as when another app took it while the browser was in the background, opens again.
+  const track = `${video("[data-stage-camera]")}?.srcObject?.getVideoTracks()[0]`;
+  const stopped = await evaluate(cdp, `const track = ${track}; track.stop(); return track.id;`);
+  await waitFor(
+    cdp,
+    `${playing("[data-stage-camera]")} && ${track}?.readyState === 'live' && ${track}.id !== ${JSON.stringify(stopped)}`,
+    10_000,
+    "A camera whose frames stopped did not open again",
   );
   await cdp.call("Browser.resetPermissions");
 }
