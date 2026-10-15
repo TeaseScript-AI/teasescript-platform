@@ -10554,6 +10554,7 @@ function mayIndexPastEnd(
 
 /** Whether a variable used as a list position is ever assigned a negative number, such as -1 for "none yet". */
 function mayIndexNegative(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  if (negativeDraw(node, context)) return true;
   // `choice - 1` after a menu whose first button gave 0, such as a "Back" button.
   if (node.kind === "binary" && node.operator === "-") {
     const right = constantValue(asNode(node.right) ?? undefined);
@@ -10573,8 +10574,54 @@ function mayIndexNegative(node: AstNode, context: LowerContext, seen = new Set<s
   return (context.assignedValues.get(key) ?? []).some(
     (value) =>
       negativeConstantIndex(value) !== null ||
+      negativeDraw(value, context) ||
       (value.kind === "variable" && mayIndexNegative(value, context, seen)),
   );
+}
+
+/**
+ * `getRandom(bound)` of a bound that may be -2 or less: Java's `(int) (Math.random() * bound)` was then a number from
+ * above the bound to 0, a position Groovy counted from the end (SpankingParty's `colorTemp[getRandom(spankersMatched)]`
+ * once more guests than colours were left).
+ */
+function negativeDraw(node: AstNode, context: LowerContext): boolean {
+  if (node.kind !== "methodCall") return false;
+  const call = legacyApiCall(node, context);
+  const [bound] = call?.arguments ?? [];
+  return call?.name === "getRandom" && bound !== undefined && mayBeBelowMinusOne(bound, context);
+}
+
+/**
+ * Whether a whole number may be -2 or less: a written one; a difference other than a non-negative number less at most
+ * 1; a negation; or a variable that `--` counts down or that is set to such a value, also its own value less some.
+ */
+function mayBeBelowMinusOne(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const value = constantValue(node);
+  if (typeof value === "number") return value <= -2;
+  if (node.kind === "unaryMinus") return true;
+  if (node.kind === "binary" && node.operator === "-") {
+    const right = constantValue(asNode(node.right) ?? undefined);
+    const left = asNode(node.left);
+    return !(
+      typeof right === "number" &&
+      right <= 1 &&
+      left !== null &&
+      nonNegativePosition(left, context)
+    );
+  }
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  if (decrementedKeys.get(context.bindings)?.has(key) === true) return true;
+  return [
+    ...(context.assignedValues.get(key) ?? []),
+    ...(context.compoundValues.get(key) ?? []),
+  ].some((item) => mayBeBelowMinusOne(item, context, seen));
 }
 
 /** Whether a value may be 0: a menu selection or random draw, which start at 0, or a variable holding one or a 0. */

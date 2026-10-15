@@ -27,6 +27,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): loading a saved party (loadParty) restores implement1 ... implement6 and implementArray but not implementArrayGoodbye, which only setImplements (a new party) fills; selectGoodbye then sets implementArray = implementArrayGoodbye, an empty list, and draws implementArray[getRandom(n)], so a loaded party's goodbye picked up null implements in Groovy (V2 explorer: TSR025). Evident intent: the goodbye draws from the party's implements, as setImplements copies them with implementArray.collect(); the patch makes loadParty copy the loaded ones the same way.",
       "diff": "goodbye-implements-load.diff"
+    },
+    {
+      "id": "equality-spankers",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): in equality mode a party has one guest per player (setSpankers: spankers = players), but loadParty restores the saved number of guests while the player list loaded at the start may now have fewer players; setColors then hands out colours for every guest from a list of `players` colours, so spankersMatched goes below 0 and getRandom of it gives a position below 0 (Groovy read it from the end; V2 explorer turn 16, seed 2: TSR025 colorTemp[-1] / [-2] at Banjo/spankparty.tease:1683 and :1688). Evident intent: equality mode caps the guests at the players, as setSpankers does, when a saved party loads.",
+      "diff": "equality-spankers.diff"
     }
   ],
   "heldStandAlone": {
