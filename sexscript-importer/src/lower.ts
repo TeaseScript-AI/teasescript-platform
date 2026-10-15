@@ -2387,7 +2387,6 @@ function lowerFileOnce(
   texts = withClockLoopTicks(texts, diagnostics);
   texts = withMessageHandles(texts, diagnostics, mixin !== null);
   texts = withoutRepeatedText(texts, diagnostics);
-  texts = withGroovyRanges(texts, (base) => freshName(base, context));
   texts = withAskQuestions(texts);
   const statements = [
     ...helperStatements(context.syntheticHelpers),
@@ -2870,30 +2869,25 @@ function lowerHelperCompilationUnit(
     statements.push(lowered);
   }
   const { diagnostics } = baseContext;
-  const typedStatements = withGroovyRanges(
-    withMessageHandles(
-      withClockLoopTicks(
-        withElapsedDurations(
-          withFillableLoads(
-            withParsedLoads(
-              withSwitchLadders(
-                withCounterLoops(
-                  withEnforcedTypes([...fieldStatements, ...statements], baseContext),
-                ),
-              ),
-              baseContext.syntheticHelpers,
+  const typedStatements = withMessageHandles(
+    withClockLoopTicks(
+      withElapsedDurations(
+        withFillableLoads(
+          withParsedLoads(
+            withSwitchLadders(
+              withCounterLoops(withEnforcedTypes([...fieldStatements, ...statements], baseContext)),
             ),
-            true,
+            baseContext.syntheticHelpers,
           ),
-          diagnostics,
           true,
         ),
         diagnostics,
+        true,
       ),
       diagnostics,
-      false,
     ),
-    (base) => freshName(base, baseContext),
+    diagnostics,
+    false,
   );
   return {
     sourceName: file.sourceName,
@@ -3167,7 +3161,6 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
     helperResults,
     !context.sharesFunctions,
   );
-  if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   if (callsFunction([result.statements], "sexscriptLegacyTextAt"))
     context.syntheticHelpers.add("textAt");
@@ -3765,14 +3758,13 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
 /**
  * A loop over an inclusive range whose only statement adds a number to a variable, `for it in 1..=n { p += 1 }`, only
  * counts; Groovy finished it at once, while TeaseScript runs it out of its instruction budget for a large n. It adds the
- * count in one step where the range is not empty: `if n >= 1 { p += n }`; a Groovy range that may count down
- * (rangeDirection) is never empty and adds its length, `p += abs(n - 1) + 1`. The bounds are read twice, so they must be
+ * count in one step where the range is not empty: `if n >= 1 { p += n }`. The bounds are read twice, so they must be
  * free of effects.
  */
 function withCountedLoops(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement): IrStatement => {
     if (statement.kind !== "for" || statement.collection.kind !== "range") return statement;
-    const { from, to, inclusive, either } = statement.collection;
+    const { from, to, inclusive } = statement.collection;
     const [only, ...rest] = statement.body;
     if (
       !inclusive ||
@@ -3797,26 +3789,6 @@ function withCountedLoops(statements: IrStatement[]): IrStatement[] {
             right: { kind: "literal", value: 1 },
           };
     const step = only.value.value;
-    // A Groovy range that may count down holds its bounds and every whole number between them.
-    if (either === true) {
-      const length: IrExpression = {
-        kind: "binary",
-        operator: "+",
-        left: {
-          kind: "call",
-          name: "abs",
-          positional: [{ kind: "binary", operator: "-", left: to, right: from }],
-          named: {},
-        },
-        right: { kind: "literal", value: 1 },
-      };
-      return {
-        ...only,
-        value:
-          step === 1 ? length : { kind: "binary", operator: "*", left: length, right: only.value },
-        span: statement.span,
-      };
-    }
     return {
       kind: "if",
       condition: { kind: "binary", operator: ">=", left: to, right: from },
@@ -10224,10 +10196,10 @@ function lowerIterated(
 }
 
 /**
- * A Groovy range ran down where its first bound was greater, `1..0` through 1 and 0, where a TeaseScript range is empty
- * (owner decision 2026-10-10). A range of two literals keeps its direction as written: one that counts down becomes
- * the list of its numbers. One whose direction shows only at runtime is marked `either`, for withGroovyRanges, unless it
- * starts at 0 or below and ends at a length, which it never passes going down.
+ * A Groovy range ran down where its first bound was greater, `1..0` through 1 and 0, where a TeaseScript range is empty.
+ * A range of two literals keeps its direction as written: one that counts down becomes the list of its numbers (owner
+ * decision 2026-10-10). One whose direction shows only at runtime, as `(1..n).each`, is the plain ascending range: its
+ * count-down where n < 1 counts as unintended (owner decision 2026-10-15).
  */
 function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpression {
   const integer = (value: IrExpression): number | null => {
@@ -10254,84 +10226,7 @@ function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpr
       return { kind: "list", items };
     }
   }
-  if (from !== null && from <= 0 && range.to.kind === "property" && range.to.name === "length")
-    return range;
-  return { ...range, either: true };
-}
-
-/**
- * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through the positions of
- * the range, an ascending TeaseScript range from 0, and take each number from the first bound in the range's
- * direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset * sign(n - 1) … }` (without `i` where nothing reads
- * it, as in `(1..n).each { swat() }`), so that a pass may end the loop
- * or wait before the next number is computed. A bound that the body may change, through a variable it sets or a
- * function of the script it calls, is computed once before the loop, as Groovy computed the range. This runs after the
- * passes that read a loop's range, such as the counters of withMessageHandles; withCountedLoops has folded the loops
- * that only count.
- */
-export function withGroovyRanges(
-  statements: IrStatement[],
-  fresh: (base: string) => string,
-): IrStatement[] {
-  return statements.flatMap((item): IrStatement[] => {
-    const statement = withNestedBlocks(item, (body) => withGroovyRanges(body, fresh));
-    if (
-      statement.kind !== "for" ||
-      statement.collection.kind !== "range" ||
-      statement.collection.either !== true
-    )
-      return [statement];
-    const { from, to, inclusive } = statement.collection;
-    const { variable, body, span } = statement;
-    const before: IrStatement[] = [];
-    // Groovy computed the range once, its first bound first, before the first pass.
-    const bound = (value: IrExpression, suffix: string): IrExpression => {
-      if (value.kind === "literal") return value;
-      const name = fresh(`${variable}${suffix}`);
-      before.push({ kind: "let", name, value, span });
-      return { kind: "variable", name };
-    };
-    const first = bound(from, "From");
-    const last = bound(to, "To");
-    const zero = first.kind === "literal" && first.value === 0;
-    const distance: IrExpression = zero
-      ? last
-      : { kind: "binary", operator: "-", left: last, right: first };
-    const offset = fresh(`${variable}Offset`);
-    const call = (name: string, value: IrExpression): IrExpression => ({
-      kind: "call",
-      name,
-      positional: [value],
-      named: {},
-    });
-    const step: IrExpression = {
-      kind: "binary",
-      operator: "*",
-      left: { kind: "variable", name: offset },
-      right: call("sign", distance),
-    };
-    const number: IrExpression = zero
-      ? step
-      : { kind: "binary", operator: "+", left: first, right: step };
-    return [
-      ...before,
-      {
-        ...statement,
-        variable: offset,
-        // A range that starts at a fraction goes through the numbers a whole step apart from it.
-        collection: {
-          kind: "range",
-          from: { kind: "literal", value: 0 },
-          to: call(inclusive ? "floor" : "ceil", call("abs", distance)),
-          inclusive,
-        },
-        // A loop that only counts, whose number nothing reads, takes none.
-        body: readsVariable(body, variable)
-          ? [{ kind: "let", name: variable, value: number, span }, ...body]
-          : body,
-      },
-    ];
-  });
+  return range;
 }
 
 /**
@@ -14218,10 +14113,14 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
     // TeaseScript `+` joins two lists into a new one (#609); an appended element becomes a one-element list.
     const lists = listConcatenationOperands(node, context);
     if (lists === null) return null;
-    // A range is no list for TeaseScript `+`, so the concatenation helper appends its numbers.
-    if (lists.some((item) => item.kind === "range"))
-      return useHelper(context, "concat", [{ kind: "list", items: lists }]);
-    return lists.reduce((left, right) => ({ kind: "binary", operator: "+", left, right }));
+    // A range is no list for TeaseScript `+`: its numbers join as a list (#919).
+    return lists
+      .map((item): IrExpression =>
+        item.kind === "range"
+          ? { kind: "methodCall", target: item, name: "toList", arguments: [] }
+          : item,
+      )
+      .reduce((left, right) => ({ kind: "binary", operator: "+", left, right }));
   }
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);
@@ -15726,23 +15625,14 @@ function textOperation(
       operation = "substring";
       break;
     case "count": {
-      // Groovy counted every occurrence, overlapping ones too; the parts between occurrences that split() finds count
-      // all of them when no start of the text is also its end, as "aa" is in "aaa".
+      // Groovy counted every occurrence, overlapping ones too; TeaseScript's count() counts them without overlap
+      // (#919), which is the same where no start of the text is also its end, as "aa" is in "aaa".
       const part = literalText(argumentsNodes[0]);
       if (argumentsNodes.length !== 1 || part === null || part === "" || overlapsItself(part))
         return undefined;
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
-      return {
-        kind: "binary",
-        operator: "-",
-        left: {
-          kind: "property",
-          target: member("split", [{ kind: "literal", value: part }], target),
-          name: "length",
-        },
-        right: { kind: "literal", value: 1 },
-      };
+      return member("count", [{ kind: "literal", value: part }], target);
     }
     case "equalsIgnoreCase": {
       // TeaseScript has no case-insensitive comparison (owner, #508): both sides are lowercased. Groovy returns

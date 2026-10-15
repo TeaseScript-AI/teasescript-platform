@@ -876,6 +876,8 @@ test(
           "def ws = zs",
           "ws.add([1, 2])",
           'show(ws.join("|"))',
+          "def joined = [0] + (1..3)",
+          "joined += (4..5)",
           // A function nothing calls only notes its problems.
           "build(5)",
           "",
@@ -883,8 +885,13 @@ test(
       );
       const program = await convert(sourcePath);
       const output = emitTease(program);
-      // A range is a list in Groovy, so its elements are appended.
-      assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
+      // A range is a list in Groovy, so its numbers are appended as a list.
+      assert.match(output, /^ {2}items \+= \(1\.\.=3\)\.toList\(\)$/mu);
+      // A list joined with a range's numbers is a list, to which a range appends its numbers too.
+      assert.match(
+        output,
+        /^let joined = \[0\] \+ \(1\.\.=3\)\.toList\(\)\njoined \+= \(4\.\.=5\)\.toList\(\)$/mu,
+      );
       // A value that may be a list or one element is decided at runtime; a function result is a list.
       assert.match(output, /^ {2}items\.addAll\(sexscriptLegacyListPart\(more\)\)$/mu);
       assert.match(output, /^ {2}items \+= extra\(\)$/mu);
@@ -1923,7 +1930,9 @@ test("the captured-locals fixture says what Groovy's closures gave", async () =>
 
 // Groovy ranges ran down where the first bound was greater, also where only the values showed it: `1..0` went through
 // 1 and 0, and `1..<0` through 1 (Domme2's reward of 0 points ran twice).
-test("ranges count down as Groovy's did", { skip: parserUnavailable }, async () => {
+// A range of two literals counts down as written; one whose bounds are computed is the plain ascending range, empty
+// where Groovy counted down (owner decision 2026-10-15).
+test("a range counts down only as written", { skip: parserUnavailable }, async () => {
   const runtime: unknown = await import(repositoryBuildUrl("src/index.js").href);
   assert.ok(typeof runtime === "object" && runtime !== null);
   // EVIDENCE: the repository build's index exports these runtime functions (src/index.ts), which the probe uses.
@@ -1951,7 +1960,7 @@ test("ranges count down as Groovy's did", { skip: parserUnavailable }, async () 
     assert.equal(step.snapshot.status, "halted", tease);
     assert.deepEqual(
       step.events.filter((event) => event.kind === "say").map((event) => event.text),
-      ["321 1 0 <1 +2 +3"],
+      ["321 +2 +3"],
       tease,
     );
   } finally {

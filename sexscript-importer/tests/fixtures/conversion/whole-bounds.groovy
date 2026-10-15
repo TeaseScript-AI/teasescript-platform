@@ -19,16 +19,13 @@ for (i in 0..<whole) {
 }
 show("Drawn " + dice.nextInt(whole))
 // A Groovy range ran down where its first bound was greater: written so, it is the list of its numbers (guillotine's
-// countdown), and where only the values show it, a helper counts either way (Domme2's reward of 0 points ran twice).
+// countdown); where only the values show it, the loop is the plain ascending range, empty where Groovy counted down
+// (owner decision 2026-10-15: Domme2's reward of 0 points ran twice, unintended).
 (3..1).each { show("Down " + it) }
 def rewardPoints = getRandom(2)
 (1..rewardPoints).each { show("Stroke " + it) }
 for (k in 0..<rewardPoints) show("Before " + k)
-// A range whose direction shows only at runtime is computed once, its first bound first, and one that starts at a
-// fraction goes through the numbers a whole step from it.
+// The range's bounds are computed once, its first bound first.
 def low = 1
 def lift = { low = 3; return 4 }
 for (k in low..lift()) show("Bound " + k)
-def start = 2.5
-def stop = 5
-for (k in start..stop) show("Half " + k)

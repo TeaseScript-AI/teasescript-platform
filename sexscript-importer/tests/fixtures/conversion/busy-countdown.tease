@@ -26,7 +26,9 @@ if after - before >= 0 s {
 // A loop that only counts adds the count at once where its range is not empty.
 function addPoints(i) {
   let p = 0
-  p += abs(floor(i) - 1) + 1
+  if floor(i) >= 1 {
+    p += floor(i)
+  }
   say prose "Points ${p}", instant
 }
 addPoints(1000000)

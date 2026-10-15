@@ -216,7 +216,6 @@ export type HelperName =
   | "switchButtonId"
   | "tokenize"
   | "split"
-  | "concat"
   | "listMax"
   | "listMin"
   | "listSum"
@@ -293,7 +292,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "storedSave",
   "storedLoad",
   "button",
-  "concat",
   "array",
   "arrayRows",
   "menuOptions",
@@ -2148,19 +2146,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ifS(bin("==", v("value"), lit(true)), [ret(v("key"))]),
           ]),
           ret(lit(null)),
-        ],
-      ),
-  },
-  concat: {
-    name: "sexscriptLegacyConcat",
-    build: () =>
-      fn(
-        "sexscriptLegacyConcat",
-        ["lists"],
-        [
-          letS("combined", { kind: "list", items: [] }),
-          forS("part", v("lists"), [forS("item", v("part"), [add("combined", v("item"))])]),
-          ret(v("combined")),
         ],
       ),
   },

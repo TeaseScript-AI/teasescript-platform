@@ -44,8 +44,7 @@ say prose "Estim connected?", instant
 function shock(message, shocks) {
   say prose message, instant
   // NOTE SX_IMPLICIT_RETURN_VALUE line 21: Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.
-  let itTo = floor(shocks)
-  for itOffset in 0..=floor(abs(itTo - 1)) {
+  for it in 1..=floor(shocks) {
     wait 1 s
   }
 }

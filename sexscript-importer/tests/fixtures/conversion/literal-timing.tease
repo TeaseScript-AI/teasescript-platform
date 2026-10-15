@@ -147,8 +147,7 @@ counted("Alternating cheeks.")
 // BreatheAcademy waitWithCountDownSound: a countdown with a step between its text and its computed wait.
 function countDown(text, timeValue, speed) {
   let leftValue = timeValue / speed
-  let itTo = floor(timeValue / speed)
-  for itOffset in 0..=floor(abs(itTo - 1)) {
+  for it in 1..=floor(timeValue / speed) {
     say prose """
       ${text}
 

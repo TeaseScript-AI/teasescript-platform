@@ -79,8 +79,6 @@ export interface VariableTypeResult {
    * append through TeaseScript's list `+=`.
    */
   appended: IrStatement[];
-  /** Those of them that append a range, through the concatenation helper. */
-  rangeAppended: IrStatement[];
   /** Those of them that append a value that may be a list or one element, through the list part helper. */
   partAppended: IrStatement[];
   /** `text += value` statements, emitted as numeric `+=` because the text was not proven while lowering. */
@@ -398,7 +396,6 @@ export function enforceVariableTypes(
     annotated: 0,
     truncated: 0,
     appended: [],
-    rangeAppended: [],
     partAppended: [],
     textAppended: [],
     loadDefaults: [],
@@ -579,17 +576,18 @@ export function enforceVariableTypes(
           const appended = appends.get(statement);
           if (appended !== undefined) {
             result.appended.push(statement);
-            // A range is no list for TeaseScript `+`, so the concatenation helper appends its numbers.
-            if (appended === "range") {
-              result.rangeAppended.push(statement);
+            // A range is no list for TeaseScript `+=`: its numbers append as a list (#919).
+            if (appended === "range")
               return {
                 ...statement,
-                operator: "=",
-                value: helperCall("concat", [
-                  { kind: "list", items: [statement.target, statement.value] },
-                ]),
+                operator: "+=",
+                value: {
+                  kind: "methodCall",
+                  target: statement.value,
+                  name: "toList",
+                  arguments: [],
+                },
               };
-            }
             // TeaseScript `+=` appends the elements of a list (#609); a value that may be a list or one element
             // is decided at runtime.
             if (appended === "part") result.partAppended.push(statement);
@@ -2884,6 +2882,9 @@ export function expressionType(
         value.arguments[1]!.value === null
       )
         return { kind: "optional", value: UNKNOWN };
+      // A range's numbers as a list (#919).
+      if (value.target.kind === "range" && value.name === "toList")
+        return { kind: "list", element: scalar("integer") };
       const target = nonNull(type(value.target));
       if (target.kind === "list") {
         if (["removeAt", "removeFirst", "removeLast"].includes(value.name)) return target.element;
@@ -2953,7 +2954,14 @@ export function expressionType(
       if (value.operator === "otherwise")
         return elementsType([nonNull(type(value.left)), type(value.right)]);
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
-      return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
+      {
+        // TeaseScript `+` joins two lists into a new one (#609).
+        const left = nonNull(type(value.left));
+        const right = nonNull(type(value.right));
+        if (value.operator === "+" && left.kind === "list" && right.kind === "list")
+          return listOf(elementsType([left.element, right.element]));
+        return arithmeticType(value.operator, left, right) ?? UNKNOWN;
+      }
     case "call": {
       // A generated helper's result, not that of a script function of the same name (`local`).
       const helper = value.local === true ? undefined : HELPER_RESULTS.get(value.name);

@@ -15,7 +15,7 @@ let hand = first(deal(), ["ten"])
 hand.removeAt(0)
 let title = first("Miss", "Mister")
 function initials(name) {
-  return name.split("M").length - 1
+  return name.count("M")
 }
 say prose "Hand: ${hand[0]}, ${title} has ${initials(title)} M", instant
 // Loop variables and iteration closure parameters take the elements of a proven list.
@@ -26,7 +26,7 @@ for outfit in outfits {
   }
 }
 for item in outfits {
-  say prose "Words: ${item.split(" ").length - 1 + 1}", instant
+  say prose "Words: ${item.count(" ") + 1}", instant
 }
 describe(hand)
 exit
