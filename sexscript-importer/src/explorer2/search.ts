@@ -23,8 +23,10 @@ import {
   type PlanDiagnostic,
 } from "../explorer-analysis.ts";
 import { instructionFiles, lineCoverage, type Target } from "../explorer-search.ts";
+import { clockModel, flipGap, timeContext } from "../explorer-time.ts";
 import {
   EPOCH_MS,
+  wallClockOf,
   storageOf,
   type Data,
   type Engine,
@@ -120,6 +122,8 @@ interface Child {
   readonly sideState?: string;
   /** Whether it holds a place in `queued` and `queuedHere` (a copy pushed with another score holds none). */
   readonly reserved?: boolean;
+  /** The interaction a play of it goes on from, when not the one its path's last input answers (an answer given later). */
+  readonly resumeAt?: number;
 }
 
 /** Steps past its own inputs a play goes on without new code before it stops. */
@@ -165,6 +169,11 @@ const PRESS_TIMES = [
 ];
 /** Plays of single changes an unsolved short-circuit condition gets, at most (see `solve`). */
 const PROGRESS_PLAYS = 4;
+/**
+ * How many times more a climb gives an answer a loop asks for right after itself, for a condition on a count of rounds:
+ * a deck dealt card by card.
+ */
+const AGAIN = [1, 2, 4, 8, 16, 32, 64, 128];
 /** Checks that found something besides their target, kept to be played on at most (see `sideFinds`). */
 const MAX_SIDE_FINDS = 8;
 /** Attempts at one way from progress plays, at most: a few operands' worth of `and`s and `or`s. */
@@ -178,15 +187,16 @@ const KINDS = ["decisions", "answers", "visits", "walks"] as const;
 
 /**
  * A value an origin can take: a draw's outcome, an input, a stored key's value at the start of a later visit (as
- * JSON text; null for a key not stored), the wall clock a session starts at, or a time the player continues later
- * (milliseconds) at the target's interaction.
+ * JSON text; null for a key not stored), the wall clock a session starts at, a time the player continues later
+ * (milliseconds) at the target's interaction, or a number of times an answer is given again right after itself.
  */
 type Value =
   | { readonly draw: Data }
   | { readonly input: ExplorerInput }
   | { readonly stored: string; readonly value: string | null }
   | { readonly clock: number }
-  | { readonly later: number };
+  | { readonly later: number }
+  | { readonly again: number };
 
 /**
  * Children one queue keeps, at least: past half as many again, it keeps its best this many (each one dropped is counted).
@@ -368,6 +378,11 @@ export function explore2(
   const started = performance.now();
   const instructions = list(plan.instructions);
   const runner = new Runner(runtime, engine, plan, options.seed);
+  /** V1's model of the conditions that compare times read from the clock, for answers given later (see `take`). */
+  const timeModel = clockModel(plan, instructions, false);
+  /** Later answers queued per way, and the ways and gaps they were queued for. */
+  const laterTries = new Map<number, number>();
+  const laterGaps = new Set<string>();
   const visited = new Uint8Array(instructions.length);
   const ways = new Set<number>();
   const next = successors(plan, instructions, new Map());
@@ -928,6 +943,53 @@ export function explore2(
         )
           answerSteps.add(step);
     });
+    // A condition on how long the player took (the time since a clock read, a deadline): the answer before it, given
+    // after the time V1's clock model says turns it, from the state that waited for that answer.
+    const laterAnswers: { path: Path; at: number; place: number; gap: number }[] = [];
+    const latestOfWay = new Map<number, Decision>();
+    for (const decision of played.decisions)
+      if (timeModel.comparisons.has(decision.instruction))
+        latestOfWay.set(decision.instruction * 2 + (1 - decision.way), decision);
+    const contexts = new Map<number, { context: ReturnType<typeof timeContext>; now: number }>();
+    for (const [side, decision] of latestOfWay) {
+      const at = decision.step - 1;
+      const resume = played.resumes[at];
+      const interaction = played.interactions[at];
+      if (at < shared || resume === undefined || interaction === undefined) continue;
+      if ((laterTries.get(side) ?? 0) >= MAX_LEAD_ROUNDS) continue;
+      let state = contexts.get(at);
+      if (state === undefined) {
+        const snapshot = record(JSON.parse(resume.tagged.json));
+        state = { context: timeContext(snapshot, false), now: wallClockOf(snapshot) };
+        contexts.set(at, state);
+      }
+      for (const comparison of timeModel.comparisons.get(decision.instruction) ?? []) {
+        if ((laterTries.get(side) ?? 0) >= MAX_LEAD_ROUNDS) break;
+        const gap = flipGap(comparison, timeModel, state.context, state.now);
+        if (
+          gap === null ||
+          !Number.isSafeInteger(gap) ||
+          gap <= 0 ||
+          laterGaps.has(`${side}|${gap}`)
+        )
+          continue;
+        laterGaps.add(`${side}|${gap}`);
+        const path = apply(played, new Map([[CLOCK, { later: gap }]]), saved, decision.step);
+        if (path === null) continue;
+        laterTries.set(side, (laterTries.get(side) ?? 0) + 1);
+        answerSteps.add(at);
+        laterAnswers.push({
+          path: { ...path, inputs: path.inputs.slice(0, decision.step + 1) },
+          at,
+          place: interaction.instruction,
+          gap,
+        });
+        if (process.env.SX_V2_DEBUG)
+          process.stderr.write(
+            `later ${decision.instruction}:${1 - decision.way} gap ${gap} at ${at}\n`,
+          );
+      }
+    }
     const resumes: Resume[] = [];
     for (const step of [...answerSteps, ...leadSteps.map((lead) => lead.step)]) {
       if (resumes[step] !== undefined) continue;
@@ -1002,6 +1064,21 @@ export function explore2(
     const readyFrom = new Map<number, number>();
     for (const each of [...leadSteps.filter((lead) => lead.distance === 0), ...readyNow])
       if (!readyFrom.has(each.watched.side)) readyFrom.set(each.watched.side, each.step);
+    for (const later of laterAnswers) {
+      const child: Child = {
+        path: later.path,
+        target: null,
+        parent: kept,
+        score: 0,
+        budget: 0,
+        tried: 0,
+        place: later.place,
+        answer: `later:${later.gap}`,
+        lead: true,
+        resumeAt: later.at,
+      };
+      answersQueue.push({ ...child, score: scoreNow(child) });
+    }
     // Decisions whose other way no path took: a child each, by the code that way leads to.
     for (const decision of played.decisions) {
       if (decision.step <= shared) continue;
@@ -1290,6 +1367,23 @@ export function explore2(
             : [];
       return { origin, values: [...values, ...extra] };
     });
+    // The latest answer before the target that a loop asks for (its place asks at other steps too): given again, it plays
+    // more rounds before the target, for a count of rounds the condition reads, also when no answer is among its origins
+    // (a deck a helper deals from, card by card).
+    let againStep = target.step - 1;
+    while (
+      againStep >= 0 &&
+      parent.interactions.filter(
+        (interaction) => interaction.instruction === parent.interactions[againStep]?.instruction,
+      ).length < 2
+    )
+      againStep -= 1;
+    if (againStep >= 0) {
+      const again = AGAIN.map((times): Value => ({ again: times }));
+      const known = climbing.find((domain) => domain.origin === `i${againStep}`);
+      if (known === undefined) climbing.push({ origin: `i${againStep}`, values: again });
+      else known.values.push(...again);
+    }
     let accepted = new Map<Origin, Value>();
     let tried = 0;
     // Where a change brought it closer (an answer's place, a draw's site): such origins come first after that.
@@ -1459,6 +1553,8 @@ export function explore2(
   };
   /** Attempts per way whose condition's values came from no origin. */
   const noOriginOf = new Map<number, number>();
+  /** For such a way, the code no path ran yet that writes what its condition reads (see `boostWriters`). */
+  const writersOf = new Map<number, ReadonlySet<number>>();
   /** Ways whose stored keys writers got a boost (see `boostWriters`). */
   const storedBoosted = new Set<number>();
   /** The functions that save to storage themselves (a helper given the key), by ID; worked out when first needed. */
@@ -1538,6 +1634,7 @@ export function explore2(
       if (typeof written === "string" && names.has(written)) writers.add(index);
     });
     if (writers.size === 0) return;
+    if (reason === "noOrigin") writersOf.set(side, writers);
     const extra = gain(target.instruction, 1 - target.way);
     let boosted = 0;
     for (const [other, child] of lastChildOf) {
@@ -2074,7 +2171,7 @@ export function explore2(
     let path = child.path;
     let parent = child.parent;
     // An answer child goes on from where its answer differs; a decision child from where its first change is.
-    let resumeAt = child.target === null ? child.path.inputs.length - 1 : -1;
+    let resumeAt = child.resumeAt ?? (child.target === null ? child.path.inputs.length - 1 : -1);
     if (child.reach !== undefined && child.target !== null && child.parent !== null) {
       // A gate toward a watched way: solved once from its parent, with a fixed number of candidates.
       const target = child.target;
@@ -2107,8 +2204,16 @@ export function explore2(
       const target = child.target;
       const side = target.instruction * 2 + (1 - target.way);
       if (ways.has(side)) continue;
-      // A condition whose values come from no origin on two parents' paths is left to its writers (see `boostWriters`).
-      if ((noOriginOf.get(side) ?? 0) >= 2) continue;
+      // A condition whose values come from no origin on two parents' paths is left to its writers (see `boostWriters`),
+      // until one of them has run: a guess that is only taken once it is a number, a picture set only when the player has
+      // one. Then its values may come from an answer on a path through it.
+      if ((noOriginOf.get(side) ?? 0) >= 2) {
+        const writers = writersOf.get(side);
+        if (writers === undefined || [...writers].every((writer) => visited[writer] !== 1))
+          continue;
+        writersOf.delete(side);
+        noOriginOf.delete(side);
+      }
       const count = attempts.get(side) ?? 0;
       const extra = progressAttempts.get(side) ?? 0;
       const here = child.sideState === undefined ? 0 : (attemptsHere.get(child.sideState) ?? 0);
@@ -2922,11 +3027,18 @@ function apply(
   let changed = false;
   let wallClockMs = parent.path.wallClockMs;
   let later: number | null = null;
+  let again: { index: number; times: number } | null = null;
   for (const [origin, value] of assignment) {
     const index = Number(origin.slice(1));
     if ("stored" in value) continue;
     if ("later" in value) {
       later = value.later;
+      changed = true;
+      continue;
+    }
+    if ("again" in value) {
+      if (inputs[index] === undefined) return null;
+      again = { index, times: value.again };
       changed = true;
       continue;
     }
@@ -2953,6 +3065,12 @@ function apply(
   }
   // The player continues later at the interaction before the target's step, before answering it as the parent did.
   if (later !== null) inputs.splice(targetStep - 1, 0, { kind: "later", afterMs: later });
+  if (again !== null) {
+    // The answer given again, right after itself (moved on by one when continuing later came before it).
+    const at = again.index + (later !== null && targetStep - 1 <= again.index ? 1 : 0);
+    const given = inputs[at]!;
+    inputs.splice(at + 1, 0, ...Array.from({ length: again.times }, () => given));
+  }
   return changed
     ? {
         inputs,

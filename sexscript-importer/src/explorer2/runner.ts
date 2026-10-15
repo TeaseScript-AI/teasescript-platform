@@ -13,7 +13,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRecord } from "../ast.ts";
-import { clockDifferences, comparedWith, DataFlow } from "../explorer-analysis.ts";
+import { clockDifferences, comparedWith, DataFlow, goalsFor } from "../explorer-analysis.ts";
 import {
   EPOCH_MS,
   failureOf,
@@ -384,6 +384,9 @@ export interface PlayOptions {
   readonly patience?: number;
 }
 
+/** V1's bounds on the answers its directed search adds to a typed ask: per condition goal, and per ask. */
+const DIRECTED_PER_GOAL = 3;
+const DIRECTED_PER_ASK = 6;
 /** Draw events shared between plays at most (see `Runner.#drawEvents`). */
 const MAX_SHARED_DRAWS = 4096;
 
@@ -601,6 +604,29 @@ export class Runner {
     this.flow = flow;
     const options = this.#options;
     options.scopedReads = true;
+    // The answers V1 directs typed asks to, as V1's search adds them for each condition's goals (at most three per goal
+    // and six per ask), offered from the start: a session length that a later check compares with (two hours) is an
+    // answer before that check ran.
+    for (const [at, instruction] of this.#instructions.entries()) {
+      // Conditions only: an `if`'s, and a `while` loop's (a `repeat` count is no condition).
+      const condition =
+        instruction.kind === "jumpIfFalse"
+          ? instruction.condition
+          : instruction.kind === "loopStart" && instruction.loopKind === "while"
+            ? instruction.expression
+            : undefined;
+      if (condition === undefined) continue;
+      for (const wanted of [true, false])
+        for (const goal of goalsFor(flow, condition, wanted, at)) {
+          if (goal.source.kind !== "ask") continue;
+          const answers = options.directedAnswers.get(goal.source.instruction) ?? [];
+          for (const value of goal.candidates
+            .filter((candidate): candidate is string => typeof candidate === "string")
+            .slice(0, DIRECTED_PER_GOAL))
+            if (answers.length < DIRECTED_PER_ASK && !answers.includes(value)) answers.push(value);
+          if (answers.length > 0) options.directedAnswers.set(goal.source.instruction, answers);
+        }
+    }
     for (const [ask, expressions] of comparedWith(
       flow,
       this.#instructions,
