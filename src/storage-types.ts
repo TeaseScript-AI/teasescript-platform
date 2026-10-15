@@ -161,27 +161,68 @@ export function sameReadStorageKeyTypes(
   right: ReadonlyMap<string, StorageKeyType>,
 ): boolean {
   if (left.size !== right.size) return false;
-  for (const [key, kept] of left) {
-    const other = right.get(key);
-    if (
-      other === undefined ||
-      other.at !== kept.at ||
-      other.declared !== kept.declared ||
-      typeKey(other.type, false) !== typeKey(kept.type, false)
-    )
-      return false;
-    if (
-      !kept.declared &&
-      (other.loads.length !== kept.loads.length ||
-        other.loads.some(
-          (load, index) =>
-            load.at !== kept.loads[index]!.at ||
-            typeKey(load.type, false) !== typeKey(kept.loads[index]!.type, false),
-        ))
-    )
+  for (const [key, kept] of left) if (!sameReadKeyType(kept, right.get(key), true)) return false;
+  return true;
+}
+
+/**
+ * Whether a check that read the types of the keys of `keys` in `read` read what `found` gives them, as
+ * {@link sameReadStorageKeyTypes} compares them, but the loads they come from only for a key whose value in `keys` says
+ * that a message named their lines. A key that neither has a type for is the same.
+ */
+export function sameReadKeys(
+  read: ReadonlyMap<string, StorageKeyType>,
+  found: ReadonlyMap<string, StorageKeyType>,
+  keys: ReadonlyMap<string, boolean>,
+): boolean {
+  for (const [key, lines] of keys) {
+    const kept = read.get(key);
+    if (kept === undefined ? found.has(key) : !sameReadKeyType(kept, found.get(key), lines))
       return false;
   }
   return true;
+}
+
+/**
+ * Whether loads that read the types of `keys` in `read` read what `found` gives them: whether the type is declared, and a
+ * declared type with union members and object properties in their order.
+ */
+export function sameDeclaredKeys(
+  read: ReadonlyMap<string, StorageKeyType>,
+  found: ReadonlyMap<string, StorageKeyType>,
+  keys: Iterable<string>,
+): boolean {
+  for (const key of keys) {
+    const kept = read.get(key);
+    const other = found.get(key);
+    if ((kept?.declared === true) !== (other?.declared === true)) return false;
+    if (kept?.declared === true && typeKey(kept.type, false) !== typeKey(other!.type, false))
+      return false;
+  }
+  return true;
+}
+
+function sameReadKeyType(
+  kept: StorageKeyType,
+  other: StorageKeyType | undefined,
+  lines: boolean,
+): boolean {
+  if (
+    other === undefined ||
+    (lines && other.at !== kept.at) ||
+    other.declared !== kept.declared ||
+    typeKey(other.type, false) !== typeKey(kept.type, false)
+  )
+    return false;
+  return (
+    kept.declared ||
+    (other.loads.length === kept.loads.length &&
+      other.loads.every(
+        (load, index) =>
+          (!lines || load.at === kept.loads[index]!.at) &&
+          typeKey(load.type, false) === typeKey(kept.loads[index]!.type, false),
+      ))
+  );
 }
 
 /** Whether two types are equal, with union members and object properties in any order. */

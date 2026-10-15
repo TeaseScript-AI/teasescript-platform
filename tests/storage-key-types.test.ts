@@ -279,6 +279,81 @@ test("a save fits every load of its key, and a key that is never loaded is not c
   );
 });
 
+test("a key type that only a later check settles still decides the saves and the plan", () => {
+  // "copy" takes the type of its default, a load of "total", whose type another load declares; "steps" a list of a
+  // variable that a later assignment makes a number. A check that does not know those yet reads other types.
+  const source = (saved: string) =>
+    [
+      'let total: number = load("total", default: 0)',
+      'let copy = load("copy", default: load("total", default: 1))',
+      `save ${saved} as "copy"`,
+      "let step = 1",
+      "step = step + 0.5",
+      'let steps = load("steps", default: [step])',
+      'save [2.5] as "steps"',
+      "exit",
+    ].join("\n");
+  assert.deepEqual(plan(source("0.5")).storageTypes, [
+    { key: "copy", type: { kind: "number" } },
+    { key: "steps", type: { kind: "list", element: { kind: "number" } } },
+    { key: "total", type: { kind: "number" } },
+  ]);
+  assert.deepEqual(errors(source('"half"')), [
+    [
+      "TSV041",
+      `Storage key "copy" is loaded as a number on line 2, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: number | string = load(...)'.`,
+      '"half"',
+    ],
+  ]);
+  // A message names the load that the check takes first: the function body runs at its call, after the other load.
+  assert.deepEqual(
+    errors(
+      'function later {\n    let late = load("level", default: 1)\n}\nlet level = load("level", default: 2)\nlater()\nsave "high" as "level"\nexit',
+    )[0]?.[1],
+    `Storage key "level" is loaded as a whole number (integer) on line 4, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: integer | string = load(...)'.`,
+  );
+});
+
+test("nothing that a check decides from another declared type of a key than the first one stays", () => {
+  // The function body declares the key first in the source, but the check takes the body after the file's statements:
+  // their declaration decides, so the list holds numbers, `b` stays a whole number, and only the body is an error.
+  const later = (declared: string, value: string) =>
+    `function later {\n    let other: ${declared} = load("k", default: ${value})\n}\n`;
+  assert.deepEqual(
+    errors(
+      `${later("string", '""')}let declared: number = load("k", default: 0)\nlet xs = []\nsay xs[0]\nxs.add(load("k", default: 0))\nlet n: number = xs[0]\nexit`,
+    ).map(([code, message]) => [code, message]),
+    [
+      [
+        "TSV041",
+        'Storage key "k" is declared as a number on line 4, so it cannot be declared as text (string) here. Declare its type at one load only. The other loads use that type.',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    errors(
+      `${later("number", "0")}let whole: integer = load("k", default: 0)\nlet b = 0\nb = load("k", default: 0)\nsay [1][b]\nexit`,
+    ).map(([code, message]) => [code, message]),
+    [
+      [
+        "TSV041",
+        'Storage key "k" is declared as a whole number (integer) on line 4, so it cannot be declared as a number here. Declare its type at one load only. The other loads use that type.',
+      ],
+    ],
+  );
+  // A load assigned to a variable reads that variable's declared type, here with its members in their written order.
+  const numberOrText = { kind: "union", members: [{ kind: "number" }, { kind: "string" }] };
+  assert.deepEqual(
+    plan(
+      'function first {\n    let receiver: number | string = 0\n    receiver = load("k", default: 0)\n    let xs = []\n    say xs[0]\n    xs.add(load("k", default: 0))\n    let copy = load("copy", default: xs)\n}\nfunction other {\n    let receiver: string | number = ""\n}\nfirst()\nexit',
+    ).storageTypes,
+    [
+      { key: "copy", type: { kind: "list", element: numberOrText } },
+      { key: "k", type: numberOrText },
+    ],
+  );
+});
+
 test("a key computed at runtime has no type", () => {
   assert.deepEqual(
     codes(

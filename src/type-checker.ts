@@ -229,10 +229,13 @@ import {
   PLAYER_DECLARATION,
   runsOnItsOwn,
   sessionDeclarations,
+  someNode,
 } from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
+  sameDeclaredKeys,
+  sameReadKeys,
   sameReadStorageKeyTypes,
   sameType,
   storageKeyTypes,
@@ -354,14 +357,20 @@ export function checkTypes(
   // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
   const unchecked: UncheckedProperties = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
-  // types the previous check found, and starts again until they stay the same. A load's own type never depends on
-  // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
-  // they changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that
-  // the next check would read changed, the next check would repeat this one exactly, so it is not run.
-  let storage: ReadonlyMap<string, StorageKeyType> = new Map();
+  // types the previous check found, and starts again until they stay the same. The first check reads the types that the
+  // source alone gives instead (see `storageGuess`): when it found the types it read, as most projects do, it is the
+  // check that reads the found types, so no other check is needed for them. A load's own type never depends on them,
+  // so they settle at once; the bound only guards against a load type that changes with variable types. When they
+  // changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that the
+  // next check would read changed, the next check would repeat this one exactly, so it is not run.
+  let guess: ReadonlyMap<string, StorageKeyType> | null = storageGuess(programs);
+  let guessedAgain = false;
+  let storage: ReadonlyMap<string, StorageKeyType> = guess;
   let storageRounds = 0;
   for (;;) {
-    const checker = new TypeChecker(
+    const guessed: boolean = storage === guess;
+    const uncheckedBefore = guessed ? [...unchecked] : [];
+    const checker: TypeChecker = new TypeChecker(
       options,
       widened,
       decided,
@@ -369,11 +378,32 @@ export function checkTypes(
       kept,
       unchecked,
       storage,
+      guessed,
       programs.length,
       onFile,
       lines,
     );
     checker.check(programs);
+    // A key whose type the runtime cannot check has none.
+    const found: Map<string, StorageKeyType> = new Map(
+      [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
+    );
+    // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
+    // the check starts again from nothing, with the found types as the guess. Its loads then read them, since loads
+    // take them from declarations, which no check changes; should they not, it starts again without a guess.
+    if (guessed && !checker.loadsReadFound(found)) {
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      unchecked.clear();
+      for (const name of uncheckedBefore) unchecked.add(name);
+      guess = guessedAgain ? null : found;
+      guessedAgain = true;
+      storage = guess ?? new Map();
+      storageRounds = 0;
+      continue;
+    }
     // A check that found more of them read those properties with the types they no longer keep, so what it found rests
     // on those types: the next check starts again from nothing but the larger set, which only grows.
     if (checker.uncheckedMore) {
@@ -381,7 +411,7 @@ export function checkTypes(
       decided.clear();
       copies.clear();
       kept.clear();
-      storage = new Map();
+      storage = guess ?? new Map();
       storageRounds = 0;
       continue;
     }
@@ -389,18 +419,18 @@ export function checkTypes(
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
     if (storageRounds < MAX_STORAGE_ROUNDS) {
-      // A key whose type the runtime cannot check has none.
-      const found = new Map(
-        [...storageKeyTypes(checker.storageLoads)].filter(
-          ([, kept]) => typePlan(kept.type) !== null,
-        ),
-      );
-      if (!sameStorageKeyTypes(storage, found)) {
+      if (guessed) {
+        // As for a first check that read no types, they changed from none when it found some, but in what it read only
+        // when it found others than it read.
+        storageRead = !checker.readsFound(found);
+        storageChanged = storageRead || found.size > 0;
+        storage = found;
+      } else if (!sameStorageKeyTypes(storage, found)) {
         storageRead = !sameReadStorageKeyTypes(storage, found);
         storage = found;
         storageChanged = true;
-        storageRounds += 1;
       }
+      if (storageChanged) storageRounds += 1;
     }
     // A load that read its default's type reads the type that another load declares from the next check on, so what
     // this check decided may rest on the wrong type: the next check decides again.
@@ -452,6 +482,167 @@ function storageTypePlans(
   }
   plans.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
   return Object.freeze(plans);
+}
+
+/**
+ * The storage key types that the source alone gives (ADR 0021 §6), which the first check reads (see {@link checkTypes}).
+ * They come from the loads with a key written as a string literal: the type that their `let` or `global` declares, or
+ * that every declaration of the variable they are assigned to declares, or else their default's type when the default is
+ * a literal. A load whose type only the check can tell, such as one with another default, is left out. The loads are
+ * taken as a check takes them: those in the start values of globals and speakers first, then by file, each by position.
+ */
+function storageGuess(programs: readonly Program[]): Map<string, StorageKeyType> {
+  const byPosition = (left: LoadExpression, right: LoadExpression): number =>
+    left.span.start.offset - right.span.start.offset;
+  const fileLoads: LoadExpression[][] = [];
+  const starts: Expression[] = [];
+  const declared = new Map<LoadExpression, TypeAnnotation>();
+  const assigned = new Map<LoadExpression, string>();
+  // The types that the `let`s, `global`s, parameters, and loop variables of each name declare, `null` for none.
+  const names = new Map<string, (TypeAnnotation | null)[]>();
+  const declare = (name: Identifier, annotation: TypeAnnotation | null): void => {
+    const annotations = names.get(name.name) ?? [];
+    annotations.push(annotation);
+    names.set(name.name, annotations);
+  };
+  for (const program of programs) {
+    const found: LoadExpression[] = [];
+    someNode(program, (node) => {
+      if (node.kind === "letStatement" || node.kind === "globalStatement") {
+        // EVIDENCE: invariant: the parser gives these kinds only to let and global statements.
+        const statement = node as LetStatement | GlobalStatement;
+        declare(statement.name, statement.typeAnnotation);
+        const value = unwrap(
+          statement.kind === "letStatement" ? statement.initializer : statement.initial,
+        );
+        if (statement.typeAnnotation !== null && value.kind === "loadExpression")
+          declared.set(value, statement.typeAnnotation);
+        if (statement.kind === "globalStatement") starts.push(statement.initial);
+      } else if (node.kind === "speakerDeclaration") {
+        // EVIDENCE: invariant: the parser gives this kind only to speaker declarations.
+        for (const property of (node as SpeakerDeclaration).properties) starts.push(property.value);
+      } else if (node.kind === "functionParameter") {
+        // EVIDENCE: invariant: the parser gives this kind only to function parameters.
+        const parameter = node as FunctionParameter;
+        declare(parameter.name, parameter.typeAnnotation);
+      } else if (node.kind === "forStatement") {
+        // EVIDENCE: invariant: the parser gives this kind only to for statements.
+        const statement = node as ForStatement;
+        declare(statement.variable, null);
+        if (statement.valueVariable !== null) declare(statement.valueVariable, null);
+      } else if (node.kind === "assignmentStatement") {
+        // EVIDENCE: invariant: the parser gives this kind only to assignments.
+        const statement = node as AssignmentStatement;
+        const value = unwrap(statement.value);
+        if (
+          statement.operator === "=" &&
+          statement.target.kind === "identifier" &&
+          value.kind === "loadExpression"
+        )
+          assigned.set(value, statement.target.name);
+      } else if (node.kind === "loadExpression") {
+        // EVIDENCE: invariant: the parser gives this kind only to load expressions.
+        found.push(node as LoadExpression);
+      }
+      return false;
+    });
+    fileLoads.push(found.sort(byPosition));
+  }
+  // The start values of globals and speakers come first, by file and position like the declarations that hold them.
+  const started = new Set<object>();
+  for (const start of starts)
+    someNode(start, (node) => {
+      if (node.kind === "loadExpression") started.add(node);
+      return false;
+    });
+  const loads = [
+    ...fileLoads.flatMap((found) => found.filter((load) => started.has(load))),
+    ...fileLoads.flatMap((found) => found.filter((load) => !started.has(load))),
+  ];
+  // The type that each declaration of a name declares, if they all declare the same one.
+  const byName = new Map<string, StaticType | undefined>();
+  const declaredByName = (name: string): StaticType | undefined => {
+    if (byName.has(name)) return byName.get(name);
+    const types = (names.get(name) ?? []).map((annotation) =>
+      annotation === null ? null : typeFromAnnotation(annotation),
+    );
+    const first = types[0] ?? null;
+    const text = first === null ? null : typeKey(first, false);
+    const type =
+      first !== null && types.every((other) => other !== null && typeKey(other, false) === text)
+        ? first
+        : undefined;
+    byName.set(name, type);
+    return type;
+  };
+  const typed: StorageLoad[] = [];
+  for (const load of loads) {
+    const key = staticText(load.key);
+    if (key === undefined) continue;
+    const annotation = declared.get(load);
+    const name = assigned.get(load);
+    const receiver =
+      annotation !== undefined
+        ? typeFromAnnotation(annotation)
+        : name === undefined
+          ? undefined
+          : declaredByName(name);
+    if (receiver !== undefined) {
+      typed.push({ key, type: nonNullType(receiver), at: load.span, declared: true });
+      continue;
+    }
+    const fallback =
+      load.defaultValue === null ? undefined : runCompileTask(literalTypeTask(load.defaultValue));
+    if (fallback === undefined) continue;
+    // As in the check, a default of null, or with a type that no value decided, gives the load no type.
+    const type = nonNullType(fallback);
+    const kind = resolved(type).kind;
+    if (kind !== "never" && kind !== "unknown" && kind !== "open")
+      typed.push({ key, type, at: load.span, declared: false });
+  }
+  // A key whose type the runtime cannot check has none.
+  return new Map([...storageKeyTypes(typed)].filter(([, kept]) => typePlan(kept.type) !== null));
+}
+
+/** The type that a check gives a literal, also one of literals such as `[1, 2]`, or `undefined` for another expression. */
+function* literalTypeTask(expression: Expression): CompileTask<StaticType | undefined> {
+  switch (expression.kind) {
+    case "booleanLiteral":
+      return BOOLEAN_TYPE;
+    case "nullLiteral":
+      return NULL_TYPE;
+    case "numberLiteral":
+      return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
+    case "durationLiteral":
+      return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
+    case "stringLiteral":
+      return STRING_TYPE;
+    case "parenthesizedExpression":
+      return yield* compileChild(literalTypeTask(expression.expression));
+    case "listLiteral":
+    case "setLiteral": {
+      const types: StaticType[] = [];
+      for (const element of expression.elements) {
+        const type = yield* compileChild(literalTypeTask(element));
+        if (type === undefined) return undefined;
+        types.push(type);
+      }
+      // Elements of different types leave the element type unknown, as in the check.
+      const element = types.length === 0 ? openType() : (joinTypes(types) ?? UNKNOWN_TYPE);
+      return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
+    }
+    case "objectLiteral": {
+      const properties = new PropertyTable();
+      for (const property of expression.properties) {
+        const type = yield* compileChild(literalTypeTask(property.value));
+        if (type === undefined) return undefined;
+        properties.set(property.name.name, type);
+      }
+      return { kind: "object", properties };
+    }
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -1341,8 +1532,24 @@ class TypeChecker {
   /** The variable each declaration created most recently, whose type later widenings change. */
   readonly #declared = new Map<Declaration, Variable>();
 
-  /** The storage key types that the previous check found from the loads (ADR 0021 §6), which saves must fit. */
+  /**
+   * The storage key types that the previous check found from the loads (ADR 0021 §6), which saves must fit, or for the
+   * first check, those that the source alone gives (see `storageGuess`).
+   */
   readonly #storage: ReadonlyMap<string, StorageKeyType>;
+
+  /**
+   * In a check that reads guessed types, the keys whose type it read, each with whether a message named the line of a
+   * load of the key, so that the end of the check can tell whether it read the types it found (see {@link readsFound});
+   * otherwise `null`.
+   */
+  readonly #guessedReads: Map<string, boolean> | null;
+
+  /**
+   * In a check that reads guessed types, the keys whose type a load without a declared type of its own read, which
+   * decides the value it gives (see {@link loadsReadFound}); otherwise `null`.
+   */
+  readonly #guessedLoads: Set<string> | null;
 
   /** The loads of storage keys written as string literals that have a type, in checking order. */
   readonly storageLoads: StorageLoad[] = [];
@@ -1376,12 +1583,15 @@ class TypeChecker {
     kept: KeptFallbacks,
     unchecked: UncheckedProperties,
     storage: ReadonlyMap<string, StorageKeyType>,
+    guessed: boolean,
     files: number,
     private readonly onFile: (file: number) => void,
     private readonly lines: LineNamer,
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#storage = storage;
+    this.#guessedReads = guessed ? new Map() : null;
+    this.#guessedLoads = guessed ? new Set() : null;
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
@@ -4238,13 +4448,18 @@ class TypeChecker {
         // A load reads the stored value as the declared type of the variable that receives it, or else as the type
         // another load of the key declares, or else as its default's type (rule 6.2).
         const own = this.#loadReceivers.get(expression);
-        const kept = this.#storage.get(key);
+        const kept = this.#storageType(key);
+        if (own === undefined) this.#guessedLoads?.add(key);
         const given = nonNullType(fallback);
         const givenKind = resolved(given).kind;
         let read: StaticType;
         if (own !== undefined) {
           read = nonNullType(own);
-          if (kept?.declared === true && kept.at !== expression.span && !sameType(kept.type, read))
+          if (
+            kept?.declared === true &&
+            !sameType(kept.type, read) &&
+            this.#storageAt(key, kept) !== expression.span
+          )
             this.#report(
               typeCode.typeMismatch,
               `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load only. The other loads use that type.`,
@@ -4264,7 +4479,7 @@ class TypeChecker {
           if (givenKind !== "never" && !isAssignable(read, given))
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(kept.at)}, so its default cannot be ${describeValue(given)}.`,
+              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(this.#storageAt(key, kept))}, so its default cannot be ${describeValue(given)}.`,
               expression.defaultValue!.span,
             );
         } else {
@@ -4295,7 +4510,7 @@ class TypeChecker {
             const both = union([conflict.type, read]);
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is loaded as ${describeValue(conflict.type)} on ${this.#line(conflict.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
+              `${storageLabel(key)} is loaded as ${describeValue(conflict.type)} on ${this.#line(this.#storageAt(key, conflict))}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
               expression.span,
             );
           }
@@ -7752,6 +7967,33 @@ class TypeChecker {
     );
   }
 
+  /** The type this check reads for a storage key written as a string literal, if it has one. */
+  #storageType(key: string): StorageKeyType | undefined {
+    if (this.#guessedReads?.has(key) === false) this.#guessedReads.set(key, false);
+    return this.#storage.get(key);
+  }
+
+  /** Where a storage key's type, or a type that loads of it read, comes from, for a message that names its line. */
+  #storageAt(key: string, from: { readonly at: SourceSpan }): SourceSpan {
+    this.#guessedReads?.set(key, true);
+    return from.at;
+  }
+
+  /**
+   * Whether this check read the storage key types that it found, `found`: always, unless it read guessed types and found
+   * others for a key it read.
+   */
+  public readsFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
+    return this.#guessedReads === null || sameReadKeys(this.#storage, found, this.#guessedReads);
+  }
+
+  /** As {@link readsFound}, but only for what its loads without a declared type of their own read. */
+  public loadsReadFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
+    return (
+      this.#guessedLoads === null || sameDeclaredKeys(this.#storage, found, this.#guessedLoads)
+    );
+  }
+
   *#storageKeyTask(expression: Expression, scope: Scope): CompileTask<void> {
     yield* compileChild(
       this.#requireTask(
@@ -7773,12 +8015,17 @@ class TypeChecker {
     value: StaticType,
   ): CompileTask<void> {
     const key = staticText(keyExpression);
-    const kept = key === undefined ? undefined : this.#storage.get(key);
+    const kept = key === undefined ? undefined : this.#storageType(key);
     // Saving null removes the key.
     const stored = nonNullType(value);
     if (kept === undefined || stored.kind === "never") return;
     yield* compileChild(
-      this.#storeTask(storagePlace(key!, kept, this.#text), expression, stored, false),
+      this.#storeTask(
+        storagePlace(key!, kept, this.#text, () => this.#storageAt(key!, kept)),
+        expression,
+        stored,
+        false,
+      ),
     );
   }
 
@@ -8918,13 +9165,23 @@ function holdsSessionValue(type: StaticType): boolean {
   );
 }
 
-/** A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). */
-function storagePlace(key: string, kept: StorageKeyType, text: PlaceText): Place {
+/**
+ * A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). Its
+ * subject names the line of the load that gives the type, from `at`.
+ */
+function storagePlace(
+  key: string,
+  kept: StorageKeyType,
+  text: PlaceText,
+  at: () => SourceSpan,
+): Place {
   const type = detachedType(kept.type);
   return {
     type,
     label: null,
-    subject: `${storageLabel(key)} is ${kept.declared ? "declared" : "loaded"} as ${describeValue(type)} on ${text.line(kept.at)}`,
+    get subject() {
+      return `${storageLabel(key)} is ${kept.declared ? "declared" : "loaded"} as ${describeValue(type)} on ${text.line(at())}`;
+    },
     verb: "save",
     fix: (value) => {
       const both = union([type, value]);

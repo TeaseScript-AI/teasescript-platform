@@ -107,8 +107,11 @@ interface AstObject {
 }
 
 /** Whether `test` holds for a node of a parser-owned AST, also inside blocks, functions, and expressions. */
-function someNode(program: Program, test: (node: AstObject) => boolean): boolean {
-  const work: unknown[] = [program];
+export function someNode(
+  root: Program | Statement | Expression,
+  test: (node: AstObject) => boolean,
+): boolean {
+  const work: unknown[] = [root];
   while (work.length > 0) {
     const value = work.pop();
     if (value === null || typeof value !== "object") continue;
