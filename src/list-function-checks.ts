@@ -1,5 +1,5 @@
 import type { CallExpression, Expression } from "./ast.js";
-import type { OperationProblem } from "./operation-checks.js";
+import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
 import { staticVisibleText } from "./static-evaluation.js";
 import {
   copyType,
@@ -254,7 +254,11 @@ function valuesType(
   const lists = members(type).map(resolved);
   const other = lists.find((member) => isKnown(member) && member.kind !== "list");
   if (other !== undefined) {
-    problem(context, `${name}(...) needs a list, not ${describeValue(other)}.`, list);
+    problem(
+      context,
+      `${name}(...) needs a list, not ${describeValue(other)}.${other.kind === "range" ? RANGE_LIST_FIX : ""}`,
+      list,
+    );
     return UNKNOWN_TYPE;
   }
   const element = lists.every(isKnown)

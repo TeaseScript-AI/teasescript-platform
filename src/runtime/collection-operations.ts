@@ -10,6 +10,7 @@ import {
   isAnyDuration,
   isCalendarDuration,
   isDuration,
+  isRange,
   isTemporal,
 } from "./value-predicates.js";
 
@@ -152,9 +153,12 @@ class ValueIndex {
   }
 }
 
+/** The fix for a range where a list is needed, as for a set (V30 §6). */
+export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
+
 /** A text for a set operation's argument that is neither a list nor a set. */
 export function setOperationArgumentMessage(name: string, value: SerializableRuntimeValue): string {
-  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.`;
+  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.${isRange(value) ? RANGE_LIST_FIX : ""}`;
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

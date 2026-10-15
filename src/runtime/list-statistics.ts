@@ -2,6 +2,7 @@ import { exactDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
+import { RANGE_LIST_FIX } from "./collection-operations.js";
 import { RuntimeFault } from "./errors.js";
 import {
   add,
@@ -30,6 +31,7 @@ import {
   isDuration,
   isList,
   isObject,
+  isRange,
   isTemporal,
 } from "./value-predicates.js";
 
@@ -59,7 +61,11 @@ export function listValues(
   span: SourceSpan,
 ): SerializableRuntimeValue[] {
   if (!isList(list))
-    throw fault("TSR059", `${name}(...) needs a list, not ${describeRuntimeValue(list)}.`, span);
+    throw fault(
+      "TSR059",
+      `${name}(...) needs a list, not ${describeRuntimeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
+      span,
+    );
   if (by === undefined) return list.items;
   return list.items.map((item) => propertyValue(name, item, "by", by, span));
 }

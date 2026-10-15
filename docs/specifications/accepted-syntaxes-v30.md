@@ -586,12 +586,12 @@ may produce `5`, `6`, `7`, `8`, or `9`.
 
 may also produce `10`.
 
-`for` ([§23](#23-loops)) and `randomInteger` ([Randomness](#randomness)) give the whole numbers of a range, and `wait`
-and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them needs
-whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with `floor(...)`,
-`round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other bounds, such as one whose type the compiler
-cannot know or one of a range kept in a variable, are checked when the range is used. A `switch` case range matches any
-number within its bounds ([§32](#32-switch-statements)).
+`for` ([§23](#23-loops)), `randomInteger` ([Randomness](#randomness)), and `toList()` give the whole numbers of a range,
+and `wait` and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them
+needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with
+`floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other bounds, such as one whose type
+the compiler cannot know or one of a range kept in a variable, are checked when the range is used. A `switch` case range
+matches any number within its bounds ([§32](#32-switch-statements)).
 
 Ranges may also be used in `switch` cases:
 
@@ -612,6 +612,10 @@ switch score {
 ```
 
 Overlapping cases are a compile error. Adjacent exclusive ranges such as `0..4` and `4..8` do not overlap.
+
+`toList()` returns the whole numbers of a range as a new list, in order: `(1..=5).toList()` is `[1, 2, 3, 4, 5]`, and
+`(1..1).toList()` is `[]` (owner decision, 2026-10-15). Write the range in parentheses, or call it on a range kept in a
+variable. A range is not a list: to add its numbers to a list, write `list += (1..=3).toList()`.
 
 ## 7. Conditions and blocks
 **Status:** Accepted

@@ -76,6 +76,9 @@ export interface OperationProblem {
   readonly fix?: string;
 }
 
+/** The fix for a range where a list is needed, as for a set (V30 §6). */
+export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
+
 /** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
 const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
 
@@ -1014,7 +1017,7 @@ export function collectionMethodProblems(
     return [
       {
         kind: "invalidOperand",
-        message: `${name}() needs a list or a set, not ${describeValue(type)}.`,
+        message: `${name}() needs a list or a set, not ${describeValue(type)}.${members(type).some((member) => resolved(member).kind === "range") ? RANGE_LIST_FIX : ""}`,
         span: argument.span,
       },
     ];
