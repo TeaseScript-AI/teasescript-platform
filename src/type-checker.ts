@@ -368,9 +368,9 @@ export function checkTypes(
   let storage: ReadonlyMap<string, StorageKeyType> = guess;
   let storageRounds = 0;
   for (;;) {
-    const guessed = storage === guess;
+    const guessed: boolean = storage === guess;
     const uncheckedBefore = guessed ? [...unchecked] : [];
-    const checker = new TypeChecker(
+    const checker: TypeChecker = new TypeChecker(
       options,
       widened,
       decided,
@@ -385,7 +385,7 @@ export function checkTypes(
     );
     checker.check(programs);
     // A key whose type the runtime cannot check has none.
-    const found = new Map(
+    const found: Map<string, StorageKeyType> = new Map(
       [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
     );
     // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
