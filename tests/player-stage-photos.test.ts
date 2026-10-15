@@ -250,6 +250,28 @@ test("a new script's preload leaves only the files of the photos it names in the
   second();
 });
 
+test("a photo the new script shows while the earlier script's file of it is still being written stays in the cache", async () => {
+  let written!: (value?: unknown) => void;
+  heldWrite = {
+    url: absolute("/files/well.jpg"),
+    until: new Promise((resolve) => (written = resolve)),
+  };
+  const first = preloadStagePhotos(["/files/well.jpg"]);
+  await preloaded();
+  const second = preloadStagePhotos([]);
+  first();
+  // As from an image path the new script computes.
+  const shown = prepareStagePhoto("/files/well.jpg");
+  written();
+  heldWrite = null;
+  await shown.shown;
+  await preloaded();
+  assert.equal(downloadsOf("/files/well.jpg"), 1);
+  assert.equal(photoCache()!.files.has(absolute("/files/well.jpg")), true);
+  shown.release();
+  second();
+});
+
 test("a preloaded photo whose download failed is downloaded again when it shows", async () => {
   page.offline = true;
   const release = preloadStagePhotos(["/files/meadow.jpg"]);

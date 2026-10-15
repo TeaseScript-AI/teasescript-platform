@@ -39,8 +39,16 @@ function cacheable(source: string): boolean {
   return /^https?:$/u.test(new URL(source, document.baseURI).protocol);
 }
 
+/** A source's web address, by which Cache Storage keeps its file. */
+function address(source: string): string {
+  return new URL(source, document.baseURI).href;
+}
+
 // The photos being written into the cache, so a read of one waits for it instead of downloading it again.
 const writing = new Map<string, Promise<unknown>>();
+// The addresses of the photos the current script uses, whose files the cache keeps: those its preload names and those
+// it read since, such as from an image path it computes; `null` before the first preload.
+let used: Set<string> | null = null;
 
 /**
  * Reads a photo's file: from the Player's cache, downloading it into the cache when it is not there yet, so the file
@@ -53,7 +61,9 @@ async function read(
   priority: RequestPriority,
 ): Promise<Blob | null> {
   try {
-    const cache = cacheable(source) ? await openPhotoCache() : null;
+    const cacheableSource = cacheable(source);
+    if (cacheableSource) used?.add(address(source));
+    const cache = cacheableSource ? await openPhotoCache() : null;
     if (cache) {
       await writing.get(source);
       const kept = await cache.match(source);
@@ -269,7 +279,8 @@ export function prepareStagePhoto(source: string): PreparedPhoto {
 /**
  * Downloads and measures these photos in the background into the Player's cache, one at a time and after any photo the
  * Stage waits for, so a later `prepareStagePhoto` of one finds its colours ready and its file without a new download.
- * The cache keeps no other files from then on. Returns a function that gives the photos up again.
+ * From then on the cache keeps only the files of the photos this script uses: these and those it reads later. Returns a
+ * function that gives the photos up again.
  */
 export function preloadStagePhotos(sources: readonly string[]): () => void {
   void keepOnly(sources).catch(() => {});
@@ -285,17 +296,19 @@ export function preloadStagePhotos(sources: readonly string[]): () => void {
 }
 
 /**
- * Removes the files of other photos from the Player's cache, such as those of an earlier script; one still being
- * written, whose download may have ended before the write, goes once it is written.
+ * Removes the files of photos a new script does not use from the Player's cache, such as those of an earlier script; one
+ * still being written, whose download may have ended before the write, goes once it is written. Each removal asks what
+ * the current script uses then, which may have grown by a photo it read meanwhile.
  */
 async function keepOnly(sources: readonly string[]) {
+  used = new Set(sources.map(address));
   const cache = await openPhotoCache();
   if (!cache) return;
-  const address = (source: string) => new URL(source, document.baseURI).href;
-  const kept = new Set(sources.map(address));
-  for (const [source, written] of writing)
-    if (!kept.has(address(source))) void written.then(() => cache.delete(source));
-  for (const request of await cache.keys()) if (!kept.has(request.url)) void cache.delete(request);
+  const remove = (source: string) => {
+    if (!used?.has(address(source))) void cache.delete(source);
+  };
+  for (const [source, written] of writing) void written.then(() => remove(source));
+  for (const request of await cache.keys()) remove(request.url);
 }
 
 /**
