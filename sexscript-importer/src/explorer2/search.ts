@@ -47,6 +47,7 @@ import {
   type Runtime2,
 } from "./runner.ts";
 import { CompactVisit, compactKey } from "./compact-visit.ts";
+import { regexExamples } from "./regex-examples.ts";
 import { Places, type Trap } from "./traps.ts";
 
 export interface Explore2Options {
@@ -164,6 +165,8 @@ const PRESS_TIMES = [
 ];
 /** Plays of single changes an unsolved short-circuit condition gets, at most (see `solve`). */
 const PROGRESS_PLAYS = 4;
+/** Checks that found something besides their target, kept to be played on at most (see `sideFinds`). */
+const MAX_SIDE_FINDS = 8;
 /** Attempts at one way from progress plays, at most: a few operands' worth of `and`s and `or`s. */
 const MAX_PROGRESS_ATTEMPTS = 8;
 
@@ -192,6 +195,8 @@ type Value =
 const MAX_QUEUE = 20_000;
 /** Typed answers from the conditions an ask's domain adds, at most. */
 const MAX_TYPED = 64;
+/** The longest typed answer a climb makes for a count a condition compares a text's length with (V1's bound too). */
+const MAX_TYPED_LENGTH = 200;
 /** Combinations of form fields one form answer's domain holds, at most (each one cut is counted). */
 const MAX_CANDIDATES = 4096;
 /** Candidates a target tries first; each time it runs out, it comes back with this many times more. */
@@ -404,6 +409,12 @@ export function explore2(
   /** The places of the random draws plays made (the runtime's sites). */
   const drawnSites = new Set<string>();
   const crashes = new Map<string, Explore2Result["crashes"][number]>();
+  /**
+   * Checks that ran code or took a way no play had, or failed in a new place, without turning their target (another
+   * case of a switch on a draw, the code behind another answer): each is played on as a play of its own, as a fuzzer
+   * keeps every input that finds something new.
+   */
+  const sideFinds: { path: Path; from: number; parent: Played; guide: Played | null }[] = [];
   let plays = 0;
   let checks = 0;
   let solved = 0;
@@ -1187,17 +1198,22 @@ export function explore2(
     debugCheck.steps += check.inputs.length - Math.max(0, from);
     // The check's own play is the path: its inputs up to the turn and the outcomes its draws had (a later visit's route
     // and draws by site included).
-    const found = check.decisions.some(turned)
-      ? {
-          path: {
-            inputs: check.inputs,
-            draws: new Map(check.draws.map((draw) => [draw.occurrence, draw.outcome])),
-            inherited: [],
-            ...startOf(shortened),
-          },
-          from,
-        }
-      : null;
+    const checkPath = {
+      inputs: check.inputs,
+      draws: new Map(check.draws.map((draw) => [draw.occurrence, draw.outcome])),
+      inherited: [],
+      ...startOf(shortened),
+    };
+    const found = check.decisions.some(turned) ? { path: checkPath, from } : null;
+    if (
+      found === null &&
+      sideFinds.length < MAX_SIDE_FINDS &&
+      ([...check.visited].some((index) => visited[index] !== 1) ||
+        check.decisions.some((decision) => !ways.has(decision.instruction * 2 + decision.way)) ||
+        (check.failure !== null &&
+          !crashes.has(`${check.failure.code}@${check.failure.path}:${check.failure.line}`)))
+    )
+      sideFinds.push({ path: checkPath, from, parent, guide });
     return { check, shortened, from, grown, found };
   };
 
@@ -1250,9 +1266,17 @@ export function explore2(
     )
       return null;
     let best = start.distance;
-    // Values the condition compares with, as typed answers; times to press a button after.
+    // Values the condition compares with, as typed answers, and for a count, texts that long (a code of so many digits
+    // a script checks the length of); times to press a button after.
     const compared = start.values.flatMap((value) =>
-      typeof value === "number" ? [value - 1, value, value + 1].map(String) : [String(value)],
+      typeof value === "number"
+        ? [value - 1, value, value + 1].flatMap((each) => [
+            String(each),
+            ...(Number.isInteger(each) && each > 0 && each <= MAX_TYPED_LENGTH
+              ? ["1".repeat(each)]
+              : []),
+          ])
+        : [String(value)],
     );
     const climbing = domains.map(({ origin, values }) => {
       const given = origin.startsWith("i") ? parent.inputs[Number(origin.slice(1))] : undefined;
@@ -1674,6 +1698,11 @@ export function explore2(
           for (const text of textsIn(condition))
             if (text !== "")
               for (const each of [text, `x${text}x`, `xxxxx${text}xxxxx`]) literals.add(each);
+          // The texts a regex the condition tests matches (an email address the script checks), those the runtime's
+          // matcher agrees with.
+          for (const { source, flags } of regexesIn(condition))
+            for (const text of regexExamples(source, flags))
+              if (runtime.matchesWhole(source, flags, text)) literals.add(text);
         }
         // Typed answers the conditions compare with, by the ask they reach: V1's goals of the target's other way and of
         // the linked decisions either way.
@@ -1888,6 +1917,23 @@ export function explore2(
     if (getHeapStatistics().used_heap_size >= (options.maxHeapBytes ?? Infinity)) {
       stoppedBy = "memory";
       break;
+    }
+    if (sideFinds.length > 0) {
+      // What checks found besides their targets is decisions' work.
+      const sideStarted = runner.work;
+      playKind = "decisions";
+      underDecision = true;
+      let sideFound = 0;
+      for (const side of sideFinds.splice(0)) {
+        const { found } = playOn(side.path, side.parent, side.from, side.guide);
+        sideFound += found;
+        if (process.env.SX_V2_DEBUG)
+          process.stderr.write(
+            `play ${plays} side at ${Math.round(performance.now() - started)} ms found ${found}\n`,
+          );
+      }
+      charge("decisions", sideStarted, sideFound);
+      continue;
     }
     const ready = KINDS.filter((kind) => kind !== "walks" || recent.length > 0)
       .filter((kind) => kind !== "decisions" || decisionsQueue.size > 0)
@@ -2581,7 +2627,7 @@ function conditionMeasure(condition: unknown, wanted: boolean, snapshot: Data): 
     if (node.kind === "group") return valueOf(node.expression);
     if (node.kind === "identifier" && typeof node.name === "string")
       return scalar(variables.get(node.name));
-    // A list's length: a deck dealt card by card gets closer to `cards.length <= 0`.
+    // A list's length (a deck dealt card by card gets closer to `cards.length <= 0`), or a text's.
     const object = record(node.object);
     if (
       node.kind === "property" &&
@@ -2589,7 +2635,10 @@ function conditionMeasure(condition: unknown, wanted: boolean, snapshot: Data): 
       object.kind === "identifier" &&
       typeof object.name === "string"
     ) {
-      const collection = record(variables.get(object.name));
+      const value = variables.get(object.name);
+      // A text's length counts its characters, as the runtime's does.
+      if (typeof value === "string") return [...value].length;
+      const collection = record(value);
       if (collection.kind === "list" && Array.isArray(collection.items))
         return collection.items.length;
     }
@@ -2706,6 +2755,26 @@ function textsIn(expression: unknown): string[] {
     }
     if (!isRecord(value)) return;
     if (value.kind === "literal" && typeof value.value === "string") found.push(value.value);
+    for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
+  };
+  walk(expression);
+  return found;
+}
+
+/** The regex literals in an expression. */
+function regexesIn(expression: unknown): { source: string; flags: string }[] {
+  const found: { source: string; flags: string }[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "regex" && typeof value.source === "string")
+      found.push({
+        source: value.source,
+        flags: typeof value.flags === "string" ? value.flags : "",
+      });
     for (const [key, item] of Object.entries(value)) if (key !== "span") walk(item);
   };
   walk(expression);

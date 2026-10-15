@@ -52,6 +52,8 @@ export interface Runtime2 {
   readonly randomDrawAlternatives: (draw: Data, limit: number) => Data;
   /** Whether a draw with this support can have this outcome (the runtime's check). */
   readonly outcomeFits: (support: Data, outcome: Data) => boolean;
+  /** Whether a text matches a regex as a whole, as the runtime's `matches` tells (false for a regex it rejects). */
+  readonly matchesWhole: (pattern: string, flags: string, text: string) => boolean;
 }
 
 /** The operations of a runtime session (`RuntimeSession`) that V2 calls, each with its result read as a record. */
@@ -161,6 +163,14 @@ export async function loadRuntime2(): Promise<Runtime2> {
   const context = isRecord(module) ? module.RuntimeDebugContext : undefined;
   if (typeof context !== "function")
     throw new Error("The repository build has no RuntimeDebugContext; explorer V2 needs it.");
+  const regex: unknown = await import(repositoryBuildUrl("src/regex.js").href);
+  const engine: unknown = await import(repositoryBuildUrl("src/regex-engine.js").href);
+  const compile = callOf(regex, "compileRegex", (value) =>
+    isRecord(value) && value.ok === true ? value.program : null,
+  );
+  const work = isRecord(engine) ? engine.RegexWork : undefined;
+  if (typeof work !== "function")
+    throw new Error("The repository build has no RegexWork; explorer V2 needs it.");
   return {
     createFreshRuntimeSession: (plan, start, options) => fresh(plan, start, options),
     createTaggedRuntimeSession: (plan, tagged, options) => restore(plan, tagged, options),
@@ -185,6 +195,20 @@ export async function loadRuntime2(): Promise<Runtime2> {
       try {
         return checked(support, outcome);
       } catch {
+        return false;
+      }
+    },
+    matchesWhole: (pattern, flags, text) => {
+      const program = compile(pattern, flags);
+      if (program === null) return false;
+      try {
+        return callOf(
+          program,
+          "matchesWhole",
+          (value) => value === true,
+        )(text, Reflect.construct(work, []));
+      } catch {
+        // A text past the runtime's regex work limit does not match for the explorer.
         return false;
       }
     },
@@ -238,6 +262,12 @@ export interface Interaction {
   readonly fields: readonly Data[];
   /** The values of the variables and stored keys the conditions seen so far read, as text (see `relevantState`). */
   readonly state: string;
+  /**
+   * Whether the innermost loop under way, here or in a caller, has a condition that reads the clock: going round it, time
+   * may let the player out, however seldom plays saw that condition run (a loop that plays a sound until some minutes
+   * have passed decides only when a sound ends).
+   */
+  readonly clockLoop: boolean;
 }
 
 /** A path: the inputs, one per step, and the outcomes fixed for draws by occurrence. */
@@ -540,6 +570,8 @@ export class Runner {
   readonly flow: DataFlow;
   /** Whether a decision's condition reads the clock (through the variables it reads too), by instruction. */
   readonly #clockReads = new Map<number, boolean>();
+  /** Whether a loop has a condition that reads the clock, by loop ID (see {@link Interaction.clockLoop}). */
+  readonly #clockLoops = new Map<number, boolean>();
   /** Every variable name a condition read so far, for {@link relevantState}. */
   readonly readNames = new Set<string>();
   readonly readKeys = new Set<string>();
@@ -1379,6 +1411,7 @@ export class Runner {
         fields: list(record(action.ui).fields),
         // A check is not counted as a path: it needs no states.
         state: options.until === undefined ? this.relevantState(snapshot) : "",
+        clockLoop: options.until === undefined && this.#inClockLoop(snapshot),
       };
       interactions.push(interaction);
       if (
@@ -1469,6 +1502,30 @@ export class Runner {
       captures: [...captures],
       ...(measured === undefined ? {} : { measured }),
     };
+  }
+
+  /** Whether the innermost loop under way in a state has a condition that reads the clock, its own or one in its body. */
+  #inClockLoop(snapshot: Data): boolean {
+    const innermost = list(snapshot.loopFrames).at(-1);
+    if (innermost === undefined || typeof innermost.loopId !== "number") return false;
+    const loopId = innermost.loopId;
+    let reads = this.#clockLoops.get(loopId);
+    if (reads === undefined) {
+      const start = this.#instructions.findIndex(
+        (instruction) => instruction.kind === "loopStart" && instruction.loopId === loopId,
+      );
+      const end = Number(this.#instructions[start]?.target);
+      reads = false;
+      for (let at = start; start >= 0 && at < end; at += 1) {
+        const kind = this.#instructions[at]?.kind;
+        if ((kind === "loopStart" || kind === "jumpIfFalse") && this.readsClock(at)) {
+          reads = true;
+          break;
+        }
+      }
+      this.#clockLoops.set(loopId, reads);
+    }
+    return reads;
   }
 
   /** Whether the condition of the decision at `index` reads the clock (through the variables it reads too). */

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { isRecord } from "../src/ast.ts";
 import { loadEngine, type Engine } from "../src/explorer.ts";
 import { loadRuntime2, Runner, type Runtime2 } from "../src/explorer2/runner.ts";
+import { regexExamples } from "../src/explorer2/regex-examples.ts";
 import { DEFAULT_OPTIONS, explore2 } from "../src/explorer2/search.ts";
 
 const loaded = await Promise.all([loadEngine(), loadRuntime2()]).then(
@@ -58,7 +59,7 @@ test(
 );
 
 test(
-  "explorer V2 goes back to a menu answer once another answer changed what the menu's code reads, finds a choice read three menus later, starts a session at another time of day for a condition on the clock, types the codes conditions compare an answer with, and comes back for a later visit with a value an earlier one saved",
+  "explorer V2 goes back to a menu answer once another answer changed what the menu's code reads, finds a choice read three menus later, starts a session at another time of day for a condition on the clock, types the codes conditions compare an answer with, an email address a regex checks, and a code as long as a condition counts, and comes back for a later visit with a value an earlier one saved",
   { skip: "reason" in loaded ? loaded.reason : false },
   () => {
     const sources = {
@@ -85,6 +86,12 @@ test(
       codes:
         'let q = askInteger prefill: 0\nif q == 523174 {\n  say "First code."\n}\nif q == 10000000 {\n' +
         '  say "Second code."\n}\nif q == 85685614 {\n  say "Third code."\n}\nexit\n',
+      mail:
+        'let mail = askText "Your email address?"\nif mail.matches(/[^\\n\\r]{1,50}@[^\\n\\r]{5,50}/) {\n' +
+        '  say "Thanks."\n}\nexit\n',
+      length:
+        'let digits = 4\nlet code = askText "The code?"\nlet size = code.length\nif size == digits {\n' +
+        '  say "Four digits."\n}\nexit\n',
       // Only a later visit, from a state the first one saved, says it.
       visit:
         'let level: number = load "level", default: 0\nif level == 2 {\n  say "Welcome back."\n}\n' +
@@ -102,9 +109,77 @@ test(
 );
 
 test(
-  "explorer V2 reports a loop with no way out with the play into it, and none for a menu that has a way out",
+  "explorer V2 makes texts that regexes match as a whole, as the runtime's matcher tells, and none for what it does not read",
   { skip: "reason" in loaded ? loaded.reason : false },
   () => {
+    assert.ok("engine" in loaded);
+    const runtime = loaded.runtime;
+    // The corpus's regexes, and RE2 syntax they do not use.
+    const patterns: [string, string][] = [
+      [String.raw`[^\n\r\x{85}\x{2028}\x{2029}]{1,50}@[^\n\r\x{85}\x{2028}\x{2029}]{5,50}`, ""],
+      [String.raw`https?:\/\/(?:[a-z0-9-]+\.)*[a-z][a-z0-9-]*(?::\d{1,4})?(?:[\/?#]\S*)?`, "i"],
+      [String.raw`[^\n\r\x{85}\x{2028}\x{2029}]*\d+\.png`, ""],
+      [String.raw`^(yes|no|maybe)$`, "i"],
+      // With the `i` flag a negated class takes neither case of its members.
+      [String.raw`[^X]{7}@[^X]{11}`, "i"],
+      // Repeats of repeats too long for an answer give the shortest text only; groups past the reader's depth, none.
+      ["(?:".repeat(30) + "x" + ")*".repeat(30), ""],
+      // An alternative or an optional part too long for an answer leaves the others.
+      ["x{600}|abcdefg", ""],
+      ["(?:x{600})?abcdefg", ""],
+      [String.raw`(?P<code>[A-F0-9]{4})-\w+?\s\x41[]a-]{2,}`, ""],
+    ];
+    for (const [pattern, flags] of patterns) {
+      const examples = regexExamples(pattern, flags);
+      assert.ok(examples.length > 0, pattern);
+      for (const text of examples)
+        assert.ok(runtime.matchesWhole(pattern, flags, text), `${pattern} ${JSON.stringify(text)}`);
+    }
+    assert.deepEqual(
+      [
+        String.raw`\p{L}+`,
+        "(?i)abc",
+        String.raw`\Qa.b\E`,
+        "(?:".repeat(2400) + "x" + ")".repeat(2400),
+      ].map((pattern) => regexExamples(pattern, "")),
+      [[], [], [], []],
+    );
+  },
+);
+
+test(
+  "explorer V2 reports a loop with no way out with the play into it, none for a menu that has a way out, and none where a loop's condition reads the clock",
+  { skip: "reason" in loaded ? loaded.reason : false },
+  () => {
+    // A loop that goes on until half an hour has passed, here round a helper that asks (a sound that plays until then
+    // decides only as each sound ends): plays that stop before its condition runs again never see it, yet time lets the
+    // player out. A loop with no condition on the clock is no such loop.
+    assert.ok("engine" in loaded);
+    const clockLoops = [
+      'function shock {\n  showButton "Shock"\n}\nlet start = getAbsoluteDateTime()\n' +
+        "while getAbsoluteDateTime() - start < 30 min {\n  shock()\n}\nexit\n",
+      'let count = 0\nwhile count < 3 {\n  count += 1\n  showButton "Again"\n}\nexit\n',
+    ].map((source) => {
+      const { plan } = loaded.engine.compileProject([{ path: "main.tease", source }], {
+        builtins: [],
+      });
+      assert.ok(isRecord(plan));
+      return new Runner(loaded.runtime, loaded.engine, plan, 1)
+        .play(
+          { inputs: [], draws: new Map(), inherited: [] },
+          {
+            extend: (interaction) => interaction.options[0] ?? null,
+            maxSteps: 2,
+            maxStepInstructions: 10_000,
+            origins: false,
+          },
+        )
+        .interactions.map((interaction) => interaction.clockLoop);
+    });
+    assert.deepEqual(clockLoops, [
+      [true, true, true],
+      [false, false, false],
+    ]);
     const trapped = run(
       'while true {\n  let pick = askChoice stay: "Stay", leave: "Leave", quit: "Quit"\n  if pick == "quit" {\n' +
         '    exit\n  }\n  if pick == "leave" {\n    while true {\n      showButton "Again"\n    }\n  }\n}\n',

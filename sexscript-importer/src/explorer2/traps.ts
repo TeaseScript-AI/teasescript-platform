@@ -42,8 +42,9 @@ interface Place {
   /** Whether a play ended (exited or failed) after an answer here. */
   exits: boolean;
   /**
-   * Whether a condition that reads the clock ran, or a random draw was made, after an answer here: where the place
-   * leads may then change as time passes or with another outcome, which the relevant state does not tell.
+   * Whether a condition that reads the clock ran, or a random draw was made, after an answer here, or the place is in a
+   * loop with a condition on the clock: where the place leads may then change as time passes or with another outcome,
+   * which the relevant state does not tell.
    */
   uncertain: boolean;
   /** The play that came here in the fewest steps, and its step here. */
@@ -79,7 +80,7 @@ export class Places {
           options: interaction.options,
           next: new Set(),
           exits: false,
-          uncertain: false,
+          uncertain: interaction.clockLoop,
           witness,
           step,
         };
@@ -99,8 +100,9 @@ export class Places {
 
   /**
    * The loops with no way out: sets of places that lead only to each other (more than one place, or one that leads to
-   * itself) without a condition on the clock or a random draw between them, where every answer offered was given
-   * (`given` holds `instruction|answer|state` keys) and none is typed, and no play ended.
+   * itself) without a condition on the clock or a random draw between them, or a loop around them with a condition on
+   * the clock, where every answer offered was given (`given` holds `instruction|answer|state` keys) and none is typed,
+   * and no play ended.
    */
   traps(given: ReadonlySet<string>, location: (instruction: number) => string): Trap[] {
     // A place that asks for a text or a form with typed fields is never done: the player may type anything else.
