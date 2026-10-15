@@ -119,6 +119,12 @@ function sexscriptLegacyAskProfile {
       save true as "intro.likemale"
     }
   }
+  player.firstName = load "intro.name", default: ""
+  if load("intro.female", default: null) == true {
+    player.gender = "female"
+  } else {
+    player.gender = "male"
+  }
   let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.dildo"] {

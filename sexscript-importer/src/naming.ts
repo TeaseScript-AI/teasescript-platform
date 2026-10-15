@@ -269,6 +269,7 @@ function renameStatement(
     case "unsupported":
     case "comment":
     case "blank":
+    case "useSpeaker":
       return statement;
   }
 }
@@ -277,6 +278,7 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
   const child = (value: IrExpression): IrExpression => renameExpression(value, scope, renamer);
   switch (expression.kind) {
     case "variable":
+      if (expression.builtin === true) return expression;
       return { ...expression, name: scope.get(expression.name) ?? expression.name };
     case "call":
       return {

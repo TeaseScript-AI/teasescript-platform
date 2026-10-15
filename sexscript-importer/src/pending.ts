@@ -257,6 +257,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
       case "unsupported":
       case "comment":
       case "blank":
+      case "useSpeaker":
         return [item];
     }
   };

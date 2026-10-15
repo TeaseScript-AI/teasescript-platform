@@ -13,8 +13,11 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parseSpeakerData, type SpeakerData } from "../src/speakers.ts";
 
 export const PATCH_MANIFEST = "patches.json";
+/** Who speaks each message of a unit (src/speakers.ts), beside its patches and read without a manifest too. */
+export const SPEAKERS_FILE = "speakers.json";
 
 export interface SourcePatch {
   readonly id: string;
@@ -124,6 +127,109 @@ export async function readUnitPatches(
   };
 }
 
+/**
+ * The unit's speaker data with each line anchor as the converter reads the script after the source patches, and the
+ * SHA-256 of the file; null when the unit has none. `original` is the unit folder, `staged` the folder with the source
+ * patches applied (the same folder without them): the lines follow the difference of each script between the two, as
+ * `patch` placed the hunks. An anchor on a line that a source patch removes fails the unit.
+ */
+export async function readUnitSpeakers(
+  patchesRoot: string,
+  unit: string,
+  original: string,
+  staged: string,
+): Promise<{ data: SpeakerData; sha256: string } | null> {
+  const where = path.join(unit, SPEAKERS_FILE);
+  let text: string;
+  try {
+    text = await readFile(path.resolve(patchesRoot, where), "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  }
+  let parsed: SpeakerData | string[];
+  try {
+    parsed = parseSpeakerData(JSON.parse(text));
+  } catch (error) {
+    throw new PatchError(`${where} is not JSON: ${String(error)}`);
+  }
+  if (Array.isArray(parsed)) throw new PatchError(`${where}: ${parsed.join("; ")}`);
+  const anchors = [
+    ...parsed.switches.flatMap((point) =>
+      "at" in point
+        ? [point.at]
+        : "after" in point
+          ? [point.after]
+          : "message" in point
+            ? [point.message]
+            : [],
+    ),
+    ...parsed.names.flatMap((rule) => [...(rule.except ?? []), ...(rule.after ?? [])]),
+  ];
+  const differences = new Map<string, string>();
+  if (path.resolve(original) !== path.resolve(staged))
+    for (const file of new Set(anchors.map((anchor) => anchor.slice(0, anchor.lastIndexOf(":")))))
+      differences.set(file, await fileDifference(original, staged, file));
+  const changed: string[] = [];
+  const mapped = (anchor: string): string => {
+    const separator = anchor.lastIndexOf(":");
+    const file = anchor.slice(0, separator);
+    const difference = differences.get(file);
+    const line = patchedLine(
+      difference === undefined ? [] : [difference],
+      file,
+      Number(anchor.slice(separator + 1)),
+    );
+    if (line === null) changed.push(anchor);
+    return `${file}:${line}`;
+  };
+  const data: SpeakerData = {
+    ...parsed,
+    switches: parsed.switches.map((point) =>
+      "at" in point
+        ? { ...point, at: mapped(point.at) }
+        : "after" in point
+          ? { ...point, after: mapped(point.after) }
+          : "message" in point
+            ? { ...point, message: mapped(point.message) }
+            : point,
+    ),
+    names: parsed.names.map((rule) => ({
+      ...rule,
+      ...(rule.except === undefined ? {} : { except: rule.except.map(mapped) }),
+      ...(rule.after === undefined ? {} : { after: rule.after.map(mapped) }),
+    })),
+  };
+  if (changed.length > 0)
+    throw new PatchError(`${where}: a source patch changes the line of ${changed.join(", ")}`);
+  return { data, sha256: sha256(text) };
+}
+
+/** A file's unified difference, without context, from the unit folder `original` to `staged`; "" where they agree. */
+function fileDifference(original: string, staged: string, file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "diff",
+      [
+        "-U0",
+        "--label",
+        `a/${file}`,
+        "--label",
+        `b/${file}`,
+        path.join(original, file),
+        path.join(staged, file),
+      ],
+      { maxBuffer: 1 << 26 },
+      (error, stdout, stderr) => {
+        // diff exits 1 where the files differ.
+        if (error !== null && error.code !== 1)
+          reject(new PatchError(`cannot compare ${file}: ${stderr || error.message}`));
+        else resolve(stdout);
+      },
+    );
+  });
+}
+
 /** The unit files a diff changes, by their paths from the unit folder. */
 export function sourcePatchPaths(diff: string, where: string): string[] {
   const paths = new Set<string>();
@@ -144,6 +250,69 @@ export function sourcePatchPaths(diff: string, where: string): string[] {
   }
   if (paths.size === 0) throw new PatchError(`${where} is not a unified diff`);
   return [...paths].sort();
+}
+
+/**
+ * A line of a legacy file, by its path from the unit folder, as it reads after the unified diffs that patch it in turn:
+ * a line a diff edits in place (a run of removed lines that as many added lines replace) is its edited line; null where
+ * a diff removes the line otherwise.
+ */
+export function patchedLine(diffs: readonly string[], file: string, line: number): number | null {
+  let current: number | null = line;
+  for (const diff of diffs) if (current !== null) current = lineAfter(diff, file, current);
+  return current;
+}
+
+function lineAfter(diff: string, file: string, line: number): number | null {
+  const lines = diff.split(/\r?\n/u);
+  let target: string | null = null;
+  let offset = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index]!;
+    if (text.startsWith("--- ") && lines[index + 1]?.startsWith("+++ ")) {
+      target = lines[index + 1]!.slice(4).split("\t")[0]!.trim().split("/").slice(1).join("/");
+      index += 1;
+      continue;
+    }
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(text);
+    if (hunk === null) continue;
+    let oldLine = Number(hunk[1]);
+    let oldLeft = Number(hunk[2] ?? 1);
+    let newLine = Number(hunk[3]);
+    let newLeft = Number(hunk[4] ?? 1);
+    const ours = target === file;
+    // A hunk without old lines adds after its start line.
+    if (ours && line < (oldLeft === 0 ? oldLine + 1 : oldLine)) return line + offset;
+    if (ours) offset += newLeft - oldLeft;
+    while ((oldLeft > 0 || newLeft > 0) && index + 1 < lines.length) {
+      index += 1;
+      const mark = lines[index]![0] ?? " ";
+      if (mark === "-") {
+        // A run of removed lines that as many added lines replace edits them in place, line by line.
+        let removed = 0;
+        while (lines[index + removed]?.[0] === "-") removed += 1;
+        let added = 0;
+        while (lines[index + removed + added]?.[0] === "+") added += 1;
+        if (ours && line >= oldLine && line < oldLine + removed)
+          return removed === added ? newLine + line - oldLine : null;
+        oldLine += removed;
+        oldLeft -= removed;
+        newLine += added;
+        newLeft -= added;
+        index += removed + added - 1;
+      } else if (mark === " ") {
+        if (ours && oldLine === line) return newLine;
+        oldLine += 1;
+        oldLeft -= 1;
+        newLine += 1;
+        newLeft -= 1;
+      } else if (mark === "+") {
+        newLine += 1;
+        newLeft -= 1;
+      }
+    }
+  }
+  return line + offset;
 }
 
 /** Applies the source patches to a staged copy of the unit, whose patched files are copies of their own. */

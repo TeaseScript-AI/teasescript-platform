@@ -75,6 +75,8 @@ export type IrStatement =
    * which may become the ask's question (ask-questions.ts).
    */
   | (IrBase & { kind: "say"; value: IrExpression; speaker?: string; prose?: true; prompt?: true })
+  /** `speaker name`: the default speaker of every later message without `as` (V30 §37). */
+  | (IrBase & { kind: "useSpeaker"; name: string })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";
@@ -262,7 +264,8 @@ export type IrExpression =
       decimal?: true;
       constant?: "pi";
     }
-  | { kind: "variable"; name: string }
+  /** `builtin` marks the engine's own object, such as the `player` speaker, which no rename of legacy names reaches. */
+  | { kind: "variable"; name: string; builtin?: true }
   /** `set` marks a set literal `set[...]` (V30 §16); `lines` writes a long list with an item on each line. */
   | { kind: "list"; items: IrExpression[]; set?: true; lines?: true }
   /**

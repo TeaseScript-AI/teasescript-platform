@@ -40,6 +40,7 @@ import { BOOLEAN, inferType, NUMBER, STRING } from "./types.ts";
 import { withNestedBlocks, withoutRepeatedChainText } from "./repeated-text.ts";
 import {
   helperDefinitionOrder,
+  helperStatements,
   SYSTEM_SPEAKER,
   withActionDispatcher,
   withDispatcherResultTypes,
@@ -49,6 +50,7 @@ import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./
 import { withStorageDefaults } from "./storage-keys.ts";
 import { withNullDefaults } from "./null-defaults.ts";
 import { withNativeTime } from "./native-time.ts";
+import { withSpeakers, type SpeakerData, type SpokenPackage } from "./speakers.ts";
 import {
   expressionType,
   functionResultTypes,
@@ -147,6 +149,11 @@ export interface PackageOptions {
    * converted file of any legacy script name. Otherwise each script keeps its legacy path beside a main.tease.
    */
   standalone?: boolean;
+  /**
+   * Who speaks each message (speakers.ts), from the unit's `speakers.json`, with `path` giving the data's name of each
+   * file, `scripts/X.groovy`, from its source name.
+   */
+  speakers?: { data: SpeakerData; path: (sourceName: string) => string };
 }
 
 /** Every literal text of the package's files. */
@@ -424,6 +431,8 @@ export interface LoweredPackage {
    * files that write no file of their own and for files converted on their own.
    */
   paths: Array<string | null>;
+  /** Speaker anchors that matched nothing, and other mismatches of the unit's speaker data, for review. */
+  speakerProblems: string[];
 }
 
 /** A package's scripts with their TeaseScript paths, relative to the package root (packageScripts). */
@@ -640,9 +649,12 @@ function entryMenu(
     choices.length === 1
       ? []
       : [
+          ...systemSpeaker(),
           {
             kind: "say",
             value: { kind: "literal", value: "Which script do you want to start?" },
+            // The importer's own menu, a system screen (owner, speaker names 2026-10-14).
+            speaker: SYSTEM_SPEAKER,
             span: null,
           },
           {
@@ -779,9 +791,11 @@ function startChoice(
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
   return [
     { kind: "comment", text: `// NOTE SX_ENTRY_EXTRAS: ${message}`, trailing: false, span: null },
+    ...systemSpeaker(),
     {
       kind: "say",
       value: { kind: "literal", value: "Which script do you want to start?" },
+      speaker: SYSTEM_SPEAKER,
       span: null,
     },
     {
@@ -1037,6 +1051,13 @@ export function lowerPackage(
       ...(javaResources === undefined ? {} : { javaResources }),
     }),
   );
+  // Who speaks: switches, name updates, and labelled messages in each file, before composition moves code around.
+  const spoken =
+    options.speakers === undefined ? null : speakerPackage(lowered, files, options.speakers);
+  if (spoken !== null)
+    spoken.files.forEach((statements, index) => {
+      lowered[index] = { ...lowered[index]!, statements };
+    });
   const helperPrograms = lowered.filter(
     (_, index) => files[index]?.root?.kind === "compilationUnit",
   );
@@ -1140,7 +1161,9 @@ export function lowerPackage(
       withStorageDefaults(
         withNullableParameters(
           withClasses.map((program, index) =>
-            index === entryIndex ? withProfile(program, withClasses) : program,
+            index === entryIndex
+              ? withProfile(withSpokenStart(program, spoken), withClasses)
+              : program,
           ),
         ),
         false,
@@ -1152,6 +1175,7 @@ export function lowerPackage(
       composed: programs.map(withDefaults),
       main: null,
       paths: files.map(() => null),
+      speakerProblems: spoken?.problems ?? [],
     };
   }
   // main.tease (ADR 0022 §1): a legacy `main.groovy`, or a generated file that asks the legacy profile and goes to the
@@ -1181,7 +1205,10 @@ export function lowerPackage(
         ? [statement.name]
         : [],
     );
-  const project = new Set([shared.main, ...shared.programs].flatMap(globalNames));
+  const project = new Set([
+    ...[shared.main, ...shared.programs].flatMap(globalNames),
+    ...(spoken?.identifiers ?? []),
+  ]);
   const apart = (program: MigrationProgram, renameProtected: boolean): MigrationProgram => {
     const own = new Set(globalNames(program));
     return renameConflictingIdentifiers(
@@ -1191,7 +1218,7 @@ export function lowerPackage(
       new Set([...project].filter((name) => !own.has(name))),
     );
   };
-  const apartMain = apart(shared.main, true);
+  const apartMain = apart(withSpokenStart(shared.main, spoken), true);
   const apartPrograms = withClasses.map((program, index) => {
     if (index === legacyMain) return apartMain;
     const position = outputIndexes.indexOf(index);
@@ -1235,6 +1262,74 @@ export function lowerPackage(
     composed: programs,
     main: legacyMain !== null ? { file: legacyMain } : { menu: main! },
     paths,
+    speakerProblems: spoken?.problems ?? [],
+  };
+}
+
+/** The speaker data applied to the package's lowered files (speakers.ts); every name of the code stays free. */
+function speakerPackage(
+  lowered: readonly MigrationProgram[],
+  files: readonly ParsedGroovyFile[],
+  speakers: NonNullable<PackageOptions["speakers"]>,
+): SpokenPackage {
+  const taken = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (!isRecord(value)) return;
+    for (const key of ["name", "variable", "valueVariable"])
+      if (
+        typeof value[key] === "string" &&
+        ["variable", "let", "function", "for", "speaker"].includes(String(value.kind))
+      )
+        taken.add(String(value[key]));
+    if (value.kind === undefined && typeof value.name === "string") taken.add(value.name);
+    Object.values(value).forEach(visit);
+  };
+  lowered.forEach((program) => visit(program.statements));
+  return withSpeakers(
+    lowered.map((program, index) => ({
+      path: speakers.path(files[index]!.sourceName),
+      statements: program.statements,
+    })),
+    speakers.data,
+    taken,
+  );
+}
+
+/** The importer's own speaker, which withMainHelpers keeps once at the top of main.tease. */
+function systemSpeaker(): IrStatement[] {
+  return helperStatements(new Set(["systemSpeaker"]));
+}
+
+/**
+ * The package's speakers declared where it starts, right after the importer's own `speaker system`, and its default
+ * speaker set before the story begins (owner decision 2026-10-15: all of them at the top of main.tease).
+ */
+function withSpokenStart(
+  program: MigrationProgram,
+  spoken: SpokenPackage | null,
+): MigrationProgram {
+  if (spoken === null || (spoken.declarations.length === 0 && spoken.start.length === 0))
+    return program;
+  const declared = program.statements.some(
+    (statement) => statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER,
+  );
+  // The data's switches to `system` need it too.
+  const statements =
+    spoken.system && !declared ? [...systemSpeaker(), ...program.statements] : program.statements;
+  const system = statements.findIndex(
+    (statement) => statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER,
+  );
+  const lead = statements.findIndex((statement) => statement.kind !== "comment");
+  const at = system >= 0 ? system + 1 : lead < 0 ? statements.length : lead;
+  return {
+    ...program,
+    statements: [
+      ...statements.slice(0, at),
+      ...spoken.declarations,
+      ...spoken.start,
+      ...statements.slice(at),
+    ],
   };
 }
 

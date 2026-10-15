@@ -87,6 +87,9 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
         `${pad}${sayText(statement.speaker, statement.prose === true, emitExpression(statement.value))}`,
       );
       return;
+    case "useSpeaker":
+      lines.push(`${pad}speaker ${statement.name}`);
+      return;
     case "speaker":
       lines.push(`${pad}speaker ${statement.name} {`);
       for (const property of statement.properties)

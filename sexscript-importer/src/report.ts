@@ -13,7 +13,7 @@ import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import type { PackageFileReader } from "./java-data.ts";
-import { lowerPackage } from "./package.ts";
+import { lowerPackage, type PackageOptions } from "./package.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
@@ -91,6 +91,8 @@ export interface FeasibilityOptions {
   heldScripts?: readonly string[];
   /** Releases that a corpus merge put side by side (PackageOptions.releases). */
   releases?: ReadonlyArray<readonly string[]>;
+  /** Who speaks each message (PackageOptions.speakers). */
+  speakers?: PackageOptions["speakers"];
   /**
    * The converted package as written, after any manual output patches, read as the Player reads it, which
    * `finalPackage` compiles and runs as it is; needs `compiler`.
@@ -264,6 +266,7 @@ export function analyzeFeasibility(
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
     ...(options.heldScripts === undefined ? {} : { heldScripts: options.heldScripts }),
     ...(options.releases === undefined ? {} : { releases: options.releases }),
+    ...(options.speakers === undefined ? {} : { speakers: options.speakers }),
   });
   const isScriptBodyAt = (index: number): boolean =>
     files[index]!.root?.kind === "scriptBody" && packagePrograms[index]?.module === undefined;

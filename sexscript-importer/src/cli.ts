@@ -12,12 +12,13 @@ import { emitTease } from "./emit-tease.ts";
 import { imageFolderTag, imageSidecar } from "./image-tags.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile, SOURCE_PATCHES_FILE } from "./lower.ts";
-import { lowerPackage } from "./package.ts";
+import { lowerPackage, type PackageOptions } from "./package.ts";
 import { parseAcceptedForms, type AcceptedForm } from "./workarounds.ts";
 import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions, type FinalPackageInput } from "./report.ts";
 import { loadRepositoryProjectRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
+import { parseSpeakerData } from "./speakers.ts";
 import { selectTimeModel } from "./time-model.ts";
 
 const [command, ...givenArgs] = process.argv.slice(2);
@@ -41,12 +42,15 @@ const accepted: ReadonlySet<AcceptedForm> =
   acceptedArgument === undefined ? new Set() : parseAcceptedForms(acceptedArgument.slice(11));
 // `--held=<path>` holds a stand-alone script back from the start choice (a unit's heldStandAlone).
 const heldScripts = rawArgs.flatMap((arg) => (arg.startsWith("--held=") ? [arg.slice(7)] : []));
+// `--speakers=<file>` reads who speaks each message from a unit's speakers.json (speakers.ts).
+const speakersFile = rawArgs.find((arg) => arg.startsWith("--speakers="))?.slice(11) ?? null;
 const args = rawArgs.filter(
   (arg) =>
     arg !== "--compile" &&
     arg !== "--run" &&
     arg !== acceptedArgument &&
-    !arg.startsWith("--held="),
+    !arg.startsWith("--held=") &&
+    !arg.startsWith("--speakers="),
 );
 
 if (command === "inventory") {
@@ -80,6 +84,7 @@ if (command === "inventory") {
     if (heldScripts.length > 0) options.heldScripts = heldScripts;
     const versions = await releases(args[0]!);
     if (versions.length > 0) options.releases = versions;
+    if (speakersFile !== null) options.speakers = await speakerOption(args[0]!, speakersFile);
   }
   if (finalPackageDir !== null) options.finalPackage = await finalPackage(finalPackageDir);
   const report = analyzeFeasibility(files, options);
@@ -106,6 +111,22 @@ if (command === "inventory") {
   await convertPackage(args[0]!, args[1]!, compiler);
 } else {
   fail("Usage: node src/cli.ts <inventory|report|convert|convert-package> ...");
+}
+
+/** A unit's speaker data, which names each file by its path from the unit folder (`scripts/…`). */
+async function speakerOption(
+  sourceDir: string,
+  file: string,
+): Promise<NonNullable<PackageOptions["speakers"]>> {
+  const sourceRoot = path.resolve(sourceDir);
+  const data = parseSpeakerData(JSON.parse(await readFile(file, "utf8")));
+  if (Array.isArray(data))
+    fail(`Speaker data ${file}:\n${data.map((problem) => `  ${problem}`).join("\n")}`);
+  return {
+    data,
+    path: (sourceName) =>
+      `scripts/${path.relative(sourceRoot, path.resolve(sourceName)).replaceAll("\\", "/")}`,
+  };
 }
 
 async function readReportInputs(inputs: string[]): Promise<ParsedGroovyFile[]> {
@@ -147,6 +168,7 @@ async function convertPackage(
   const internal = await internalScripts(sourceRoot);
   const versions = await releases(sourceRoot);
   const patched = await sourcePatches(sourceRoot);
+  const speakers = speakersFile === null ? null : await speakerOption(sourceRoot, speakersFile);
   const lowered = lowerPackage(parsed, {
     accepted,
     media,
@@ -156,7 +178,13 @@ async function convertPackage(
     ...(heldScripts.length === 0 ? {} : { heldScripts }),
     ...(versions.length === 0 ? {} : { releases: versions }),
     ...(patched.length === 0 ? {} : { sourcePatches: patched }),
+    ...(speakers === null ? {} : { speakers }),
   });
+  // A speaker anchor that matches nothing fails the conversion, so that the unit's data is reviewed.
+  if (lowered.speakerProblems.length > 0)
+    fail(
+      `Speaker data ${speakersFile}:\n${lowered.speakerProblems.map((problem) => `  ${problem}`).join("\n")}`,
+    );
   const programs = lowered.composed;
   // Each file keeps its legacy folder and name (lowerPackage paths); the package starts at main.tease (ADR 0022): a
   // legacy main.groovy, or a generated file that goes to the main script.

@@ -3,7 +3,10 @@ title: "folder-scripts"
 ---
 
 // NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
-say prose "Which script do you want to start?", instant
+speaker system {
+  title: "System"
+}
+say as system "Which script do you want to start?", instant
 let picked = askChoice background: "background", sound: "sound"
 switch picked {
   case "background" {

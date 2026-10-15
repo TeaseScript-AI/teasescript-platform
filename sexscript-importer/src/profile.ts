@@ -129,6 +129,13 @@ const save = (key: IrExpression, value: IrExpression): IrStatement => ({
   value,
   span: null,
 });
+const playerField = (name: string, value: IrExpression): IrStatement => ({
+  kind: "assign",
+  target: { kind: "property", target: { kind: "variable", name: "player", builtin: true }, name },
+  operator: "=",
+  value,
+  span: null,
+});
 const ifMissing = (key: string, body: IrStatement[]): IrStatement => ({
   kind: "if",
   condition: missing(key),
@@ -184,6 +191,16 @@ export function legacyProfilePrompt(
         },
       ]),
     );
+  // The Player has no profile of its own yet, so the answers also describe the built-in player speaker (V30 §37).
+  if (asked.includes("intro.name")) body.push(playerField("firstName", load("intro.name")));
+  if (asked.includes("intro.female"))
+    body.push({
+      kind: "if",
+      condition: { kind: "binary", operator: "==", left: load("intro.female"), right: lit(true) },
+      then: [playerField("gender", lit("female"))],
+      else: [playerField("gender", lit("male"))],
+      span: null,
+    });
   const ownedLists = [
     ["toys", TOYS, "What do you have in your toy chest ?"],
     ["clothes", CLOTHES, "What do you own ?"],

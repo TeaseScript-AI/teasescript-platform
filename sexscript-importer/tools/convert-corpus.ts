@@ -40,13 +40,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONVERTED_VIDEO_EXTENSIONS, SOURCE_PATCHES_FILE } from "../src/lower.ts";
+import type { SpeakerData } from "../src/speakers.ts";
 import { selectTimeModel } from "../src/time-model.ts";
 import {
   applyOutputPatches,
   applySourcePatches,
   readUnitPatches,
+  readUnitSpeakers,
   sha256,
   sourcePatchPaths,
+  SPEAKERS_FILE,
   type UnitPatches,
 } from "./unit-patches.ts";
 
@@ -77,6 +80,8 @@ export interface ConversionRecord {
   readonly inputs: Readonly<Record<string, string>>;
   /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
   readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
+  /** SHA-256 of the unit's speaker data (`speakers.json`); null for none. */
+  readonly speakers: string | null;
   /** The unit's status from the merged corpus's `unit.json`, such as `unfinished-content-stub`; null for none. */
   readonly unitStatus: string | null;
   readonly exitCode: number;
@@ -311,18 +316,30 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     const patches = await readUnitPatches(options.patchesRoot, id);
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
+    step = "speakers";
+    const speakers = await readUnitSpeakers(
+      options.patchesRoot,
+      id,
+      path.join(corpusRoot, id),
+      unitRoot,
+    );
+    const unitArguments = await converterArguments(stage, patches, speakers);
     step = "conversion";
     await mkdir(packageRoot, { recursive: true });
     const { exitCode, stderr } = await run(process.execPath, [
       cliPath,
       "convert-package",
-      ...heldArguments(patches),
+      ...unitArguments,
       path.join(unitRoot, "scripts"),
       packageRoot,
     ]);
     // Exit code 1 also means converted with TODOs; without the closing line, the converter itself failed.
-    if (!/^Converted \d+ SexScript source file/mu.test(stderr))
-      throw new Error(stderr.trim().split("\n").slice(-5).join("\n") || `exit ${exitCode}`);
+    if (!/^Converted \d+ SexScript source file/mu.test(stderr)) {
+      // Speaker data names every anchor that matched nothing; other failures end with their cause.
+      const lines = stderr.trim().split("\n");
+      const speakers = lines.findIndex((line) => line.startsWith("Speaker data "));
+      throw new Error(lines.slice(speakers < 0 ? -5 : speakers).join("\n") || `exit ${exitCode}`);
+    }
     await writeFile(
       path.join(packageRoot, ".conversion.log"),
       stderr.replaceAll(packageRoot, published).replaceAll(unitRoot, path.join(corpusRoot, id)),
@@ -333,7 +350,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
     step = "media";
     const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
     step = "report";
-    const report = await unitReport(unitRoot, packageRoot, heldArguments(patches));
+    const report = await unitReport(unitRoot, packageRoot, unitArguments);
     const record: ConversionRecord = {
       source: path.join(corpusRoot, id),
       converter: options.converter,
@@ -346,6 +363,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
               layer,
               sha256: patches.hashes.get(patchId)!,
             })),
+      speakers: speakers?.sha256 ?? null,
       unitStatus: await unitStatus(corpusRoot, id),
       exitCode,
       ...media,
@@ -408,8 +426,16 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "re
     const patches = await readUnitPatches(options.patchesRoot, id);
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
+    step = "speakers";
+    const speakers = await readUnitSpeakers(
+      options.patchesRoot,
+      id,
+      path.join(corpusRoot, id),
+      unitRoot,
+    );
+    const unitArguments = await converterArguments(stage, patches, speakers);
     step = "report";
-    const report = await unitReport(unitRoot, published, heldArguments(patches));
+    const report = await unitReport(unitRoot, published, unitArguments);
     const temporary = path.join(published, ".report.json.tmp");
     await writeFile(temporary, `${JSON.stringify(report)}\n`);
     await rename(temporary, path.join(published, ".report.json"));
@@ -530,9 +556,21 @@ async function linkMedia(
   return { linkedMedia, linkedResourceMedia, collisions, resourcePacks: [...packs].sort() };
 }
 
-/** The CLI arguments that hold a unit's stand-alone scripts back from the start choice. */
-function heldArguments(patches: UnitPatches | null): string[] {
-  return [...(patches?.heldStandAlone.keys() ?? [])].map((file) => `--held=${file}`);
+/**
+ * The CLI arguments of a unit: its stand-alone scripts held back from the start choice, and its speaker data, which the
+ * staging folder holds with the lines of the patched scripts.
+ */
+async function converterArguments(
+  stage: string,
+  patches: UnitPatches | null,
+  speakers: { data: SpeakerData } | null,
+): Promise<string[]> {
+  const held = [...(patches?.heldStandAlone.keys() ?? [])].map((file) => `--held=${file}`);
+  if (speakers === null) return held;
+  const file = path.join(stage, SPEAKERS_FILE);
+  await mkdir(stage, { recursive: true });
+  await writeFile(file, `${JSON.stringify(speakers.data)}\n`);
+  return [...held, `--speakers=${file}`];
 }
 
 /**

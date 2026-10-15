@@ -237,6 +237,53 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
   changes. A patch that removes a TODO needs its diagnostic actually resolved.
 - Every patch needs an `id` and a `reason`; `category` is free text, such as the inspection category.
 
+#### Speaker data
+
+Who says each message is knowledge about one script too: `patches/<unit>/speakers.json`, read with or without a
+`patches.json` (`src/speakers.ts`; the investigation that wrote it: `DESIGN.md` beside the coordinator's speaker-names
+notes). Its lines are lines of the legacy scripts as the corpus has them; the conversion maps them through the unit's
+source patches, and a line a source patch changes, or an anchor that matches nothing, fails the unit for review.
+
+```json
+{
+  "reason": "Who speaks in this package, and how the speaker is recognised.",
+  "speakers": { "mistress": { "title": "Mistress", "firstName": "Melanie" }, "ivy": { "firstName": "Ivy" } },
+  "default": "system",
+  "prefixes": [{ "text": "Meryl", "speaker": "meryl" }],
+  "switches": [
+    { "function": "scripts/Farkel.groovy:introduction", "speaker": "mistress" },
+    { "at": "scripts/Farkel.groovy:422", "speaker": "system" },
+    { "message": "scripts/Peach.groovy:132", "speaker": "player" }
+  ],
+  "names": [{ "variable": "mistress", "files": ["scripts/Farkel.groovy"], "speaker": "mistress", "template": "Mistress {}" }]
+}
+```
+
+- `speakers` become declarations at the top of `main.tease`, under the importer's `speaker system`, with the person
+  fields of V30 §37 (`title`, `firstName`, `lastName`, `shortTitle`; `displayName` only where the shown name is not
+  their join). An identifier that the code uses gets `Speaker` added. `system` (menus, settings, notices), `narrator`
+  (story narration, declared "Narrator" when used), and the engine's `player` need no entry.
+- `default`: `speaker <id>` where `main.tease` starts the story; null leaves messages without a speaker.
+- `prefixes`: a message, or a later paragraph of it, that starts with `Name:` (or another `form`, such as `"[{}]\n"`)
+  is said `as` that speaker without the label, and an ask whose question starts with one is asked as that speaker.
+  `expression` (with `file`, and an optional `form`) is the Groovy expression in front of `+ ": " +`, whose value also
+  becomes the speaker's name. A label inside a text that a variable holds stays text; a `message` switch names its
+  speaker.
+- `switches` set the default speaker from that point on (`entry`: a file's start; `function`: a function's start;
+  `image`: before each picture whose path starts with that text, the longest that matches; `at`/`after`: before/after
+  the statement on that line). `message` says only the messages of that line as the speaker. The player speaks single
+  messages only (`message` or a prefix), each with the comment `// SX_PLAYER_LINE` above it, which the owner calls
+  provisional.
+- `names` set `<speaker>.displayName` after each assignment of `variable` in `files` (lines in `except` skipped), and
+  after the statement of each `after` line: by `values` (an unlisted value keeps the name, or takes `otherwise`), by a
+  `template` whose `{}` is the value (or its `values` text), or both. A template's `{expression}` reads a variable, an
+  item, or a field: `"{owner_title}{owner_name}"`, `"{galleryname[loop]}"`. Every variable the rule reads must hold a
+  value, and the name is trimmed; a blank name, as a load of a key never saved gives, names nobody. The update stands
+  where the rule says, so each variable it reads must exist there.
+
+`node tools/speaker-check.ts <package-dir>...` plays converted packages in the runtime and lists each message with its
+speaker and picture, and, where characters have picture folders of their own, the messages one says over another's.
+
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
 `/source/` itself, with the sources as UTF-8 plain text, and forwards the other GET requests to the playground server

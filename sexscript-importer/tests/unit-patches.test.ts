@@ -13,12 +13,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { isRecord } from "../src/ast.ts";
 import {
   loadRepositoryPackageScanner,
   loadRepositoryProjectCompiler,
 } from "../src/compile-check.ts";
 import { convertUnit, type UnitOptions, type UnitResult } from "../tools/convert-corpus.ts";
-import { PatchError, readUnitPatches, sha256 } from "../tools/unit-patches.ts";
+import { patchedLine, PatchError, readUnitPatches, sha256 } from "../tools/unit-patches.ts";
 
 const SOURCE = 'show("Helo, " + greetingName())\nwait(1)\nshow("Bye")\n';
 const DIFF = `--- a/scripts/start.groovy
@@ -354,3 +355,196 @@ test("patch manifests are checked before anything is applied", async () => {
     await rm(work, { recursive: true, force: true });
   }
 });
+
+const SPOKEN = [
+  'def name = "Vera"',
+  'show("Welcome.")',
+  'show("She waves.\\n\\nMeryl: Hello.")',
+  'name = "Lilith"',
+  'show("I am " + name)',
+  'show("Oh, Miss.")',
+  'show("Bye")',
+  "",
+].join("\n");
+const SPOKEN_DIFF = `--- a/scripts/start.groovy
++++ b/scripts/start.groovy
+@@ -2,2 +2,3 @@
+-show("Welcome.")
++// Legacy bug: a test edit.
++show("Welcome!")
+ show("She waves.\\n\\nMeryl: Hello.")
+`;
+const SPOKEN_DATA = {
+  speakers: { vera: { title: "Mistress", firstName: "Vera" }, meryl: { firstName: "Meryl" } },
+  default: "vera",
+  prefixes: [{ text: "Meryl", speaker: "meryl" }],
+  switches: [
+    { message: "scripts/start.groovy:6", speaker: "player" },
+    { at: "scripts/start.groovy:7", speaker: "narrator" },
+  ],
+  names: [
+    { variable: "name", files: ["scripts/start.groovy"], speaker: "vera", template: "Mistress {}" },
+  ],
+};
+
+test(
+  "a unit's speaker data names who says each message, at the lines of its patched scripts",
+  { skip: unbuilt },
+  async () => {
+    const { work, options } = await fixture();
+    try {
+      await writeFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), SPOKEN);
+      await writeFile(path.join(work, "patches/Walk/welcome.diff"), SPOKEN_DIFF);
+      await writePatches(work, [{ ...SOURCE_PATCH, id: "welcome", diff: "welcome.diff" }]);
+      const speakers = path.join(work, "patches/Walk/speakers.json");
+      await writeFile(speakers, JSON.stringify(SPOKEN_DATA));
+      const { record } = converted(await convertUnit(options));
+      assert.equal(record.speakers, sha256(JSON.stringify(SPOKEN_DATA)));
+      const main = await readFile(path.join(options.outputRoot, "Walk/main.tease"), "utf8");
+      assert.match(
+        main,
+        // The importer's own system speaker is declared only where something says as it.
+        /^speaker vera \{\n {2}title: "Mistress"\n {2}firstName: "Vera"\n\}\nspeaker meryl \{\n {2}firstName: "Meryl"\n\}\nspeaker narrator \{\n {2}displayName: "Narrator"\n\}\nspeaker vera\ngoto "start.tease"/u,
+      );
+      const start = await readFile(path.join(options.outputRoot, "Walk/start.tease"), "utf8");
+      for (const expected of [
+        // A name that comes out blank names nobody.
+        /name = "Lilith"\nif name != null \{\n {2}let shownName = "Mistress \$\{name\}"\.trim\(\)\n {2}if shownName != "" \{\n {4}vera\.displayName = shownName\n {2}\}\n\}/u,
+        /say prose "Welcome!", instant\nsay prose "She waves\.", instant\nsay as meryl prose "Hello\.", instant/u,
+        /\/\/ SX_PLAYER_LINE: [^\n]*\nsay as player prose "Oh, Miss\.", instant\nspeaker narrator\nsay prose "Bye"/u,
+      ])
+        assert.match(start, expected);
+
+      // An anchor on a line a source patch changes, or one that matches nothing, fails the unit for review.
+      const failed = async (data: unknown, message: RegExp): Promise<void> => {
+        await writeFile(speakers, JSON.stringify(data));
+        const result = await convertUnit(options);
+        assert.ok(!result.converted);
+        assert.match(result.failure.message, message);
+      };
+      await failed(
+        { ...SPOKEN_DATA, switches: [{ at: "scripts/start.groovy:2", speaker: "meryl" }] },
+        /a source patch changes the line of scripts\/start\.groovy:2/u,
+      );
+      await failed(
+        { ...SPOKEN_DATA, switches: [{ after: "scripts/start.groovy:8", speaker: "meryl" }] },
+        /"after": "scripts\/start\.groovy:9" starts no statement/u,
+      );
+      await failed(
+        { ...SPOKEN_DATA, prefixes: [{ text: "Sasha", speaker: "meryl" }] },
+        /"Sasha" labels no message/u,
+      );
+      await failed({ ...SPOKEN_DATA, default: "nobody" }, /unknown speaker "nobody"/u);
+      assert.match(
+        await readFile(path.join(options.outputRoot, "Walk/start.tease"), "utf8"),
+        /say as meryl prose "Hello\.", instant/u,
+      );
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a line of a legacy script is followed through the diffs that patch it", () => {
+  const diff = (file: string, hunks: string): string => `--- a/${file}\n+++ b/${file}\n${hunks}`;
+  const changed = diff("scripts/a.groovy", "@@ -3,2 +3,3 @@\n x\n-y\n+y1\n+y2\n");
+  const edited = diff("scripts/a.groovy", "@@ -2,3 +2,3 @@\n-p\n-q\n+P\n+Q\n r\n");
+  assert.deepEqual(
+    [1, 2, 3, 4].map((line) => patchedLine([edited], "scripts/a.groovy", line)),
+    [1, 2, 3, 4],
+  );
+  const added = diff("scripts/a.groovy", "@@ -1,0 +2,2 @@\n+p\n+q\n");
+  assert.deepEqual(
+    [1, 2, 3, 4, 5, 9].map((line) => patchedLine([changed], "scripts/a.groovy", line)),
+    [1, 2, 3, null, 6, 10],
+  );
+  assert.deepEqual(
+    [1, 2, 5].map((line) => patchedLine([added, changed], "scripts/a.groovy", line)),
+    [1, null, 8],
+  );
+  assert.equal(patchedLine([changed], "scripts/b.groovy", 4), 4);
+});
+
+test(
+  "speaker data switches at pictures, functions, and lines, and names speakers from values, labels, and templates",
+  { skip: unbuilt },
+  async () => {
+    const { work, options } = await fixture();
+    try {
+      await writeFile(
+        path.join(options.corpusRoot, "Walk/scripts/start.groovy"),
+        [
+          'def titles = ["Miss", "Mistress"]',
+          "def sex = 1",
+          'def opponent = "Kim"',
+          "def greet = {",
+          '  show("Hello from the guest.")',
+          "}",
+          'setImage("door.jpg")',
+          'show("Welcome.")',
+          "greet()",
+          'show("Back.")',
+          'show(opponent + ": I play.")',
+          'opponent = "Ann"',
+          'show("Next.")',
+          'if (getBoolean("Kitty: Ready?")) show(opponent + ": Go.")',
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(work, "patches/Walk/speakers.json"),
+        JSON.stringify({
+          speakers: {
+            host: { firstName: "Kitty" },
+            opp: { displayName: "Opponent" },
+            guest: { displayName: "Guest" },
+          },
+          default: "narrator",
+          prefixes: [
+            { expression: "opponent", file: "scripts/start.groovy", speaker: "opp" },
+            { text: "Kitty", speaker: "host" },
+          ],
+          switches: [
+            { image: "do", speaker: "host" },
+            { function: "scripts/start.groovy:greet", speaker: "guest" },
+            { after: "scripts/start.groovy:9", speaker: "host" },
+          ],
+          names: [
+            {
+              variable: "opponent",
+              files: ["scripts/start.groovy"],
+              speaker: "opp",
+              values: { Ann: "Anna" },
+              template: "{titles[sex]} {}",
+            },
+            {
+              after: ["scripts/start.groovy:13"],
+              files: "all",
+              speaker: "guest",
+              template: "Guest of {opponent}",
+            },
+          ],
+        }),
+      );
+      converted(await convertUnit(options));
+      const start = await readFile(path.join(options.outputRoot, "Walk/start.tease"), "utf8");
+      for (const expected of [
+        /function greet \{\n {2}speaker guest\n {2}say prose "Hello from the guest\.", instant\n\}/u,
+        /speaker host\nshowImage "door\.jpg"\nsay prose "Welcome\.", instant\ngreet\(\)\nspeaker host\nsay prose "Back\.", instant/u,
+        /opp\.displayName = "\$\{opponent\}"\nsay as opp prose "I play\.", instant/u,
+        /opponent = "Ann"\nif opponent != null and titles != null \{\n {2}let shownName = "\$\{titles\[sex\]\} \$\{dict\{ Ann: "Anna" \}\.get\(toString\(opponent\), default: opp\.displayName\)\}"\.trim\(\)/u,
+        /say prose "Next\.", instant\nif opponent != null \{\n {2}let shownName = "Guest of \$\{opponent\}"\.trim\(\)/u,
+        // A labelled question is asked as its speaker.
+        /if askBoolean as host prose "Ready\?" \{\n {2}opp\.displayName = "\$\{opponent\}"\n {2}say as opp prose "Go\.", instant\n\}/u,
+      ])
+        assert.match(start, expected);
+      const report: unknown = JSON.parse(
+        await readFile(path.join(options.outputRoot, "Walk/.report.json"), "utf8"),
+      );
+      assert.ok(isRecord(report) && isRecord(report.finalPackage));
+      assert.equal(report.finalPackage.compiles, true);
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  },
+);
