@@ -1,6 +1,6 @@
-// `default:` evaluates its value also for a present key, so a dict's fallback of another type than the dict's values
-// becomes the default only where it cannot fail; one that may fail, also arithmetic that may be too large, stays a
-// conditional, and one of the values' type is a default as before #853.
+// `default:` evaluates its value also for a present key, so a dict's fallback becomes the default only where it has the
+// dict's value type, as at #536: a fallback of another type, also one that may fail or be too large, stays a
+// conditional.
 def m = [a: 1]
 def key = "a"
 def pos = "123456789".length()

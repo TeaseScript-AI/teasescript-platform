@@ -13334,37 +13334,10 @@ function sideEffectFree(node: AstNode, context: LowerContext): boolean {
 }
 
 /**
- * Whether evaluating a dict's fallback can neither fail nor change anything, as `default:` evaluates it also where
- * Groovy did not: a constant, a variable, a negated number that is never null, and a list, map, or text of such parts;
- * not arithmetic, whose result may be too large.
- */
-function failsNever(node: AstNode, context: LowerContext): boolean {
-  const never = (child: AstNode): boolean => failsNever(child, context);
-  switch (node.kind) {
-    case "constant":
-    case "variable":
-      return true;
-    case "unaryMinus": {
-      const value = asNode(node.value);
-      return value !== null && never(value) && onlyOf(inferType(value, context.types), NUMBER);
-    }
-    case "list":
-    case "map":
-    case "mapEntry":
-    case "gstring":
-      return nodeChildren(node).every(never);
-    default:
-      return false;
-  }
-}
-
-/**
- * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536): `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`,
- * and `m[k] != null ? m[k] : d`, also with the test negated and the branches swapped, for a fallback without effects
- * (sideEffectFree). The default may be of another type than the dict's values, null too (#853), where it cannot fail
- * (failsNever), since `default:` evaluates it also for a present key, where Groovy did not. `exact` is false where
- * Groovy also replaced a stored null, or, with a truth test, a stored false, 0, or empty value other than the default
- * itself. Null for any other expression.
+ * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536): `m[k] ?: d`,
+ * `m.containsKey(k) ? m[k] : d`, and `m[k] != null ? m[k] : d`, also with the test negated and the branches swapped.
+ * `exact` is false where Groovy also replaced a stored null, or, with a truth test, a stored false, 0, or empty value
+ * other than the default itself. Null for any other expression, and for a null default, which `get` does not take.
  */
 function dictDefault(
   node: AstNode,
@@ -13391,12 +13364,18 @@ function dictDefault(
     test = tested.test;
   }
   const parts = read === null ? null : dictLookupParts(read, context);
-  // A fallback with effects, which Groovy's test ran where the conversion's would not, keeps the conditional.
-  if (parts === null || fallback === null || !sideEffectFree(fallback, context)) return null;
-  // One that may fail, which `default:` would run for a present key too, only where the dict's values have its type,
-  // as before #853.
-  if (!failsNever(fallback, context) && !dictDefaultFits(parts, fallback, context)) return null;
+  // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback with effects
+  // keeps the conditional.
+  if (
+    parts === null ||
+    fallback === null ||
+    isNullConstant(fallback) ||
+    !sideEffectFree(fallback, context)
+  )
+    return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
+  // The default has the dict's value type (#536); another fallback keeps the conditional.
+  if (!dictDefaultFits(parts, fallback, context)) return null;
   let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
   if (exact && test === "truth") {
     // Groovy's truth test also replaced the value type's false, 0, or empty value, which is exact only as default.
@@ -13545,10 +13524,6 @@ function readThenDefault(
     fallback === null ||
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
-    // A dict's default of another type only where it cannot fail, as for `?:` (dictDefault).
-    (dictLookupParts(read, context) !== null &&
-      !failsNever(fallback, context) &&
-      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context)) ||
     // The default runs after the read stored null in the variable (or in the element's list).
     mayReadDestination(
       fallback,
@@ -13561,6 +13536,9 @@ function readThenDefault(
       // The online service's typed reads are storage reads too (SX_ONLINE_STORAGE).
       TYPED_ONLINE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
     ) ||
+    // A dict's default has its value type, as for `?:` (dictDefaultFits).
+    (dictLookupParts(read, context) !== null &&
+      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context)) ||
     // A received value that failed legacy's Integer cast read null too, so its default also replaces that, which only
     // a default the read's helper can take as a value does: a constant or a variable (sexscriptLegacyReceiveInteger).
     (legacyApiCall(read, context)?.name === "receiveInteger" &&
