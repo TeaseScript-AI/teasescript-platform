@@ -308,7 +308,8 @@ export function emitExpression(expression: IrExpression): string {
     case "regex":
       return `/${expression.pattern}/${expression.flags}`;
     case "literal":
-      if (expression.constant !== undefined) return expression.constant;
+      // A pass that changed the number, such as a truncated count, keeps its spread `constant` but no longer has its value.
+      if (expression.constant === "pi" && expression.value === Math.PI) return "pi";
       return typeof expression.value === "string"
         ? (blockString([{ text: expression.value }]) ?? `"${escapeStringText(expression.value)}"`)
         : expression.decimal === true && /^-?\d+$/u.test(String(expression.value))

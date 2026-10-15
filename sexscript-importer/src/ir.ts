@@ -254,7 +254,7 @@ export interface IrSwitchCase {
 export type IrExpression =
   /** `action` marks the ID of a function kept as a value; renaming the function renames the ID. */
   /** `decimal` writes a whole number as a decimal (`1.0`), which TeaseScript types as a number rather than an integer. */
-  /** `constant` writes the number by the name of the engine constant it is, `pi` (V30 "Numeric functions"). */
+  /** `constant` writes the number, while it has the constant's value, by its engine name, `pi` (V30 "Numeric functions"). */
   | {
       kind: "literal";
       value: string | number | boolean | null;
