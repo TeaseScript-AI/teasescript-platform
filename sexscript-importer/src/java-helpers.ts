@@ -55,7 +55,7 @@ const bin = (operator: string, left: IrExpression, right: IrExpression): IrExpre
   right,
 });
 const not = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "not", value });
-const regex = (pattern: string): IrExpression => ({ kind: "regex", pattern, flags: "" });
+const regex = (pattern: string, flags = ""): IrExpression => ({ kind: "regex", pattern, flags });
 const call = (name: string, ...positional: IrExpression[]): IrExpression => ({
   kind: "call",
   name,
@@ -425,7 +425,7 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
             method(
               method(v("path"), "replace", lit("\\"), lit("/")),
               "replace",
-              regex("(.)\\/+$"),
+              regex("(.)\\/+$", "s"),
               lit("$1"),
             ),
           ),

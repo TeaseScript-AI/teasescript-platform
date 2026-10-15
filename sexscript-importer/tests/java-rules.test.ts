@@ -351,6 +351,8 @@ test("converts clock texts, file names, and closures kept in record fields", { s
     "def clock = new GregorianCalendar( 0, 0, 0, 0, 0, maxSessionTime, 0 ).time.format( 'HH:mm:ss' )",
     "def wrapped = new GregorianCalendar(0, 0, 0, 25, 0, 5).getTime().format('HH:mm')",
     'def shortName = (new File("images/Room\\\\Sub/bed.jpg")).getName()',
+    // Separators at the end go, also after a line break, and a lone one stays.
+    'def trailing = new File("a\\n//").getName().length() + new File("/").getName().length()',
     "def count = 0",
     'def hardSlap = [label: "a hard slap", action: { count = count + 1 }]',
     'def soft = [label: "soft", action: { count = count + 10 }]',
@@ -360,7 +362,7 @@ test("converts clock texts, file names, and closures kept in record fields", { s
     // A field may have the name of a pure text method, which the call does not make pure.
     'def tidy = [label: "tidy", trim: { count = count + 100 }]',
     "tidy.trim()",
-    'show("${clock} ${wrapped} ${shortName} ${count}")',
+    'show("${clock} ${wrapped} ${shortName} ${count} ${trailing}")',
     "def rolledDice = [3, 1, 2]",
     "rolledDice = rolledDice.sort()",
     "rolledDice = rolledDice.reverse()",
@@ -373,7 +375,7 @@ test("converts clock texts, file names, and closures kept in record fields", { s
   assert.match(source, /^sexscriptLegacyCall\(strike\.action, \[\]\)$/mu);
   assert.doesNotMatch(source, /TODO/u);
   assert.match(source, /^times\.sort\(\)$/mu);
-  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 111", "3,2,1 cba 2,5,9 3"]);
+  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 111 2", "3,2,1 cba 2,5,9 3"]);
 });
 
 // Every way a script may change a file keeps its reads manual: through another variable, as a rename target, below a
@@ -516,3 +518,29 @@ test("keeps written text files in storage and shows viewed files as prose", { sk
     { count: 2, last: "second", before: "packaged", after: "rewritten", journal: "first\nsecond" },
   );
 });
+
+// A regular expression whose matches are used converts where RE2 matches what Java did: a $ that Java also matched before
+// a final line break, a repeated group that can match no text and holds a group, a split by a pattern that can match no
+// text, and a replacement whose group number a digit would continue stay manual; a computed replacement is inserted
+// as it is, with a note on what Java read in it.
+test(
+  "says where a Java regular expression or replacement whose matches are used does not convert",
+  { skip },
+  async () => {
+    const source = await convert([
+      "def kept = 'ab'.replaceAll('(a)', '$1\\\\2')",
+      "def repeated = 'aab'.replaceAll('(a*)*b', '<$1>')",
+      "def ending = 'ab'.replaceAll('b$', '')",
+      'def parts = "a  b".split(" *")',
+      'def mark = "#"',
+      'def marked = "ab".replaceAll("(a)", mark)',
+      'show("${kept} ${repeated} ${ending} ${parts.size()} ${marked}")',
+    ]);
+    assert.match(source, /TODO SX_JAVA_REPLACEMENT line 1:/u);
+    assert.match(source, /TODO SX_JAVA_REGEX line 2: .*a repeated group that can match no text/u);
+    assert.match(source, /TODO SX_JAVA_REGEX line 3: .*\$, which Java also matched/u);
+    assert.match(source, /TODO SX_JAVA_REGEX line 4: .*can match no text/u);
+    assert.match(source, /NOTE SX_JAVA_REPLACEMENT_TEXT line 6:/u);
+    assert.match(source, /"ab"\.replace\(\/\(a\)\/, mark\.replace\("\$", "\$\$"\)\)/u);
+  },
+);

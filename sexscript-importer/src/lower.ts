@@ -13304,19 +13304,35 @@ function dictLookup(
     : { kind: "methodCall", target: dict, name: "contains", arguments: [key], dict: true };
 }
 
-/** Whether evaluating an expression has no effect: pure (isPure), or text operations on such values. */
-function sideEffectFree(node: AstNode, context: LowerContext): boolean {
-  if (isPure(node, context)) return true;
-  const call = node.kind === "methodCall" ? callParts(node) : null;
-  const receiver = asNode(node.object);
-  return (
-    call !== null &&
-    !call.inherited &&
-    receiver !== null &&
-    (STRING_METHODS.has(call.name) || TEXT_ONLY_METHODS.has(call.name)) &&
-    sideEffectFree(receiver, context) &&
-    call.arguments.every((argument) => sideEffectFree(argument, context))
-  );
+/**
+ * Whether evaluating a dict's fallback can neither fail nor change anything, as `default:` evaluates it also where
+ * Groovy did not: a constant, a variable, a negated number, `+`, `-`, or `*` of numbers that are never null, and a
+ * list, map, or text of such parts.
+ */
+function failsNever(node: AstNode, context: LowerContext): boolean {
+  const never = (child: AstNode): boolean => failsNever(child, context);
+  const number = (child: AstNode | null): boolean =>
+    child !== null && never(child) && onlyOf(inferType(child, context.types), NUMBER);
+  switch (node.kind) {
+    case "constant":
+    case "variable":
+      return true;
+    case "unaryMinus":
+      return number(asNode(node.value));
+    case "binary":
+      return (
+        ["+", "-", "*"].includes(String(node.operator)) &&
+        number(asNode(node.left)) &&
+        number(asNode(node.right))
+      );
+    case "list":
+    case "map":
+    case "mapEntry":
+    case "gstring":
+      return nodeChildren(node).every(never);
+    default:
+      return false;
+  }
 }
 
 /**
@@ -13350,9 +13366,9 @@ function dictDefault(
     test = tested.test;
   }
   const parts = read === null ? null : dictLookupParts(read, context);
-  // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback with effects
-  // keeps the conditional.
-  if (parts === null || fallback === null || !sideEffectFree(fallback, context)) return null;
+  // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback that may fail or
+  // have effects keeps the conditional (failsNever).
+  if (parts === null || fallback === null || !failsNever(fallback, context)) return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
   let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
   if (exact && test === "truth") {
@@ -13485,6 +13501,8 @@ function readThenDefault(
     fallback === null ||
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
+    // A dict's `default:` runs also where the key is present, so it may not fail (failsNever).
+    (dictLookupParts(read, context) !== null && !failsNever(fallback, context)) ||
     // The default runs after the read stored null in the variable (or in the element's list).
     mayReadDestination(
       fallback,
@@ -15581,10 +15599,20 @@ function textOperation(
       const computed =
         replacementText === null ? lowerExpression(argumentsNodes[1]!, context) : null;
       if (target === null || (replacementText === null && computed === null)) return null;
+      const replacementType = inferType(argumentsNodes[1]!, context.types);
       const computedText: IrExpression | null =
-        computed === null || onlyOf(inferType(argumentsNodes[1]!, context.types), STRING)
+        computed === null || onlyOf(replacementType, STRING)
           ? computed
           : { kind: "template", parts: [{ value: computed }] };
+      // A number or a boolean shows no `\` or `$`.
+      if (computed !== null && !onlyOf(replacementType, NUMBER | BOOLEAN))
+        addDiagnostic(
+          context,
+          "SX_JAVA_REPLACEMENT_TEXT",
+          "warning",
+          "Java read a \\ in a replacement known only when the script runs as an escape and a $ as a group's number, which stopped the script without such a group; the text here is inserted as it is.",
+          node.span,
+        );
       if (search !== null)
         return member(
           "replace",

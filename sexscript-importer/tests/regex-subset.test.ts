@@ -87,6 +87,17 @@ test("Java regular expressions whose every match is used", () => {
     reason:
       "$, which Java also matched before a line terminator at the end, where the match is used",
   });
+  // Java filled the groups of a repeated group that can match no text otherwise than RE2.
+  for (const pattern of ["(a*)*b", "(?:(a)?)+", "(a|)?"])
+    assert.deepEqual(
+      javaRegex(pattern, "all"),
+      {
+        reason:
+          "a repeated group that can match no text and holds a group, which Java filled otherwise",
+      },
+      pattern,
+    );
+  assert.equal("reason" in javaRegex("(?:a*)*b", "all"), false);
   const shape = (pattern: string): { groups: number; empty: boolean } | { reason: string } => {
     const regex = javaRegex(pattern, "all");
     return "reason" in regex ? regex : { groups: regex.groups, empty: regex.empty };
@@ -104,7 +115,8 @@ test("Java regular expressions whose every match is used", () => {
 });
 
 // Java read `$n` as the first digit and each next one while the number stays a group, `\x` as x; a group the regex
-// lacks, `$` without a number, a named group, and a trailing backslash failed or do not convert.
+// lacks, `$` without a number, a named group, a trailing backslash, and a digit after a group, also an escaped one,
+// which TeaseScript would join to the group's number, failed or do not convert.
 test("Java replacements as TeaseScript regex replacements", () => {
   assert.equal(javaReplacement("$1[", 1), "$1[");
   assert.equal(javaReplacement("\\$x\\\\", 0), "$$x\\");
@@ -117,6 +129,7 @@ test("Java replacements as TeaseScript regex replacements", () => {
     ["${name}", 1],
     ["a\\", 0],
     ["$x", 1],
+    ["$1\\2", 1],
   ] as const)
     assert.equal(javaReplacement(text, groups), null, text);
 });

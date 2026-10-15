@@ -111,7 +111,15 @@ export function javaRegex(source: string, within: "whole" | "find" | "all"): Jav
   let before = true;
   let element = true;
   let alternatives = false;
-  const enclosing: Array<{ before: boolean; element: boolean; alternatives: boolean }> = [];
+  const enclosing: Array<{
+    before: boolean;
+    element: boolean;
+    alternatives: boolean;
+    groups: number;
+  }> = [];
+  // Whether the group just closed can match no text and holds a group, whose text Java set otherwise than RE2 where the
+  // group repeats: `(a*)*b` leaves an empty first group in Java.
+  let emptyWithGroups = false;
   const next = (empty: boolean): void => {
     before &&= element;
     element = empty;
@@ -188,7 +196,7 @@ export function javaRegex(source: string, within: "whole" | "find" | "all"): Jav
       depth += 1;
       last = null;
       ending = "start";
-      enclosing.push({ before, element, alternatives });
+      enclosing.push({ before, element, alternatives, groups: open === "(" ? groups - 1 : groups });
       [before, element, alternatives] = [true, true, false];
     } else if (character === ")") {
       if (depth === 0) return fail("an unbalanced parenthesis");
@@ -197,7 +205,9 @@ export function javaRegex(source: string, within: "whole" | "find" | "all"): Jav
       last = "group";
       ending = "group";
       const empty = alternatives || (before && element);
-      ({ before, element, alternatives } = enclosing.pop()!);
+      const outer = enclosing.pop()!;
+      emptyWithGroups = empty && groups > outer.groups;
+      ({ before, element, alternatives } = outer);
       next(empty);
     } else if (character === "|") {
       out.push("|");
@@ -207,6 +217,10 @@ export function javaRegex(source: string, within: "whole" | "find" | "all"): Jav
       [before, element] = [true, true];
     } else if (character === "*" || character === "+" || character === "?") {
       if (last === null) return fail("a quantifier without anything to repeat");
+      if (within === "all" && last === "group" && emptyWithGroups)
+        return fail(
+          "a repeated group that can match no text and holds a group, which Java filled otherwise",
+        );
       const quantified = quantifier(character);
       if (typeof quantified !== "string") return quantified;
       out.push(quantified);
@@ -347,28 +361,36 @@ export function javaRegex(source: string, within: "whole" | "find" | "all"): Jav
  * groups (V30 §8 "Regexes"): `\x` is the character x, a `$` of it `$$`; `$n` names a group, read as Java read it, the
  * first digit and each next one while the number stays a group. Null where Java failed, at a `$` without a group's
  * number, a group the regex does not have, or a trailing backslash; for a named group `${name}`, which no converted
- * regex has; and where a digit follows a group, which TeaseScript would read as part of its number.
+ * regex has; and where a digit, also an escaped one, follows a group, which TeaseScript would read as part of its
+ * number.
  */
 export function javaReplacement(text: string, groups: number): string | null {
   const characters = [...text];
   const digit = (character: string | undefined): boolean =>
     character !== undefined && character >= "0" && character <= "9";
   let out = "";
+  // Whether the text so far ends with a group, which a digit after it would join.
+  let afterGroup = false;
   for (let index = 0; index < characters.length; index += 1) {
     const character = characters[index]!;
     if (character === "\\") {
       const escaped = characters[++index];
-      if (escaped === undefined) return null;
+      if (escaped === undefined || (afterGroup && digit(escaped))) return null;
       out += escaped === "$" ? "$$" : escaped;
+      afterGroup = false;
     } else if (character === "$") {
       if (!digit(characters[index + 1])) return null;
       let number = Number(characters[++index]);
       if (number > groups) return null;
       while (digit(characters[index + 1]) && number * 10 + Number(characters[index + 1]) <= groups)
         number = number * 10 + Number(characters[++index]);
-      if (digit(characters[index + 1])) return null;
       out += `$${number}`;
-    } else out += character;
+      afterGroup = true;
+    } else {
+      if (afterGroup && digit(character)) return null;
+      out += character;
+      afterGroup = false;
+    }
   }
   return out;
 }

@@ -2843,7 +2843,8 @@ export function expressionType(
     case "template":
       return scalar("string");
     case "variable":
-      return variable(value.name);
+      // An engine constant, `pi`, is a number.
+      return value.engine === true ? scalar("number") : variable(value.name);
     case "list":
       return listOf(elementsType(value.items.map(type)));
     case "object":
