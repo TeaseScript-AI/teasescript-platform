@@ -440,8 +440,8 @@ export class Evaluator {
           );
         // The host gave the account, so a read has no recorded origin.
         this.trace?.readState(
-          stateKey("account"),
-          expression.name,
+          stateKey("account", expression.name),
+          null,
           `account.${expression.name}`,
           value,
           true,
@@ -1814,7 +1814,7 @@ export class Evaluator {
       if (this.trace === null) continue;
       // Each field depends only on the account's field it copies.
       const previous = this.trace.push();
-      this.trace.readState(stateKey("account"), name, `account.${name}`, value, true);
+      this.trace.readState(stateKey("account", name), null, `account.${name}`, value, true);
       this.#writeState(reference, name, value, span, { property: name });
       this.trace.pop(previous);
     }
