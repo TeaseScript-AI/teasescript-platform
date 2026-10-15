@@ -13304,6 +13304,21 @@ function dictLookup(
     : { kind: "methodCall", target: dict, name: "contains", arguments: [key], dict: true };
 }
 
+/** Whether evaluating an expression has no effect: pure (isPure), or text operations on such values. */
+function sideEffectFree(node: AstNode, context: LowerContext): boolean {
+  if (isPure(node, context)) return true;
+  const call = node.kind === "methodCall" ? callParts(node) : null;
+  const receiver = asNode(node.object);
+  return (
+    call !== null &&
+    !call.inherited &&
+    receiver !== null &&
+    (STRING_METHODS.has(call.name) || TEXT_ONLY_METHODS.has(call.name)) &&
+    sideEffectFree(receiver, context) &&
+    call.arguments.every((argument) => sideEffectFree(argument, context))
+  );
+}
+
 /**
  * Whether evaluating a dict's fallback can neither fail nor change anything, as `default:` evaluates it also where
  * Groovy did not: a constant, a variable, a negated number that is never null, and a list, map, or text of such parts;
@@ -13332,13 +13347,16 @@ function failsNever(node: AstNode, context: LowerContext): boolean {
 /**
  * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536), whose default may be of any type, null too
  * (#853): `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, and `m[k] != null ? m[k] : d`, also with the test negated and the
- * branches swapped. `exact` is false where Groovy also replaced a stored null, or, with a truth test, a stored false, 0,
- * or empty value other than the default itself. Null for any other expression.
+ * branches swapped, for a fallback without effects (sideEffectFree). `default:` evaluates its value also for a present
+ * key, where Groovy did not, so a fallback that may fail (failsNever) is `lazy`: `dict.get(key, default: null) otherwise
+ * value`, which evaluates it only for a missing key or a stored null. `exact` is false where Groovy used the fallback otherwise: for a stored
+ * null, or with a truth test for a stored false, 0, or empty value other than the default itself. Null for any other
+ * expression, and for a lazy fallback that a stored null would take where Groovy kept the null.
  */
 function dictDefault(
   node: AstNode,
   context: LowerContext,
-): { parts: DictLookupParts; fallback: AstNode; exact: boolean } | null {
+): { parts: DictLookupParts; fallback: AstNode; exact: boolean; lazy: boolean } | null {
   let read: AstNode | null = null;
   let fallback: AstNode | null = null;
   let test: "contains" | "null" | "truth" = "truth";
@@ -13360,11 +13378,14 @@ function dictDefault(
     test = tested.test;
   }
   const parts = read === null ? null : dictLookupParts(read, context);
-  // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback that may fail or
-  // have effects keeps the conditional (failsNever).
-  if (parts === null || fallback === null || !failsNever(fallback, context)) return null;
+  // A fallback with effects, which Groovy's test ran where the conversion's would not, keeps the conditional.
+  if (parts === null || fallback === null || !sideEffectFree(fallback, context)) return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
-  let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
+  const nullable = context.mapUses.nullableValues.has(dict);
+  const lazy = !failsNever(fallback, context);
+  // A stored null takes the default where Groovy's key test kept it.
+  if (lazy && test === "contains" && nullable) return null;
+  let exact = lazy || test === "contains" || !nullable;
   if (exact && test === "truth") {
     // Groovy's truth test also replaced the value type's false, 0, or empty value, which is exact only as default.
     const values = (context.mapUses.dictionaryValues.get(dict) ?? 0) & ~NULL;
@@ -13375,7 +13396,7 @@ function dictDefault(
       (values === BOOLEAN && literal === false) ||
       (values === LIST && fallback.kind === "list" && nodeArray(fallback.items).length === 0);
   }
-  return { parts, fallback, exact };
+  return { parts, fallback, exact, lazy };
 }
 
 /** A key test of a Groovy condition: `containsKey` or `in`, a null test, or a truth test of a lookup. */
@@ -13417,10 +13438,10 @@ function keyTest(
 /** `dict.get(key, default: value)` (#536) for a Groovy dict fallback (dictDefault); null when it cannot be lowered. */
 function lowerDictDefault(
   node: AstNode,
-  found: { parts: DictLookupParts; fallback: AstNode; exact: boolean },
+  found: { parts: DictLookupParts; fallback: AstNode; exact: boolean; lazy: boolean },
   context: LowerContext,
 ): IrExpression | null {
-  const { parts, fallback, exact } = found;
+  const { parts, fallback, exact, lazy } = found;
   const dict = lowerExpression(parts.receiver, context);
   const key: IrExpression | null =
     parts.key === null
@@ -13433,11 +13454,27 @@ function lowerDictDefault(
       context,
       "SX_DICT_DEFAULT",
       "warning",
-      "Groovy also used the fallback for a stored null, or with ?: for a stored false, 0, or empty value; get(key, default:) uses it only for a missing key (#536).",
+      lazy
+        ? "Groovy also used the fallback for a stored false, 0, or empty value with ?:; here it replaces only a missing key or a stored null."
+        : "Groovy also used the fallback for a stored null, or with ?: for a stored false, 0, or empty value; get(key, default:) uses it only for a missing key (#536).",
       node.span,
     );
   }
-  return { kind: "methodCall", target: dict, name: "get", arguments: [key, value], dict: true };
+  const read = (fallbackValue: IrExpression): IrExpression => ({
+    kind: "methodCall",
+    target: dict,
+    name: "get",
+    arguments: [key, fallbackValue],
+    dict: true,
+  });
+  return lazy
+    ? {
+        kind: "binary",
+        operator: "otherwise",
+        left: read({ kind: "literal", value: null }),
+        right: value,
+      }
+    : read(value);
 }
 
 /**
@@ -13495,8 +13532,6 @@ function readThenDefault(
     fallback === null ||
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
-    // A dict's `default:` runs also where the key is present, so it may not fail (failsNever).
-    (dictLookupParts(read, context) !== null && !failsNever(fallback, context)) ||
     // The default runs after the read stored null in the variable (or in the element's list).
     mayReadDestination(
       fallback,
@@ -13739,8 +13774,10 @@ function lowerReadDefault(node: AstNode, context: LowerContext): IrExpression | 
   const parts = dictLookupParts(read, context);
   if (parts !== null) {
     const dict = bindingKey(parts.receiver, context.bindings) ?? "";
-    const exact = !context.mapUses.nullableValues.has(dict);
-    return lowerDictDefault(node, { parts, fallback, exact }, context);
+    // The test was one of null, which a lazy fallback keeps exactly (dictDefault).
+    const lazy = !failsNever(fallback, context);
+    const exact = lazy || !context.mapUses.nullableValues.has(dict);
+    return lowerDictDefault(node, { parts, fallback, exact, lazy }, context);
   }
   const load = lowerExpression(read, context);
   const value = lowerExpression(fallback, context);
