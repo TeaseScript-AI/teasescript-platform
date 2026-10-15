@@ -228,7 +228,7 @@ test("a say rejected after its expressions ran keeps nothing, with either stagin
 
 test("a say rejected for 'speaker' without a speaker keeps nothing, with either staging", () => {
   // The default speaker is set only on a path that does not run, so the say has none.
-  const unset = ["speaker vera { }", "if done {\n  speaker vera\n}"];
+  const unset = ['speaker vera { title: "Miss" }', "if done {\n  speaker vera\n}"];
   const reads = [
     'say "${random()} ${speaker.title}"',
     'let line = say "${items.random} ${speaker.title.uppercase()}"',

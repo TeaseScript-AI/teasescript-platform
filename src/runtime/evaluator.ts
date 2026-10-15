@@ -33,6 +33,11 @@ import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../messag
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
+  propertiesReadThrough,
+  speakerPropertySource,
+  speakerPropertyValue,
+} from "../speaker-terms.js";
+import {
   LIST_STATISTICS,
   linearRegression,
   listStatistic,
@@ -1352,12 +1357,20 @@ export class Evaluator {
       }
       // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(
-          this.speakerById(object.speakerId, target.span),
-          target.name,
-          value,
-          target.span,
-        );
+        const speaker = this.speakerById(object.speakerId, target.span);
+        // A reference prepared to the property, through any name for the speaker, keeps the value it leads to now; so
+        // does one to a property read through it, as a term through `gender`.
+        const has = (name: string) => speaker.properties.some((property) => property.name === name);
+        for (const name of [target.name, ...propertiesReadThrough(has, target.name)]) {
+          const path: PreparedReferenceStep[] = [{ kind: "property", name }];
+          detachPreparedReferencesForMutation(this.snapshot, {
+            rootFrameId: GLOBAL_SCOPE_ID,
+            rootName: speaker.identifier,
+            path,
+            speakerPath: { speakerId: speaker.id, path },
+          });
+        }
+        setSpeakerProperty(speaker, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
@@ -3036,12 +3049,10 @@ export class Evaluator {
     name: string,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    let property = speaker.properties.find((item) => item.name === name)?.value;
-    if (property === undefined && name === "title") {
-      property = speaker.properties.find((item) => item.name === "shortTitle")?.value;
-    } else if (property === undefined && name === "shortTitle") {
-      property = speaker.properties.find((item) => item.name === "title")?.value;
-    }
+    const property = speakerPropertyValue(
+      (own) => speaker.properties.find((item) => item.name === own)?.value,
+      name,
+    );
     if (property === undefined)
       throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
     return property;
@@ -3711,10 +3722,20 @@ export class Evaluator {
     object: ExpressionPlan | null = null,
   ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span, object);
-    if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
-      return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
+      const speaker = this.speakerById(value.speakerId, span);
+      // A value that a speaker reads through another property, such as a term its gender gives, comes from that one.
+      if (this.trace !== null)
+        this.#readState(
+          value,
+          speakerPropertySource(
+            (own) => speaker.properties.some((property) => property.name === own),
+            name,
+          ),
+        );
+      return this.#getSpeakerProperty(speaker, name, span);
     }
+    if (this.trace !== null) this.#readState(value, name);
     if (isList(value) || isSet(value))
       return this.#getCollectionProperty(value, name, span, object);
     if (typeof value === "string") {

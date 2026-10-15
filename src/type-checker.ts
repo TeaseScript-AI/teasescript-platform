@@ -132,9 +132,11 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
+  missingSpeakerFieldMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
+import { GENDER_TERMS, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -579,6 +581,16 @@ type DeferredCheck = {
       readonly span: SourceSpan;
       /** The error, or a function for it given the properties that the objects read can have. */
       readonly message: string | ((properties: readonly string[]) => string);
+    }
+  | {
+      /**
+       * A read of a field of {@link SPEAKER_FIELDS} from the speaker of this name, or from any speaker for `null`, which
+       * fails when the speaker gets none of the field's sources (see {@link fieldSources}).
+       */
+      readonly kind: "speakerField";
+      readonly speaker: string | null;
+      readonly name: string;
+      readonly span: SourceSpan;
     }
 );
 
@@ -1183,6 +1195,15 @@ class TypeChecker {
    */
   readonly #anySpeaker = new PropertyTable();
 
+  /**
+   * For each declared speaker by its name, the properties that its declaration or an assignment through its name gives
+   * it, which decide the reads of its fields of {@link SPEAKER_FIELDS}.
+   */
+  readonly #speakerGets = new Map<string, Set<string>>();
+
+  /** The reads of speaker fields that this check noted, each once (see {@link #noteSpeakerField}). */
+  readonly #fieldReads = new Set<Expression>();
+
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
     readonly node: Expression | AssignmentStatement;
@@ -1565,8 +1586,11 @@ class TypeChecker {
     this.#project.declare(declaration.name.name, { kind: "speaker", custom });
     this.#speakerProperties.set(declaration.name.name, properties);
     (this.#anySpeaker.sources ??= new Set()).add(properties);
+    const gets = new Set<string>();
+    this.#speakerGets.set(declaration.name.name, gets);
     for (const property of declaration.properties) {
       const name = property.name.name;
+      gets.add(name);
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
@@ -1621,8 +1645,12 @@ class TypeChecker {
    */
   #noteSpeakerRead(read: PropertyAccessExpression, receiver: StaticType, scope: Scope): void {
     const name = read.property.name;
-    if (resolved(receiver).kind !== "speaker" || !this.#keepsType(name) || SPEAKER_TERMS.has(name))
+    if (resolved(receiver).kind !== "speaker") return;
+    if (SPEAKER_FIELDS.has(name)) {
+      this.#noteSpeakerField(read, scope);
       return;
+    }
+    if (!this.#keepsType(name)) return;
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
@@ -1639,10 +1667,40 @@ class TypeChecker {
           speaker ?? null,
           name,
           custom,
-          [...custom, ...BUILT_IN_SPEAKER_PROPERTIES],
+          [...custom, ...SPEAKER_FIELDS],
           example,
         );
       },
+    );
+  }
+
+  /**
+   * Notes the read `read`, also by `+=` or `-=`, of a field of {@link SPEAKER_FIELDS} from a speaker: of the speaker the
+   * receiver names, or of any speaker when the compiler cannot tell which. The end of the check reports it when no
+   * declaration or assignment in the project gives such a speaker one of the field's sources (V30 §37).
+   */
+  #noteSpeakerField(read: PropertyAccessExpression, scope: Scope): void {
+    if (this.#fieldReads.has(read)) return;
+    this.#fieldReads.add(read);
+    this.#deferred.push({
+      kind: "speakerField",
+      file: this.#file,
+      at: this.diagnostics.length,
+      speaker: this.#speakerName(read.object, scope) ?? null,
+      name: read.property.name,
+      span: read.property.span,
+    });
+  }
+
+  /**
+   * Whether the speaker `speaker`, or some speaker for `null`, gets one of the sources of its field `name`: by its
+   * declaration or an assignment through its name, or through a store the compiler cannot check, which may reach any
+   * speaker. `anySpeaker` holds what some speaker gets.
+   */
+  #getsField(speaker: string | null, name: string, anySpeaker: ReadonlySet<string>): boolean {
+    const gets = speaker === null ? anySpeaker : this.#speakerGets.get(speaker);
+    return fieldSources(name).some(
+      (source) => this.#unchecked.has(source) || gets?.has(source) === true,
     );
   }
 
@@ -2479,6 +2537,11 @@ class TypeChecker {
       } else {
         const name = target.property.name;
         if (statement.operator !== "=") this.#noteSpeakerRead(target, object, scope);
+        else {
+          // A store through a speaker's name gives it the property; any other store into a speaker is unchecked.
+          const speaker = this.#speakerName(target.object, scope);
+          if (speaker !== undefined) this.#speakerGets.get(speaker)?.add(name);
+        }
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
         const value = resolved(nonNullType(receiver));
@@ -5693,10 +5756,29 @@ class TypeChecker {
       }
     const verdicts = missingPropertyReads(checked);
     const missing = new Map(sites.map((site, index) => [site, verdicts[index]]));
+    // What some speaker gets, for reads from a speaker the compiler cannot tell apart, once the first needs it.
+    let anySpeaker: ReadonlySet<string> | undefined;
     for (const check of this.#deferred) {
       let found: readonly Diagnostic[] = [];
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
+      } else if (check.kind === "speakerField") {
+        anySpeaker ??= new Set([...this.#speakerGets.values()].flatMap((gets) => [...gets]));
+        if (!this.#getsField(check.speaker, check.name, anySpeaker)) {
+          this.#file = check.file;
+          const before = this.diagnostics.length;
+          this.#report(
+            typeCode.invalidOperand,
+            missingSpeakerFieldMessage(
+              check.speaker,
+              check.name,
+              fieldSources(check.name),
+              check.speaker ?? this.#speakerGets.keys().next().value ?? "name",
+            ),
+            check.span,
+          );
+          found = this.diagnostics.splice(before);
+        }
       } else if (check.kind === "property") {
         const names = missing.get(check.site);
         if (names !== undefined) {
@@ -9546,39 +9628,26 @@ const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The name lists and gender-derived terms that V30 §37 gives the player and every speaker, which the runtime does not
- * supply: a speaker has one only when the script gives it, and a read of one it lacks fails when it runs (TSR017).
+ * The built-in properties of a speaker that it has only once a declaration or an assignment gives it: those of
+ * {@link BUILT_IN_SPEAKER_PROPERTIES}, the gender terms, and the name lists (V30 §37). A read of one that the speaker
+ * never gets anywhere in the project is a compile error, as of a custom property (see {@link fieldSources}).
  */
-const SPEAKER_TERMS: ReadonlySet<string> = new Set([
-  "petNames",
-  "degradingNames",
-  "lovingNames",
-  "maleFemale",
-  "manWoman",
-  "boyGirl",
-  "heShe",
-  "himHer",
-  "hisHer",
-  "himselfHerself",
-  "penisVagina",
-  "cockPussy",
-  "penisClitoris",
-  "cockClit",
-  "glansClitoris",
-  "ballsLabia",
-  "scrotumVulva",
-  "foreskinClitoralHood",
-  "chestBreasts",
-  "nippleBreast",
-  "hardWet",
-  "strokeRub",
-  "strokingRubbing",
-  "wankRub",
-  "wankingRubbing",
-  "strokedRubbed",
-  "wankedRubbed",
-  "strokerMasturbator",
+const SPEAKER_FIELDS: ReadonlySet<string> = new Set([
+  ...BUILT_IN_SPEAKER_PROPERTIES,
+  ...GENDER_TERMS.keys(),
+  ...SPEAKER_NAME_LISTS,
 ]);
+
+/**
+ * The fields of which a speaker needs one for a read of its field `name` to find a value: `title` and `shortTitle` stand
+ * for each other, a term's default comes from `gender`, and a display name may be joined from the parts of the name.
+ */
+function fieldSources(name: string): readonly string[] {
+  if (name === "title" || name === "shortTitle") return ["title", "shortTitle"];
+  if (name === "displayName")
+    return ["displayName", "title", "shortTitle", "firstName", "lastName"];
+  return GENDER_TERMS.has(name) ? [name, "gender"] : [name];
+}
 
 /** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
 function staticSetMember(expression: Expression): (string | number | boolean | null)[] {
