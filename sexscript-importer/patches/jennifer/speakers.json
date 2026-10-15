@@ -7,6 +7,147 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/jennifer/assignments.groovy:24",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_greet.groovy:41",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_greet.groovy:43",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_immediate.groovy:59",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_immediate.groovy:62",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_immediate.groovy:65",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_immediate.groovy:68",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:40",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:53",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:61",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:64",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:67",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:69",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/encounters_special.groovy:72",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/intimacy.groovy:52",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/intimacy.groovy:55",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/intimacy.groovy:58",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/intimacy.groovy:61",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:300",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:305",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:314",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:319",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:324",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:329",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:334",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:344",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:353",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:355",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:360",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:362",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:367",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:369",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:374",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:377",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer/setup.groovy:386",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

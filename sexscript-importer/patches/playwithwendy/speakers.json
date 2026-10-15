@@ -7,6 +7,11 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/playwithwendy.groovy:98",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

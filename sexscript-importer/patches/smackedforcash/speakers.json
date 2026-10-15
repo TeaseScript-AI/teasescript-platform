@@ -2,10 +2,12 @@
   "reason": "Three women of a web-series crew take turns: the producer Crystal, the spanker Alexis and the camerawoman Naomi; every line follows a setImage of that woman's own picture (producer-, domme-, cameragirl-). Viewer comments come from anonymous viewers; narration, menus, settings and score screens have no speaker.",
   "speakers": {
     "crystal": {
-      "firstName": "Crystal"
+      "firstName": "Crystal",
+      "displayName": "Producer"
     },
     "alexis": {
-      "firstName": "Alexis"
+      "firstName": "Alexis",
+      "displayName": "Mistress"
     },
     "naomi": {
       "firstName": "Naomi"
@@ -66,5 +68,26 @@
       "speaker": "system"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/Banjo/smackedforcash.groovy:616"
+      ],
+      "files": [
+        "scripts/Banjo/smackedforcash.groovy"
+      ],
+      "speaker": "crystal",
+      "template": "Crystal"
+    },
+    {
+      "after": [
+        "scripts/Banjo/smackedforcash.groovy:624"
+      ],
+      "files": [
+        "scripts/Banjo/smackedforcash.groovy"
+      ],
+      "speaker": "alexis",
+      "template": "Alexis"
+    }
+  ]
 }

@@ -7,6 +7,199 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/empyrean.groovy:56",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:73",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:136",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:141",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:167",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:180",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:183",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:204",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:208",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:209",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean.groovy:213",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:21",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:23",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:28",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:29",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:34",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:41",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:64",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:67",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:73",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:77",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:87",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:143",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:196",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:221",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:225",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:226",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:229",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:232",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:234",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:268",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:289",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/chastity.groovy:290",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:46",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:84",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:89",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:93",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:94",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:99",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:102",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:171",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:179",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/setup.groovy:183",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/status.groovy:14",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/status.groovy:15",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/empyrean/user.groovy:11",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

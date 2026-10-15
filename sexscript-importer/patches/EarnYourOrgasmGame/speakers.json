@@ -29,6 +29,10 @@
     {
       "at": "scripts/EarnYourOrgasmGame.groovy:347",
       "speaker": "host"
+    },
+    {
+      "message": "scripts/EarnYourOrgasmGame.groovy:766",
+      "speaker": "system"
     }
   ],
   "names": []

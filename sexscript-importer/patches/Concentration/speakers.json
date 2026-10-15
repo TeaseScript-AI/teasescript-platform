@@ -7,6 +7,167 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Concentration.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:54",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:147",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:169",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:173",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:184",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:204",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:215",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:216",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:238",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:249",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:267",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:278",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:322",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:326",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:337",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:388",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:390",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:394",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:407",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:418",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:488",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:654",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:708",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:867",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:881",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:961",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:966",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:980",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:984",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:993",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1003",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1013",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1086",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1100",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1110",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1123",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1126",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1196",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Concentration.groovy:1198",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

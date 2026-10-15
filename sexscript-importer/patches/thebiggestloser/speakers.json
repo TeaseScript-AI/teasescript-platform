@@ -3,11 +3,23 @@
   "speakers": {
     "main": {
       "title": "Mistress",
-      "firstName": "Tiffany"
+      "firstName": "Tiffany",
+      "displayName": "Mistress"
     }
   },
   "default": "main",
   "prefixes": [],
   "switches": [],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/thebiggestloser.groovy:28"
+      ],
+      "files": [
+        "scripts/thebiggestloser.groovy"
+      ],
+      "speaker": "main",
+      "template": "Mistress Tiffany"
+    }
+  ]
 }

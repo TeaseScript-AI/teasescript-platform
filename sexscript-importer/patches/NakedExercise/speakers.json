@@ -7,6 +7,147 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/NakedExercise.groovy:70",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:77",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:80",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:93",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:191",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:207",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:412",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:990",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1001",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1015",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1023",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1041",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1045",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1055",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1059",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1061",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1067",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1139",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1147",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1155",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1158",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1290",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1291",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1297",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1310",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1337",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1343",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1384",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1405",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1444",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1454",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1471",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1473",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/NakedExercise.groovy:1479",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

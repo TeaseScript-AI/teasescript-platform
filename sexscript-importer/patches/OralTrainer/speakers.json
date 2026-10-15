@@ -7,6 +7,39 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:235",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1258",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1269",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1272",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1275",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1278",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1281",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/OralTrainer/OralTrainerImpl.groovy:1337",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

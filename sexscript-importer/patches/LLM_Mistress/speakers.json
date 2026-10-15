@@ -3,7 +3,8 @@
   "speakers": {
     "tina": {
       "title": "Mistress",
-      "firstName": "Tina"
+      "firstName": "Tina",
+      "displayName": "Mistress"
     }
   },
   "default": "system",

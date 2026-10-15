@@ -2,10 +2,12 @@
   "reason": "The player is Valeria (all her words are buttons). Her boyfriend Boscy and the visitor Elisa talk in turns; every one of Elisa's recorded lines carries a commented-out playSound voice file (01-57), Boscy's lines never do. Switches follow that marker line by line.",
   "speakers": {
     "boscy": {
-      "firstName": "Boscy"
+      "firstName": "Boscy",
+      "displayName": "Master"
     },
     "elisa": {
-      "firstName": "Elisa"
+      "firstName": "Elisa",
+      "displayName": "Woman"
     }
   },
   "default": "boscy",
@@ -204,5 +206,26 @@
       "speaker": "boscy"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/Esterna/001ragazzaCopia.groovy:104"
+      ],
+      "files": [
+        "scripts/Esterna/001ragazzaCopia.groovy"
+      ],
+      "speaker": "boscy",
+      "template": "Boscy"
+    },
+    {
+      "after": [
+        "scripts/Esterna/001ragazzaCopia.groovy:74"
+      ],
+      "files": [
+        "scripts/Esterna/001ragazzaCopia.groovy"
+      ],
+      "speaker": "elisa",
+      "template": "Elisa"
+    }
+  ]
 }

@@ -7,6 +7,119 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/BattleshipSpank.groovy:11",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:18",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:71",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:126",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:136",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:227",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:230",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:239",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:276",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:348",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:492",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:554",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:570",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:585",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:598",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:611",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:622",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:631",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:639",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:647",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:652",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:653",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:654",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:659",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:712",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:715",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipSpank.groovy:718",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

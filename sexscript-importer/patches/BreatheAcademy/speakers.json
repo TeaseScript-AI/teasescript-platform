@@ -7,6 +7,15 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/BreatheAcademy.groovy:381",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BreatheAcademy.groovy:719",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

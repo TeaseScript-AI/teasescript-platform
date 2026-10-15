@@ -3,11 +3,13 @@
   "speakers": {
     "danielle": {
       "title": "Mistress",
-      "firstName": "Danielle"
+      "firstName": "Danielle",
+      "displayName": "Mistress"
     },
     "tillie": {
       "title": "Miss",
-      "firstName": "Tillie"
+      "firstName": "Tillie",
+      "displayName": "Guest"
     }
   },
   "default": "danielle",
@@ -30,5 +32,26 @@
       "speaker": "system"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/besuch_einer_peinigerin_en.groovy:21"
+      ],
+      "files": [
+        "scripts/besuch_einer_peinigerin_en.groovy"
+      ],
+      "speaker": "danielle",
+      "template": "Mistress Danielle"
+    },
+    {
+      "after": [
+        "scripts/besuch_einer_peinigerin_en.groovy:82"
+      ],
+      "files": [
+        "scripts/besuch_einer_peinigerin_en.groovy"
+      ],
+      "speaker": "tillie",
+      "template": "Miss Tillie"
+    }
+  ]
 }

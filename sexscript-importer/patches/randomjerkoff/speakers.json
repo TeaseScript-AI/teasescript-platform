@@ -7,6 +7,15 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/randomjerkoff.groovy:44",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/randomjerkoff.groovy:224",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

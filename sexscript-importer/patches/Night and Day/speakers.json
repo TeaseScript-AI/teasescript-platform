@@ -2,7 +2,8 @@
   "reason": "The twins Julie (straight hair, the mean one) and Laura (curly hair, the sweet one) take turns. Julie introduces herself and speaks the opening; after each coin flip the heads (treat) branch is Laura's and the tails (punishment) branch is Julie's, as the opening rule at lines 132-134 says; the in-between sections spoken as \"we\" are both.",
   "speakers": {
     "julie": {
-      "firstName": "Julie"
+      "firstName": "Julie",
+      "displayName": "Mistress"
     },
     "laura": {
       "firstName": "Laura"
@@ -231,5 +232,16 @@
       "speaker": "system"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/Night and Day.groovy:24"
+      ],
+      "files": [
+        "scripts/Night and Day.groovy"
+      ],
+      "speaker": "julie",
+      "template": "Julie"
+    }
+  ]
 }

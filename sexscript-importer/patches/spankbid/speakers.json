@@ -7,6 +7,59 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/spankbid.groovy:4",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:13",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:17",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:21",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:31",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:42",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:45",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:47",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:50",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:69",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:71",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:75",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/spankbid.groovy:77",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -8,6 +8,19 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/wanttoshowof.groovy:8",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wanttoshowof.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wanttoshowof.groovy:16",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

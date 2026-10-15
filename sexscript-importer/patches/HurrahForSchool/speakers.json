@@ -6,7 +6,8 @@
     },
     "head": {
       "title": "Dr",
-      "lastName": "Grimes"
+      "lastName": "Grimes",
+      "displayName": "Head"
     },
     "nurse": {
       "title": "Nurse"
@@ -195,6 +196,16 @@
         "3": "Head Girl"
       },
       "otherwise": "Head Boy"
+    },
+    {
+      "after": [
+        "scripts/HurrahForSchool.groovy:2014"
+      ],
+      "files": [
+        "scripts/HurrahForSchool.groovy"
+      ],
+      "speaker": "head",
+      "template": "Dr Grimes"
     }
   ]
 }

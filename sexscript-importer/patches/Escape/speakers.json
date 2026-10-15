@@ -7,6 +7,119 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:203",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:386",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:389",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:420",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:568",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:571",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:585",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:609",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:616",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:626",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:794",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:842",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:894",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:899",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:938",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:940",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:969",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1174",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1206",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1249",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1280",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1300",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1307",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1365",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1399",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1403",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Escape.groovy:1418",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

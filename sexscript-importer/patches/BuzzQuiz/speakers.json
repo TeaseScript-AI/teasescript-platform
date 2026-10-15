@@ -7,6 +7,275 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/BQCompetition.groovy:16",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:20",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:33",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:125",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:130",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:139",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:144",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:149",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:154",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:161",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:171",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:173",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:175",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:180",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:192",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:198",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:222",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:231",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:240",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:241",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:242",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:243",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:268",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:296",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:301",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:320",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:325",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:331",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:339",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:346",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:350",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:357",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:361",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:389",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:396",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:401",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:405",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:408",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BQCompetition.groovy:413",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:27",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:52",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:64",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:114",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:118",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:130",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:132",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:146",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:156",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:182",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:189",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:209",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:214",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:223",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:233",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:243",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:252",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:294",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:305",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuiz.groovy:323",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuizQuestionTest.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuizQuestionTest.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuizQuestionTest.groovy:47",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BuzzQuizQuestionTest.groovy:53",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

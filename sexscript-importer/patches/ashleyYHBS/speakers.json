@@ -8,6 +8,207 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:132",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:139",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:140",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:155",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:187",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:199",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:212",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:219",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:226",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:246",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:266",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:271",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:275",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:281",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:285",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:297",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:302",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:309",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:316",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:340",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:343",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:346",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:466",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:472",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:478",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:481",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:483",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:486",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:498",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:504",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:508",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:512",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:519",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:522",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:526",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:540",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleyYHBS.groovy:545",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleybabysitter.groovy:184",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleybabysitter.groovy:732",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/ashleybabysitter.groovy:743",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/ashleybabysitter.groovy:745",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/ashleycheater.groovy:49",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:38",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:72",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:74",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:80",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:83",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/system/implements.groovy:90",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

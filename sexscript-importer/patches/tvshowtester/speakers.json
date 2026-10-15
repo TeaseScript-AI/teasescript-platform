@@ -7,6 +7,63 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/tvshowtester.groovy:59",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:77",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:150",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:156",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:159",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:165",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/tvshowtester.groovy:174",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:59",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:77",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:150",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:156",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:159",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:165",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/tvshowtester_fr.groovy:174",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -7,6 +7,263 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:81",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:195",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:755",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:783",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:826",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:832",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:848",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:851",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:897",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:909",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:974",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:978",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1239",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1244",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1351",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1391",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1434",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1481",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1818",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1826",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1850",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1861",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1926",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1936",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1948",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1952",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:1964",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2007",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2011",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2016",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2020",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2025",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2029",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2034",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2038",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2042",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2048",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2052",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2057",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2062",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2069",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2084",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2086",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SissyPlaytimeExposure.groovy:2139",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:4",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:71",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:80",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:102",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:163",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:177",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:235",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:274",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:303",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:323",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:339",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:343",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:353",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:403",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:420",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:439",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:450",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGallery.groovy:453",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGameCollage.groovy:213",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/sissyGame/sissyGameCollage.groovy:272",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -34,6 +34,22 @@
     {
       "at": "scripts/wetdream_nl.groovy:1128",
       "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:112",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:158",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:171",
+      "speaker": "system"
     }
   ],
   "names": [

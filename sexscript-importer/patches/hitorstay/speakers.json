@@ -7,6 +7,27 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/hitorstay.groovy:87",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/hitorstay.groovy:107",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/hitorstay.groovy:112",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/hitorstay.groovy:119",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/hitorstay.groovy:183",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

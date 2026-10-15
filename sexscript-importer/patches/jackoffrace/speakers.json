@@ -7,6 +7,71 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/jackoffrace.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:90",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:94",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:103",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:108",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:167",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:169",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:174",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:183",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:202",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:318",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:500",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:737",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:740",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:746",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jackoffrace.groovy:961",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

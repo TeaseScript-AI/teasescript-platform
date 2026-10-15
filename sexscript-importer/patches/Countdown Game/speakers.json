@@ -7,6 +7,11 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/countdowngame.groovy:1406",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

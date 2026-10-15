@@ -20,7 +20,8 @@
       "firstName": "Dianne"
     },
     "miranda": {
-      "firstName": "Miranda"
+      "firstName": "Miranda",
+      "displayName": "Female Guard"
     }
   },
   "default": "system",
@@ -1695,5 +1696,16 @@
       "speaker": "system"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/prison_break.groovy:3546"
+      ],
+      "files": [
+        "scripts/prison_break.groovy"
+      ],
+      "speaker": "miranda",
+      "template": "Miranda"
+    }
+  ]
 }

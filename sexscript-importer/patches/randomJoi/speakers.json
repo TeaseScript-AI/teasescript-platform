@@ -7,6 +7,19 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/randomJoi.groovy:552",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/randomJoi.groovy:553",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/randomJoi.groovy:557",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

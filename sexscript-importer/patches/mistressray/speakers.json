@@ -8,6 +8,35 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/mistressray.groovy:9",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mistressray.groovy:15",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mistressray.groovy:21",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/mistressray.groovy:42",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/mistressray.groovy:59",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/mistressray.groovy:63",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/mistressray.groovy:67",
+      "speaker": "narrator"
+    }
+  ],
   "names": []
 }

@@ -8,6 +8,15 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/ChastityBeadMistress/ChastityBeadMistress.Main.groovy:99",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ChastityBeadMistress/ChastityBeadMistress.Status.groovy:49",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -7,6 +7,147 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:165",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:230",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:368",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:371",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:385",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:402",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:409",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:419",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:456",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:463",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:468",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:627",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:629",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1554",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1559",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1574",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1634",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1664",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1665",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1689",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1690",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1940",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1953",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1961",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:1987",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2189",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2233",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2265",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2313",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2336",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2375",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2483",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2516",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2520",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TheSnowyOwl/Stay.groovy:2535",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

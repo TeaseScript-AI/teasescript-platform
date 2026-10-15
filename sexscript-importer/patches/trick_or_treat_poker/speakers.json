@@ -7,6 +7,43 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:253",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:257",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:302",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:321",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:346",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:490",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:493",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:498",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/trick_or_treat_poker.groovy:508",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

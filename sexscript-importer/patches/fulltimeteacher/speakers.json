@@ -3,11 +3,52 @@
   "speakers": {
     "main": {
       "title": "Miss",
-      "lastName": "Martin"
+      "lastName": "Martin",
+      "displayName": "Teacher"
     }
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
-  "names": []
+  "switches": [
+    {
+      "message": "scripts/fulltimeteacher.groovy:7",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:21",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:55",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:59",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:67",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:69",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/fulltimeteacher.groovy:73",
+      "speaker": "narrator"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/fulltimeteacher.groovy:23"
+      ],
+      "files": [
+        "scripts/fulltimeteacher.groovy"
+      ],
+      "speaker": "main",
+      "template": "Miss Martin"
+    }
+  ]
 }

@@ -2,11 +2,23 @@
   "reason": "One named character, Kyanna (Haiku and Luna inventories agree).",
   "speakers": {
     "main": {
-      "firstName": "Kyanna"
+      "firstName": "Kyanna",
+      "displayName": "Mistress"
     }
   },
   "default": "main",
   "prefixes": [],
   "switches": [],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/redgreen.groovy:92"
+      ],
+      "files": [
+        "scripts/redgreen.groovy"
+      ],
+      "speaker": "main",
+      "template": "Kyanna"
+    }
+  ]
 }

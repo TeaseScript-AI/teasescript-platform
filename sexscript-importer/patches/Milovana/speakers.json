@@ -7,6 +7,19 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Milovana.groovy:596",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Milovana.groovy:680",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Milovana.groovy:924",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

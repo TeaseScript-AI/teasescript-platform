@@ -1,8 +1,9 @@
 {
-  "reason": "In Baccarat.groovy the bank is played by one opponent, named by the variable OpponentName (default Alexis, chosen in settings from the picture folders), who speaks in the first person under her or his picture (\"Hi, I'm \"+OpponentName). Card dealing, scores, rules, settings, the clothes form, estim setup, the separate chemin-de-fer game and the extras notices are system text.",
+  "reason": "In Baccarat.groovy the bank is played by one opponent, named by the variable OpponentName (default Alexis, chosen in settings from the picture folders), who speaks in the first person under her or his picture (\"Hi, I'm \"+OpponentName). Card dealing, scores, rules, settings, the clothes form, estim setup, the separate chemin-de-fer game and the extras notices are system text. The opponent shows as the Banker until she says her name (\"Hi, I'm …\", line 739), also after the settings choose another (owner 2026-10-15: a role until the introduction).",
   "speakers": {
     "opponent": {
-      "firstName": "Alexis"
+      "firstName": "Alexis",
+      "displayName": "Banker"
     }
   },
   "default": "system",
@@ -103,12 +104,24 @@
   ],
   "names": [
     {
-      "variable": "OpponentName",
+      "after": [
+        "scripts/Baccarat.groovy:187"
+      ],
       "files": [
         "scripts/Baccarat.groovy"
       ],
       "speaker": "opponent",
-      "template": "{}"
+      "template": "Banker"
+    },
+    {
+      "after": [
+        "scripts/Baccarat.groovy:739"
+      ],
+      "files": [
+        "scripts/Baccarat.groovy"
+      ],
+      "speaker": "opponent",
+      "template": "{OpponentName}"
     }
   ]
 }

@@ -7,6 +7,135 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/theEdger.groovy:20",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:22",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:169",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:178",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:187",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:287",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:291",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:296",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:307",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:318",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:330",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:335",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:341",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:401",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:404",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:409",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:412",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:422",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:436",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:501",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:514",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:518",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:520",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:524",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:551",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger.groovy:556",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:105",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:112",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:127",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:144",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:185",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/theEdger/theEdger-watch.groovy:189",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

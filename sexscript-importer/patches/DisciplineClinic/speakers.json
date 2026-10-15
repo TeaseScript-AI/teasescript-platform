@@ -2,13 +2,15 @@
   "reason": "Two packages. In the clinic, the receptionist Brianna speaks whenever her reception pictures are set (setImageReception/setImageReceptionBusy). The disciplinarian speaks whenever a mistress picture helper is set; her name follows the `mistress` variable, which changes at the handoffs. In the After Dark club, the AI assistant Tina speaks with setImageTina and the club mistress speaks in her scene file. The title kiosk, the rewards menus, narration and system screens have no speaker.",
   "speakers": {
     "brianna": {
-      "firstName": "Brianna"
+      "firstName": "Brianna",
+      "displayName": "Receptionist"
     },
     "mistress": {
       "title": "Mistress"
     },
     "tina": {
-      "firstName": "Tina"
+      "firstName": "Tina",
+      "displayName": "Club Assistant"
     }
   },
   "default": "system",
@@ -182,6 +184,26 @@
         "Claire": "Claire"
       },
       "otherwise": "Mistress"
+    },
+    {
+      "after": [
+        "scripts/DisciplineClinic/DisciplineClinicMain.groovy:2291"
+      ],
+      "files": [
+        "scripts/DisciplineClinic/DisciplineClinicMain.groovy"
+      ],
+      "speaker": "brianna",
+      "template": "Brianna"
+    },
+    {
+      "after": [
+        "scripts/DCAfterDark/DCAfterDarkMain.groovy:1790"
+      ],
+      "files": [
+        "scripts/DCAfterDark/DCAfterDarkMain.groovy"
+      ],
+      "speaker": "tina",
+      "template": "Tina"
     }
   ]
 }

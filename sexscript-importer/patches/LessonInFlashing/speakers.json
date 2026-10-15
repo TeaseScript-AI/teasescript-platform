@@ -2,7 +2,8 @@
   "reason": "Three guides take turns, each introduced under her own picture: the first guide (Dagmar, named by Andrea at 81), then Andrea from her self-introduction (79), then Marketa (121). Part 2 opens with one greeting from each, after which Dagmar speaks for the group (\"we\") under her pictures; the random-pick notice and the closing \"Goodbye\" are system text.",
   "speakers": {
     "dagmar": {
-      "firstName": "Dagmar"
+      "firstName": "Dagmar",
+      "displayName": "Woman"
     },
     "andrea": {
       "firstName": "Andrea"
@@ -59,5 +60,16 @@
       "speaker": "dagmar"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/alessoninflashing.groovy:79"
+      ],
+      "files": [
+        "scripts/alessoninflashing.groovy"
+      ],
+      "speaker": "dagmar",
+      "template": "Dagmar"
+    }
+  ]
 }

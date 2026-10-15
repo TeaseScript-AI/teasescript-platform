@@ -7,6 +7,251 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:6",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:29",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:33",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:44",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:53",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:60",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:155",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:159",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:203",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:226",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:281",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:296",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BeggarMyNeighbour.groovy:299",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:9",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:60",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:64",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:75",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:79",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:92",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:99",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:129",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:134",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:140",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:149",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:161",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:165",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:185",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:195",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:202",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:205",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:214",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:224",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:227",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:229",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:240",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:253",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:282",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:284",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:307",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:315",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:397",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:479",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:491",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:494",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:521",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:547",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:588",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:596",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:609",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:615",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:621",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:683",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:689",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:697",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:700",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:702",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:725",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:728",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StripJackNaked.groovy:737",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

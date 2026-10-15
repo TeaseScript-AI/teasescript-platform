@@ -3,7 +3,8 @@
   "speakers": {
     "lilith": {
       "title": "Mistress",
-      "firstName": "Lilith"
+      "firstName": "Lilith",
+      "displayName": "Mistress"
     },
     "demon": {
       "displayName": "Demon"
@@ -219,7 +220,94 @@
     {
       "message": "scripts/helldate4.groovy:185",
       "speaker": "player"
+    },
+    {
+      "message": "scripts/helldate.groovy:4",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/helldate2.groovy:4",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/helldate4.groovy:37",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:44",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:51",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:58",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:65",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:72",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:80",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:91",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:93",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:95",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:97",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:99",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:109",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:115",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:121",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate4.groovy:129",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/helldate_de.groovy:4",
+      "speaker": "system"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/helldate2.groovy:109"
+      ],
+      "files": [
+        "scripts/helldate2.groovy"
+      ],
+      "speaker": "lilith",
+      "template": "Mistress Lilith"
+    }
+  ]
 }

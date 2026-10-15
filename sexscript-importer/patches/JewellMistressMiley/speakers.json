@@ -8,6 +8,127 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/jewell.groovy:129",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell.groovy:142",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/assignments.groovy:760",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/confessions.groovy:191",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/cumEdging.groovy:257",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/cumExact.groovy:263",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/cumHowTo.groovy:52",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/cumLuckyDay.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/cumPermission.groovy:531",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/firstRun.groovy:14",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/firstRun.groovy:109",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/masturbate.groovy:206",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/negotiations.groovy:104",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/punishEnema.groovy:35",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/punishSpank.groovy:142",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/punishments.groovy:1899",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/ritualMorning.groovy:77",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/ritualNight.groovy:318",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainBondage.groovy:336",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainChastity.groovy:160",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainEnema.groovy:197",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainPuppyLevelOne.groovy:345",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainPuppyLevelThree.groovy:255",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainPuppyLevelTwo.groovy:617",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainSissyLevelOne.groovy:441",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainSissyLevelThree.groovy:547",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainSissyLevelTwo.groovy:418",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainStrapon.groovy:241",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/trainTorture.groovy:560",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jewell/training.groovy:119",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

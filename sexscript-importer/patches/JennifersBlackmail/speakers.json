@@ -7,6 +7,91 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/jennifer_has_fun.groovy:90",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:106",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:111",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:379",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:384",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:386",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:389",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:391",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:394",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:396",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:419",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:429",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifer_has_fun.groovy:430",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:61",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:67",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:85",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:88",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:143",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jennifers_blackmail.groovy:481",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -7,6 +7,11 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Boobs.groovy:719",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

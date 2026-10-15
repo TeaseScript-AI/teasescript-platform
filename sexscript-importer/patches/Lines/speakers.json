@@ -79,6 +79,14 @@
     {
       "entry": "scripts/Lines/Reset/KittyReset.groovy",
       "speaker": "system"
+    },
+    {
+      "message": "scripts/Lines/Jewell.groovy:280",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Lines/Jewell.groovy:289",
+      "speaker": "system"
     }
   ],
   "names": []

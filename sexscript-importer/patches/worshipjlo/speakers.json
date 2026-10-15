@@ -8,6 +8,19 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/worshipjlo.groovy:5",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/worshipjlo.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/worshipjlo.groovy:31",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

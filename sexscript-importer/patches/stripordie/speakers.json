@@ -7,6 +7,151 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/stripordie.groovy:219",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:232",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:236",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:354",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:433",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:721",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:793",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:796",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:802",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:943",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:978",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:992",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1005",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1018",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1030",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1083",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1088",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1119",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1131",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1152",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1154",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1159",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1168",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1187",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1200",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1239",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1252",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1389",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1412",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1504",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1524",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1662",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1665",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1668",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1747",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/stripordie.groovy:1749",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

@@ -11,7 +11,8 @@
       "displayName": "Guard"
     },
     "elaina": {
-      "firstName": "Elaina"
+      "firstName": "Elaina",
+      "displayName": "Female Guard"
     },
     "woman": {
       "displayName": "Woman"
@@ -47,7 +48,8 @@
       "displayName": "Amazon"
     },
     "kareen": {
-      "firstName": "Kareen"
+      "firstName": "Kareen",
+      "displayName": "Elf"
     },
     "lady": {
       "displayName": "Lady of the Lake"
@@ -7310,5 +7312,41 @@
       "speaker": "player"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/DungeonTrials.groovy:4998",
+        "scripts/DungeonTrialsTrailer.groovy:4754"
+      ],
+      "files": [
+        "scripts/DungeonTrials.groovy",
+        "scripts/DungeonTrialsTrailer.groovy"
+      ],
+      "speaker": "kareen",
+      "template": "Kareen"
+    },
+    {
+      "variable": "metElaina",
+      "files": [
+        "scripts/DungeonTrials.groovy",
+        "scripts/DungeonTrialsTrailer.groovy"
+      ],
+      "speaker": "elaina",
+      "values": {
+        "true": "Elaina"
+      }
+    },
+    {
+      "after": [
+        "scripts/DungeonTrials.groovy:6736",
+        "scripts/DungeonTrialsTrailer.groovy:6422"
+      ],
+      "files": [
+        "scripts/DungeonTrials.groovy",
+        "scripts/DungeonTrialsTrailer.groovy"
+      ],
+      "speaker": "elaina",
+      "template": "Elaina"
+    }
+  ]
 }

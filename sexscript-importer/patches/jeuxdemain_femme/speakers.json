@@ -7,6 +7,63 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:132",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:142",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:412",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:476",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:649",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:667",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:825",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:941",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:948",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:954",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:979",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:1010",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/jeuxdemain_femme.groovy:1430",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

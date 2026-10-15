@@ -7,6 +7,15 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/exercice.groovy:229",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/exercise.groovy:237",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

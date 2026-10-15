@@ -7,6 +7,35 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Nim.groovy:68",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:188",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:190",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:341",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:358",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

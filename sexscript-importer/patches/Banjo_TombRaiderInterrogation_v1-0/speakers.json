@@ -8,6 +8,531 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:129",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:134",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:161",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:210",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:318",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:324",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:336",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:367",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:388",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:400",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:404",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:411",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:420",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:432",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:446",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:450",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:455",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:471",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:475",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:478",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:503",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:528",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:545",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:553",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:567",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:596",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:604",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:611",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:635",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:651",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:658",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:669",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:690",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:693",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:697",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:758",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:801",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:831",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:853",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:861",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:873",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:881",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:897",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:914",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:917",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:928",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:936",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:947",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:964",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:972",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:987",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:996",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1007",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1023",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1039",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1049",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1058",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1069",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1082",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1093",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1108",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1121",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1128",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1144",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1148",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1203",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1216",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1232",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1240",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1272",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1312",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1334",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1341",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1434",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1465",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1480",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1483",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1495",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1536",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1557",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1657",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1667",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1670",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1682",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1698",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1708",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1711",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1722",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1739",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1748",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1760",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1776",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1784",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1795",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1820",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1850",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1860",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1884",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1904",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1914",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1928",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1945",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1960",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:1986",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2006",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2009",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2012",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2032",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2087",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2129",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2133",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2142",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2158",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2161",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2170",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2178",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2206",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2222",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2249",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2291",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2302",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2342",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2356",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2364",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2405",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2408",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2415",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2444",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2456",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2467",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Banjo/tomb_raider_interrogation.groovy:2483",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

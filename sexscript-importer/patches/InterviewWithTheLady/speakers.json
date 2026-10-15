@@ -7,6 +7,39 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:50",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:52",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:54",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:57",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:64",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:79",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:84",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/InterviewWithTheLady.groovy:86",
+      "speaker": "narrator"
+    }
+  ],
   "names": []
 }

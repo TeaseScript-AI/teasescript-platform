@@ -6,7 +6,8 @@
     },
     "malhotra": {
       "title": "Mrs",
-      "lastName": "Malhotra"
+      "lastName": "Malhotra",
+      "displayName": "Headmistress"
     },
     "mistress": {
       "title": "Mistress"
@@ -79,5 +80,16 @@
       "speaker": "narrator"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/schoolscript/firstrun.groovy:36"
+      ],
+      "files": [
+        "scripts/schoolscript/firstrun.groovy"
+      ],
+      "speaker": "malhotra",
+      "template": "Mrs Malhotra"
+    }
+  ]
 }

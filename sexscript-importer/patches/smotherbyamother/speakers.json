@@ -5,7 +5,8 @@
       "displayName": "Friend"
     },
     "zoey": {
-      "firstName": "Zoey"
+      "firstName": "Zoey",
+      "displayName": "Sister"
     },
     "mom": {
       "displayName": "Mom"
@@ -42,5 +43,16 @@
       "speaker": "mom"
     }
   ],
-  "names": []
+  "names": [
+    {
+      "after": [
+        "scripts/smotherbyamother.groovy:32"
+      ],
+      "files": [
+        "scripts/smotherbyamother.groovy"
+      ],
+      "speaker": "zoey",
+      "template": "Zoey"
+    }
+  ]
 }

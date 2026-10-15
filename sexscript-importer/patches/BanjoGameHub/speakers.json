@@ -412,6 +412,214 @@
     {
       "at": "scripts/Banjo/penaltybox.groovy:1255",
       "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/gameofchance_ee.groovy:816",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/gameofchance_ee.groovy:817",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/guessthenumber_ee.groovy:616",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/guessthenumber_ee.groovy:618",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/guessthenumber_ee.groovy:721",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/guessthenumber_ee.groovy:733",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:718",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:733",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:749",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:762",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:767",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:768",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:769",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/hitorstay_ee.groovy:770",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:709",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:725",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:747",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:752",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:753",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/rockpaperscissors.groovy:754",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/spankblackjack.groovy:631",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:985",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:986",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:987",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:988",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:989",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:990",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:991",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:992",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:993",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:994",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:995",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:996",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:997",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:998",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:999",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1000",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1001",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1002",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1003",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1004",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1005",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1006",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1007",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1008",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1009",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1010",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1011",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1012",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1020",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1032",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Banjo/wheelofdiscipline.groovy:1567",
+      "speaker": "system"
     }
   ],
   "names": [

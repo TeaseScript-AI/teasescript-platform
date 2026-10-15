@@ -7,6 +7,15 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/zur_enthaltsamkeit_verfuehrt_de.groovy:303",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/zur_enthaltsamkeit_verfuehrt_en.groovy:303",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

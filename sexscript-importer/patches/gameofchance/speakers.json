@@ -7,6 +7,31 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/gameofchance.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:209",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:220",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:252",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:258",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/gameofchance.groovy:259",
+      "speaker": "system"
+    }
+  ],
   "names": []
 }

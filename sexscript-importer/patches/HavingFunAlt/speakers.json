@@ -8,6 +8,75 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
+  "switches": [
+    {
+      "message": "scripts/HavingFunAlt.groovy:62",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:71",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:84",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:95",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:104",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:128",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:156",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:159",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:161",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:168",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:180",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:217",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:220",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:223",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:280",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:283",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/HavingFunAlt.groovy:286",
+      "speaker": "narrator"
+    }
+  ],
   "names": []
 }

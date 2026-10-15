@@ -2,11 +2,54 @@
   "reason": "One named character, Aria (Haiku and Luna inventories agree).",
   "speakers": {
     "main": {
-      "firstName": "Aria"
+      "firstName": "Aria",
+      "displayName": "Woman"
     }
   },
   "default": "main",
   "prefixes": [],
-  "switches": [],
-  "names": []
+  "switches": [
+    {
+      "message": "scripts/guessthenumber.groovy:245",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumber.groovy:257",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumber.groovy:294",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumberalt.groovy:48",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumberalt.groovy:251",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumberalt.groovy:263",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/guessthenumberalt.groovy:300",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/guessthenumber.groovy:51",
+        "scripts/guessthenumberalt.groovy:57"
+      ],
+      "files": [
+        "scripts/guessthenumber.groovy",
+        "scripts/guessthenumberalt.groovy"
+      ],
+      "speaker": "main",
+      "template": "Aria"
+    }
+  ]
 }
