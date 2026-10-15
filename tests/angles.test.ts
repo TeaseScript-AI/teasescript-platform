@@ -290,6 +290,10 @@ test("a plain number where an angle is needed, and other combinations, are error
       [[message, span]],
       source,
     );
+  // Grouping is suggested only for a number before the unit: grouping a duration would not fix it.
+  assert.ok(
+    errors("let a = 1 / (2 s) rad").every(([, message]) => !message.includes("Group the numbers")),
+  );
 });
 
 test("where the compiler cannot see the type, the same mistakes fail at runtime", () => {

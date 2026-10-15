@@ -5924,7 +5924,7 @@ class TypeChecker {
     this.#report(
       typeCode.invalidOperand,
       (command === undefined ? null : groupedUnitMessage(command, expression, failed)) ??
-        operatorMessage(operator, expression, failed),
+        operatorMessage(operator, expression, failed, (item) => this.#typeOf(item)),
       expression.span,
     );
     return UNKNOWN_TYPE;
@@ -10374,6 +10374,7 @@ function operatorMessage(
   operator: string,
   expression: Extract<Expression, { kind: "unaryExpression" | "binaryExpression" }>,
   operands: readonly StaticType[],
+  typeOf: (expression: Expression) => StaticType,
 ): string {
   const [left, right] = operands;
   if (operands.length === 1)
@@ -10402,7 +10403,7 @@ function operatorMessage(
   if (angle(left!) || angle(right!)) {
     const binary = expression.kind === "binaryExpression" ? expression : null;
     // A unit binds tighter than an operator, so `pi / 6 rad` divides a number by an angle.
-    const grouped = binary !== null && isNumeric(left!) ? groupedAngleText(binary) : null;
+    const grouped = binary !== null && isNumeric(left!) ? groupedAngleText(binary, typeOf) : null;
     const group =
       grouped === null ? "" : ` Or group the numbers before the unit, as in '${grouped}'.`;
     if (
@@ -10615,14 +10616,16 @@ function timeUnitFix(
 }
 
 /**
- * `n op a unit` as the author likely meant it, `(n op a) unit`, when the right operand is an angle with its unit written
- * directly after it; `null` otherwise, or when the source is too long to show.
+ * `n op a unit` as the author likely meant it, `(n op a) unit`, when the right operand is a number with an angle unit
+ * written directly after it; `null` otherwise, or when the source is too long to show.
  */
 function groupedAngleText(
   expression: Extract<Expression, { kind: "binaryExpression" }>,
+  typeOf: (expression: Expression) => StaticType,
 ): string | null {
   const right = expression.right;
-  if (right.kind !== "angleExpression") return null;
+  if (right.kind !== "angleExpression" || !isNumeric(nonNullTypeForUse(typeOf(right.operand))))
+    return null;
   const left = expressionText(expression.left);
   const amount = expressionText(right.operand);
   return left === null || amount === null
