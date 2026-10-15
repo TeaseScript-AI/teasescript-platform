@@ -5813,6 +5813,7 @@ function unitAfterWord(value: Expression, word: Token, unitless: WeakSet<Express
     }
     if (node.kind === "binaryExpression") node = node.left;
     else if (node.kind === "rangeExpression") node = node.start;
+    else if (node.kind === "typeTestExpression") node = node.value;
     else return false;
   }
 }
