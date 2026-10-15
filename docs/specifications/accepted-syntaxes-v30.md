@@ -2719,8 +2719,8 @@ A dict written where the form is asked combines the answer types its entries pro
 type proves one kind, from a `value:` known where its values are created, the result is a dict of that answer
 type, such as an `integer dict`, or an `integer? dict` when a field may be `optional:`. Otherwise, as for an
 `object dict` of descriptors of different kinds with explicit `type:`, the result is a
-`(boolean | number | string | date | time | datetime | duration | absoluteDateTime | null) dict` (a cycle may return any
-choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
+`(boolean | number | string | date | time | datetime | duration | calendarDuration | angle | absoluteDateTime | null) dict`
+(a cycle may return any choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
 
 ```text
 let menu: object dict = dict {}
@@ -4260,8 +4260,8 @@ Rules:
   case runs. Cases do not fall through, and `break` is not used to end a case.
 - Every `case` uses a required block.
 - A `case` lists one or more values separated by commas and matches when any of them matches.
-- A case value is a literal (text without `${...}`, a number or duration with an optional sign, `true`, `false`, or
-  `null`), a declared speaker, or a range with a number literal on each side. A literal or speaker matches when the
+- A case value is a literal (text without `${...}`, a number, duration, or angle with an optional sign, `true`, `false`,
+  or `null`), a declared speaker, or a range with a number literal on each side. A literal or speaker matches when the
   switched value `==` it.
 - A range matches a number within its bounds (§6): `1..5` matches `1 <= value < 5` and `1..=5` matches
   `1 <= value <= 5`, including numbers that are not whole, such as `4.5`. A value that is not a number, such as `null`,

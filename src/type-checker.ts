@@ -11020,6 +11020,8 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATETIME_TYPE,
   // A cycle may return any choice value but `null`.
   DURATION_TYPE,
+  CALENDAR_DURATION_TYPE,
+  ANGLE_TYPE,
   ABSOLUTE_DATE_TIME_TYPE,
 ]);
 

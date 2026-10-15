@@ -338,6 +338,25 @@ test("a form checks when it opens that each field answers within the type the co
     )[0],
     "TSR058",
   );
+  // A field whose kind only the runtime knows may be a cycle of any choice value: durations, calendar durations, or
+  // angles.
+  for (const [options, answer] of [
+    ["[1 s, 2 s]", "1 second"],
+    ["[1 calendar day, 2 calendar days]", "1 calendar day"],
+    ["[90 deg, pi rad]", "90°"],
+  ] as const) {
+    const plan = compileValidPlan(
+      `let tag = "cycle"\nlet answers = askForm fields: { x: { type: tag, options: ${options} } }\nsay answers.x\nexit`,
+    );
+    const opened = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+    assert.equal(opened.foregroundAction?.kind, "interaction", opened.failure?.message);
+    const answered = submitted(plan, opened).finished;
+    assert.deepEqual(
+      answered.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      [answer],
+      options,
+    );
+  }
   // Data that matches what the compiler saw opens and answers as typed.
   const matching = outcome(
     'let f = { value: false, text: "Owned" }\nlet a = askForm fields: { x: f, y: [{ text: "One", value: 1 }, { text: "Two", value: 2 }] }\nlet owned: boolean = a.x\nlet n: integer = a.y\nexit',
