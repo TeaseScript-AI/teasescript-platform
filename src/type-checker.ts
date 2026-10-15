@@ -1438,6 +1438,14 @@ class TypeChecker {
         : null;
     }
     if (node.kind !== "propertyAccessExpression") return null;
+    // A person field of the player that a copy of the account gives has the account's type, which no first value
+    // changes.
+    if (
+      this.#accountCopy !== undefined &&
+      PERSON_FIELDS.has(node.property.name) &&
+      this.#speakerName(node.object, scope) === PLAYER
+    )
+      return null;
     // Only a property that an object or a speaker keeps has a first value; one that a dict, list, or set computes,
     // such as `keys`, has none.
     const receivers = members(nonNullType(this.#typeOf(node.object))).map(resolved);

@@ -200,6 +200,15 @@ test("the player and the account have compile errors that name the form that exi
       [["TSV041", "3"]],
       before,
     );
+  // The copy fixes the element type, so the fix keeps values of another type apart.
+  assert.deepEqual(
+    mismatches("player.copyFrom(account)\nplayer.petNames.add(3)\nexit").map(
+      ([, message]) => message,
+    ),
+    [
+      "'player.petNames' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
+    ],
+  );
   // A field the script gives another type conflicts with the copy's text.
   assert.deepEqual(
     mismatches("player.petNames = [1]\nplayer.copyFrom(account)\nexit").map(([code, , text]) => [
