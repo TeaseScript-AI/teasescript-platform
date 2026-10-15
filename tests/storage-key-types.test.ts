@@ -279,6 +279,41 @@ test("a save fits every load of its key, and a key that is never loaded is not c
   );
 });
 
+test("a key type that only a later check settles still decides the saves and the plan", () => {
+  // "copy" takes the type of its default, a load of "total", whose type another load declares; "steps" a list of a
+  // variable that a later assignment makes a number. A check that does not know those yet reads other types.
+  const source = (saved: string) =>
+    [
+      'let total: number = load("total", default: 0)',
+      'let copy = load("copy", default: load("total", default: 1))',
+      `save ${saved} as "copy"`,
+      "let step = 1",
+      "step = step + 0.5",
+      'let steps = load("steps", default: [step])',
+      'save [2.5] as "steps"',
+      "exit",
+    ].join("\n");
+  assert.deepEqual(plan(source("0.5")).storageTypes, [
+    { key: "copy", type: { kind: "number" } },
+    { key: "steps", type: { kind: "list", element: { kind: "number" } } },
+    { key: "total", type: { kind: "number" } },
+  ]);
+  assert.deepEqual(errors(source('"half"')), [
+    [
+      "TSV041",
+      `Storage key "copy" is loaded as a number on line 2, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: number | string = load(...)'.`,
+      '"half"',
+    ],
+  ]);
+  // A message names the load that the check takes first: the function body runs at its call, after the other load.
+  assert.deepEqual(
+    errors(
+      'function later {\n    let late = load("level", default: 1)\n}\nlet level = load("level", default: 2)\nlater()\nsave "high" as "level"\nexit',
+    )[0]?.[1],
+    `Storage key "level" is loaded as a whole number (integer) on line 4, so it cannot save text (string). To allow it, declare a type that includes it, as in 'let value: integer | string = load(...)'.`,
+  );
+});
+
 test("a key computed at runtime has no type", () => {
   assert.deepEqual(
     codes(
