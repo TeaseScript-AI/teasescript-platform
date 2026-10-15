@@ -534,6 +534,9 @@ test(
       'def parts = "a  b".split(" *")',
       'def mark = "#"',
       'def marked = "ab".replaceAll("(a)", mark)',
+      // A null-safe call gave null for null, which its receiver as text would not.
+      "def nothing = [null, 'x'][0]",
+      "def safe = nothing?.tokenize()",
       'show("${kept} ${repeated} ${ending} ${parts.size()} ${marked}")',
     ]);
     assert.match(source, /TODO SX_JAVA_REPLACEMENT line 1:/u);
@@ -541,6 +544,7 @@ test(
     assert.match(source, /TODO SX_JAVA_REGEX line 3: .*\$, which Java also matched/u);
     assert.match(source, /TODO SX_JAVA_REGEX line 4: .*can match no text/u);
     assert.match(source, /NOTE SX_JAVA_REPLACEMENT_TEXT line 6:/u);
+    assert.match(source, /^let safe = nothing\.findAll\(/mu);
     assert.match(source, /"ab"\.replace\(\/\(a\)\/, mark\.replace\("\$", "\$\$"\)\)/u);
   },
 );

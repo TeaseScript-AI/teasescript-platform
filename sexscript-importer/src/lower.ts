@@ -14973,7 +14973,7 @@ function lowerObjectMethodCallExpression(
   // Groovy tokenize() exists only for text: the parts between any of the delimiter characters, without empty parts,
   // which are the runs of other characters that findAll() finds; delimiters known only at runtime go to a helper.
   if (name === "tokenize" && argumentsNodes.length <= 1 && targetNode !== null) {
-    const text = receivedText(targetNode, context);
+    const text = receivedText(targetNode, node, context);
     const written = argumentsNodes.length === 0 ? " \t\n\r\f" : constantString(argumentsNodes[0]!);
     const members =
       written === null
@@ -15589,7 +15589,7 @@ function textOperation(
         );
         return null;
       }
-      const target = receivedText(targetNode, context);
+      const target = receivedText(targetNode, node, context);
       const computed =
         replacementText === null ? lowerExpression(argumentsNodes[1]!, context) : null;
       if (target === null || (replacementText === null && computed === null)) return null;
@@ -15653,7 +15653,9 @@ function textOperation(
         return null;
       }
       const target =
-        regex === null ? lowerExpression(targetNode, context) : receivedText(targetNode, context);
+        regex === null
+          ? lowerExpression(targetNode, context)
+          : receivedText(targetNode, node, context);
       if (target === null) return null;
       const by: IrExpression = regex?.literal ?? {
         kind: "literal",
@@ -15729,12 +15731,14 @@ function textOperation(
 }
 
 /**
- * The text a Groovy string method ran on: a value that may be no text, such as one of a variable that held text or a
- * number, as `${value}`, which Groovy's call would have failed on where it was none.
+ * The text a Groovy string method `call` ran on, its receiver `node`: a value that may be no text, such as one of a
+ * variable that held text or a number, as `${value}`, which Groovy's call would have failed on where it was none. A
+ * null-safe call, `value?.replaceAll(...)`, which gave null for null, keeps its receiver.
  */
-function receivedText(node: AstNode, context: LowerContext): IrExpression | null {
+function receivedText(node: AstNode, call: AstNode, context: LowerContext): IrExpression | null {
   const value = lowerExpression(node, context);
-  if (value === null || onlyOf(inferType(node, context.types), STRING)) return value;
+  if (value === null || call.safe === true || onlyOf(inferType(node, context.types), STRING))
+    return value;
   // Text already: a written or joined text, or a helper's text, such as a list's notation.
   helperResults ??= functionResultTypes(allHelperStatements());
   const result = value.kind === "call" ? helperResults.get(value.name) : undefined;

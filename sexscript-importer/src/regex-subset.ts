@@ -19,7 +19,10 @@ export function parseTailPattern(pattern: string): { insensitive: boolean; tail:
   const insensitive = rest.startsWith("(?i)");
   if (insensitive) rest = rest.slice(4);
   if (!rest.startsWith(".*")) return null;
-  const tail = literalText(rest.slice(2));
+  // A test of the end also passes a line terminator, which Java's `.*` did not: an approximation kept, as before regexes
+  // converted, for a tail of plain characters and escaped metacharacters, such as a file extension `\.png`; any other
+  // tail converts as a regex.
+  const tail = literalText(rest.slice(2), false);
   return tail === null || tail === "" ? null : { insensitive, tail };
 }
 
@@ -41,16 +44,17 @@ export function javaReplacementText(replacement: string): string | null {
 }
 
 /**
- * The text a pattern of literal characters and escaped punctuation, such as `\\|` or `\\#`, matches; null for any other
- * pattern.
+ * The text a pattern of literal characters and escaped punctuation, such as `\\|` or `\\#`, or with `punctuation`
+ * false escaped metacharacters only, matches; null for any other pattern.
  */
-function literalText(pattern: string): string | null {
+function literalText(pattern: string, punctuation = true): string | null {
   let text = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
     if (character === "\\") {
       const next = pattern[index + 1];
-      if (next === undefined || !PUNCTUATION.test(next)) return null;
+      if (next === undefined || !(punctuation ? PUNCTUATION.test(next) : META.has(next)))
+        return null;
       text += next;
       index += 1;
       continue;

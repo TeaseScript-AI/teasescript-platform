@@ -14,3 +14,5 @@ for (t in texts) {
   if (t =~ /b$/) r << "b-end" else r << "."
   show(r.join(" "))
 }
+// A whole match of a tail with escaped punctuation is a regex, which does not pass over a line break, as Java's did not.
+show("${'first\nlast#' ==~ '.*\\#'} ${'last#' ==~ '.*\\#'}")
