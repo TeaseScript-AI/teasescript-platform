@@ -874,7 +874,9 @@ usable bottom edge includes its reported top offset rather than treating its hei
 
 The composer receives focus by default, except on touch-only devices, where automatic focus would raise the software
 keyboard; there the user taps the input to start typing. Non-interactive Player clicks should not arbitrarily steal
-typing focus; an explicitly focused tool/input/control naturally owns keyboard input while it is active.
+typing focus, and a click on a permanent button gives it back to the composer, as default focus does; an explicitly
+focused tool/input/control, such as a permanent button focused from the keyboard, naturally owns keyboard input while
+it is active.
 Submitting with `Send` keeps editing focus and preserves the software keyboard's current state: a visible keyboard stays
 open, while a dismissed keyboard is not reopened. A hardware keyboard can continue typing after Send; tapping the input
 explicitly opens the software keyboard again. Submitting with `Enter` from the input keeps editing focus for a retry or
