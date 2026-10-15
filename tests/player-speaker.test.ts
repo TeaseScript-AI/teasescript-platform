@@ -84,6 +84,8 @@ test("the player and the account have compile errors that name the form that exi
         'account.firstName = "Sam"',
         'account.petNames.add("toy")',
         'account.petNames[0] = "toy"',
+        "account.petNames.sort()",
+        "account.lovingNames.reverse()",
         "account = 1",
         "let all = account",
         "exit",
@@ -110,6 +112,16 @@ test("the player and the account have compile errors that name the form that exi
         "TSV004",
         "Cannot change 'account.petNames': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and change 'player.petNames' instead.",
         "account.petNames[0]",
+      ],
+      [
+        "TSV004",
+        "Cannot change 'account.petNames': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and change 'player.petNames' instead.",
+        "account.petNames",
+      ],
+      [
+        "TSV004",
+        "Cannot change 'account.lovingNames': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and change 'player.lovingNames' instead.",
+        "account.lovingNames",
       ],
       ["TSV004", "Cannot assign to 'account', which is read-only.", "account"],
       [
@@ -195,6 +207,8 @@ test("the player and the account have compile errors that name the form that exi
     ]),
     [["TSV041", "player.copyFrom(account)"]],
   );
+  // A text of the account reverses into a new text.
+  assert.deepEqual(mismatches("say account.firstName.reverse()\nexit"), []);
 });
 
 test("player.copyFrom(account) replaces the player's person fields and keeps the rest", () => {

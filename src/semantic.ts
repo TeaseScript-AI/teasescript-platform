@@ -63,7 +63,13 @@ import {
 } from "./expression-children.js";
 import { DURATION_UNIT_MILLISECONDS, durationLiteralValue, isCalendar } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import { COLLECTION_CHANGES, noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import {
+  COLLECTION_CHANGES,
+  LIST_REORDERS,
+  noteSharing,
+  rootName,
+  type Sharing,
+} from "./operation-checks.js";
 import {
   globMatches,
   isPathGlob,
@@ -78,7 +84,7 @@ import {
   sessionDeclarations,
   setsDefaultSpeaker,
 } from "./project-globals.js";
-import { PLAYER } from "./speaker-terms.js";
+import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -2118,16 +2124,22 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
+        // A list of the account changes in place as a list of anything else does, also when it is reordered; a text of
+        // the account reverses into a new text.
+        if (
+          method.kind === "propertyAccessExpression" &&
+          rootName(method.object) === "account" &&
+          (COLLECTION_CHANGES.has(method.property.name) ||
+            (LIST_REORDERS.has(method.property.name) && isAccountList(method.object)))
+        ) {
+          this.#reportAccountChange(method.object, false);
+          return;
+        }
         if (
           method.kind === "propertyAccessExpression" &&
           COLLECTION_CHANGES.has(method.property.name)
-        ) {
-          if (rootName(method.object) === "account") {
-            this.#reportAccountChange(method.object, false);
-            return;
-          }
+        )
           this.#recordSharedWrite(rootName(method.object), scope, "changes");
-        }
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -3381,6 +3393,16 @@ function findFirstInteraction(
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
   return null;
+}
+
+/** Whether `expression` is a name list of the account, as `account.petNames`. */
+function isAccountList(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  return (
+    node.kind === "propertyAccessExpression" &&
+    isAccount(node.object) &&
+    SPEAKER_NAME_LISTS.has(node.property.name)
+  );
 }
 
 /** Whether `expression` is the protected `account`, which no binding can have as its name. */
