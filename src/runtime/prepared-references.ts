@@ -22,6 +22,7 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
+import { speakerPropertyValue } from "../speaker-terms.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -222,7 +223,9 @@ export function detachPreparedReferencesForMutation(
       } catch {
         continue;
       }
-      if (descriptor.detached) continue;
+      // A detached reference holds a copy of its root, which changes only where its path goes through a speaker, whose
+      // properties stay shared state, as for a receiver that `speaker` or a function result gave.
+      if (descriptor.detached && mutation.speakerPath == null) continue;
       const changedDepth = preparedReferenceMutationDepth(snapshot, descriptor, mutation, false);
       if (changedDepth === null) continue;
       freezePreparedReference(snapshot, temporary.value, descriptor, changedDepth);
@@ -413,12 +416,13 @@ function freezePreparedReference(
       rootFrameId: GLOBAL_SCOPE_ID,
       rootName: speaker.reference.identifier,
       path: descriptor.path.slice(speaker.depth),
-      // An attached reference keeps a copy of its root exactly where the plan keeps one.
+      // An attached reference keeps a copy of its root exactly where the plan keeps one; a detached one, which always
+      // keeps one, stays detached and follows the speaker through that copy.
       capturedRoot:
         descriptor.capturedRoot === undefined
           ? undefined
           : cloneCapturedSerializableValue(speaker.reference),
-      detached: false,
+      detached: descriptor.detached,
     });
     serialized.properties.length = 0;
     for (const property of followed.properties) serialized.properties.push(property);
@@ -572,12 +576,10 @@ function resolvePreparedReferenceStep(
   if (isSpeakerReference(value)) {
     const speaker = snapshot.speakers.find((candidate) => candidate.id === value.speakerId);
     if (speaker === undefined) return { found: false, value: null };
-    let property = speaker.properties.find((candidate) => candidate.name === step.name)?.value;
-    if (property === undefined && step.name === "title") {
-      property = speaker.properties.find((candidate) => candidate.name === "shortTitle")?.value;
-    } else if (property === undefined && step.name === "shortTitle") {
-      property = speaker.properties.find((candidate) => candidate.name === "title")?.value;
-    }
+    const property = speakerPropertyValue(
+      (name) => speaker.properties.find((candidate) => candidate.name === name)?.value,
+      step.name,
+    );
     return property === undefined
       ? { found: false, value: null }
       : { found: true, value: property };

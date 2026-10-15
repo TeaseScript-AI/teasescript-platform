@@ -1265,16 +1265,6 @@ async function packageScenario(cdp, origin) {
   }
 }
 
-/**
- * The `missing-media` package refers to an image, a sound, and a speaker avatar the package lacks, and to an image, a
- * sound, and an avatar that are no valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
- * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
- */
-/**
- * The title bar shows the title and author of `main.tease`'s header, for the default build and the development preview;
- * a title cut off by a narrow bar opens in full on a tap, and on short screens with the auto-hide bar the first tap only
- * reveals the bar.
- */
 // The start page shows the script's header, and the session it starts is kept: a reload continues it where it was, also
 // with a photo only the session holds, and after `exit` the session stays behind the end dialog until it is closed,
 // which returns to the start page.

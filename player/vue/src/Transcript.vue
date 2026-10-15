@@ -344,6 +344,7 @@ watch(endInset, (inset, previous) => {
 });
 const palette = ref<TranscriptPalette>({
   surface: "#ffffff",
+  reply: "#000000",
   canvas: "#ffffff",
   edge: null,
   link: "#0000ee",
@@ -354,6 +355,7 @@ function readPalette() {
   const canvas = backdropBehind(element);
   palette.value = {
     surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
+    reply: resolveColour(element, "var(--primary)", "#000000"),
     canvas,
     edge: vignetteEdge(element, canvas),
     link: resolveColour(element, "var(--markup-link)", "#0000ee"),

@@ -61,6 +61,7 @@ import type {
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
 import { canonicalRegexFlags } from "../../regex.js";
+import { copiesAccount } from "../../project-globals.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -512,6 +513,10 @@ export class InstructionCompiler {
         return;
       }
       case "expressionStatement": {
+        if (copiesAccount(statement.expression)) {
+          this.instructions.push({ kind: "copyAccount", span: copySpan(statement.span) });
+          return;
+        }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
@@ -1457,6 +1462,15 @@ export class InstructionCompiler {
         };
       }
       case "propertyAccessExpression": {
+        if (isAccount(expression.object))
+          return {
+            plan: {
+              kind: "accountField",
+              name: expression.property.name,
+              span: copySpan(expression.span),
+            },
+            temporaryIds: [],
+          };
         const object = yield* compileChild(this.#lowerExpressionTask(expression.object));
         return {
           plan: {
@@ -3117,6 +3131,12 @@ interface LoweredExpression {
   readonly temporaryIds: readonly number[];
 }
 
+/** Whether `expression` is the protected `account`, which no binding can have as its name. */
+function isAccount(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  return node.kind === "identifier" && node.name === "account";
+}
+
 function unwrapParentheses(expression: Expression): Expression {
   let current = expression;
   while (current.kind === "parenthesizedExpression") current = current.expression;
@@ -3422,6 +3442,12 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "propertyAccessExpression":
+      if (isAccount(expression.object))
+        return {
+          kind: "accountField",
+          name: expression.property.name,
+          span: copySpan(expression.span),
+        };
       return {
         kind: "property",
         object: child(expression.object),

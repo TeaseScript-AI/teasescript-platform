@@ -381,7 +381,7 @@ function executeInstructionBoundary(
   if (
     observeStart &&
     observer !== null &&
-    observeBefore(context.trace, observer, instructionIndex, call)
+    observeBefore(context.trace, observer, snapshot, instructionIndex, call)
   ) {
     context.stopped = true;
     return 0;
@@ -441,7 +441,7 @@ function executeInstructionBoundary(
   if (unit) control.endUnit(context.trace);
   // A failed instruction did not complete; the operation ends with its failure.
   if (observer !== null && !failed)
-    observeAfter(context.trace, observer, instructionIndex, snapshot.nextInstruction, call);
+    observeAfter(context.trace, observer, snapshot, instructionIndex, call);
   return 1;
 }
 
@@ -449,15 +449,16 @@ function executeInstructionBoundary(
 function observeBefore(
   trace: TraceStore | null,
   observer: RuntimeInstructionObserver,
+  snapshot: RuntimeSnapshot,
   instruction: number,
   call: number,
 ): boolean {
   if (observer.before === undefined) return false;
-  if (trace !== null) trace.betweenInstructions = true;
+  if (trace !== null) trace.between = snapshot;
   try {
     return observer.before(instruction, call) === true;
   } finally {
-    if (trace !== null) trace.betweenInstructions = false;
+    if (trace !== null) trace.between = null;
   }
 }
 
@@ -468,7 +469,7 @@ function observeDispatch(
   snapshot: RuntimeSnapshot,
 ): boolean {
   if (observer.dispatch === undefined) return false;
-  if (trace !== null) trace.betweenInstructions = true;
+  if (trace !== null) trace.between = snapshot;
   try {
     return (
       observer.dispatch(
@@ -477,7 +478,7 @@ function observeDispatch(
       ) === true
     );
   } finally {
-    if (trace !== null) trace.betweenInstructions = false;
+    if (trace !== null) trace.between = null;
   }
 }
 
@@ -485,16 +486,16 @@ function observeDispatch(
 function observeAfter(
   trace: TraceStore | null,
   observer: RuntimeInstructionObserver,
+  snapshot: RuntimeSnapshot,
   instruction: number,
-  next: number,
   call: number,
 ): void {
   if (observer.after === undefined) return;
-  if (trace !== null) trace.betweenInstructions = true;
+  if (trace !== null) trace.between = snapshot;
   try {
-    observer.after(instruction, next, call);
+    observer.after(instruction, snapshot.nextInstruction, call);
   } finally {
-    if (trace !== null) trace.betweenInstructions = false;
+    if (trace !== null) trace.between = null;
   }
 }
 
@@ -930,6 +931,10 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "copyAccount":
+      evaluator.copyAccount(copySpan(instruction.span));
+      advance(snapshot);
+      return;
     case "enterScope":
       assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
       snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
@@ -2964,6 +2969,7 @@ function selectiveSayStagingClone(
     // Records are never changed in place; a shown message adds one.
     liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
     debugMode: snapshot.debugMode,
+    account: snapshot.account,
     // A say changes no control state; the operation's control keeps it.
     randomControl: snapshot.randomControl,
     maxCallDepth: snapshot.maxCallDepth,

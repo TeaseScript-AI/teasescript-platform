@@ -36,7 +36,7 @@ export interface PlayerMessagePresentation {
   readonly id: string;
   readonly speakerId: string;
   readonly text: string;
-  /** Present only for authored runtime output; player-authored entries remain plain text. */
+  /** Present only for authored runtime output, also a message of `player`; an answer remains plain text. */
   readonly content?: MessageMarkup;
   /** For a script's message, the runtime event whose content it shows, which Debug's Explain values explains. */
   readonly contentSequence?: number;

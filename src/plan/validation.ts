@@ -1,4 +1,5 @@
 import { isStoredCalendarDurationRecord, isStoredDurationRecord } from "../duration.js";
+import { PERSON_FIELDS } from "../speaker-terms.js";
 import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
@@ -562,6 +563,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["declareGlobal", "name", "value", "typeCheck", "file"],
   ["declareSpeaker", "name", "properties", "file"],
   ["setDefaultSpeaker", "name"],
+  ["copyAccount"],
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
@@ -622,6 +624,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["regex", "source", "flags"],
   ["identifier", "name"],
   ["debugMode"],
+  ["accountField", "name"],
   ["temporary", "temporaryId"],
   ["preparedReference", "temporaryId"],
   ["list", "elements"],
@@ -679,6 +682,7 @@ function validateInstruction(
     case "setDefaultSpeaker":
       requireString(value.name, `${path}.name`, errors);
       return;
+    case "copyAccount":
     case "enterScope":
     case "leaveScope":
     case "exit":
@@ -2314,6 +2318,10 @@ function validateExpressionNode(
       requireString(value.name, `${path}.name`, errors);
       return;
     case "debugMode":
+      return;
+    case "accountField":
+      if (typeof value.name !== "string" || !PERSON_FIELDS.has(value.name))
+        errors.push(planError("TSC002", "Account field is not a person field.", `${path}.name`));
       return;
     case "temporary":
     case "preparedReference":

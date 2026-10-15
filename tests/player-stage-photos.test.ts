@@ -22,6 +22,8 @@ const cannotMeasure = (_request: unknown, answer: WorkerAnswer): void => {
 };
 const BASE = "https://player.example/";
 const absolute = (url: string) => new URL(url, BASE).href;
+// A write that is still going on after its download, as a large file's can, until `until` settles.
+let heldWrite: { readonly url: string; readonly until: Promise<unknown> } | null = null;
 class PageCache {
   readonly files = new Map<string, Blob>();
   async match(request: string) {
@@ -29,13 +31,15 @@ class PageCache {
     return file && new Response(file);
   }
   async put(request: string, response: Response) {
-    this.files.set(absolute(request), await response.blob());
+    const file = await response.blob();
+    if (heldWrite?.url === absolute(request)) await heldWrite.until;
+    this.files.set(absolute(request), file);
   }
   async keys() {
     return [...this.files.keys()].map((url) => new Request(url));
   }
-  async delete(request: Request) {
-    return this.files.delete(request.url);
+  async delete(request: Request | string) {
+    return this.files.delete(typeof request === "string" ? absolute(request) : request.url);
   }
 }
 const cacheStorage = new Map<string, PageCache>();
@@ -221,11 +225,18 @@ test("without Cache Storage, a photo the preloader measured is downloaded again 
   }
 });
 
-test("a new script's preload leaves only the files of the photos it names in the cache", async () => {
-  const first = preloadStagePhotos(["/files/cellar.jpg", "/files/attic.jpg"]);
+test("a new script's preload leaves only the files of the photos it names in the cache, also one still being written", async () => {
+  let written!: (value?: unknown) => void;
+  heldWrite = {
+    url: absolute("/files/vault.jpg"),
+    until: new Promise((resolve) => (written = resolve)),
+  };
+  const first = preloadStagePhotos(["/files/cellar.jpg", "/files/attic.jpg", "/files/vault.jpg"]);
   await preloaded();
   const second = preloadStagePhotos(["/files/attic.jpg", "/files/tower.jpg"]);
   first();
+  written();
+  heldWrite = null;
   await preloaded();
   assert.deepEqual([...photoCache()!.files.keys()].sort(), [
     absolute("/files/attic.jpg"),
@@ -236,6 +247,28 @@ test("a new script's preload leaves only the files of the photos it names in the
     1,
     "a photo both scripts name is not downloaded again",
   );
+  second();
+});
+
+test("a photo the new script shows while the earlier script's file of it is still being written stays in the cache", async () => {
+  let written!: (value?: unknown) => void;
+  heldWrite = {
+    url: absolute("/files/well.jpg"),
+    until: new Promise((resolve) => (written = resolve)),
+  };
+  const first = preloadStagePhotos(["/files/well.jpg"]);
+  await preloaded();
+  const second = preloadStagePhotos([]);
+  first();
+  // As from an image path the new script computes.
+  const shown = prepareStagePhoto("/files/well.jpg");
+  written();
+  heldWrite = null;
+  await shown.shown;
+  await preloaded();
+  assert.equal(downloadsOf("/files/well.jpg"), 1);
+  assert.equal(photoCache()!.files.has(absolute("/files/well.jpg")), true);
+  shown.release();
   second();
 });
 

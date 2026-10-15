@@ -284,9 +284,10 @@ export class RuntimeDebugContext {
   /**
    * Releases the retained records up to ID `upTo`, which the host has read, as the bounds drop records, except that the
    * version index keeps naming them: `variableRecord` and `storageRecord` still give their IDs, and later records still
-   * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. Between
-   * operations, also after one threw, and in an instruction observer it releases them; while an operation otherwise
-   * runs, as in a builtin, nothing.
+   * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. It drops the
+   * index entries of scopes and calls that have ended, though, which execution never reads again: `variableRecord` may
+   * then give `null` for a scope that the snapshot no longer has. Between operations, also after one threw, and in an
+   * instruction observer it releases them; while an operation otherwise runs, as in a builtin, nothing.
    */
   public release(upTo: number): void {
     if (typeof upTo !== "number") throw new TypeError("release takes a record ID.");
@@ -359,6 +360,11 @@ export interface DebugDependencies {
   omitted: number;
   /** The IDs as a set, once there are more than a scan checks quickly. */
   seen?: Set<number> | undefined;
+  /**
+   * IDs that come before `ids`, last first, put in front by a merge. An ID may come again later, where it does not count:
+   * `settled` gives the IDs in order, each once.
+   */
+  front?: number[] | undefined;
 }
 
 export function emptyDependencies(): DebugDependencies {
@@ -475,6 +481,8 @@ export class TraceStore {
   #nextId = 1;
   #bytes = 0;
   #versions = new Map<string, number>();
+  /** The index size at which a release prunes it next: twice what the last pruning left. */
+  #pruneAt = 0;
   #outputs = new Map<number, number>();
   #stageImageId: number | null = null;
   #stageImageSet = false;
@@ -490,8 +498,8 @@ export class TraceStore {
   #stage: Stage | null = null;
   /** Whether an operation records now, from `open` to `close`. */
   #operating = false;
-  /** Whether that operation stands between two instructions, calling an instruction observer. */
-  betweenInstructions = false;
+  /** The state that operation stands at between two instructions while it calls an instruction observer, else `null`. */
+  between: RuntimeSnapshot | null = null;
 
   #epoch = 0;
   #origin: RuntimeDebugTraceOrigin = "attach";
@@ -502,6 +510,8 @@ export class TraceStore {
   #firstEventSequence: number | null = null;
   #failure: string | null = null;
   #plan: InstructionPlan | null = null;
+  /** The file of each instruction whose location a view gave, by index: finding one searches the plan's files. */
+  #paths: string[] = [];
   #last: WeakRef<RuntimeSnapshot> | null = null;
 
   /** Where records are attributed now: an instruction, and the call frame that runs it when the engine runs it. */
@@ -572,7 +582,7 @@ export class TraceStore {
   /** Ends an operation that threw: its records stay as far as it got, and the stages it left open end. */
   abandon(): void {
     this.#operating = false;
-    this.betweenInstructions = false;
+    this.between = null;
     if (this.#failure !== null) return;
     while (this.#stage !== null) this.#endStage(this.#stage);
   }
@@ -583,6 +593,7 @@ export class TraceStore {
     this.#retained = 0;
     this.#bytes = 0;
     this.#versions = new Map();
+    this.#pruneAt = 0;
     this.#outputs = new Map();
     this.#stageImageId = null;
     this.#stageImageSet = false;
@@ -594,6 +605,7 @@ export class TraceStore {
     this.#rngAnchorState = null;
     this.#firstEventSequence = null;
     this.#plan = null;
+    this.#paths = [];
     this.#decisions = [];
     this.acc = emptyDependencies();
   }
@@ -752,20 +764,18 @@ export class TraceStore {
 
   /**
    * Makes `deps` the collector of the frame being evaluated after `child` finished, which it adds. Into an empty
-   * collector, the finished child's causes move instead of being copied, so a chain of nested expressions collects
-   * in work proportional to its causes.
+   * collector, the finished child's causes move instead of being copied, and a few causes go in front of a child's many
+   * instead of the many after the few. A merge therefore costs the shorter side, so an expression nested on either side
+   * collects in work proportional to its causes.
    */
   focus(deps: DebugDependencies, child: DebugDependencies | null, merge: boolean): void {
     if (child !== null && merge && this.#failure === null) {
-      if (deps.ids.length > 0 || deps.omitted > 0) addAll(deps, child, this.#limit());
-      else if (child !== deps) {
-        deps.ids = child.ids;
-        deps.omitted = child.omitted;
-        deps.seen = child.seen;
-        child.ids = [];
-        child.omitted = 0;
-        child.seen = undefined;
-      }
+      if (deps.ids.length > 0 || deps.front !== undefined || deps.omitted > 0) {
+        if (child !== deps && precedes(deps, child, this.#limit())) {
+          prepend(deps, child);
+          adopt(deps, child);
+        } else addAll(deps, child, this.#limit());
+      } else if (child !== deps) adopt(deps, child);
     }
     this.acc = deps;
   }
@@ -776,6 +786,7 @@ export class TraceStore {
     this.acc.ids.length = 0;
     this.acc.omitted = 0;
     this.acc.seen = undefined;
+    this.acc.front = undefined;
     this.acc.ids.push(id);
   }
 
@@ -874,12 +885,12 @@ export class TraceStore {
    */
   copyTemporary(callFrameId: number, temporaryId: number, value: SerializableRuntimeValue): void {
     if (this.#failure !== null) return;
-    const deps = this.acc;
-    if (deps.ids.length !== 1 || deps.omitted !== 0) {
+    const ids = settled(this.acc);
+    if (ids.length !== 1 || this.acc.omitted !== 0) {
       this.writeTemporary(callFrameId, temporaryId, value);
       return;
     }
-    if (!this.alias(temporaryKey(callFrameId, temporaryId), deps.ids[0]!))
+    if (!this.alias(temporaryKey(callFrameId, temporaryId), ids[0]!))
       this.writeTemporary(callFrameId, temporaryId, value);
   }
 
@@ -1365,7 +1376,7 @@ export class TraceStore {
       sceneTimeMs: decided?.sceneTimeMs ?? this.#sceneTimeMs,
       preview: preview?.text ?? null,
       previewTruncated: preview?.truncated ?? false,
-      dependencies: Object.freeze([...deps.ids]),
+      dependencies: Object.freeze([...settled(deps)]),
       omitted: deps.omitted,
       detail,
       control,
@@ -1425,17 +1436,14 @@ export class TraceStore {
     if (
       this.#failure !== null ||
       this.#stage !== null ||
-      (this.#operating && !this.betweenInstructions)
+      (this.#operating && this.between === null)
     )
       return;
     try {
       while (this.#retained < this.#records.length && this.#retainedAt(this.#retained).id <= upTo) {
         const record = this.#retainedAt(this.#retained);
         this.#bytes -= record.bytes;
-        const indexed =
-          (record.key !== null && this.#versions.get(record.key) === record.id) ||
-          (record.aliases?.some((key) => this.#versions.get(key) === record.id) ?? false);
-        const stub = indexed
+        const stub = this.#named(record)
           ? new ReleasedRecord(record.id, record.key, record.aliases, RELEASED_RECORD_BYTES)
           : undefined;
         this.#records[this.#retained] = stub;
@@ -1445,9 +1453,63 @@ export class TraceStore {
         if (this.#lastRandom === record) this.#lastRandom = null;
         this.#retained += 1;
       }
+      // Inside an observer, the state the operation stands at; between operations, the last one's result.
+      const state = this.between ?? this.#last?.deref();
+      if (state !== undefined && this.#versions.size >= this.#pruneAt) this.#prune(state);
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  /**
+   * Drops the index entries of the variables of scopes that `state` no longer has, and of the temporaries, arguments,
+   * and loops of calls that ended. Scope and call IDs are never used again, so nothing reads those entries any more. A
+   * released record that the index no longer names goes with them. Pruning waits until the index has doubled, so it
+   * costs about as much as the entries added meanwhile.
+   */
+  #prune(state: RuntimeSnapshot): void {
+    const scopes = new Set([GLOBAL_SCOPE_ID]);
+    for (const scope of state.frames) scopes.add(scope.id);
+    for (const scope of state.retainedScopes) scopes.add(scope.id);
+    const calls = new Set([0]);
+    for (const call of state.callFrames) calls.add(call.id);
+    // Where the records that the dropped entries named stand in the queue, each looked at once below.
+    const places = new Set<number>();
+    for (const [key, id] of this.#versions) {
+      const owners =
+        key[0] === "b" ? scopes : key[0] === "t" || key[0] === "a" || key[0] === "l" ? calls : null;
+      // A key of these kinds begins with its scope or call ID: `b12:name`, `t3:5`.
+      if (owners === null || owners.has(Number.parseInt(key.slice(1), 10))) continue;
+      this.#versions.delete(key);
+      this.#bytes -= INDEX_OVERHEAD_BYTES + key.length * 2;
+      const index = this.#records.length - (this.#nextId - id);
+      if (index >= this.#head) places.add(index);
+    }
+    for (const index of places) {
+      const record = this.#records[index];
+      if (record === undefined) continue;
+      // The list keeps each key that still names the record once: `alias` lists a key again after it named another
+      // record. So a later pruning looks at no entry it looked at before, except the index entries naming the record.
+      if (record.aliases !== null) {
+        const aliases = [...new Set(record.aliases)].filter(
+          (key) => this.#versions.get(key) === record.id,
+        );
+        record.aliases = aliases.length > 0 ? aliases : null;
+      }
+      if (record instanceof ReleasedRecord && !this.#named(record)) {
+        this.#records[index] = undefined;
+        this.#bytes -= record.bytes;
+      }
+    }
+    this.#pruneAt = 2 * this.#versions.size;
+  }
+
+  /** Whether the version index names `record`, by its key or an alias. */
+  #named(record: TraceRecord | ReleasedRecord): boolean {
+    return (
+      (record.key !== null && this.#versions.get(record.key) === record.id) ||
+      (record.aliases?.some((key) => this.#versions.get(key) === record.id) ?? false)
+    );
   }
 
   /**
@@ -1567,7 +1629,10 @@ export class TraceStore {
         span === null || plan === null || record.instruction === null
           ? null
           : Object.freeze({
-              path: instructionSourcePath(plan, record.instruction),
+              path: (this.#paths[record.instruction] ??= instructionSourcePath(
+                plan,
+                record.instruction,
+              )),
               line: span.sl + 1,
               column: span.sc + 1,
               endLine: span.el + 1,
@@ -1631,11 +1696,20 @@ function argumentKey(callFrameId: number, parameter: string): string {
 
 /**
  * Runtime state that values are read from besides variables: a speaker's properties, a timer, media, or permanent
- * button, the camera view, the catalog of tagged photos, and `debugMode`.
+ * button, the camera view, the catalog of tagged photos, `debugMode`, and each field of the account, by its name.
  */
 export function stateKey(
-  kind: "speaker" | "timer" | "media" | "button" | "message" | "camera" | "photos" | "debugMode",
-  id = 0,
+  kind:
+    | "speaker"
+    | "timer"
+    | "media"
+    | "button"
+    | "message"
+    | "camera"
+    | "photos"
+    | "debugMode"
+    | "account",
+  id: number | string = 0,
 ): string {
   return `x${kind}:${id}`;
 }
@@ -1665,10 +1739,13 @@ function storageKeyOf(key: string): string {
 
 function addDependency(deps: DebugDependencies, id: number, limit: number): void {
   const ids = deps.ids;
-  if (ids.length < SCANNED_DEPENDENCIES || limit <= SCANNED_DEPENDENCIES) {
+  if (
+    deps.seen === undefined &&
+    (ids.length < SCANNED_DEPENDENCIES || limit <= SCANNED_DEPENDENCIES)
+  ) {
     if (ids.includes(id)) return;
   } else if ((deps.seen ??= new Set(ids)).has(id)) return;
-  if (ids.length >= limit) {
+  if ((deps.seen?.size ?? ids.length) >= limit) {
     deps.omitted += 1;
     return;
   }
@@ -1677,8 +1754,73 @@ function addDependency(deps: DebugDependencies, id: number, limit: number): void
 }
 
 function addAll(target: DebugDependencies, source: DebugDependencies, limit: number): void {
-  for (const id of source.ids) addDependency(target, id, limit);
+  for (const id of settled(source)) addDependency(target, id, limit);
   target.omitted += source.omitted;
+}
+
+/** The IDs of `deps` in order, each once; puts `front` in place first. */
+function settled(deps: DebugDependencies): number[] {
+  const front = deps.front;
+  if (front === undefined) return deps.ids;
+  const ids: number[] = [];
+  const placed = new Set<number>();
+  const place = (id: number) => {
+    if (placed.has(id)) return;
+    placed.add(id);
+    ids.push(id);
+  };
+  for (let index = front.length - 1; index >= 0; index -= 1) place(front[index]!);
+  for (const id of deps.ids) place(id);
+  deps.ids = ids;
+  deps.front = undefined;
+  return ids;
+}
+
+/** The IDs `deps` holds, an ID that `front` repeats counted again. */
+function held(deps: DebugDependencies): number {
+  return deps.ids.length + (deps.front?.length ?? 0);
+}
+
+/**
+ * Whether `deps` should go in front of `child` rather than `child` after `deps`: when `child` is long and holds more,
+ * and the two together stay within the limit, so the result is the same.
+ */
+function precedes(deps: DebugDependencies, child: DebugDependencies, limit: number): boolean {
+  const length = held(child);
+  return (
+    limit > SCANNED_DEPENDENCIES &&
+    length > SCANNED_DEPENDENCIES &&
+    length > held(deps) &&
+    (deps.seen?.size ?? deps.ids.length) + (child.seen?.size ?? child.ids.length) <= limit
+  );
+}
+
+/** Puts the IDs of `deps` in front of those of `child`, in work proportional to `deps`. */
+function prepend(deps: DebugDependencies, child: DebugDependencies): void {
+  const seen = (child.seen ??= new Set(child.ids));
+  const front = (child.front ??= []);
+  // `front` holds IDs last first: those of `deps` from its last back to its first.
+  for (let index = deps.ids.length - 1; index >= 0; index -= 1) {
+    front.push(deps.ids[index]!);
+    seen.add(deps.ids[index]!);
+  }
+  for (const id of deps.front ?? []) {
+    front.push(id);
+    seen.add(id);
+  }
+  child.omitted += deps.omitted;
+}
+
+/** Moves what `child` holds into `deps`, which holds nothing of its own any longer, and leaves `child` empty. */
+function adopt(deps: DebugDependencies, child: DebugDependencies): void {
+  deps.ids = child.ids;
+  deps.omitted = child.omitted;
+  deps.seen = child.seen;
+  deps.front = child.front;
+  child.ids = [];
+  child.omitted = 0;
+  child.seen = undefined;
+  child.front = undefined;
 }
 
 /** Bytes counted for a stage's undo entry of `key`, which it keeps while the stage lasts. */
@@ -1699,7 +1841,7 @@ function encloses(outer: PlanSourceLocation, inner: PlanSourceLocation): boolean
 }
 
 function copyDependencies(deps: DebugDependencies): DebugDependencies {
-  return { ids: [...deps.ids], omitted: deps.omitted };
+  return { ids: [...settled(deps)], omitted: deps.omitted };
 }
 
 const PREVIEW_SPAN: PlanSourceLocation = Object.freeze({

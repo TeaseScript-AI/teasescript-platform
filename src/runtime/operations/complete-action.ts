@@ -37,6 +37,8 @@ import { createCapturedSerializableList } from "../serializable-values.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
+import { answerPresentation } from "../message-presentation.js";
+import { PLAYER } from "../../speaker-terms.js";
 import {
   withDebugTrace,
   stateKey,
@@ -575,6 +577,10 @@ function completeInteraction(
             target: action.target,
             requestingSpeakerId: action.speakerId,
             text: transcriptText,
+            presentation: answerPresentation(
+              current.speakers.find((speaker) => speaker.identifier === PLAYER) ?? null,
+              copySpan(span),
+            ),
             span: copySpan(span),
           } satisfies PlayerTranscriptEvent),
         ]),

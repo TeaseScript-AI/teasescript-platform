@@ -63,6 +63,7 @@ export function requiredInstructionTemporaries(
         collect(instruction.destination.value);
       break;
     case "setDefaultSpeaker":
+    case "copyAccount":
     case "prepareInteractionSpeaker":
     case "enterScope":
     case "leaveScope":

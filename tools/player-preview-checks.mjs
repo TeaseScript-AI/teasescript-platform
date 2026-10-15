@@ -446,12 +446,39 @@ async function startComposerFocusChecks(page) {
     )
     .catch(() => {});
   check(await inputFocused(), "A click on a message took typing focus from the composer");
+  // A permanent button focused from the keyboard keeps its own Space; one pressed with the mouse gives typing focus
+  // back to the composer once its block has run.
+  const count = page.locator("[data-permanent-button]").filter({ hasText: "Count one" });
+  const counted = async (text) => {
+    await page.locator("[data-slot=bubble]").filter({ hasText: text }).waitFor();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("[data-permanent-button]")?.getAttribute("aria-disabled") !== "true",
+    );
+  };
+  await count.focus();
+  await page.keyboard.press("Space");
+  await counted("That makes 1.");
+  check(
+    await count.evaluate((element) => document.activeElement === element),
+    "A permanent button pressed with Space lost its keyboard focus",
+  );
+  await count.click();
+  await counted("That makes 2.");
+  await page
+    .waitForFunction(
+      () => document.activeElement?.matches("[data-composer-input]") === true,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "A permanent button pressed with the mouse kept typing focus");
   await page.keyboard.press("Space");
   await page
     .locator("[data-foreground-controls]")
     .getByRole("button", { name: "Done counting", exact: true })
     .waitFor({ state: "detached", timeout: 2000 });
-  return "PASS the composer takes and keeps focus, where Space presses the showButton";
+  return "PASS the composer takes and keeps focus, also after a permanent button pressed with the mouse, where Space presses the showButton";
 }
 
 async function composerSendFocusChecks(page) {

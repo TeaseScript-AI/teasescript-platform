@@ -63,7 +63,13 @@ import {
 } from "./expression-children.js";
 import { DURATION_UNIT_MILLISECONDS, durationLiteralValue, isCalendar } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import { COLLECTION_CHANGES, noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import {
+  COLLECTION_CHANGES,
+  LIST_REORDERS,
+  noteSharing,
+  rootName,
+  type Sharing,
+} from "./operation-checks.js";
 import {
   globMatches,
   isPathGlob,
@@ -72,7 +78,13 @@ import {
 } from "./project-paths.js";
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
-import { runsOnItsOwn, sessionDeclarations, setsDefaultSpeaker } from "./project-globals.js";
+import {
+  PLAYER_DECLARATION,
+  runsOnItsOwn,
+  sessionDeclarations,
+  setsDefaultSpeaker,
+} from "./project-globals.js";
+import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -363,7 +375,7 @@ class ProjectNames {
     ).entries()) {
       this.#orders.set(declaration, order);
       const speaker = declaration.kind === "speakerDeclaration";
-      declare(declaration.name, {
+      const binding = {
         kind: speaker ? "speaker" : "variable",
         project: {
           file,
@@ -371,7 +383,10 @@ class ProjectNames {
           description: speaker ? "speaker" : "global",
           order,
         },
-      });
+      } as const;
+      // The built-in speaker has a protected name, which no script declaration may take.
+      if (declaration === PLAYER_DECLARATION) this.scope.declare(PLAYER, binding);
+      else declare(declaration.name, binding);
     }
     for (const [file, { program }] of files.entries())
       for (const statement of program.statements)
@@ -1285,9 +1300,18 @@ class SemanticValidator {
       }
       case "speakerDeclaration": {
         // Speakers belong to the project, which declared them already.
-        const declared = this.#protectedNames.has(statement.name.name)
-          ? this.#declare(statement.name.name, "speaker", statement.name.span, scope)
-          : this.project.owns(statement);
+        if (statement.name.name === PLAYER)
+          this.#report(
+            semanticCode.duplicateDeclaration,
+            "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.",
+            statement.name.span,
+          );
+        const declared =
+          statement.name.name === PLAYER
+            ? false
+            : this.#protectedNames.has(statement.name.name)
+              ? this.#declare(statement.name.name, "speaker", statement.name.span, scope)
+              : this.project.owns(statement);
         const names = new Set<string>();
         for (const property of statement.properties) {
           if (names.has(property.name.name)) {
@@ -1826,10 +1850,10 @@ class SemanticValidator {
       target.kind === "identifier" ? "assigns" : "changes",
     );
     if (target.kind === "identifier") {
-      if (target.name === "debugMode") {
+      if (target.name === "debugMode" || target.name === "account") {
         this.#report(
           semanticCode.invalidAssignment,
-          "Cannot assign to 'debugMode', which is read-only.",
+          `Cannot assign to '${target.name}', which is read-only.`,
           target.span,
         );
         return;
@@ -1859,11 +1883,38 @@ class SemanticValidator {
       return;
     }
 
+    if (rootName(target) === "account") {
+      this.#reportAccountChange(target, true);
+      return;
+    }
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
       this.#validateListIndex(target.index);
     }
+  }
+
+  /**
+   * Reports a store into the read-only account at `place` (`store`), or a change of one of its lists through it
+   * (V30 §37).
+   */
+  #reportAccountChange(place: Expression, store: boolean): void {
+    let field = unwrapParentheses(place);
+    while (
+      (field.kind === "propertyAccessExpression" || field.kind === "indexExpression") &&
+      unwrapParentheses(field.object).kind !== "identifier"
+    )
+      field = unwrapParentheses(field.object);
+    const name = field.kind === "propertyAccessExpression" ? field.property.name : null;
+    // An assignment of a field itself, as opposed to a change inside it.
+    const assigned = store && name !== null && field === unwrapParentheses(place);
+    const label = name === null ? "account" : `account.${name}`;
+    const instead = name === null ? "its field" : `'player.${name}'`;
+    this.#report(
+      semanticCode.invalidAssignment,
+      `Cannot ${assigned ? "assign to" : "change"} '${label}': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
+      place.span,
+    );
   }
 
   /** Reports a list index the compiler can see is negative; the type check reports one that is not a whole number. */
@@ -1942,6 +1993,14 @@ class SemanticValidator {
         }
         // Protected, so never a binding: the engine reads it from the session.
         if (expression.name === "debugMode") return;
+        if (expression.name === "account") {
+          this.#report(
+            semanticCode.functionValue,
+            "'account' is not a value of its own. Read one of its fields, as in 'account.firstName', or copy it into the player with 'player.copyFrom(account)'.",
+            expression.span,
+          );
+          return;
+        }
         const binding = scope.resolve(expression.name);
         this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {
@@ -2004,6 +2063,8 @@ class SemanticValidator {
         return;
       }
       case "propertyAccessExpression":
+        // The account is read by its fields, which the type check knows.
+        if (isAccount(expression.object)) return;
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
@@ -2063,6 +2124,17 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
+        // A list of the account changes in place as a list of anything else does, also when it is reordered; a text of
+        // the account reverses into a new text.
+        if (
+          method.kind === "propertyAccessExpression" &&
+          rootName(method.object) === "account" &&
+          (COLLECTION_CHANGES.has(method.property.name) ||
+            (LIST_REORDERS.has(method.property.name) && isAccountList(method.object)))
+        ) {
+          this.#reportAccountChange(method.object, false);
+          return;
+        }
         if (
           method.kind === "propertyAccessExpression" &&
           COLLECTION_CHANGES.has(method.property.name)
@@ -2208,6 +2280,13 @@ class SemanticValidator {
         }
         const argumentSpeaker = isAskImageCall(expression) ? "speaker" : contextualSpeaker;
         for (const argument of expression.arguments) {
+          // `copyFrom` takes the account as a whole; the type check reports any other form of it.
+          if (
+            method.kind === "propertyAccessExpression" &&
+            method.property.name === "copyFrom" &&
+            isAccount(argument.value)
+          )
+            continue;
           yield* compileChild(this.#validateExpressionTask(argument.value, scope, argumentSpeaker));
         }
         if (
@@ -3314,6 +3393,22 @@ function findFirstInteraction(
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
   return null;
+}
+
+/** Whether `expression` is a name list of the account, as `account.petNames`. */
+function isAccountList(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  return (
+    node.kind === "propertyAccessExpression" &&
+    isAccount(node.object) &&
+    SPEAKER_NAME_LISTS.has(node.property.name)
+  );
+}
+
+/** Whether `expression` is the protected `account`, which no binding can have as its name. */
+function isAccount(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  return node.kind === "identifier" && node.name === "account";
 }
 
 function unwrapParentheses(expression: Expression): Expression {

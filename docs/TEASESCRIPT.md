@@ -342,7 +342,8 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 
 ## Currently implemented language subset
 
-The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections
+The repository includes core values, variables, assignments including `+=`/`-=`, speakers with the V30 §37 terms, the
+built-in speaker `player`, and the read-only person fields of `account` ([player and account](RUNTIME.md#the-player-and-the-account)), output, collections
 including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
 deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
 loop control.
@@ -398,7 +399,7 @@ and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentil
 the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
 with that method takes them; a method that no value has is `TSV043` also on a receiver of unknown type, as is any method
-of a speaker; other values are checked when the operation runs.
+of a speaker other than the statement `player.copyFrom(account)`; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, the custom properties of a speaker that only stores through its
@@ -407,8 +408,9 @@ decided by a first non-null value, a first element, a parameter default, or a fu
 variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
 `number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
 types they support, and on a union every member must support them; reading an object property that no object at its
-place can have, or a custom property that no declaration or assignment gives any speaker the read may reach (V30 §37),
-is a compile error, decided at the end of the check from code anywhere in the project; union types, type
+place can have, or a custom property, built-in field, term, or name list that no declaration or assignment gives any
+speaker the read may reach (V30 §37), is a compile error, decided at the end of the check from code anywhere in the
+project; union types, type
 names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain variables; using a possibly
 null value where its non-null type is required is a compile error that names the check and a fallback with
 `otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an

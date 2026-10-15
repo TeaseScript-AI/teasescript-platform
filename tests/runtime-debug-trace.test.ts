@@ -18,6 +18,7 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type ProjectSourceFile,
+  type RuntimeAccountInput,
   type RuntimeDebugRecord,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
@@ -73,6 +74,8 @@ interface PlayOptions {
   /** Leave every interaction unanswered, so that buttons time out. */
   readonly unanswered?: boolean;
   readonly from?: RuntimeSnapshot;
+  /** The person fields of the player's account. */
+  readonly account?: RuntimeAccountInput;
 }
 
 interface Played {
@@ -103,6 +106,7 @@ function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
       seed: SEED,
       persistentScriptStorage: options.persistentStores !== undefined,
       ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+      ...(options.account === undefined ? {} : { account: options.account }),
     });
   const apply = (result: { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }) => {
     snapshot = result.snapshot;
@@ -407,6 +411,58 @@ test("a global assigned in another file explains a message in main.tease", () =>
     ],
   );
   assert.equal(played.trace.variableRecord("global", "score"), assignment!.id);
+});
+
+test("record views find each instruction's file once per plan", () => {
+  // The trace sees each plan's file table through a counter: finding the file of an instruction reads it.
+  let fileReads = 0;
+  const counted = new WeakMap<InstructionPlan, InstructionPlan>();
+  const open = TraceStore.prototype.open;
+  TraceStore.prototype.open = function (plan, snapshot) {
+    let seen = counted.get(plan);
+    if (seen === undefined) {
+      seen = {
+        ...plan,
+        get files() {
+          fileReads += 1;
+          return plan.files;
+        },
+      };
+      counted.set(plan, seen);
+    }
+    return open.call(this, seen, snapshot);
+  };
+  const trace = new RuntimeDebugContext();
+  const locations = () => records(trace).map((view) => view.location);
+  try {
+    play(
+      compile([
+        { path: "main.tease", source: ['call "rooms/bonus.tease"', "exit"].join("\n") },
+        {
+          path: "rooms/bonus.tease",
+          source: ["let bonus = 4", "bonus += 1", "bonus += 2", "end"].join("\n"),
+        },
+      ]),
+      { trace },
+    );
+    const first = locations();
+    assert.ok(first.some((location) => location?.path === "rooms/bonus.tease"));
+    fileReads = 0;
+    assert.deepEqual(locations(), first);
+    assert.equal(fileReads, 0, "views of the same instructions again find no file");
+    // Another plan begins another epoch, whose records are in its own files.
+    play(
+      compile(
+        [...Array.from({ length: 12 }, (_, line) => `let value${line} = ${line}`), "exit"].join(
+          "\n",
+        ),
+      ),
+      { trace },
+    );
+    assert.deepEqual([...new Set(locations().map((location) => location?.path))], ["main.tease"]);
+  } finally {
+    TraceStore.prototype.open = open;
+  }
 });
 
 test("compound, property, index, and collection changes give the whole variable a new version", () => {
@@ -745,6 +801,56 @@ test("speaker and handle properties are state that every name for them reads", (
   assert.ok(repeated.some((step) => step.target === "timer.repeatDuration"));
   assert.ok(repeated.some((step) => step.target === "beat"));
   assert.ok(!repeated.some((step) => step.target === "timer.pause()"));
+});
+
+test("a term that a speaker's gender gives, or a title read through the other one, comes from that property", () => {
+  const played = traced(
+    [
+      "speaker guide {",
+      '    gender: "female"',
+      '    shortTitle: "Miss"',
+      '    hisHer: "their"',
+      "}",
+      'let changed = "male"',
+      "guide.gender = changed",
+      'let short = "Ms"',
+      "guide.shortTitle = short",
+      'say "${guide.heShe} ${guide.title} ${guide.hisHer}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const [term, title, explicit] = causes(played.trace, outputOf(played, "he Ms their"));
+  assert.ok(lineage(played.trace, term!.id).some((step) => step.target === "changed"));
+  assert.ok(lineage(played.trace, title!.id).some((step) => step.target === "short"));
+  // A term set explicitly keeps its own origin.
+  assert.ok(!lineage(played.trace, explicit!.id).some((step) => step.target === "changed"));
+});
+
+test("a field the player copied from the account comes from the account's field, which the host gave", () => {
+  const played = traced(
+    [
+      'let mine = "Sam"',
+      "player.firstName = mine",
+      "player.copyFrom(account)",
+      'say "${player.firstName} ${account.lastName}"',
+      "exit",
+    ].join("\n"),
+    { account: { firstName: "Alex", lastName: "Morgan" } },
+  );
+  const [copied, read] = causes(played.trace, outputOf(played, "Alex Morgan"));
+  const steps = lineage(played.trace, copied!.id);
+  assert.ok(steps.some((step) => step.kind === "assignment" && step.target === "player.firstName"));
+  assert.ok(
+    steps.some((step) => step.kind === "unrecorded" && step.target === "account.firstName"),
+  );
+  // The value the copy replaced is no cause.
+  assert.ok(!steps.some((step) => step.target === "mine"));
+  assert.ok(
+    lineage(played.trace, read!.id).some(
+      (step) => step.kind === "unrecorded" && step.target === "account.lastName",
+    ),
+  );
 });
 
 test("an overwritten property value is no cause of the value that replaced it", () => {
@@ -1563,6 +1669,79 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   assert.equal(all.omittedDependencies, 0);
 });
 
+test("uncapped causes merge in work proportional to them on whichever side an expression nests", () => {
+  // Sums of operands drawn from fewer variables, so a variable comes again on either side of a merge.
+  const shapes: Record<string, (operands: readonly string[]) => string> = {
+    left: (operands) => operands.join(" + "),
+    right: (operands) => operands.reduceRight((inner, operand) => `${operand} + (${inner})`),
+    // Groups of one, two, and three operands, nested on alternating sides.
+    mixed: (operands) => {
+      const groups: string[] = [];
+      for (let start = 0, size = 1; start < operands.length; start += size, size = (size % 3) + 1)
+        groups.push(`(${operands.slice(start, start + size).join(" + ")})`);
+      return groups.reduceRight((inner, group, index) =>
+        index % 2 === 0 ? `${group} + (${inner})` : `(${inner}) + ${group}`,
+      );
+    },
+  };
+  const has = Set.prototype.has;
+  const add = Set.prototype.add;
+  const includes = Array.prototype.includes;
+  /** Dependency lookups during a traced run of `total = shape`, and the variables `total` depends on. */
+  const traced = (shape: string, count: number) => {
+    const pool = (count * 3) / 4;
+    const operands = Array.from({ length: count }, (_, index) => `v${(index * 7) % pool}`);
+    const expression = shapes[shape]!(operands);
+    const plan = compile(
+      [
+        ...Array.from({ length: pool }, (_, index) => `let v${index} = ${index}`),
+        `let total = ${expression}`,
+        "exit",
+      ].join("\n"),
+    );
+    const session = createFreshRuntimeSession(plan, { seed: SEED });
+    const trace = new RuntimeDebugContext({ maxDependencies: Infinity });
+    let lookups = 0;
+    // Merging causes deduplicates them by a scan or a set: count those lookups while the traced run evaluates.
+    Set.prototype.has = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return has.call(this, value);
+    };
+    Set.prototype.add = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return add.call(this, value);
+    };
+    // EVIDENCE: invariant: the wrapper forwards every call unchanged to the original includes, so it has its type.
+    Array.prototype.includes = function (this: unknown[], ...args: Parameters<typeof includes>) {
+      lookups += 1;
+      return includes.apply(this, args);
+    } as typeof includes;
+    try {
+      session.run({ debugTrace: trace });
+    } finally {
+      Set.prototype.has = has;
+      Set.prototype.add = add;
+      Array.prototype.includes = includes;
+    }
+    const scope = session.exportTrustedSnapshot().frames[0]!.id;
+    const sum = record(trace, trace.variableRecord(scope, "total"));
+    assert.equal(sum.omittedDependencies, 0);
+    // Evaluation reads the operands from left to right: each variable counts where it is first read.
+    const variables = [...new Set(expression.match(/v\d+/gu) ?? [])];
+    assert.deepEqual(
+      sum.dependencies.map((dependency) => dependency.id),
+      variables.map((name) => trace.variableRecord(scope, name)),
+    );
+    return lookups;
+  };
+  for (const shape of Object.keys(shapes)) {
+    const small = traced(shape, 256);
+    const large = traced(shape, 1024);
+    // Four times the operands: linear work grows about fourfold, a merge copying the longer side sixteenfold.
+    assert.ok(large < 6 * small, `${shape}: ${small} lookups for 256 operands, ${large} for 1024`);
+  }
+});
+
 /** A record as data that does not change while the trace keeps it: dependencies and `control` by ID. */
 function recordData(entry: RuntimeDebugRecord) {
   return {
@@ -1580,11 +1759,29 @@ const RELEASED = [
   "    }",
   "    return n + addUp(n - 1)",
   "}",
+  // The block reads and changes a variable of a call that ended, which its scope keeps.
+  "function arm(n) {",
+  "    let note = n * 2",
+  "    timer async 2 s {",
+  "        note += base",
+  '        say "note ${note}", instant',
+  "    }",
+  "}",
+  "arm(3)",
+  // Its own variables stay read while the calls it makes end.
+  "function countUp(from) {",
+  "    let running = from",
+  "    for j in 1..=40 {",
+  "        running += addUp(j % 4)",
+  "    }",
+  "    return running",
+  "}",
   "let total = 0",
   "for i in 1..=40 {",
   "    total += addUp(i % 4)",
   "}",
   "wait 1 s",
+  "let counted = countUp(base)",
   "let later = base + total",
   "for pass in 1..=3 {",
   "    let inner = pass + later",
@@ -1673,6 +1870,18 @@ test("released records leave the trace, while later records and the version inde
     assert.equal(released.record(expected.at(-1)!.id), null);
     assert.deepEqual([released.outputs(), released.recentMessages()], [[], []]);
     assert.equal(released.outputRecord(1), null);
+    // The releases dropped the index entries of calls that ended, and never pointed one at another version.
+    const ended = [
+      ...new Set(
+        expected.flatMap((entry) => (entry.variable?.name === "n" ? [entry.variable.scope] : [])),
+      ),
+    ];
+    const versions = ended.map((scope) => [
+      kept.variableRecord(scope, "n"),
+      released.variableRecord(scope, "n"),
+    ]);
+    assert.ok(versions.every(([was, now]) => was !== null && (now === null || now === was)));
+    assert.ok(versions.filter(([, now]) => now === null).length > ended.length / 2);
   }
 
   // A later record names a released cause, which reads as no longer retained.
@@ -1691,6 +1900,105 @@ test("released records leave the trace, while later records and the version inde
     ),
     { id: base, retained: false },
   );
+});
+
+test("releases drop the ended aliases of one record in work proportional to them", () => {
+  /** Index lookups of every release, which runs after each instruction when `everyInstruction`, then once at the end. */
+  const lookups = (source: string, everyInstruction: boolean, observe?: number) => {
+    const trace = new RuntimeDebugContext({ maxRecords: 100_000 });
+    const session = createFreshRuntimeSession(compile(source), {
+      seed: SEED,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    const get = Map.prototype.get;
+    let releasing = false;
+    let count = 0;
+    Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+      if (releasing) count += 1;
+      return get.call(this, key);
+    };
+    const release = () => {
+      releasing = true;
+      try {
+        trace.release(Infinity);
+      } finally {
+        releasing = false;
+      }
+    };
+    const observed = everyInstruction ? { instructionObserver: { after: release } } : {};
+    try {
+      session.run({ debugTrace: trace, ...observed });
+      if (observe !== undefined) {
+        session.observeTime(observe, [], { debugTrace: trace });
+        session.run({ debugTrace: trace, ...observed });
+      }
+      release();
+    } finally {
+      Map.prototype.get = get;
+    }
+    assert.equal(session.view().status, "halted");
+    return count;
+  };
+  // Each round of the block keeps `value` across a call in a temporary of that round's call, an alias of the same
+  // record, and the last release drops all of them.
+  const ended = (rounds: number) =>
+    lookups(
+      [
+        "function zero {",
+        "    return 0",
+        "}",
+        "function arm {",
+        "    let value = 1",
+        "    return timer(duration: 1 ms, async: true, repeat: true) {",
+        "        let copy = value + zero()",
+        "        say copy, instant",
+        "    }",
+        "}",
+        "let clock = arm()",
+        `wait ${rounds} ms`,
+        "clock.stop()",
+        "exit",
+      ].join("\n"),
+      false,
+      rounds,
+    );
+  // Each round lists the root call's temporary as an alias of `none` again, and calls that also keep `none` across a
+  // call end: many releases each look at the record while that one alias still names it.
+  const listedAgain = (rounds: number) =>
+    lookups(
+      [
+        "let none: number? = null",
+        "function zero {",
+        "    return 0",
+        "}",
+        "function peek {",
+        "    let copy = [none, zero()]",
+        "    return 0",
+        "}",
+        "function touch {",
+        "    let copy = [none, zero()]",
+        "    peek()",
+        "    peek()",
+        "    return 0",
+        "}",
+        `repeat ${rounds} {`,
+        "    let out = none otherwise touch()",
+        "}",
+        "exit",
+      ].join("\n"),
+      true,
+    );
+  for (const [name, scenario] of [
+    ["ended", ended],
+    ["listed again", listedAgain],
+  ] as const) {
+    const small = scenario(64);
+    const large = scenario(256);
+    // Four times the rounds: linear work grows about fourfold, looking at the same aliases again sixteenfold.
+    assert.ok(large < 6 * small, `${name}: ${small} index lookups for 64 rounds, ${large} for 256`);
+  }
 });
 
 test("release does nothing while an instruction runs, as a builtin it calls sees", () => {

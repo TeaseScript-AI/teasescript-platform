@@ -132,9 +132,11 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
+  missingSpeakerFieldMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
+import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -221,10 +223,19 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { checksProperties, typePlan } from "./type-plans.js";
-import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import {
+  accountCopy,
+  copiesAccount,
+  PLAYER_DECLARATION,
+  runsOnItsOwn,
+  sessionDeclarations,
+  someNode,
+} from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
+  sameDeclaredKeys,
+  sameReadKeys,
   sameReadStorageKeyTypes,
   sameType,
   storageKeyTypes,
@@ -346,14 +357,20 @@ export function checkTypes(
   // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
   const unchecked: UncheckedProperties = new Set();
   // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
-  // types the previous check found, and starts again until they stay the same. A load's own type never depends on
-  // them, so they settle at once; the bound only guards against a load type that changes with variable types. When
-  // they changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that
-  // the next check would read changed, the next check would repeat this one exactly, so it is not run.
-  let storage: ReadonlyMap<string, StorageKeyType> = new Map();
+  // types the previous check found, and starts again until they stay the same. The first check reads the types that the
+  // source alone gives instead (see `storageGuess`): when it found the types it read, as most projects do, it is the
+  // check that reads the found types, so no other check is needed for them. A load's own type never depends on them,
+  // so they settle at once; the bound only guards against a load type that changes with variable types. When they
+  // changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that the
+  // next check would read changed, the next check would repeat this one exactly, so it is not run.
+  let guess: ReadonlyMap<string, StorageKeyType> | null = storageGuess(programs);
+  let guessedAgain = false;
+  let storage: ReadonlyMap<string, StorageKeyType> = guess;
   let storageRounds = 0;
   for (;;) {
-    const checker = new TypeChecker(
+    const guessed: boolean = storage === guess;
+    const uncheckedBefore = guessed ? [...unchecked] : [];
+    const checker: TypeChecker = new TypeChecker(
       options,
       widened,
       decided,
@@ -361,11 +378,32 @@ export function checkTypes(
       kept,
       unchecked,
       storage,
+      guessed,
       programs.length,
       onFile,
       lines,
     );
     checker.check(programs);
+    // A key whose type the runtime cannot check has none.
+    const found: Map<string, StorageKeyType> = new Map(
+      [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
+    );
+    // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
+    // the check starts again from nothing, with the found types as the guess. Its loads then read them, since loads
+    // take them from declarations, which no check changes; should they not, it starts again without a guess.
+    if (guessed && !checker.loadsReadFound(found)) {
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      unchecked.clear();
+      for (const name of uncheckedBefore) unchecked.add(name);
+      guess = guessedAgain ? null : found;
+      guessedAgain = true;
+      storage = guess ?? new Map();
+      storageRounds = 0;
+      continue;
+    }
     // A check that found more of them read those properties with the types they no longer keep, so what it found rests
     // on those types: the next check starts again from nothing but the larger set, which only grows.
     if (checker.uncheckedMore) {
@@ -373,7 +411,7 @@ export function checkTypes(
       decided.clear();
       copies.clear();
       kept.clear();
-      storage = new Map();
+      storage = guess ?? new Map();
       storageRounds = 0;
       continue;
     }
@@ -381,18 +419,18 @@ export function checkTypes(
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
     if (storageRounds < MAX_STORAGE_ROUNDS) {
-      // A key whose type the runtime cannot check has none.
-      const found = new Map(
-        [...storageKeyTypes(checker.storageLoads)].filter(
-          ([, kept]) => typePlan(kept.type) !== null,
-        ),
-      );
-      if (!sameStorageKeyTypes(storage, found)) {
+      if (guessed) {
+        // As for a first check that read no types, they changed from none when it found some, but in what it read only
+        // when it found others than it read.
+        storageRead = !checker.readsFound(found);
+        storageChanged = storageRead || found.size > 0;
+        storage = found;
+      } else if (!sameStorageKeyTypes(storage, found)) {
         storageRead = !sameReadStorageKeyTypes(storage, found);
         storage = found;
         storageChanged = true;
-        storageRounds += 1;
       }
+      if (storageChanged) storageRounds += 1;
     }
     // A load that read its default's type reads the type that another load declares from the next check on, so what
     // this check decided may rest on the wrong type: the next check decides again.
@@ -447,6 +485,167 @@ function storageTypePlans(
 }
 
 /**
+ * The storage key types that the source alone gives (ADR 0021 §6), which the first check reads (see {@link checkTypes}).
+ * They come from the loads with a key written as a string literal: the type that their `let` or `global` declares, or
+ * that every declaration of the variable they are assigned to declares, or else their default's type when the default is
+ * a literal. A load whose type only the check can tell, such as one with another default, is left out. The loads are
+ * taken as a check takes them: those in the start values of globals and speakers first, then by file, each by position.
+ */
+function storageGuess(programs: readonly Program[]): Map<string, StorageKeyType> {
+  const byPosition = (left: LoadExpression, right: LoadExpression): number =>
+    left.span.start.offset - right.span.start.offset;
+  const fileLoads: LoadExpression[][] = [];
+  const starts: Expression[] = [];
+  const declared = new Map<LoadExpression, TypeAnnotation>();
+  const assigned = new Map<LoadExpression, string>();
+  // The types that the `let`s, `global`s, parameters, and loop variables of each name declare, `null` for none.
+  const names = new Map<string, (TypeAnnotation | null)[]>();
+  const declare = (name: Identifier, annotation: TypeAnnotation | null): void => {
+    const annotations = names.get(name.name) ?? [];
+    annotations.push(annotation);
+    names.set(name.name, annotations);
+  };
+  for (const program of programs) {
+    const found: LoadExpression[] = [];
+    someNode(program, (node) => {
+      if (node.kind === "letStatement" || node.kind === "globalStatement") {
+        // EVIDENCE: invariant: the parser gives these kinds only to let and global statements.
+        const statement = node as LetStatement | GlobalStatement;
+        declare(statement.name, statement.typeAnnotation);
+        const value = unwrap(
+          statement.kind === "letStatement" ? statement.initializer : statement.initial,
+        );
+        if (statement.typeAnnotation !== null && value.kind === "loadExpression")
+          declared.set(value, statement.typeAnnotation);
+        if (statement.kind === "globalStatement") starts.push(statement.initial);
+      } else if (node.kind === "speakerDeclaration") {
+        // EVIDENCE: invariant: the parser gives this kind only to speaker declarations.
+        for (const property of (node as SpeakerDeclaration).properties) starts.push(property.value);
+      } else if (node.kind === "functionParameter") {
+        // EVIDENCE: invariant: the parser gives this kind only to function parameters.
+        const parameter = node as FunctionParameter;
+        declare(parameter.name, parameter.typeAnnotation);
+      } else if (node.kind === "forStatement") {
+        // EVIDENCE: invariant: the parser gives this kind only to for statements.
+        const statement = node as ForStatement;
+        declare(statement.variable, null);
+        if (statement.valueVariable !== null) declare(statement.valueVariable, null);
+      } else if (node.kind === "assignmentStatement") {
+        // EVIDENCE: invariant: the parser gives this kind only to assignments.
+        const statement = node as AssignmentStatement;
+        const value = unwrap(statement.value);
+        if (
+          statement.operator === "=" &&
+          statement.target.kind === "identifier" &&
+          value.kind === "loadExpression"
+        )
+          assigned.set(value, statement.target.name);
+      } else if (node.kind === "loadExpression") {
+        // EVIDENCE: invariant: the parser gives this kind only to load expressions.
+        found.push(node as LoadExpression);
+      }
+      return false;
+    });
+    fileLoads.push(found.sort(byPosition));
+  }
+  // The start values of globals and speakers come first, by file and position like the declarations that hold them.
+  const started = new Set<object>();
+  for (const start of starts)
+    someNode(start, (node) => {
+      if (node.kind === "loadExpression") started.add(node);
+      return false;
+    });
+  const loads = [
+    ...fileLoads.flatMap((found) => found.filter((load) => started.has(load))),
+    ...fileLoads.flatMap((found) => found.filter((load) => !started.has(load))),
+  ];
+  // The type that each declaration of a name declares, if they all declare the same one.
+  const byName = new Map<string, StaticType | undefined>();
+  const declaredByName = (name: string): StaticType | undefined => {
+    if (byName.has(name)) return byName.get(name);
+    const types = (names.get(name) ?? []).map((annotation) =>
+      annotation === null ? null : typeFromAnnotation(annotation),
+    );
+    const first = types[0] ?? null;
+    const text = first === null ? null : typeKey(first, false);
+    const type =
+      first !== null && types.every((other) => other !== null && typeKey(other, false) === text)
+        ? first
+        : undefined;
+    byName.set(name, type);
+    return type;
+  };
+  const typed: StorageLoad[] = [];
+  for (const load of loads) {
+    const key = staticText(load.key);
+    if (key === undefined) continue;
+    const annotation = declared.get(load);
+    const name = assigned.get(load);
+    const receiver =
+      annotation !== undefined
+        ? typeFromAnnotation(annotation)
+        : name === undefined
+          ? undefined
+          : declaredByName(name);
+    if (receiver !== undefined) {
+      typed.push({ key, type: nonNullType(receiver), at: load.span, declared: true });
+      continue;
+    }
+    const fallback =
+      load.defaultValue === null ? undefined : runCompileTask(literalTypeTask(load.defaultValue));
+    if (fallback === undefined) continue;
+    // As in the check, a default of null, or with a type that no value decided, gives the load no type.
+    const type = nonNullType(fallback);
+    const kind = resolved(type).kind;
+    if (kind !== "never" && kind !== "unknown" && kind !== "open")
+      typed.push({ key, type, at: load.span, declared: false });
+  }
+  // A key whose type the runtime cannot check has none.
+  return new Map([...storageKeyTypes(typed)].filter(([, kept]) => typePlan(kept.type) !== null));
+}
+
+/** The type that a check gives a literal, also one of literals such as `[1, 2]`, or `undefined` for another expression. */
+function* literalTypeTask(expression: Expression): CompileTask<StaticType | undefined> {
+  switch (expression.kind) {
+    case "booleanLiteral":
+      return BOOLEAN_TYPE;
+    case "nullLiteral":
+      return NULL_TYPE;
+    case "numberLiteral":
+      return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
+    case "durationLiteral":
+      return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
+    case "stringLiteral":
+      return STRING_TYPE;
+    case "parenthesizedExpression":
+      return yield* compileChild(literalTypeTask(expression.expression));
+    case "listLiteral":
+    case "setLiteral": {
+      const types: StaticType[] = [];
+      for (const element of expression.elements) {
+        const type = yield* compileChild(literalTypeTask(element));
+        if (type === undefined) return undefined;
+        types.push(type);
+      }
+      // Elements of different types leave the element type unknown, as in the check.
+      const element = types.length === 0 ? openType() : (joinTypes(types) ?? UNKNOWN_TYPE);
+      return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
+    }
+    case "objectLiteral": {
+      const properties = new PropertyTable();
+      for (const property of expression.properties) {
+        const type = yield* compileChild(literalTypeTask(property.value));
+        if (type === undefined) return undefined;
+        properties.set(property.name.name, type);
+      }
+      return { kind: "object", properties };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
  * The variables, elements, and properties that one of their assignments gives a non-whole number, with the first such
  * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
  */
@@ -465,10 +664,11 @@ type Decided = Map<Declaration, Map<string, Decision>>;
 type Copies = Map<Declaration, Map<string, string>>;
 
 /**
- * The `otherwise` expressions whose value counted as null so far where they were checked, but which a later value
- * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
+ * The `otherwise` expressions, and the assignments to a variable of unknown type, whose value counted as null so far
+ * where they were checked, but which a later value decided in a way that a next check cannot start with: their result
+ * keeps that value's place (see {@link fallbackType}).
  */
-type KeptFallbacks = Set<Expression>;
+type KeptFallbacks = Set<Expression | AssignmentStatement>;
 
 /**
  * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
@@ -578,6 +778,16 @@ type DeferredCheck = {
       readonly span: SourceSpan;
       /** The error, or a function for it given the properties that the objects read can have. */
       readonly message: string | ((properties: readonly string[]) => string);
+    }
+  | {
+      /**
+       * A read of a field of {@link SPEAKER_FIELDS} from the speaker of this name, or from any speaker for `null`, which
+       * fails when the speaker gets none of the field's sources (see {@link fieldSources}).
+       */
+      readonly kind: "speakerField";
+      readonly speaker: string | null;
+      readonly name: string;
+      readonly span: SourceSpan;
     }
 );
 
@@ -1158,7 +1368,9 @@ class TypeChecker {
   /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
   copiedMore = false;
 
-  /** Whether this check found a fallback to keep that earlier checks did not (see {@link KeptFallbacks}). */
+  /**
+   * Whether this check found a fallback or assignment to keep that earlier checks did not (see {@link KeptFallbacks}).
+   */
   keptMore = false;
 
   readonly #kept: KeptFallbacks;
@@ -1180,8 +1392,26 @@ class TypeChecker {
    */
   readonly #anySpeaker = new PropertyTable();
 
-  /** The fallbacks of this check that replaced places that so far held only null, with those places. */
-  readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
+  /** A `player.copyFrom(account)` of the project, which gives the player its copied fields from the start. */
+  #accountCopy: CallExpression | undefined;
+
+  /**
+   * For each declared speaker by its name, the properties that its declaration or an assignment through its name gives
+   * it, which decide the reads of its fields of {@link SPEAKER_FIELDS}.
+   */
+  readonly #speakerGets = new Map<string, Set<string>>();
+
+  /** The reads of speaker fields that this check noted, each once (see {@link #noteSpeakerField}). */
+  readonly #fieldReads = new Set<Expression>();
+
+  /** The calls `player.copyFrom(account)` that are statements of their own, the only place the copy may stand. */
+  readonly #copyStatements = new WeakSet<Expression>();
+
+  /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
+  readonly #replaced: {
+    readonly node: Expression | AssignmentStatement;
+    readonly slots: readonly OpenType[];
+  }[] = [];
 
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
@@ -1252,8 +1482,9 @@ class TypeChecker {
       this.#copies.set(place.root, copies);
       this.copiedMore = true;
     }
-    // A fallback replaced a place that held only null where it was checked. When something decided that place after
-    // all, also in a way the next check cannot start with, the fallback keeps it from then on (see `fallbackType`).
+    // A fallback or an assignment replaced a place that held only null where it was checked. When something decided
+    // that place after all, also in a way the next check cannot start with, it keeps that place from then on (see
+    // `fallbackType`).
     const known = new Map<OpenType, boolean>();
     for (const { node, slots } of this.#replaced)
       if (!this.#kept.has(node) && !slots.every((slot) => heldOnlyNull(slot, known))) {
@@ -1301,8 +1532,24 @@ class TypeChecker {
   /** The variable each declaration created most recently, whose type later widenings change. */
   readonly #declared = new Map<Declaration, Variable>();
 
-  /** The storage key types that the previous check found from the loads (ADR 0021 §6), which saves must fit. */
+  /**
+   * The storage key types that the previous check found from the loads (ADR 0021 §6), which saves must fit, or for the
+   * first check, those that the source alone gives (see `storageGuess`).
+   */
   readonly #storage: ReadonlyMap<string, StorageKeyType>;
+
+  /**
+   * In a check that reads guessed types, the keys whose type it read, each with whether a message named the line of a
+   * load of the key, so that the end of the check can tell whether it read the types it found (see {@link readsFound});
+   * otherwise `null`.
+   */
+  readonly #guessedReads: Map<string, boolean> | null;
+
+  /**
+   * In a check that reads guessed types, the keys whose type a load without a declared type of its own read, which
+   * decides the value it gives (see {@link loadsReadFound}); otherwise `null`.
+   */
+  readonly #guessedLoads: Set<string> | null;
 
   /** The loads of storage keys written as string literals that have a type, in checking order. */
   readonly storageLoads: StorageLoad[] = [];
@@ -1336,12 +1583,15 @@ class TypeChecker {
     kept: KeptFallbacks,
     unchecked: UncheckedProperties,
     storage: ReadonlyMap<string, StorageKeyType>,
+    guessed: boolean,
     files: number,
     private readonly onFile: (file: number) => void,
     private readonly lines: LineNamer,
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#storage = storage;
+    this.#guessedReads = guessed ? new Map() : null;
+    this.#guessedLoads = guessed ? new Set() : null;
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
@@ -1398,6 +1648,14 @@ class TypeChecker {
         : null;
     }
     if (node.kind !== "propertyAccessExpression") return null;
+    // A person field of the player that a copy of the account gives has the account's type, which no first value
+    // changes.
+    if (
+      this.#accountCopy !== undefined &&
+      PERSON_FIELDS.has(node.property.name) &&
+      this.#speakerName(node.object, scope) === PLAYER
+    )
+      return null;
     // Only a property that an object or a speaker keeps has a first value; one that a dict, list, or set computes,
     // such as `keys`, has none.
     const receivers = members(nonNullType(this.#typeOf(node.object))).map(resolved);
@@ -1445,6 +1703,7 @@ class TypeChecker {
             this.#declareFunction(statement, file, this.#project),
           );
     this.#effects = { shared: new Map(), loops };
+    this.#accountCopy = accountCopy(programs);
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -1558,8 +1817,28 @@ class TypeChecker {
     this.#project.declare(declaration.name.name, { kind: "speaker", custom });
     this.#speakerProperties.set(declaration.name.name, properties);
     (this.#anySpeaker.sources ??= new Set()).add(properties);
+    const gets = new Set<string>();
+    this.#speakerGets.set(declaration.name.name, gets);
+    // A copy of the account anywhere, also in a block or function checked later, gives the player each person field,
+    // and its terms and name lists text from the start, decided at the copy.
+    const copy = declaration === PLAYER_DECLARATION ? this.#accountCopy : undefined;
+    if (copy !== undefined)
+      for (const name of PERSON_FIELDS) {
+        gets.add(name);
+        if (this.#keepsType(name))
+          properties.set(
+            name,
+            decidedSlot(
+              freshPlaceType(
+                SPEAKER_NAME_LISTS.has(name) ? { kind: "list", element: STRING_TYPE } : STRING_TYPE,
+              ),
+              copy.span,
+            ),
+          );
+      }
     for (const property of declaration.properties) {
       const name = property.name.name;
+      gets.add(name);
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
@@ -1614,12 +1893,16 @@ class TypeChecker {
    */
   #noteSpeakerRead(read: PropertyAccessExpression, receiver: StaticType, scope: Scope): void {
     const name = read.property.name;
-    if (resolved(receiver).kind !== "speaker" || !this.#keepsType(name) || SPEAKER_TERMS.has(name))
+    if (resolved(receiver).kind !== "speaker") return;
+    if (SPEAKER_FIELDS.has(name)) {
+      this.#noteSpeakerField(read, scope);
       return;
+    }
+    if (!this.#keepsType(name)) return;
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
-    const example = speaker ?? this.#speakerProperties.keys().next().value ?? "name";
+    const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
       name,
@@ -1629,13 +1912,104 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? null,
+          speaker ?? this.#onlySpeaker(),
           name,
           custom,
-          [...custom, ...BUILT_IN_SPEAKER_PROPERTIES],
+          [...custom, ...SPEAKER_FIELDS],
           example,
         );
       },
+    );
+  }
+
+  /**
+   * A field of the account (V30 §37): a person field, as text, or a name list, as a list of text. The account may lack
+   * it when the script runs, which fails then; an unknown field is an error.
+   */
+  #accountFieldType(read: PropertyAccessExpression): StaticType {
+    const name = read.property.name;
+    if (SPEAKER_NAME_LISTS.has(name)) return { kind: "list", element: STRING_TYPE };
+    if (PERSON_FIELDS.has(name)) return STRING_TYPE;
+    this.#report(
+      typeCode.invalidOperand,
+      `The account has no field '${name}'.${
+        misspelledPropertyHint(name, [...PERSON_FIELDS]) ||
+        " Read a person field, as in 'account.firstName', 'account.heShe', or 'account.petNames'."
+      }`,
+      read.property.span,
+    );
+    return UNKNOWN_TYPE;
+  }
+
+  /**
+   * `player.copyFrom(account)`, a statement of its own, copies the account's person fields into the player (V30 §37),
+   * so the player gets each of them, which the account may still lack when the script runs, and its terms and name
+   * lists hold text (see {@link copyStores}). Any other form of `copyFrom` is an error.
+   */
+  *#copyFromTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
+    if (!copiesAccount(expression) || !this.#copyStatements.has(expression)) {
+      const callee = unwrap(expression.callee);
+      if (callee.kind === "propertyAccessExpression")
+        yield* compileChild(this.#expressionTask(callee.object, scope));
+      for (const argument of expression.arguments)
+        if (!isAccountName(argument.value))
+          yield* compileChild(this.#expressionTask(argument.value, scope));
+      this.#report(
+        typeCode.invalidOperand,
+        "'copyFrom' only copies the account into the player: write 'player.copyFrom(account)' on a line of its own.",
+        callee.kind === "propertyAccessExpression" ? callee.property.span : expression.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    // The copy is checked as the stores it makes, so it gives the player each field, decides or widens each place, and
+    // conflicts with another type that the script gave a field, as such a store would.
+    for (const store of copyStores(expression))
+      yield* compileChild(this.#assignmentTask(store, scope));
+    return NULL_TYPE;
+  }
+
+  /**
+   * Notes the read `read`, also by `+=` or `-=`, of a field of {@link SPEAKER_FIELDS} from a speaker: of the speaker the
+   * receiver names, or of any speaker when the compiler cannot tell which. The end of the check reports it when no
+   * declaration or assignment in the project gives such a speaker one of the field's sources (V30 §37).
+   */
+  #noteSpeakerField(read: PropertyAccessExpression, scope: Scope): void {
+    if (this.#fieldReads.has(read)) return;
+    this.#fieldReads.add(read);
+    this.#deferred.push({
+      kind: "speakerField",
+      file: this.#file,
+      at: this.diagnostics.length,
+      speaker: this.#speakerName(read.object, scope) ?? null,
+      name: read.property.name,
+      span: read.property.span,
+    });
+  }
+
+  /** A declared speaker for a message to name in its example, other than the built-in `player`. */
+  #exampleSpeaker(): string {
+    for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return name;
+    return "name";
+  }
+
+  /**
+   * The speaker that a read from a speaker the compiler cannot tell apart reaches when the project declares no other
+   * one: the built-in `player`, if the project has it.
+   */
+  #onlySpeaker(): string | null {
+    for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return null;
+    return this.#speakerGets.has(PLAYER) ? PLAYER : null;
+  }
+
+  /**
+   * Whether the speaker `speaker`, or some speaker for `null`, gets one of the sources of its field `name`: by its
+   * declaration or an assignment through its name, or through a store the compiler cannot check, which may reach any
+   * speaker. `anySpeaker` holds what some speaker gets.
+   */
+  #getsField(speaker: string | null, name: string, anySpeaker: ReadonlySet<string>): boolean {
+    const gets = speaker === null ? anySpeaker : this.#speakerGets.get(speaker);
+    return fieldSources(name).some(
+      (source) => this.#unchecked.has(source) || gets?.has(source) === true,
     );
   }
 
@@ -1812,6 +2186,7 @@ class TypeChecker {
         yield* compileChild(this.#assignmentTask(statement, scope));
         return true;
       case "expressionStatement":
+        if (copiesAccount(statement.expression)) this.#copyStatements.add(statement.expression);
         yield* compileChild(this.#expressionTask(statement.expression, scope));
         return true;
       case "speakerDeclaration":
@@ -2472,6 +2847,11 @@ class TypeChecker {
       } else {
         const name = target.property.name;
         if (statement.operator !== "=") this.#noteSpeakerRead(target, object, scope);
+        else {
+          // A store through a speaker's name gives it the property; any other store into a speaker is unchecked.
+          const speaker = this.#speakerName(target.object, scope);
+          if (speaker !== undefined) this.#speakerGets.get(speaker)?.add(name);
+        }
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
         const value = resolved(nonNullType(receiver));
@@ -2572,7 +2952,17 @@ class TypeChecker {
       // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
       if (checked !== statement.value) this.#storeLoaded(place.type, value, statement.value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
-      if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
+      if (variable !== undefined) {
+        let held = this.#capture(statement.value);
+        // A copy of a place that so far held only null, such as an element of `[null]`, is null here, as for
+        // `otherwise` (see `fallbackType`): no store into a variable of unknown type decides the copy, as after `let`.
+        const slot = resolved(variable.type).kind === "unknown" ? nullOnlySlot(held) : undefined;
+        if (slot !== undefined && !this.#kept.has(statement)) {
+          this.#replaced.push({ node: statement, slots: [slot] });
+          held = NULL_TYPE;
+        }
+        this.#assigned(variable, held);
+      }
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
@@ -3918,6 +4308,7 @@ class TypeChecker {
         return { kind: "object", properties };
       }
       case "propertyAccessExpression": {
+        if (isAccountName(expression.object)) return this.#accountFieldType(expression);
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
         const name = expression.property.name;
         this.#noteSpeakerRead(expression, object, scope);
@@ -4057,13 +4448,18 @@ class TypeChecker {
         // A load reads the stored value as the declared type of the variable that receives it, or else as the type
         // another load of the key declares, or else as its default's type (rule 6.2).
         const own = this.#loadReceivers.get(expression);
-        const kept = this.#storage.get(key);
+        const kept = this.#storageType(key);
+        if (own === undefined) this.#guessedLoads?.add(key);
         const given = nonNullType(fallback);
         const givenKind = resolved(given).kind;
         let read: StaticType;
         if (own !== undefined) {
           read = nonNullType(own);
-          if (kept?.declared === true && kept.at !== expression.span && !sameType(kept.type, read))
+          if (
+            kept?.declared === true &&
+            !sameType(kept.type, read) &&
+            this.#storageAt(key, kept) !== expression.span
+          )
             this.#report(
               typeCode.typeMismatch,
               `${storageLabel(key)} is declared as ${describeValue(kept.type)} on ${this.#line(kept.at)}, so it cannot be declared as ${describeValue(read)} here. Declare its type at one load only. The other loads use that type.`,
@@ -4083,7 +4479,7 @@ class TypeChecker {
           if (givenKind !== "never" && !isAssignable(read, given))
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(kept.at)}, so its default cannot be ${describeValue(given)}.`,
+              `${storageLabel(key)} is declared as ${describeValue(read)} on ${this.#line(this.#storageAt(key, kept))}, so its default cannot be ${describeValue(given)}.`,
               expression.defaultValue!.span,
             );
         } else {
@@ -4114,7 +4510,7 @@ class TypeChecker {
             const both = union([conflict.type, read]);
             this.#report(
               typeCode.typeMismatch,
-              `${storageLabel(key)} is loaded as ${describeValue(conflict.type)} on ${this.#line(conflict.at)}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
+              `${storageLabel(key)} is loaded as ${describeValue(conflict.type)} on ${this.#line(this.#storageAt(key, conflict))}, so it cannot be loaded as ${describeValue(read)} here.${isAnnotatable(both) ? ` To allow both, declare its type at one load, as in 'let value: ${typeName(both)} = load(...)'.` : ""}`,
               expression.span,
             );
           }
@@ -5676,10 +6072,29 @@ class TypeChecker {
       }
     const verdicts = missingPropertyReads(checked);
     const missing = new Map(sites.map((site, index) => [site, verdicts[index]]));
+    // What some speaker gets, for reads from a speaker the compiler cannot tell apart, once the first needs it.
+    let anySpeaker: ReadonlySet<string> | undefined;
     for (const check of this.#deferred) {
       let found: readonly Diagnostic[] = [];
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
+      } else if (check.kind === "speakerField") {
+        anySpeaker ??= new Set([...this.#speakerGets.values()].flatMap((gets) => [...gets]));
+        if (!this.#getsField(check.speaker, check.name, anySpeaker)) {
+          this.#file = check.file;
+          const before = this.diagnostics.length;
+          this.#report(
+            typeCode.invalidOperand,
+            missingSpeakerFieldMessage(
+              check.speaker ?? this.#onlySpeaker(),
+              check.name,
+              fieldSources(check.name),
+              check.speaker ?? this.#exampleSpeaker(),
+            ),
+            check.span,
+          );
+          found = this.diagnostics.splice(before);
+        }
       } else if (check.kind === "property") {
         const names = missing.get(check.site);
         if (names !== undefined) {
@@ -5877,6 +6292,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
+    if (method === "copyFrom") return yield* compileChild(this.#copyFromTask(expression, scope));
     // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
     if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
       this.#noteChanged(callee.object);
@@ -7551,6 +7967,33 @@ class TypeChecker {
     );
   }
 
+  /** The type this check reads for a storage key written as a string literal, if it has one. */
+  #storageType(key: string): StorageKeyType | undefined {
+    if (this.#guessedReads?.has(key) === false) this.#guessedReads.set(key, false);
+    return this.#storage.get(key);
+  }
+
+  /** Where a storage key's type, or a type that loads of it read, comes from, for a message that names its line. */
+  #storageAt(key: string, from: { readonly at: SourceSpan }): SourceSpan {
+    this.#guessedReads?.set(key, true);
+    return from.at;
+  }
+
+  /**
+   * Whether this check read the storage key types that it found, `found`: always, unless it read guessed types and found
+   * others for a key it read.
+   */
+  public readsFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
+    return this.#guessedReads === null || sameReadKeys(this.#storage, found, this.#guessedReads);
+  }
+
+  /** As {@link readsFound}, but only for what its loads without a declared type of their own read. */
+  public loadsReadFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
+    return (
+      this.#guessedLoads === null || sameDeclaredKeys(this.#storage, found, this.#guessedLoads)
+    );
+  }
+
   *#storageKeyTask(expression: Expression, scope: Scope): CompileTask<void> {
     yield* compileChild(
       this.#requireTask(
@@ -7572,12 +8015,17 @@ class TypeChecker {
     value: StaticType,
   ): CompileTask<void> {
     const key = staticText(keyExpression);
-    const kept = key === undefined ? undefined : this.#storage.get(key);
+    const kept = key === undefined ? undefined : this.#storageType(key);
     // Saving null removes the key.
     const stored = nonNullType(value);
     if (kept === undefined || stored.kind === "never") return;
     yield* compileChild(
-      this.#storeTask(storagePlace(key!, kept, this.#text), expression, stored, false),
+      this.#storeTask(
+        storagePlace(key!, kept, this.#text, () => this.#storageAt(key!, kept)),
+        expression,
+        stored,
+        false,
+      ),
     );
   }
 
@@ -8717,13 +9165,23 @@ function holdsSessionValue(type: StaticType): boolean {
   );
 }
 
-/** A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). */
-function storagePlace(key: string, kept: StorageKeyType, text: PlaceText): Place {
+/**
+ * A storage key as the place that a saved value must fit: the type every load of the key reads (ADR 0021 §6). Its
+ * subject names the line of the load that gives the type, from `at`.
+ */
+function storagePlace(
+  key: string,
+  kept: StorageKeyType,
+  text: PlaceText,
+  at: () => SourceSpan,
+): Place {
   const type = detachedType(kept.type);
   return {
     type,
     label: null,
-    subject: `${storageLabel(key)} is ${kept.declared ? "declared" : "loaded"} as ${describeValue(type)} on ${text.line(kept.at)}`,
+    get subject() {
+      return `${storageLabel(key)} is ${kept.declared ? "declared" : "loaded"} as ${describeValue(type)} on ${text.line(at())}`;
+    },
     verb: "save",
     fix: (value) => {
       const both = union([type, value]);
@@ -9529,39 +9987,61 @@ const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The name lists and gender-derived terms that V30 §37 gives the player and every speaker, which the runtime does not
- * supply: a speaker has one only when the script gives it, and a read of one it lacks fails when it runs (TSR017).
+ * The built-in properties of a speaker that it has only once a declaration or an assignment gives it: those of
+ * {@link BUILT_IN_SPEAKER_PROPERTIES}, the gender terms, and the name lists (V30 §37). A read of one that the speaker
+ * never gets anywhere in the project is a compile error, as of a custom property (see {@link fieldSources}).
  */
-const SPEAKER_TERMS: ReadonlySet<string> = new Set([
-  "petNames",
-  "degradingNames",
-  "lovingNames",
-  "maleFemale",
-  "manWoman",
-  "boyGirl",
-  "heShe",
-  "himHer",
-  "hisHer",
-  "himselfHerself",
-  "penisVagina",
-  "cockPussy",
-  "penisClitoris",
-  "cockClit",
-  "glansClitoris",
-  "ballsLabia",
-  "scrotumVulva",
-  "foreskinClitoralHood",
-  "chestBreasts",
-  "nippleBreast",
-  "hardWet",
-  "strokeRub",
-  "strokingRubbing",
-  "wankRub",
-  "wankingRubbing",
-  "strokedRubbed",
-  "wankedRubbed",
-  "strokerMasturbator",
+const SPEAKER_FIELDS: ReadonlySet<string> = new Set([
+  ...BUILT_IN_SPEAKER_PROPERTIES,
+  ...GENDER_TERMS.keys(),
+  ...SPEAKER_NAME_LISTS,
 ]);
+
+/** The stores of each `player.copyFrom(account)` (see {@link copyStores}), made once for each, so every check sees them. */
+const COPY_STORES = new WeakMap<CallExpression, readonly AssignmentStatement[]>();
+
+/**
+ * The stores `player.<field> = account.<field>` that `player.copyFrom(account)` stands for in the type check, one for
+ * each person field, at the call's place.
+ */
+function copyStores(call: CallExpression): readonly AssignmentStatement[] {
+  const made = COPY_STORES.get(call);
+  if (made !== undefined) return made;
+  const span = call.span;
+  const named = (name: string): Identifier => ({ kind: "identifier", name, span });
+  const field = (object: string, name: string): PropertyAccessExpression => ({
+    kind: "propertyAccessExpression",
+    object: named(object),
+    property: named(name),
+    span,
+  });
+  const stores = [...PERSON_FIELDS].map((name): AssignmentStatement => ({
+    kind: "assignmentStatement",
+    operator: "=",
+    target: field(PLAYER, name),
+    value: field("account", name),
+    span,
+  }));
+  COPY_STORES.set(call, stores);
+  return stores;
+}
+
+/** Whether `expression` is the protected `account`, which no binding can have as its name. */
+function isAccountName(expression: Expression): boolean {
+  const node = unwrap(expression);
+  return node.kind === "identifier" && node.name === "account";
+}
+
+/**
+ * The fields of which a speaker needs one for a read of its field `name` to find a value: `title` and `shortTitle` stand
+ * for each other, a term's default comes from `gender`, and a display name may be joined from the parts of the name.
+ */
+function fieldSources(name: string): readonly string[] {
+  if (name === "title" || name === "shortTitle") return ["title", "shortTitle"];
+  if (name === "displayName")
+    return ["displayName", "title", "shortTitle", "firstName", "lastName"];
+  return GENDER_TERMS.has(name) ? [name, "gender"] : [name];
+}
 
 /** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
 function staticSetMember(expression: Expression): (string | number | boolean | null)[] {

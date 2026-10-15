@@ -2,7 +2,7 @@ import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 94;
+export const INSTRUCTION_PLAN_VERSION = 95;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -124,6 +124,7 @@ export type Instruction =
   | DeclareGlobalInstruction
   | DeclareSpeakerInstruction
   | SetDefaultSpeakerInstruction
+  | CopyAccountInstruction
   | EnterScopeInstruction
   | LeaveScopeInstruction
   | DeclareBindingInstruction
@@ -197,6 +198,14 @@ export interface DeclareSpeakerInstruction extends InstructionBase {
 export interface SetDefaultSpeakerInstruction extends InstructionBase {
   readonly kind: "setDefaultSpeaker";
   readonly name: string;
+}
+
+/**
+ * `player.copyFrom(account)`: gives the player each person field of the account, and takes away each one the account
+ * lacks (V30 §37).
+ */
+export interface CopyAccountInstruction extends InstructionBase {
+  readonly kind: "copyAccount";
 }
 
 export interface EnterScopeInstruction extends InstructionBase {
@@ -1027,6 +1036,7 @@ export type ExpressionPlan =
   | CalendarDurationExpressionPlan
   | IdentifierExpressionPlan
   | DebugModeExpressionPlan
+  | AccountFieldExpressionPlan
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
@@ -1084,6 +1094,12 @@ export interface IdentifierExpressionPlan extends ExpressionPlanBase {
 /** A read of the protected `debugMode`: the session's current Debug state, which the host sets (`setDebugMode`). */
 export interface DebugModeExpressionPlan extends ExpressionPlanBase {
   readonly kind: "debugMode";
+}
+
+/** A read of a person field of the read-only account, which the host gives the session at its start (V30 §37). */
+export interface AccountFieldExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "accountField";
+  readonly name: string;
 }
 
 export interface TemporaryExpressionPlan extends ExpressionPlanBase {

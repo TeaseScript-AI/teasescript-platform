@@ -33,6 +33,14 @@ import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../messag
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
+  PERSON_FIELDS,
+  PLAYER,
+  propertiesReadThrough,
+  speakerPropertySource,
+  speakerPropertyValue,
+} from "../speaker-terms.js";
+import { accountFieldValue } from "./account.js";
+import {
   LIST_STATISTICS,
   linearRegression,
   listStatistic,
@@ -401,6 +409,7 @@ export class Evaluator {
           | "calendarDuration"
           | "identifier"
           | "debugMode"
+          | "accountField"
           | "temporary"
           | "preparedReference";
       }
@@ -421,6 +430,24 @@ export class Evaluator {
           true,
         );
         return this.snapshot.debugMode;
+      case "accountField": {
+        const value = accountFieldValue(this.snapshot.account, expression.name);
+        if (value === undefined)
+          throw fault(
+            "TSR017",
+            `The account has no '${expression.name}': the player's account does not give one. Give the player a value of its own instead, as in 'player.${expression.name} = ...'.`,
+            expression.span,
+          );
+        // The host gave the account, so a read has no recorded origin.
+        this.trace?.readState(
+          stateKey("account", expression.name),
+          null,
+          `account.${expression.name}`,
+          value,
+          true,
+        );
+        return value;
+      }
       case "duration":
         return exactDuration(expression.milliseconds);
       case "calendarDuration":
@@ -826,6 +853,7 @@ export class Evaluator {
         case "calendarDuration":
         case "identifier":
         case "debugMode":
+        case "accountField":
         case "temporary":
         case "preparedReference":
           value = this.#evaluateLeaf(expression);
@@ -1352,12 +1380,20 @@ export class Evaluator {
       }
       // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(
-          this.speakerById(object.speakerId, target.span),
-          target.name,
-          value,
-          target.span,
-        );
+        const speaker = this.speakerById(object.speakerId, target.span);
+        // A reference prepared to the property, through any name for the speaker, keeps the value it leads to now; so
+        // does one to a property read through it, as a term through `gender`.
+        const has = (name: string) => speaker.properties.some((property) => property.name === name);
+        for (const name of [target.name, ...propertiesReadThrough(has, target.name)]) {
+          const path: PreparedReferenceStep[] = [{ kind: "property", name }];
+          detachPreparedReferencesForMutation(this.snapshot, {
+            rootFrameId: GLOBAL_SCOPE_ID,
+            rootName: speaker.identifier,
+            path,
+            speakerPath: { speakerId: speaker.id, path },
+          });
+        }
+        setSpeakerProperty(speaker, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
@@ -1746,11 +1782,60 @@ export class Evaluator {
     return visibleText(value, span, currentTemporalContext(this.snapshot));
   }
 
+  /**
+   * `player.copyFrom(account)` (V30 §37): the player gets a copy of each person field of the account and loses each one
+   * the account lacks, in place, so its other properties keep their order.
+   */
+  public copyAccount(span: SourceSpan): void {
+    const player = this.speakerByName(PLAYER, span);
+    const reference: SerializableRuntimeValue = {
+      kind: "speakerReference",
+      speakerId: player.id,
+      identifier: player.identifier,
+    };
+    // The copy may change every person field, so a reference prepared to one keeps the value it leads to now.
+    for (const name of PERSON_FIELDS) {
+      const path: PreparedReferenceStep[] = [{ kind: "property", name }];
+      detachPreparedReferencesForMutation(this.snapshot, {
+        rootFrameId: GLOBAL_SCOPE_ID,
+        rootName: player.identifier,
+        path,
+        speakerPath: { speakerId: player.id, path },
+      });
+    }
+    for (const name of PERSON_FIELDS) {
+      const value = this.snapshot.account.find((field) => field.name === name)?.value;
+      if (value === undefined) {
+        const index = player.properties.findIndex((property) => property.name === name);
+        if (index >= 0) player.properties.splice(index, 1);
+        continue;
+      }
+      setSpeakerProperty(player, name, value, span);
+      if (this.trace === null) continue;
+      // Each field depends only on the account's field it copies.
+      const previous = this.trace.push();
+      this.trace.readState(stateKey("account", name), null, `account.${name}`, value, true);
+      this.#writeState(reference, name, value, span, { property: name });
+      this.trace.pop(previous);
+    }
+  }
+
   public outputSpeaker(
     speaker: RuntimeSpeakerSnapshot,
     span: SourceSpan,
     events: InterpreterEvent[],
   ): OutputSpeaker {
+    // The player's own message shows no name and no avatar (V30 §37).
+    if (speaker.identifier === PLAYER)
+      return Object.freeze({
+        identifier: PLAYER,
+        displayName: "",
+        color: normalizeColor(
+          speaker.properties.find((property) => property.name === "color")?.value,
+        ),
+        font: optionalSpeakerString(speaker, "font", span),
+        avatar: null,
+      });
     const explicit = this.#speakerText(speaker, "displayName", span);
     let displayName: string;
     let fallback = false;
@@ -3036,12 +3121,10 @@ export class Evaluator {
     name: string,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    let property = speaker.properties.find((item) => item.name === name)?.value;
-    if (property === undefined && name === "title") {
-      property = speaker.properties.find((item) => item.name === "shortTitle")?.value;
-    } else if (property === undefined && name === "shortTitle") {
-      property = speaker.properties.find((item) => item.name === "title")?.value;
-    }
+    const property = speakerPropertyValue(
+      (own) => speaker.properties.find((item) => item.name === own)?.value,
+      name,
+    );
     if (property === undefined)
       throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
     return property;
@@ -3711,10 +3794,20 @@ export class Evaluator {
     object: ExpressionPlan | null = null,
   ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span, object);
-    if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
-      return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
+      const speaker = this.speakerById(value.speakerId, span);
+      // A value that a speaker reads through another property, such as a term its gender gives, comes from that one.
+      if (this.trace !== null)
+        this.#readState(
+          value,
+          speakerPropertySource(
+            (own) => speaker.properties.some((property) => property.name === own),
+            name,
+          ),
+        );
+      return this.#getSpeakerProperty(speaker, name, span);
     }
+    if (this.trace !== null) this.#readState(value, name);
     if (isList(value) || isSet(value))
       return this.#getCollectionProperty(value, name, span, object);
     if (typeof value === "string") {

@@ -3,6 +3,7 @@ import {
   loadDevelopmentPackage,
   type PackageProblem,
 } from "../../../playground/package-catalog.js";
+import { DEMO_ACCOUNT } from "../../demo-account.js";
 import type { PlayerProject } from "../../runtime-adapter.js";
 
 // The trusted host for a package of the playground server's development package root (#570), opened with
@@ -14,6 +15,7 @@ export function developmentPackageHost(id: string) {
     // A stable, opaque script-storage scope per package, as for the repository demo.
     storageScope: `development-package:${id}`,
     name: id,
+    account: DEMO_ACCOUNT,
     resolveAsset: (path: string): string | null =>
       files.has(path) ? developmentPackageFileUrl(id, path) : null,
     /** The package as a project, and what the server could not read of it; rejects when it cannot be opened. */

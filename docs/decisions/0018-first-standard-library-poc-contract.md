@@ -30,11 +30,11 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
     buttons or a dropdown without changing semantics; `showButton` completes through its rendered button or exact
     visible-text composer submission.
 12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible
-    choice text may activate `askChoice`; exact visible button text may activate `showButton`. Space in the empty
-    composer does not activate `showButton`.
+    choice text may activate `askChoice`; exact visible button text may activate `showButton`, and so may Space in the
+    empty composer, since its button is always preselected (owner decision on #512, 2026-10-08).
 13. `say` uses account-configured smart autoplay by default, supports exact durations, `0 s`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive reading time is one ADR 0016 pending action, the foreground action: a paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision on #829, 2026-10-11).
-15. A skippable pacing gate may be completed by a primary click or tap on Player background or other unused Player space, or by Space while the focused composer is empty. Skip completes only the pacing gate.
+15. A skippable pacing gate may be completed by a primary click or tap on a message, its speaker avatar, Player background, or other unused Player space (owner decision, 2026-10-14), or by Space while the focused composer is empty. Skip completes only the pacing gate.
 16. The normal Player application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
 17. A later deterministic speaker-aware typing indicator is desired but excluded from this POC.
 
@@ -326,9 +326,9 @@ let elapsed = showButton "Continue", timeout: 30 s
 ```
 
 The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
-foreground-control vocabulary as `askChoice`. The Player activates it by
-clicking/tapping the rendered button or submitting its exact non-empty stored visible text in the composer. Other text,
-Space in the empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
+foreground-control vocabulary as `askChoice`. The Player activates it by clicking/tapping the rendered button,
+submitting its exact non-empty stored visible text in the composer, or Space in the empty focused composer, since its
+button is always preselected. Other text and a click/tap on unrelated blank Player space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
 
 The engine derives the canonical player-authored transcript text from the stored button label; the Player application
@@ -509,9 +509,9 @@ For `askChoice`, selecting a button or dropdown entry:
 
 Typing an exact unambiguous visible choice has the same completion effect.
 
-For `showButton`, clicking/tapping the rendered control or submitting its exact non-empty visible text in the composer
-makes the stored visible text the player's transcript message and completes the same pending action. Other composer
-submissions, Space with the empty focused composer, and clicking unrelated blank Player space do not activate the
+For `showButton`, clicking/tapping the rendered control, submitting its exact non-empty visible text in the composer,
+or Space with the empty focused composer makes the stored visible text the player's transcript message and completes
+the same pending action. Other composer submissions and clicking unrelated blank Player space do not activate the
 button. For example:
 
 ```tease
@@ -628,7 +628,7 @@ Each settlement emits its own sequenced `actionCompleted`. Continuations do not 
 
 ### Player skip completion
 
-A primary click/tap on otherwise unused Player space, or an eligible Space key while the focused composer is empty, submits a typed completion for the active `chatPacingGate` action ID. Interactive controls and focused inputs take precedence: activating them must not also trigger the viewport-wide pacing shortcut.
+A primary click/tap on a message, its speaker avatar, or otherwise unused Player space, or an eligible Space key while the focused composer is empty, submits a typed completion for the active `chatPacingGate` action ID. Interactive controls, the composer, and focused inputs take precedence: activating them must not also trigger the viewport-wide pacing shortcut. [PLAYER-UI.md](../ui/PLAYER-UI.md) owns the exact click and key rules.
 
 - a skippable active gate settles normally with a skip settlement;
 - an unskippable gate rejects the attempt without state mutation;
@@ -671,7 +671,7 @@ Effective skip policy is:
 
 A skippable gate may be completed by:
 
-- a primary click or tap on Player background or other unused Player space;
+- a primary click or tap on a message, its speaker avatar, Player background, or other unused Player space;
 - Space when the focused Standard chat composer is empty.
 
 An actual interactive control has priority. Activating a control must not also be interpreted as a viewport-wide pacing skip.
