@@ -1705,11 +1705,29 @@ const RELEASED = [
   "    }",
   "    return n + addUp(n - 1)",
   "}",
+  // The block reads and changes a variable of a call that ended, which its scope keeps.
+  "function arm(n) {",
+  "    let note = n * 2",
+  "    timer async 2 s {",
+  "        note += base",
+  '        say "note ${note}", instant',
+  "    }",
+  "}",
+  "arm(3)",
+  // Its own variables stay read while the calls it makes end.
+  "function countUp(from) {",
+  "    let running = from",
+  "    for j in 1..=40 {",
+  "        running += addUp(j % 4)",
+  "    }",
+  "    return running",
+  "}",
   "let total = 0",
   "for i in 1..=40 {",
   "    total += addUp(i % 4)",
   "}",
   "wait 1 s",
+  "let counted = countUp(base)",
   "let later = base + total",
   "for pass in 1..=3 {",
   "    let inner = pass + later",
@@ -1798,6 +1816,18 @@ test("released records leave the trace, while later records and the version inde
     assert.equal(released.record(expected.at(-1)!.id), null);
     assert.deepEqual([released.outputs(), released.recentMessages()], [[], []]);
     assert.equal(released.outputRecord(1), null);
+    // The releases dropped the index entries of calls that ended, and never pointed one at another version.
+    const ended = [
+      ...new Set(
+        expected.flatMap((entry) => (entry.variable?.name === "n" ? [entry.variable.scope] : [])),
+      ),
+    ];
+    const versions = ended.map((scope) => [
+      kept.variableRecord(scope, "n"),
+      released.variableRecord(scope, "n"),
+    ]);
+    assert.ok(versions.every(([was, now]) => was !== null && (now === null || now === was)));
+    assert.ok(versions.filter(([, now]) => now === null).length > ended.length / 2);
   }
 
   // A later record names a released cause, which reads as no longer retained.

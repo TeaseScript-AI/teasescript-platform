@@ -284,9 +284,10 @@ export class RuntimeDebugContext {
   /**
    * Releases the retained records up to ID `upTo`, which the host has read, as the bounds drop records, except that the
    * version index keeps naming them: `variableRecord` and `storageRecord` still give their IDs, and later records still
-   * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. Between
-   * operations, also after one threw, and in an instruction observer it releases them; while an operation otherwise
-   * runs, as in a builtin, nothing.
+   * name them as dependencies, so record IDs and dependencies stay those of a trace that releases nothing. It drops the
+   * index entries of scopes and calls that have ended, though, which execution never reads again: `variableRecord` may
+   * then give `null` for a scope that the snapshot no longer has. Between operations, also after one threw, and in an
+   * instruction observer it releases them; while an operation otherwise runs, as in a builtin, nothing.
    */
   public release(upTo: number): void {
     if (typeof upTo !== "number") throw new TypeError("release takes a record ID.");
@@ -480,6 +481,8 @@ export class TraceStore {
   #nextId = 1;
   #bytes = 0;
   #versions = new Map<string, number>();
+  /** The index size at which a release prunes it next: twice what the last pruning left. */
+  #pruneAt = 0;
   #outputs = new Map<number, number>();
   #stageImageId: number | null = null;
   #stageImageSet = false;
@@ -495,8 +498,8 @@ export class TraceStore {
   #stage: Stage | null = null;
   /** Whether an operation records now, from `open` to `close`. */
   #operating = false;
-  /** Whether that operation stands between two instructions, calling an instruction observer. */
-  betweenInstructions = false;
+  /** The state that operation stands at between two instructions while it calls an instruction observer, else `null`. */
+  between: RuntimeSnapshot | null = null;
 
   #epoch = 0;
   #origin: RuntimeDebugTraceOrigin = "attach";
@@ -579,7 +582,7 @@ export class TraceStore {
   /** Ends an operation that threw: its records stay as far as it got, and the stages it left open end. */
   abandon(): void {
     this.#operating = false;
-    this.betweenInstructions = false;
+    this.between = null;
     if (this.#failure !== null) return;
     while (this.#stage !== null) this.#endStage(this.#stage);
   }
@@ -590,6 +593,7 @@ export class TraceStore {
     this.#retained = 0;
     this.#bytes = 0;
     this.#versions = new Map();
+    this.#pruneAt = 0;
     this.#outputs = new Map();
     this.#stageImageId = null;
     this.#stageImageSet = false;
@@ -1432,17 +1436,14 @@ export class TraceStore {
     if (
       this.#failure !== null ||
       this.#stage !== null ||
-      (this.#operating && !this.betweenInstructions)
+      (this.#operating && this.between === null)
     )
       return;
     try {
       while (this.#retained < this.#records.length && this.#retainedAt(this.#retained).id <= upTo) {
         const record = this.#retainedAt(this.#retained);
         this.#bytes -= record.bytes;
-        const indexed =
-          (record.key !== null && this.#versions.get(record.key) === record.id) ||
-          (record.aliases?.some((key) => this.#versions.get(key) === record.id) ?? false);
-        const stub = indexed
+        const stub = this.#named(record)
           ? new ReleasedRecord(record.id, record.key, record.aliases, RELEASED_RECORD_BYTES)
           : undefined;
         this.#records[this.#retained] = stub;
@@ -1452,9 +1453,49 @@ export class TraceStore {
         if (this.#lastRandom === record) this.#lastRandom = null;
         this.#retained += 1;
       }
+      // Inside an observer, the state the operation stands at; between operations, the last one's result.
+      const state = this.between ?? this.#last?.deref();
+      if (state !== undefined && this.#versions.size >= this.#pruneAt) this.#prune(state);
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  /**
+   * Drops the index entries of the variables of scopes that `state` no longer has, and of the temporaries, arguments,
+   * and loops of calls that ended. Scope and call IDs are never used again, so nothing reads those entries any more. A
+   * released record that the index no longer names goes with them. Pruning waits until the index has doubled, so it
+   * costs about as much as the entries added meanwhile.
+   */
+  #prune(state: RuntimeSnapshot): void {
+    const scopes = new Set([GLOBAL_SCOPE_ID]);
+    for (const scope of state.frames) scopes.add(scope.id);
+    for (const scope of state.retainedScopes) scopes.add(scope.id);
+    const calls = new Set([0]);
+    for (const call of state.callFrames) calls.add(call.id);
+    for (const [key, id] of this.#versions) {
+      const owners =
+        key[0] === "b" ? scopes : key[0] === "t" || key[0] === "a" || key[0] === "l" ? calls : null;
+      // A key of these kinds begins with its scope or call ID: `b12:name`, `t3:5`.
+      if (owners === null || owners.has(Number.parseInt(key.slice(1), 10))) continue;
+      this.#versions.delete(key);
+      this.#bytes -= INDEX_OVERHEAD_BYTES + key.length * 2;
+      const index = this.#records.length - (this.#nextId - id);
+      const record = index < this.#head ? undefined : this.#records[index];
+      if (record instanceof ReleasedRecord && record.id === id && !this.#named(record)) {
+        this.#records[index] = undefined;
+        this.#bytes -= record.bytes;
+      }
+    }
+    this.#pruneAt = 2 * this.#versions.size;
+  }
+
+  /** Whether the version index names `record`, by its key or an alias. */
+  #named(record: TraceRecord | ReleasedRecord): boolean {
+    return (
+      (record.key !== null && this.#versions.get(record.key) === record.id) ||
+      (record.aliases?.some((key) => this.#versions.get(key) === record.id) ?? false)
+    );
   }
 
   /**
