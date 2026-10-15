@@ -502,6 +502,8 @@ export class TraceStore {
   #firstEventSequence: number | null = null;
   #failure: string | null = null;
   #plan: InstructionPlan | null = null;
+  /** The file of each instruction whose location a view gave, by index: finding one searches the plan's files. */
+  #paths: string[] = [];
   #last: WeakRef<RuntimeSnapshot> | null = null;
 
   /** Where records are attributed now: an instruction, and the call frame that runs it when the engine runs it. */
@@ -594,6 +596,7 @@ export class TraceStore {
     this.#rngAnchorState = null;
     this.#firstEventSequence = null;
     this.#plan = null;
+    this.#paths = [];
     this.#decisions = [];
     this.acc = emptyDependencies();
   }
@@ -1567,7 +1570,10 @@ export class TraceStore {
         span === null || plan === null || record.instruction === null
           ? null
           : Object.freeze({
-              path: instructionSourcePath(plan, record.instruction),
+              path: (this.#paths[record.instruction] ??= instructionSourcePath(
+                plan,
+                record.instruction,
+              )),
               line: span.sl + 1,
               column: span.sc + 1,
               endLine: span.el + 1,

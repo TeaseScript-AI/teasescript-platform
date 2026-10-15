@@ -409,6 +409,58 @@ test("a global assigned in another file explains a message in main.tease", () =>
   assert.equal(played.trace.variableRecord("global", "score"), assignment!.id);
 });
 
+test("record views find each instruction's file once per plan", () => {
+  // The trace sees each plan's file table through a counter: finding the file of an instruction reads it.
+  let fileReads = 0;
+  const counted = new WeakMap<InstructionPlan, InstructionPlan>();
+  const open = TraceStore.prototype.open;
+  TraceStore.prototype.open = function (plan, snapshot) {
+    let seen = counted.get(plan);
+    if (seen === undefined) {
+      seen = {
+        ...plan,
+        get files() {
+          fileReads += 1;
+          return plan.files;
+        },
+      };
+      counted.set(plan, seen);
+    }
+    return open.call(this, seen, snapshot);
+  };
+  const trace = new RuntimeDebugContext();
+  const locations = () => records(trace).map((view) => view.location);
+  try {
+    play(
+      compile([
+        { path: "main.tease", source: ['call "rooms/bonus.tease"', "exit"].join("\n") },
+        {
+          path: "rooms/bonus.tease",
+          source: ["let bonus = 4", "bonus += 1", "bonus += 2", "end"].join("\n"),
+        },
+      ]),
+      { trace },
+    );
+    const first = locations();
+    assert.ok(first.some((location) => location?.path === "rooms/bonus.tease"));
+    fileReads = 0;
+    assert.deepEqual(locations(), first);
+    assert.equal(fileReads, 0, "views of the same instructions again find no file");
+    // Another plan begins another epoch, whose records are in its own files.
+    play(
+      compile(
+        [...Array.from({ length: 12 }, (_, line) => `let value${line} = ${line}`), "exit"].join(
+          "\n",
+        ),
+      ),
+      { trace },
+    );
+    assert.deepEqual([...new Set(locations().map((location) => location?.path))], ["main.tease"]);
+  } finally {
+    TraceStore.prototype.open = open;
+  }
+});
+
 test("compound, property, index, and collection changes give the whole variable a new version", () => {
   const played = traced(
     [
