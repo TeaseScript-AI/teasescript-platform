@@ -1473,6 +1473,8 @@ export class TraceStore {
     for (const scope of state.retainedScopes) scopes.add(scope.id);
     const calls = new Set([0]);
     for (const call of state.callFrames) calls.add(call.id);
+    // Where the records that the dropped entries named stand in the queue, each looked at once below.
+    const places = new Set<number>();
     for (const [key, id] of this.#versions) {
       const owners =
         key[0] === "b" ? scopes : key[0] === "t" || key[0] === "a" || key[0] === "l" ? calls : null;
@@ -1481,8 +1483,17 @@ export class TraceStore {
       this.#versions.delete(key);
       this.#bytes -= INDEX_OVERHEAD_BYTES + key.length * 2;
       const index = this.#records.length - (this.#nextId - id);
-      const record = index < this.#head ? undefined : this.#records[index];
-      if (record instanceof ReleasedRecord && record.id === id && !this.#named(record)) {
+      if (index >= this.#head) places.add(index);
+    }
+    for (const index of places) {
+      const record = this.#records[index];
+      if (record === undefined) continue;
+      // An alias that no longer names the record leaves its list, so that no later pruning looks at it again.
+      if (record.aliases !== null) {
+        const aliases = record.aliases.filter((key) => this.#versions.get(key) === record.id);
+        record.aliases = aliases.length > 0 ? aliases : null;
+      }
+      if (record instanceof ReleasedRecord && !this.#named(record)) {
         this.#records[index] = undefined;
         this.#bytes -= record.bytes;
       }
