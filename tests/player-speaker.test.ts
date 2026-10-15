@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  compileProject,
   compileSource,
   createCheckpoint,
   createFreshRuntimeSnapshot,
@@ -199,14 +200,29 @@ test("the player and the account have compile errors that name the form that exi
       [["TSV041", "3"]],
       before,
     );
-  // A field the script gave another type conflicts with the copy, as a store of the account's field would.
+  // A field the script gives another type conflicts with the copy's text.
   assert.deepEqual(
     mismatches("player.petNames = [1]\nplayer.copyFrom(account)\nexit").map(([code, , text]) => [
       code,
       text,
     ]),
-    [["TSV041", "player.copyFrom(account)"]],
+    [["TSV041", "1"]],
   );
+  // So does a change checked before a copy in a block, a function, or another file.
+  for (const files of [
+    [
+      "timer async 1 ms {\n    player.copyFrom(account)\n}\nwait 2 ms\nplayer.petNames.add(3)\nexit",
+    ],
+    ["function later {\n    player.copyFrom(account)\n}\nplayer.petNames.add(3)\nexit"],
+    ["player.petNames.add(3)\nexit", "global function copied {\n    player.copyFrom(account)\n}"],
+  ])
+    assert.deepEqual(
+      compileProject(
+        files.map((source, index) => ({ path: index === 0 ? "main.tease" : "copy.tease", source })),
+      ).diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+      [["main.tease", "TSV041"]],
+      files[0],
+    );
   // A text of the account reverses into a new text.
   assert.deepEqual(mismatches("say account.firstName.reverse()\nexit"), []);
 });

@@ -223,7 +223,13 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { checksProperties, typePlan } from "./type-plans.js";
-import { copiesAccount, runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import {
+  accountCopy,
+  copiesAccount,
+  PLAYER_DECLARATION,
+  runsOnItsOwn,
+  sessionDeclarations,
+} from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
@@ -1195,6 +1201,9 @@ class TypeChecker {
    */
   readonly #anySpeaker = new PropertyTable();
 
+  /** A `player.copyFrom(account)` of the project, which gives the player its copied fields from the start. */
+  #accountCopy: CallExpression | undefined;
+
   /**
    * For each declared speaker by its name, the properties that its declaration or an assignment through its name gives
    * it, which decide the reads of its fields of {@link SPEAKER_FIELDS}.
@@ -1476,6 +1485,7 @@ class TypeChecker {
             this.#declareFunction(statement, file, this.#project),
           );
     this.#effects = { shared: new Map(), loops };
+    this.#accountCopy = accountCopy(programs);
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -1591,6 +1601,23 @@ class TypeChecker {
     (this.#anySpeaker.sources ??= new Set()).add(properties);
     const gets = new Set<string>();
     this.#speakerGets.set(declaration.name.name, gets);
+    // A copy of the account anywhere, also in a block or function checked later, gives the player each person field,
+    // and its terms and name lists text from the start, decided at the copy.
+    const copy = declaration === PLAYER_DECLARATION ? this.#accountCopy : undefined;
+    if (copy !== undefined)
+      for (const name of PERSON_FIELDS) {
+        gets.add(name);
+        if (this.#keepsType(name))
+          properties.set(
+            name,
+            decidedSlot(
+              freshPlaceType(
+                SPEAKER_NAME_LISTS.has(name) ? { kind: "list", element: STRING_TYPE } : STRING_TYPE,
+              ),
+              copy.span,
+            ),
+          );
+      }
     for (const property of declaration.properties) {
       const name = property.name.name;
       gets.add(name);

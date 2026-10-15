@@ -1,6 +1,7 @@
 import type {
   CallExpression,
   Expression,
+  ExpressionStatement,
   GlobalStatement,
   Identifier,
   Program,
@@ -70,6 +71,27 @@ export function copiesAccount(expression: Expression): expression is CallExpress
     argument.value.kind === "identifier" &&
     argument.value.name === "account"
   );
+}
+
+/**
+ * A `player.copyFrom(account)` statement in a file of the project, wherever it stands, or `undefined` without one: its
+ * call.
+ */
+export function accountCopy(programs: readonly Program[]): CallExpression | undefined {
+  let found: CallExpression | undefined;
+  for (const program of programs)
+    if (
+      someNode(program, (node) => {
+        if (node.kind !== "expressionStatement") return false;
+        // EVIDENCE: invariant: the parser gives this kind only to expression statements.
+        const { expression } = node as ExpressionStatement;
+        if (!copiesAccount(expression)) return false;
+        found = expression;
+        return true;
+      })
+    )
+      break;
+  return found;
 }
 
 /** Whether a statement of the project sets the default speaker, as `speaker vera` does, wherever it stands. */
