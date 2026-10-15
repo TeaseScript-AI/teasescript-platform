@@ -40,6 +40,8 @@ export interface CaptureDeviceInfo {
   readonly deviceId: string;
   /** Empty until the browser grants access; device identifiers are not stable author-facing identity. */
   readonly label: string;
+  /** Which way a camera faces, such as `user` or `environment`, where the browser reports it. */
+  readonly facingMode?: string;
 }
 
 /** Receives recorded data; a recorder calls `stopped` or `failed` exactly once, after its last `data`. */

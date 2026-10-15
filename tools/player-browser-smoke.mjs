@@ -84,9 +84,9 @@ async function main() {
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
-    // A synthetic camera that shows the test card for the camera scenario; permissions are granted or denied per
-    // scenario through CDP.
-    "--use-fake-device-for-media-stream",
+    // Two synthetic cameras that show the test card for the camera scenarios, like a phone's front and back cameras;
+    // permissions are granted or denied per scenario through CDP.
+    "--use-fake-device-for-media-stream=device-count=2",
     // A local-network name for the same server: plain HTTP there is not a secure context, unlike 127.0.0.1.
     `--host-resolver-rules=MAP ${LAN_HOST} 127.0.0.1`,
     `--remote-debugging-port=${debugPort}`,
@@ -145,6 +145,7 @@ async function main() {
         ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
         ["entrances", () => entrancesScenario(cdp, origin)],
         ["camera", () => cameraScenario(cdp, origin)],
+        ["viewfinder", () => viewfinderScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -167,7 +168,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, and the camera",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, and the camera view's controls on a phone",
       );
     } finally {
       cdp.close();
@@ -1421,9 +1422,9 @@ async function keptSessionScenario(cdp, origin, profile) {
 }
 
 /**
- * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, a Next option in the A/B tests
- * panel changes the Player's colours, and the empty Stage after `hideImage` gives
- * the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
+ * Photo colours (`photo-colour` package): the Stage photo colours the Player's background, fading in 0.3 s unless a
+ * fade time is chosen, the photo accent, fade time and blending A/B tests change the Player, only a dropdown A/B test
+ * has a Next option, and the empty Stage after `hideImage` gives the theme's colours back. Once each change has settled, text on the background and in a message bubble is readable,
  * in both modes and in Standard and High contrast.
  */
 async function photoColourScenario(cdp, origin, profile) {
@@ -1493,21 +1494,47 @@ async function photoColourScenario(cdp, origin, profile) {
     false,
     "The photo left the painted background unchanged",
   );
-  // The A/B tests panel opens from the tools menu, and its photo accent's Next option changes the Player's colours.
-  const abTests = '[data-tools-focus="launcher:A/B tests"]';
-  const nextAccent = '[aria-label="Next option: Photo accent"]';
-  await physicalClick(cdp, abTests);
-  await waitFor(cdp, visible(nextAccent));
-  const beforeVariant = JSON.stringify(await value(cdp, roles));
-  await physicalClick(cdp, nextAccent);
-  await waitFor(
-    cdp,
-    `JSON.stringify(${roles}) !== ${JSON.stringify(beforeVariant)}`,
-    3_000,
-    "The photo accent's Next option left the Player's colours as they were",
+  // With no fade time chosen, the colours fade in 0.3 s, the fade time test's B.
+  const fadeDuration = `document.documentElement.style.getPropertyValue('--photo-fade-duration')`;
+  assertEqual(
+    JSON.stringify(
+      await value(cdp, `[localStorage.getItem('player-photo-fade-time'), ${fadeDuration}]`),
+    ),
+    JSON.stringify([null, "300ms"]),
+    "With no fade time chosen, the photo colours do not fade in 0.3 s",
   );
-  await physicalClick(cdp, nextAccent);
-  await waitFor(cdp, `JSON.stringify(${roles}) === ${JSON.stringify(beforeVariant)}`);
+  // The A/B tests panel opens from the tools menu. A radio button already takes either option in one click, so only a
+  // test shown as a dropdown, such as the photo colour family, has a Next option.
+  const abTests = '[data-tools-focus="launcher:A/B tests"]';
+  await physicalClick(cdp, abTests);
+  await waitFor(cdp, visible('[aria-label="Next option: Photo colour family"]'));
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-ab-test]')].every((test) => !!test.querySelector('select') === [...test.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Next option'))`,
+    ),
+    true,
+    "An A/B test has a Next option although it is not a dropdown, or a dropdown test has none",
+  );
+  // Each radio button applies its option at once: the photo accent and the blending change the Player's colours, the
+  // fade time the fade's duration. The second press goes back to the default.
+  for (const [test, option, original, changed] of [
+    ["photo-accent", "photo", "theme", `JSON.stringify(${roles})`],
+    ["photo-fade-time", "0.6s", "0.3s", fadeDuration],
+    ["photo-blending", "srgb", "oklab", `JSON.stringify(${roles})`],
+  ]) {
+    const radio = (choice) => `[data-ab-test="${test}"] input[value="${choice}"]`;
+    const before = await value(cdp, changed);
+    await physicalClick(cdp, radio(option));
+    await waitFor(
+      cdp,
+      `${changed} !== ${JSON.stringify(before)}`,
+      3_000,
+      `The ${test} A/B test's ${option} left the Player as it was`,
+    );
+    await physicalClick(cdp, radio(original));
+    await waitFor(cdp, `${changed} === ${JSON.stringify(before)}`);
+  }
   await physicalClick(cdp, abTests);
   await waitFor(cdp, `!document.querySelector('[data-tool="A/B tests"]')`);
   await switchMode("dark");
@@ -1962,6 +1989,56 @@ async function cameraScenario(cdp, origin) {
   await waitFor(
     cdp,
     `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
+  await cdp.call("Browser.resetPermissions");
+}
+
+// On a phone-sized screen the camera view's controls take real clicks in the window and over the Stage, whose top lies
+// under the Player's top controls: the mirror button flips the picture, and the switch opens the other fake camera.
+async function viewfinderScenario(cdp, origin) {
+  const video = (view) => `document.querySelector('${view} [data-viewfinder] video')`;
+  const playing = (view) => `${video(view)}?.readyState >= 2 && !${video(view)}.paused`;
+  const mirrored = (view) => `${video(view)}?.classList.contains('viewfinder-mirrored')`;
+  const camera = (view) => `${video(view)}?.srcObject?.getVideoTracks()[0]?.getSettings().deviceId`;
+  const flips = async (view) => {
+    const before = await value(cdp, mirrored(view));
+    await physicalClick(cdp, `${view} [data-viewfinder-mirror]`);
+    await waitFor(
+      cdp,
+      `${mirrored(view)} === ${!before}`,
+      2_000,
+      `A click on the mirror button in ${view} did not flip the picture`,
+    );
+  };
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "granted",
+  });
+  await setViewport(cdp, 390, 844);
+  await navigate(cdp, `${origin}/player/?dev&debug=off&scenario=viewfinder`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, playing("[data-floating-viewfinder]"));
+  await flips("[data-floating-viewfinder]");
+  await clickLabelled(cdp, "I'm ready, Mistress");
+  await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
+  await clickLabelled(cdp, "Put me on your Stage");
+  await waitFor(cdp, playing("[data-stage-camera]"));
+  await flips("[data-stage-camera]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-stage-camera] [data-viewfinder-switch]')`,
+    4_000,
+    "Two cameras offered no camera switch",
+  );
+  const before = await value(cdp, camera("[data-stage-camera]"));
+  await physicalClick(cdp, "[data-stage-camera] [data-viewfinder-switch]");
+  await waitFor(
+    cdp,
+    `${playing("[data-stage-camera]")} && ${camera("[data-stage-camera]")} !== ${JSON.stringify(before)}`,
+    8_000,
+    "The camera switch did not open the other camera",
   );
   await cdp.call("Browser.resetPermissions");
 }

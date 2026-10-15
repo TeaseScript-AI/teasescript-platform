@@ -30,6 +30,36 @@ export function usePlayerPreference<T extends string>(
   });
 }
 
+/** A preference without a fixed set of values, such as a camera the browser names; `null` while none is stored. */
+export function usePlayerTextPreference(key: string): Ref<string | null> {
+  const storage = browserStorage();
+  if (!storage) return shallowRef(null);
+  return useStorage<string | null>(key, null, storage, {
+    writeDefaults: false,
+    serializer: { read: (raw) => (raw === "" ? null : raw), write: (value) => value ?? "" },
+  });
+}
+
+/**
+ * Moves the choice stored for the former Photo colour transition A/B test, which changed the fade time and the blending
+ * together, to the two tests that replaced it (owner decision 2026-10-14): its A, 0.6 s blended in Oklab, chooses A in
+ * both, and its B, 0.3 s blended in sRGB, B in both, so a choice stays when a default changes.
+ */
+export function migratePhotoTransition(storage: Storage | undefined) {
+  if (!storage) return;
+  try {
+    const stored = storage.getItem("player-photo-transition");
+    if (stored === null) return;
+    if (stored === "oklab" || stored === "srgb") {
+      storage.setItem("player-photo-fade-time", stored === "oklab" ? "0.6s" : "0.3s");
+      storage.setItem("player-photo-blending", stored);
+    }
+    storage.removeItem("player-photo-transition");
+  } catch {
+    // A storage that refuses the write keeps the old choice, so the next load moves it.
+  }
+}
+
 /** A number preference from `min` to `max`; stored text that is no such number reads as the default. */
 export function usePlayerNumberPreference(
   key: string,

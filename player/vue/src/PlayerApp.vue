@@ -53,7 +53,12 @@ import { playerNoticeKeys, playerNotices } from "../../notices.js";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerNotifications } from "./usePlayerNotifications";
 import { useMessageUpdateAnnouncements } from "./useMessageUpdateAnnouncements";
-import { usePlayerNumberPreference, usePlayerPreference } from "./usePlayerPreference";
+import {
+  browserStorage,
+  migratePhotoTransition,
+  usePlayerNumberPreference,
+  usePlayerPreference,
+} from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 import { usePhotoColour } from "./usePhotoColour";
@@ -89,9 +94,8 @@ const props = withDefaults(
     debug: () => ({ menu: false, autoSkip: false }),
   },
 );
-// The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
+// The camera view's window keeps the place the user gave it while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
-const viewfinderMirrored = ref(true);
 // An image request's camera step shows its viewfinder in the camera window the script shows, otherwise on the Stage,
 // where it shows the camera instead of any camera view the script shows there. Its first step shows the preview on the
 // Stage, over the Stage image and any camera view there.
@@ -141,14 +145,16 @@ watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
 // The A/B tests (owner decisions 2026-10-14): the title bar defaults to A, the photo accent to B, the theme's, the
-// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, and the photo colour
-// transition to A, 0.6 s in Oklab.
+// photo colour family to Vibrant when its swatch covers at least 3 % of the photo, else Muted, the photo colour fade
+// time to B, 0.3 s, and the blending to A, Oklab.
 const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
 // A new key: until B became the default, every browser stored the default A on its first load.
 const photoAccentOption = usePlayerPreference("player-photo-accent-v2", ["photo", "theme"], "theme");
 const photoFamily = usePlayerPreference("player-photo-family", PHOTO_FAMILIES, "large-vibrant");
 const photoFamilyShare = usePlayerNumberPreference("player-photo-family-share", { min: 0, max: 100 }, 3);
-const photoTransition = usePlayerPreference("player-photo-transition", ["oklab", "srgb"], "oklab");
+migratePhotoTransition(browserStorage());
+const photoFadeTime = usePlayerPreference("player-photo-fade-time", ["0.6s", "0.3s"], "0.3s");
+const photoBlending = usePlayerPreference("player-photo-blending", ["oklab", "srgb"], "oklab");
 // Settings' switch for the A/B tests panel, on unless turned off.
 const storedAbTestsMenu = usePlayerPreference("player-ab-tests-menu", ["on", "off"], "on");
 const abTestsMenu = computed({
@@ -477,7 +483,7 @@ const photoColours = usePhotoColour(
   ),
   computed(() => themeIntent.value.mode),
   computed(() => ({ family: photoFamily.value, minShare: photoFamilyShare.value / 100 })),
-  photoTransition,
+  photoFadeTime,
   { canvas: computed(() => toolsShell.value?.$el as HTMLElement | undefined), stage: stageElement },
 );
 usePlayerTheme(
@@ -486,7 +492,7 @@ usePlayerTheme(
     return accent ? { ...themeIntent.value, accentSeed: accent } : themeIntent.value;
   }),
   computed(() => photoColours.value?.surfaces ?? null),
-  photoTransition,
+  photoBlending,
 );
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
@@ -549,7 +555,8 @@ async function toggleFullscreen() {
         v-model:photo-accent="photoAccentOption"
         v-model:photo-family="photoFamily"
         v-model:photo-family-share="photoFamilyShare"
-        v-model:photo-transition="photoTransition"
+        v-model:photo-fade-time="photoFadeTime"
+        v-model:photo-blending="photoBlending"
       />
       <slot v-else name="tool" v-bind="scope" />
     </template>
@@ -591,10 +598,12 @@ async function toggleFullscreen() {
         <template #stage>
           <Stage
             ref="stage"
-            v-model:camera-mirrored="viewfinderMirrored"
+            v-model:camera-mirrored="player.cameraChoice.mirrored.value"
             :media="shownMedia"
             :camera="stageCamera"
             :preview="imagePreview"
+            :camera-switch-label="player.cameraChoice.switchLabel.value"
+            @switch-camera="player.cameraChoice.switchCamera"
             @media-aspect="mediaAspect = $event"
             @media-load="stageImageLoaded"
             @media-failure="stageImageFailed"
@@ -611,8 +620,10 @@ async function toggleFullscreen() {
               (captureInWindow || player.viewfinder.value)
             "
             v-model:place="floatingPlace"
-            v-model:mirrored="viewfinderMirrored"
+            v-model:mirrored="player.cameraChoice.mirrored.value"
             :track="captureInWindow ? capture!.track : player.viewfinder.value"
+            :switch-label="player.cameraChoice.switchLabel.value"
+            @switch-camera="player.cameraChoice.switchCamera"
           >
             <ImageCapture v-if="captureInWindow" :view="capture!" />
           </FloatingViewfinder>

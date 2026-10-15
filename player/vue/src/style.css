@@ -247,7 +247,7 @@
 :root[data-player-theme="light"] .player-viewport-canvas { --photo-edge: white; }
 /* While the photo colour changes (`usePhotoColour.ts`), every theme colour fades together from the root, where
    `usePlayerTheme.ts` lists them as transition properties: the background, the bubbles, the buttons, the accent and the
-   composer, with the vignette beside them. `--photo-fade-duration` follows the Photo colour transition A/B test. */
+   composer, with the vignette beside them. `--photo-fade-duration` follows the Photo colour fade time A/B test. */
 @media (prefers-reduced-motion: no-preference) {
   :root[data-photo-fade] { transition-duration: var(--photo-fade-duration); transition-timing-function: ease; }
   :root[data-photo-fade] .player-viewport-canvas { transition: --photo-edge var(--photo-fade-duration) ease; }

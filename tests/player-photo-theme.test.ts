@@ -37,21 +37,26 @@ let generatePlayerTheme: (
   photo?: PhotoSurfaces | null,
 ) => { roles: Record<string, OklchColor>; diagnostics: readonly ContrastDiagnostic[] };
 let defaults: Readonly<Record<Mode, PlayerThemeIntent>>;
+let migratePhotoTransition: (storage: Storage | undefined) => void;
 
 // The theme modules use MCU, which loads through the Player test bundle.
 before(async () => {
   const theme = await loadPlayerModule("player/theme/photo-theme.ts");
   const palette = await loadPlayerModule("player/theme/palette.ts");
   const player = await loadPlayerModule("player/vue/src/usePlayerTheme.ts");
+  const preference = await loadPlayerModule("player/vue/src/usePlayerPreference.ts");
   assert.equal(typeof theme.photoColours, "function");
   assert.equal(typeof palette.generatePlayerTheme, "function");
   assert.equal(typeof player.defaultPlayerThemeIntents, "object");
+  assert.equal(typeof preference.migratePhotoTransition, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports were checked just above.
   photoColours = theme.photoColours as typeof photoColours;
   // EVIDENCE: validation: the generator export was checked callable just above, from the same real source build.
   generatePlayerTheme = palette.generatePlayerTheme as typeof generatePlayerTheme;
   // EVIDENCE: validation: the default intents are the Player's own, checked present just above.
   defaults = player.defaultPlayerThemeIntents as typeof defaults;
+  // EVIDENCE: validation: the migration export was checked callable just above, from the same real source build.
+  migratePhotoTransition = preference.migratePhotoTransition as typeof migratePhotoTransition;
 });
 
 // Swatches of the given colours, each covering the given share of the photo, 10 % unless given.
@@ -176,9 +181,54 @@ test("a Vibrant swatch standing in for a missing Muted one is the larger one", (
   assert.equal(hue(neon, "light", { family: "large-vibrant", minShare: 0.05 }), red);
 });
 
-test("the sRGB photo transition writes the theme's colours in legacy sRGB syntax, which fades in sRGB", () => {
+test("sRGB photo colour blending writes the theme's colours in legacy sRGB syntax, which fades in sRGB", () => {
   assert.equal(legacySrgbCss("oklch(1 0 0)"), "rgb(255 255 255 / 1)");
   assert.equal(legacySrgbCss("oklch(0 0 0 / 0.25)"), "rgb(0 0 0 / 0.25)");
+});
+
+// A browser's local storage, held in memory.
+class MemoryStorage implements Storage {
+  readonly items: Map<string, string>;
+  constructor(items: Record<string, string>) {
+    this.items = new Map(Object.entries(items));
+  }
+  get length(): number {
+    return this.items.size;
+  }
+  clear(): void {
+    this.items.clear();
+  }
+  getItem(key: string): string | null {
+    return this.items.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return [...this.items.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.items.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.items.set(key, value);
+  }
+}
+
+test("a choice stored for the former Photo colour transition test moves to the fade time and blending tests", () => {
+  // Its A, 0.6 s in Oklab, chooses A in both, even where A is no longer the default; its B, 0.3 s in sRGB, chooses B
+  // in both. Unknown stored text chooses neither.
+  for (const [stored, moved] of [
+    ["oklab", { "player-photo-fade-time": "0.6s", "player-photo-blending": "oklab" }],
+    ["srgb", { "player-photo-fade-time": "0.3s", "player-photo-blending": "srgb" }],
+    ["sepia", {}],
+  ] as const) {
+    const storage = new MemoryStorage({ "player-photo-transition": stored });
+    migratePhotoTransition(storage);
+    assert.deepEqual(Object.fromEntries(storage.items), moved, stored);
+  }
+  // Every load moves it: once it has moved, later choices stay.
+  const chosen = { "player-photo-fade-time": "0.6s", "player-photo-blending": "srgb" };
+  const storage = new MemoryStorage(chosen);
+  migratePhotoTransition(storage);
+  assert.deepEqual(Object.fromEntries(storage.items), chosen);
 });
 
 // The six photos of the node-vibrant fixture, and a sweep of photo colours around the hue circle.

@@ -2,7 +2,7 @@
 import { computed, ref, useId, watch } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import Viewfinder from "./Viewfinder.vue";
-import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
+import ViewfinderControls from "./ViewfinderControls.vue";
 
 // The viewfinder as a floating window over the Player, like a mini player. A slim title bar shows that it is a window.
 // The user drags it anywhere, resizes it from any edge or corner like a desktop window, keeping the camera's aspect, or
@@ -17,7 +17,12 @@ export interface FloatingPlace {
   readonly ratio?: number;
 }
 // Without a track the window keeps its frame, for Player controls drawn on it while a camera opens or cannot be used.
-defineProps<{ track: MediaStreamTrack | null }>();
+defineProps<{
+  track: MediaStreamTrack | null;
+  /** The camera switch's name, or `null` without another camera to switch to. */
+  switchLabel?: string | null;
+}>();
+const emit = defineEmits<{ switchCamera: [] }>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
 const mirrored = defineModel<boolean>("mirrored", { default: true });
 
@@ -202,14 +207,18 @@ function measured(next: number) {
         Drag to move, or drag an edge to resize. Arrow keys move it; plus and minus resize it.
       </span>
       <div class="floating-viewfinder-window">
-        <div class="floating-viewfinder-bar" :style="{ '--bar-height': `${BAR}px`, height: `${BAR}px` }">
-          <ViewfinderMirrorButton v-model="mirrored" />
-        </div>
+        <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }" />
         <div class="floating-viewfinder-picture" :style="{ '--viewfinder-ratio': ratio }">
           <Viewfinder v-if="track" :track="track" :mirrored="mirrored" @aspect="measured" />
           <div v-else class="floating-viewfinder-empty" />
           <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
           <slot />
+          <ViewfinderControls
+            v-if="track"
+            v-model:mirrored="mirrored"
+            :switch-label="switchLabel ?? null"
+            @switch-camera="emit('switchCamera')"
+          />
         </div>
       </div>
       <span
@@ -255,12 +264,6 @@ function measured(next: number) {
   --viewfinder-video-radius: 0 0 11px 11px;
 }
 .floating-viewfinder-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  /* The button sits as far from the right as from the top and bottom, clear of the window's rounded corner. */
-  padding-inline: calc((var(--bar-height) - 1.5rem) / 2);
-  color: var(--media-text);
   border-bottom: 1px solid var(--media-border);
   backdrop-filter: blur(6px);
 }

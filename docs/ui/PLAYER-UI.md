@@ -277,14 +277,17 @@ available in every build to every user. It currently offers:
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
   started, also with the Debug menu off;
 - **Testing · A/B tests** (on by default): adds the **A/B tests** panel to the tools menu, after Debug. It holds only
-  the A/B tests the owner approved, each with its options and a **Next option** button that steps to the following
-  option and wraps around, so a variant can be flipped while the panel stays open beside the playing Player:
+  the A/B tests the owner approved, each with its options, so a variant can be flipped while the panel stays open
+  beside the playing Player. A test shown as radio buttons takes either option in one click; a test shown as a
+  dropdown, today the photo colour family, also has a **Next option** button that steps to the following option and
+  wraps around without opening the dropdown:
   - **Title bar on short screens:** A or B above (default A);
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
   - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
     photo from which a swatch counts as large enough (default 3 %);
-  - **Photo colour transition:** A, 0.6 s blended in Oklab (default), or B, 0.3 s blended in sRGB
-    ([Stage and media presentation](#stage-and-media-presentation)).
+  - **Photo colour fade time:** A, 0.6 s, or B, 0.3 s (default), for the photo colour fade
+    ([Stage and media presentation](#stage-and-media-presentation));
+  - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
 
 Apart from the Debug menu, these settings and the A/B test choices are presentation preferences, not canonical runtime
 state. The Player keeps them in this browser's local storage
@@ -572,15 +575,23 @@ A script can show the user what the session camera sees, for example to get into
 `showCamera` in a floating window or `showCamera stage` over the Stage image, and hide it with `hideCamera`
 ([§22](../specifications/accepted-syntaxes-v30.md#camera-view)). The camera view is only a preview: it has no capture
 control, and the script alone takes photos with `takePhoto()`. It shows a live image at the camera's aspect ratio,
-without a visible label, mirrored (selfie view) by default; a button switches the mirroring off and on while the Player
-is mounted. Captured photos are never mirrored. Without an available camera it is not shown. In the window it floats
-over the Player with a slim title bar that holds the mirror button. Like a desktop window, the user drags it anywhere
-and resizes it from any edge or corner, keeping the camera's aspect; focused, the arrow keys move it and + and - resize
-it. It floats in the whole Player, so showing or hiding the tools sidebar never moves it: it lies over the docked
-sidebar, and the narrow layout's drawer slides over it. It keeps its place while the Player is mounted, also when the
-script moves the view to the Stage and back. Over the Stage, the view covers the Stage image, which stays loaded
-underneath, and the Stage takes the camera's aspect until the view goes; the mirror button sits in the view's upper
-corner. The Player's camera view is the only one: the browser's own picture-in-picture is not offered for it.
+without a visible label, mirrored (selfie view) by default, except a camera the browser reports as facing back, which
+is not mirrored, as in camera apps. Captured photos are never mirrored. Its controls sit in the view's lower left
+corner, clear of the Player's top controls over the top of the Stage and of the timer rail along its right side: a
+mirror button switches the mirroring off and on while the Player is mounted, and where the browser reports two or more
+cameras, a Switch camera button beside it opens the next camera in the browser's order, wrapping around, so a phone
+flips between its front and back cameras. Its accessible name says which camera comes next where the browser reports
+that, such as "Switch to back camera", and is "Switch camera" otherwise. A camera switched to starts from its own
+mirroring default. The script keeps running, and `takePhoto()` and an image request's camera step use the chosen
+camera. The Player opens the browser's default camera until the player switches, and remembers the chosen camera in
+this browser, like its [settings](#player-settings); a camera that is gone falls back to the default. Without an
+available camera the view is not shown. In the window it floats over the Player with a slim title bar. Like a desktop
+window, the user drags it anywhere and resizes it from any edge or corner, keeping the camera's aspect; focused, the
+arrow keys move it and + and - resize it. It floats in the whole Player, so showing or hiding the tools sidebar never
+moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it. It keeps its place while the
+Player is mounted, also when the script moves the view to the Stage and back. Over the Stage, the view covers the Stage
+image, which stays loaded underneath, and the Stage takes the camera's aspect until the view goes. The Player's camera
+view is the only one: the browser's own picture-in-picture is not offered for it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
@@ -644,8 +655,9 @@ the previous photo's colour stays; a camera view or an image request's preview o
 Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
 colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
 a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
-message bubbles, the buttons, the accent, and the composer. The Photo colour transition A/B test sets the fade: A, the
-default, 0.6 s blended in Oklab; B, as in Milovana's player, 0.3 s blended in sRGB. Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
+message bubbles, the buttons, the accent, and the composer. Two A/B tests set the fade, each B as in Milovana's player:
+Photo colour fade time, 0.6 s (A) or 0.3 s (B, the default), and Photo colour blending, in Oklab (A, the default) or in
+sRGB (B). Reduced motion removes the fade. The colours are measured as node-vibrant measures its swatches
 (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
@@ -925,7 +937,7 @@ theme's accent in the action-button material. Only Use image answers, recorded i
 `Image`. A new photo or file replaces the preview, and the replaced one is dropped.
 
 Open camera starts the camera step: the viewfinder opens over the Stage, or in the camera window when the script shows
-one, with no question and no control on the picture besides the viewfinder's mirror button, and the chat offers **Take
+one, with no question and no control on the picture besides the camera view's controls, and the chat offers **Take
 photo**, **Self-timer (5 s)**, and **Back**. Take photo takes the photo at once. Self-timer first counts down five
 seconds: a number from 5 to 1 as large as the viewfinder allows, each appearing large and settling over the live
 picture, without the motion when the player prefers reduced motion. While the camera opens and during the countdown,

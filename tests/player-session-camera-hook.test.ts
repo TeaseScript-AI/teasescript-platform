@@ -49,6 +49,9 @@ class FakeTrack extends EventTarget {
   stop() {
     this.readyState = "ended";
   }
+  getSettings() {
+    return { deviceId: "fake camera" };
+  }
 }
 
 // The browser surface the session camera and audio priming use; getUserMedia answers when the test grants it, with a
@@ -61,14 +64,14 @@ function stubBrowser(context: TestContext) {
     document: new EventTarget(),
     window: new EventTarget(),
     navigator: {
-      mediaDevices: {
+      mediaDevices: Object.assign(new EventTarget(), {
         getUserMedia: async () => {
           await granted;
           const track = new FakeTrack();
           tracks.push(track);
           return { getTracks: () => [track] };
         },
-      },
+      }),
     },
     Audio: class {
       src = "";

@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
 import { PHOTO_FAMILIES, type PhotoFamily } from "../../theme/photo-theme.js";
-import type { PhotoTransition } from "./usePhotoColour";
+import type { PhotoFadeTime } from "./usePhotoColour";
 
-// The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison. Each
-// test's Next option steps to its following option and wraps around, so the variants can be flipped while watching the
-// Player; the button keeps focus, so Enter or Space flips again. The choices are browser-local Player preferences.
+// The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison, so
+// they can be flipped while watching the Player. A radio button takes either option in one click; a dropdown test's
+// Next option steps to its following option and wraps around without opening the dropdown, and keeps focus, so Enter or
+// Space steps again. The choices are browser-local Player preferences.
 const titlebar = defineModel<"left" | "overlap">("titlebar", { required: true });
 const photoAccent = defineModel<"photo" | "theme">("photoAccent", { required: true });
 const photoFamily = defineModel<PhotoFamily>("photoFamily", { required: true });
 /** The least share of the photo, in percent, that makes a Vibrant swatch large enough. */
 const photoFamilyShare = defineModel<number>("photoFamilyShare", { required: true });
-const photoTransition = defineModel<PhotoTransition>("photoTransition", { required: true });
+const photoFadeTime = defineModel<PhotoFadeTime>("photoFadeTime", { required: true });
+const photoBlending = defineModel<"oklab" | "srgb">("photoBlending", { required: true });
 
 const familyLabels: Readonly<Record<PhotoFamily, string>> = {
   vibrant: "A · Vibrant",
@@ -45,16 +47,6 @@ function setShare(event: Event) {
         <input v-model="titlebar" type="radio" name="titlebar-option" value="overlap" />
         B · Auto-hide, controls right
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Title bar on short screens"
-          @click="titlebar = next(['left', 'overlap'] as const, titlebar)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-accent">
       <legend class="font-medium">Photo accent</legend>
@@ -66,16 +58,6 @@ function setShare(event: Event) {
         <input v-model="photoAccent" type="radio" name="photo-accent-option" value="theme" />
         B · Theme accent
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Photo accent"
-          @click="photoAccent = next(['photo', 'theme'] as const, photoAccent)"
-        >
-          Next option
-        </Button>
-      </div>
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-family">
       <legend class="font-medium">Photo colour family</legend>
@@ -115,26 +97,27 @@ function setShare(event: Event) {
         </Button>
       </div>
     </fieldset>
-    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-transition">
-      <legend class="font-medium">Photo colour transition</legend>
+    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-fade-time">
+      <legend class="font-medium">Photo colour fade time</legend>
       <label class="flex items-start gap-2">
-        <input v-model="photoTransition" type="radio" name="photo-transition-option" value="oklab" />
-        A · 0.6 s, blended in Oklab
+        <input v-model="photoFadeTime" type="radio" name="photo-fade-time-option" value="0.6s" />
+        A · 0.6 s
       </label>
       <label class="flex items-start gap-2">
-        <input v-model="photoTransition" type="radio" name="photo-transition-option" value="srgb" />
-        B · 0.3 s, blended in sRGB, like Milovana
+        <input v-model="photoFadeTime" type="radio" name="photo-fade-time-option" value="0.3s" />
+        B · 0.3 s, like Milovana
       </label>
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label="Next option: Photo colour transition"
-          @click="photoTransition = next(['oklab', 'srgb'] as const, photoTransition)"
-        >
-          Next option
-        </Button>
-      </div>
+    </fieldset>
+    <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-blending">
+      <legend class="font-medium">Photo colour blending</legend>
+      <label class="flex items-start gap-2">
+        <input v-model="photoBlending" type="radio" name="photo-blending-option" value="oklab" />
+        A · Oklab
+      </label>
+      <label class="flex items-start gap-2">
+        <input v-model="photoBlending" type="radio" name="photo-blending-option" value="srgb" />
+        B · sRGB, like Milovana
+      </label>
     </fieldset>
   </div>
 </template>

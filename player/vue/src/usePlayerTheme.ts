@@ -46,8 +46,9 @@ function registerColour(name: string) {
 }
 
 /**
- * Applies the theme of `intent`, with `photo`'s surfaces while the Stage photo colours the Player. With `blend` "srgb"
- * the colours are written in legacy sRGB syntax, so a fade between them blends in sRGB instead of Oklab.
+ * Applies the theme of `intent`, with `photo`'s surfaces while the Stage photo colours the Player. With `blend` "srgb",
+ * the Photo colour blending A/B test's B, the colours are written in legacy sRGB syntax, so a fade between them blends
+ * in sRGB instead of Oklab.
  */
 export function usePlayerTheme(
   intent: Readonly<Ref<PlayerThemeIntent>>,
