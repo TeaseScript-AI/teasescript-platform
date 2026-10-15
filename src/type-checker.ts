@@ -2449,6 +2449,7 @@ class TypeChecker {
             this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
           );
         this.#checkWholeRangeBounds(statement.iterable, "A for-loop range bound");
+        this.#warnEmptyRange(statement.iterable, "the loop never runs");
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
         this.#reportUnless(
@@ -4204,6 +4205,37 @@ class TypeChecker {
     if (!Number.isSafeInteger(length)) return;
     const problem = rangeListLengthProblem(start!, end!, range.inclusive);
     if (problem !== null) this.#report(typeCode.invalidOperand, problem, expression.span);
+  }
+
+  /**
+   * Warns when a range with a whole-number literal on each side, such as `3..=1` or `5..5`, contains no numbers, naming
+   * the `result`, such as "the loop never runs" (V30 §6). A computed bound stays silent, even one the compiler knows.
+   */
+  #warnEmptyRange(expression: Expression, result: string): void {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return;
+    const bounds = literalRange(range);
+    if (
+      bounds === undefined ||
+      !isScalar(this.#typeOf(range.start), "integer") ||
+      !isScalar(this.#typeOf(range.end), "integer")
+    )
+      return;
+    const { start, end, inclusive, startText, endText } = bounds;
+    if (inclusive ? end >= start : end > start) return;
+    const operator = inclusive ? "..=" : "..";
+    const reason =
+      start === end
+        ? `'${startText}${operator}${endText}' excludes its end. Write '${startText}..=${endText}' for the single number ${startText}.`
+        : `a range never counts down. Write '${endText}${operator}${startText}' to count up.`;
+    this.diagnostics.push(
+      createDiagnostic(
+        DiagnosticSeverity.Warning,
+        typeCode.constantTest,
+        `This range contains no numbers, so ${result}: ${reason}`,
+        expression.span,
+      ),
+    );
   }
 
   /** The type of an expression that {@link #expressionTask} already checked. */
@@ -6452,6 +6484,7 @@ class TypeChecker {
     if (method === "toList") {
       this.#checkWholeRangeBounds(callee.object, "A toList range bound");
       this.#checkRangeListLength(callee.object);
+      this.#warnEmptyRange(callee.object, "toList() returns []");
     }
     // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
     // another member has the method, the runtime checks a speaker.

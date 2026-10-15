@@ -24,7 +24,59 @@ test("executes exclusive and inclusive integer ranges", () => {
     "3",
     "4",
   ]);
-  assert.deepEqual(sayTexts(runSource("for value in 4..1 { say value }\nexit")), []);
+});
+
+test("a range that contains no numbers runs its loop no time, with a warning when both bounds are numbers", () => {
+  for (const [range, message] of [
+    [
+      "4..1",
+      "This range contains no numbers, so the loop never runs: a range never counts down. Write '1..4' to count up.",
+    ],
+    [
+      "(-1..=-3)",
+      "This range contains no numbers, so the loop never runs: a range never counts down. Write '-3..=-1' to count up.",
+    ],
+    [
+      "5..5",
+      "This range contains no numbers, so the loop never runs: '5..5' excludes its end. Write '5..=5' for the single number 5.",
+    ],
+  ]) {
+    const source = `for value in ${range} { say value }\nsay "after"\nexit`;
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => [
+        diagnostic.severity,
+        diagnostic.code,
+        diagnostic.message,
+        source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+      ]),
+      [["warning", "TSV046", message, range]],
+    );
+    const compiled = plan(source, {}, ["TSV046"]);
+    assert.deepEqual(sayTexts(run(compiled, createImmediatePacingRuntimeSnapshot(compiled))), [
+      "after",
+    ]);
+  }
+  // A computed bound, a variable, or a global stays silent, even where the compiler knows its value.
+  assert.deepEqual(
+    sayTexts(
+      runSource(
+        [
+          "let high = 4",
+          "global top = 5",
+          "let count = 0",
+          "let reversed = 4..1",
+          "for value in high..1 { say value }",
+          "for value in top..top { say value }",
+          "for value in (2 + 2)..=1 { say value }",
+          "for value in 0..count { say value }",
+          "for value in reversed { say value }",
+          "for value in 2..=2 { say value }",
+          "exit",
+        ].join("\n"),
+      ),
+    ),
+    ["2"],
+  );
 });
 
 test("iterates lists and sets in order and performs zero iterations", () => {

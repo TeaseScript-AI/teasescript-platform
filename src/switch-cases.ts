@@ -203,17 +203,34 @@ export function caseValueText(expression: Expression): string | undefined {
   return literalValue(unwrapParentheses(expression))?.text;
 }
 
-/** The bounds of a range case with a number literal on each side, such as `1..=5`, or `undefined` for another value. */
+/**
+ * The bounds of a range with a number literal on each side, such as `1..=5` or `-2..0`, as numbers and as written, or
+ * `undefined` for another value.
+ */
 export function literalRange(
   expression: Expression,
-): { readonly start: number; readonly end: number; readonly inclusive: boolean } | undefined {
+):
+  | {
+      readonly start: number;
+      readonly end: number;
+      readonly inclusive: boolean;
+      readonly startText: string;
+      readonly endText: string;
+    }
+  | undefined {
   const range = unwrapParentheses(expression);
   if (range.kind !== "rangeExpression") return undefined;
   const start = numberLiteral(range.start);
   const end = numberLiteral(range.end);
   return start === undefined || end === undefined
     ? undefined
-    : { start: start.value, end: end.value, inclusive: range.inclusive };
+    : {
+        start: start.value,
+        end: end.value,
+        inclusive: range.inclusive,
+        startText: start.text,
+        endText: end.text,
+      };
 }
 
 /** A number literal with an optional sign, such as `3`, `-2.5`, or `+1`. */
