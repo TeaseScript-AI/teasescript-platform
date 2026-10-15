@@ -50,6 +50,35 @@ export function missingSpeakerPropertyMessage(
   );
 }
 
+/**
+ * The message for a read of a built-in field, term, or name list that no declaration or assignment gives a speaker
+ * (V30 §37): of the speaker `speaker`, or of any declared speaker for `null`. `sources` are the fields of which the
+ * speaker needs one, the field first; `example` is a speaker to declare it in.
+ */
+export function missingSpeakerFieldMessage(
+  speaker: string | null,
+  name: string,
+  sources: readonly string[],
+  example: string,
+): string {
+  const subject =
+    speaker === null ? `No speaker has '${name}'` : `Speaker '${speaker}' has no '${name}'`;
+  const whom = speaker === null ? "a speaker" : "it";
+  const needed = sources.length === 1 ? "one" : alternatives(sources);
+  const fix = sources.includes("gender")
+    ? `Give ${whom} a gender, as in 'speaker ${example} { gender: "female" }', or assign '${speaker === null ? "" : `${speaker}.`}${name}' before reading it.`
+    : `Give ${whom} a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`;
+  return `${subject}: no declaration or assignment gives ${whom} ${needed}. ${fix}`;
+}
+
+/** Names in quotes as alternatives, as in `'a' or 'b'` and `'a', 'b', or 'c'`. */
+function alternatives(names: readonly string[]): string {
+  const quoted = names.map((name) => `'${name}'`);
+  return quoted.length <= 2
+    ? quoted.join(" or ")
+    : `${quoted.slice(0, -1).join(", ")}, or ${quoted.at(-1)}`;
+}
+
 /** Up to ten names in quotes, joined as in `'a', 'b', and 'c'`, with how many more there are. */
 function nameList(names: readonly string[]): string {
   const quoted = names.slice(0, 10).map((name) => `'${name}'`);

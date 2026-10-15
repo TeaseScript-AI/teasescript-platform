@@ -5076,6 +5076,10 @@ This allows state to remain attached to the character it describes instead of re
 
 Built-in dynamic terms, name lists, presentation fields, and custom properties may all be changed by the running script.
 
+A speaker has a built-in field, term, or name list only once a declaration or an assignment gives it one. Reading one
+that nothing in the package gives the speaker is a compile error. `title` and `shortTitle` count for each other,
+`gender` counts for every term, and `title`, `shortTitle`, `firstName`, or `lastName` counts for `displayName`.
+
 Custom-property rules:
 
 - The first unconditional assignment declares the property and infers its type.
