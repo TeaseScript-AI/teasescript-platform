@@ -129,6 +129,55 @@ test("toList needs whole-number bounds, checked when the script compiles where i
   ]);
 });
 
+test("toList makes at most 1,000,000 numbers and refuses a larger range before it builds a list", () => {
+  const tooMany = (range: string, numbers: string) =>
+    `toList() can make a list of at most 1,000,000 numbers, but ${range} holds ${numbers}. Use a smaller range.`;
+  assert.deepEqual(
+    said(
+      "say (1..=1000000).toList().length\nsay (0..1000000).toList()[999999]",
+      "let r = -999999..=0\nsay r.toList().length",
+    ),
+    ["1000000", "999999", "1000000"],
+  );
+  // A range written in the call with bounds the compiler knows is checked when the script compiles.
+  assert.deepEqual(
+    [
+      "let numbers = (1..=1000001).toList()\nexit",
+      "let numbers = (0..1000 * 1001).toList()\nexit",
+      "let numbers = (1..=2000000000).toList()\nexit",
+    ].map((source) => diagnostics(source)),
+    [
+      [["TSV043", tooMany("1..=1000001", "1,000,001"), "(1..=1000001)"]],
+      [["TSV043", tooMany("0..1001000", "1,001,000"), "(0..1000 * 1001)"]],
+      [["TSV043", tooMany("1..=2000000000", "2,000,000,000"), "(1..=2000000000)"]],
+    ],
+  );
+  // A stored range, or one with bounds the compiler cannot know, is checked when toList runs.
+  assert.deepEqual(failure("let r = 1..=1000001\nsay r.toList()\nexit"), [
+    "TSR045",
+    tooMany("1..=1000001", "1,000,001"),
+    "r.toList()",
+  ]);
+  assert.deepEqual(failure(`${PICK}say (0..pick(1000001)).toList()\nexit`), [
+    "TSR045",
+    tooMany("0..1000001", "1,000,001"),
+    "(0..pick(1000001)).toList()",
+  ]);
+  // The check comes before any number is added: a list of this range could never be built, and the variable it was
+  // meant for gets nothing.
+  const huge = runValidSource("let r = 0..=9007199254740990\nlet numbers = r.toList()\nexit");
+  assert.deepEqual(
+    [huge.snapshot.failure?.code, huge.snapshot.failure?.message],
+    ["TSR045", tooMany("0..=9007199254740990", "9,007,199,254,740,991")],
+  );
+  assert.equal(
+    huge.snapshot.frames[0]?.bindings.some(
+      (binding) => binding.name === "numbers" && binding.value !== null,
+    ),
+    false,
+  );
+});
+
 test("a range given where a list is needed names toList in the fix", () => {
   assert.deepEqual(
     [

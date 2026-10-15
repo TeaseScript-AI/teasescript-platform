@@ -101,6 +101,7 @@ import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base
 import { textSha256 } from "./sha256.js";
 import {
   RANGE_LIST_FIX,
+  rangeListLengthProblem,
   SET_OPERATIONS,
   setOperationArgumentMessage,
   setOperationItems,
@@ -4641,11 +4642,14 @@ export function assertIntegerRange(
 }
 
 /**
- * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them. The
- * list is new and nothing else holds its numbers, so it takes them without a copy.
+ * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them, and at
+ * most `MAX_RANGE_LIST_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
+ * numbers, so it takes them without a copy.
  */
 function rangeList(range: SerializableRuntimeRange, span: SourceSpan): SerializableRuntimeList {
   assertIntegerRange(range, "toList()", span);
+  const tooLong = rangeListLengthProblem(range.start, range.end, range.inclusive);
+  if (tooLong !== null) throw fault("TSR045", tooLong, span);
   const items: number[] = [];
   for (let position = 0, length = rangeLength(range); position < length; position += 1)
     items.push(range.start + position);

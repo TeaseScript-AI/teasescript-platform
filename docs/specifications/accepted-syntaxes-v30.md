@@ -615,7 +615,9 @@ Overlapping cases are a compile error. Adjacent exclusive ranges such as `0..4` 
 
 `toList()` returns the whole numbers of a range as a new list, in order: `(1..=5).toList()` is `[1, 2, 3, 4, 5]`, and
 `(1..1).toList()` is `[]` (owner decision, 2026-10-15). Write the range in parentheses, or call it on a range kept in a
-variable. A range is not a list: to add its numbers to a list, write `list += (1..=3).toList()`.
+variable. A range is not a list: to add its numbers to a list, write `list += (1..=3).toList()`. `toList()` makes at
+most 1,000,000 numbers; a larger range is a compile error where the compiler can see its bounds, and runtime error
+`TSR045` otherwise.
 
 ## 7. Conditions and blocks
 **Status:** Accepted

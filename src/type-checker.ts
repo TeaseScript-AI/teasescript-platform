@@ -104,6 +104,7 @@ import {
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
+import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import {
   compareDurations,
   divideDuration,
@@ -4189,6 +4190,22 @@ class TypeChecker {
     }
   }
 
+  /**
+   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_RANGE_LIST_LENGTH` numbers
+   * (V30 §6). Bounds that a number cannot hold exactly are left to the runtime, which names them.
+   */
+  #checkRangeListLength(expression: Expression): void {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return;
+    const start = staticNumber(range.start);
+    const end = staticNumber(range.end);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return;
+    const length = end! - start! + (range.inclusive ? 1 : 0);
+    if (!Number.isSafeInteger(length)) return;
+    const problem = rangeListLengthProblem(start!, end!, range.inclusive);
+    if (problem !== null) this.#report(typeCode.invalidOperand, problem, expression.span);
+  }
+
   /** The type of an expression that {@link #expressionTask} already checked. */
   #typeOf(expression: Expression): StaticType {
     return this.#types.get(expression) ?? UNKNOWN_TYPE;
@@ -6431,8 +6448,11 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
-    // A range written in the call gives its whole numbers, as `for` does (V30 §6).
-    if (method === "toList") this.#checkWholeRangeBounds(callee.object, "A toList range bound");
+    // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
+    if (method === "toList") {
+      this.#checkWholeRangeBounds(callee.object, "A toList range bound");
+      this.#checkRangeListLength(callee.object);
+    }
     // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
     // another member has the method, the runtime checks a speaker.
     const all = members(value);
