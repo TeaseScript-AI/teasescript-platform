@@ -116,7 +116,7 @@ function caseValue(
         start.value === end.value
           ? `The range ${text} excludes its end, so it contains no numbers. Write case ${start.text}, or ` +
               `${start.text}..=${end.text} to include the end.`
-          : `The range ${text} counts down, so it contains no numbers. Put the lower bound first, as in ` +
+          : `The range ${text} contains no numbers: a range never counts down. Put the lower bound first, as in ` +
               `${end.text}..${start.text} or ${end.text}..=${start.text}.`,
         expression.span,
       );
