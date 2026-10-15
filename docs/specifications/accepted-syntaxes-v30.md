@@ -520,7 +520,7 @@ Expression precedence from strongest to weakest:
 Postfix operations such as property access, indexing, and function calls associate from left to right:
 
 ```text
-player.toys[0].name
+account.toys[0].name
 ```
 
 Arithmetic operators and `otherwise` associate from left to right within the same precedence level:
@@ -1806,7 +1806,7 @@ items.random
 `items.random` explicitly selects one element using the deterministic session RNG. It works for value lists and object lists:
 
 ```text
-let chosenName = player.petNames.random
+let chosenName = account.petNames.random
 let stranger = speakers.random
 ```
 
@@ -1816,8 +1816,8 @@ Interpolation is the only place where a list turns into one random element. Each
 element with the deterministic session RNG:
 
 ```text
-say "Good ${player.petNames}"
-say "Come closer, ${player.petNames}"
+say "Good ${account.petNames}"
+say "Come closer, ${account.petNames}"
 ```
 
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
@@ -1887,14 +1887,14 @@ when the compiler can see it. A list as a whole `askChoice` option instead gives
 To choose a specific element, use its index:
 
 ```text
-say player.petNames[0]
-say "Today I will call you ${player.petNames[1]}"
+say account.petNames[0]
+say "Today I will call you ${account.petNames[1]}"
 ```
 
 To reuse one random choice, select it explicitly and store the resulting value:
 
 ```text
-let chosenName = player.petNames.random
+let chosenName = account.petNames.random
 
 say "From now on, you are my ${chosenName}"
 say "Come here, ${chosenName}"
@@ -1903,7 +1903,7 @@ say "Come here, ${chosenName}"
 Normal assignment does not perform random selection:
 
 ```text
-let copiedNames = player.petNames
+let copiedNames = account.petNames
 ```
 
 This assigns a list copy. List assignment uses copy semantics rather than a shared reference:
@@ -4633,7 +4633,7 @@ final author syntax. See [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 ## 37. Dynamic speaker terms
 **Status:** Accepted
 
-Dynamic speaker terms are built-in and custom properties attached to a speaker-compatible character reference. A character may represent a person, a fictional character, a robot, or another entity that can participate in the tease.
+Dynamic speaker terms are built-in and custom properties attached to a speaker. A character may represent a person, a fictional character, a robot, or another entity that can participate in the tease.
 
 The same property model is used for:
 
@@ -4644,7 +4644,9 @@ mistressVera
 cashier
 ```
 
-- `player` is the fixed built-in reference for the person playing the tease. Use `player`, not `user`.
+- `player` is the built-in speaker for the person playing the tease. It exists without a declaration, and its name is
+  reserved: `speaker player { ... }` is a compile error, so a script assigns its fields instead. Use `player`, not
+  `user`.
 - `speaker` is the context-sensitive reference for the effective speaker.
 - A declared speaker is referenced through its identifier, such as `mistressVera` or `cashier`.
 - Other speakers remain directly addressable while one speaker is talking.
@@ -4669,6 +4671,7 @@ speaker mistressVera {
 Ordinary `say` uses the current default speaker:
 
 ```text
+player.copyFrom(account)
 say "Kneel."
 say "Good morning, ${player.alias}."
 ```
@@ -4682,6 +4685,11 @@ say as mistressVera "You will obey your ${speaker.title}."
 
 During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
 
+`say as player "..."` is the player's own message. It appears on the player's side, as a clicked button's answer does,
+with no name and no avatar, and with the ordinary reading time. A clicked button and an answer to an ask are messages of
+`player` too, so the player's presentation (`color`, `font`, and the bubble options) applies to all of them. Other
+speakers name the player through its fields, as in `say as mistressVera "Hi ${player.firstName}"`.
+
 A speaker can refer to another speaker explicitly:
 
 ```text
@@ -4694,7 +4702,7 @@ Set the current default speaker with the same `speaker` keyword followed by an e
 speaker mistressVera
 ```
 
-This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
+This does not redeclare the speaker, and `speaker player` makes the player the default speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
 
 **Status (Owner decision, 2026-10-13):** a message that names no speaker with `as` while no default speaker is set
 has no speaker, and `speaker` in it has no value. If no file of the package has a `speaker` statement that sets the
@@ -4908,10 +4916,10 @@ degradingNames
 lovingNames
 ```
 
-The engine supplies a default list for each player field. The player may customize these account-wide defaults. The
-player's settings require at least one name in each list, and the Player and engine validate this where a profile
-enters them; no profile input exists yet, so the validation arrives with it. There is no fallback text: a list that a
-script empties follows the ordinary empty-list rules.
+The account supplies the player's lists: `account.petNames` reads one, and `player.copyFrom(account)` copies them into
+the player. The player's settings require at least one name in each list, and the engine checks this where the host
+gives the account; the Player has no profile input yet. There is no fallback text: a list that a script empties follows
+the ordinary empty-list rules.
 
 ```text
 player.petNames
@@ -4922,6 +4930,7 @@ player.lovingNames
 Interpolation selects one random element according to the list rules:
 
 ```text
+player.copyFrom(account)
 say "Come here, ${player.petNames}."
 say "Good ${player.lovingNames}."
 say "You are such a ${player.degradingNames}."
@@ -4973,6 +4982,7 @@ Setting `gender` fills the default values of the derived terms below:
 Examples:
 
 ```text
+player.copyFrom(account)
 say "You are a good ${player.boyGirl}."
 say "${mistressVera.heShe} is waiting for you."
 ```
@@ -4989,7 +4999,10 @@ player.cockClit = "cock"
 
 `gender` therefore provides convenient defaults. It does not make gender identity, pronouns, anatomy, and preferred words inseparable.
 
-For `player`, account settings are loaded before the script starts. Explicit account terms override gender defaults. Script assignments then override the effective runtime values without silently changing the account. Changing `gender` only supplies values for terms that have not already been explicitly set at the applicable account or script layer.
+A term set explicitly wins over the default of `gender`, and changing `gender` changes only the terms that were not set
+explicitly. Another gender value supplies no defaults. The account follows the same rules for its own `gender` and
+terms. `player` starts with no gender and no terms, and `player.copyFrom(account)` copies the account's gender and the
+terms it sets explicitly. Script assignments then change the player without changing the account.
 
 ### Anatomical and arousal terms
 
@@ -5012,6 +5025,7 @@ The confirmed anatomical and arousal terms are:
 Examples:
 
 ```text
+player.copyFrom(account)
 say "Touch your ${player.cockPussy}."
 say "${player.strokeRub} your ${player.cockClit}."
 say "Focus on your ${player.glansClitoris}."
@@ -5050,6 +5064,7 @@ Actions and anatomical targets remain separate so the same terms can be recombin
 Examples:
 
 ```text
+player.copyFrom(account)
 say "${player.strokeRub} your ${player.cockClit}."
 say "Keep ${player.strokingRubbing} your ${player.cockClit}."
 say "${player.wankRub} your ${player.cockClit}."
@@ -5062,7 +5077,7 @@ The generic words `masturbate`, `masturbating`, and `masturbated` need no dynami
 
 ### Extensible character state
 
-Speaker-compatible objects are open to script-defined properties. A script may attach counters, scores, flags, collections, or other state to the player or any declared speaker:
+Speakers are open to script-defined properties. A script may attach counters, scores, flags, collections, or other state to the player or any declared speaker:
 
 ```text
 player.punishmentPoints = 0
@@ -5079,6 +5094,7 @@ Built-in dynamic terms, name lists, presentation fields, and custom properties m
 A speaker has a built-in field, term, or name list only once a declaration or an assignment gives it one. Reading one
 that nothing in the package gives the speaker is a compile error. `title` and `shortTitle` count for each other,
 `gender` counts for every term, and `title`, `shortTitle`, `firstName`, or `lastName` counts for `displayName`.
+`player.copyFrom(account)` anywhere in the package gives `player` every field it copies.
 
 Custom-property rules:
 
@@ -5099,11 +5115,22 @@ let toys = account.toys
 let hardcoreActive = account.hardcore.active
 ```
 
+Its person fields are those of a speaker: `title`, `shortTitle`, `firstName`, `lastName`, `displayName`, `alias`,
+`gender`, the terms, and the three name lists, as in `account.firstName`, `account.heShe`, and `account.petNames`. They
+read like a speaker's, so a term follows the account's `gender` unless the account sets it. The host gives them when the
+session starts, and the session keeps them, also across a checkpoint. Reading a field that the account lacks fails when
+the script runs.
+
+`player.copyFrom(account)` replaces the player's person fields with the account's: the name fields, `alias`, `gender`,
+the terms the account sets explicitly, and copies of the name lists, so `player.petNames.add(...)` never changes the
+account. A field the account lacks is cleared on `player`. The presentation fields and script-defined properties of
+`player` stay as they are. It is the only form of `copyFrom`: another receiver or argument is a compile error.
+
 Rules:
 
 - account fields are schema-defined, typed, and available to autocomplete;
 - unknown account fields are compile errors;
-- direct assignment is forbidden;
+- direct assignment and changing an account list are compile errors;
 - cheat mode may substitute only unlocked values according to the account rules;
 - locked values and hardcore state always expose the real server-confirmed state.
 
