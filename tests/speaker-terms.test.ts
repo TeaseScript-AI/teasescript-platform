@@ -133,6 +133,24 @@ test("a store into a speaker keeps the value that a receiver read through any na
       source,
     );
   }
+  // A speaker that another speaker's property holds, reached through a function result, when that property changes.
+  for (const terms of ["", '\n    heShe: "she"']) {
+    const source = [
+      `speaker anna {\n    displayName: "Anna"\n    gender: "female"${terms}\n}`,
+      `speaker ben {\n    displayName: "Ben"\n    gender: "other"${terms === "" ? "" : '\n    heShe: "he"'}\n}`,
+      'speaker vera {\n    displayName: "Vera"\n    friend: anna\n}',
+      "function selected {\n    return vera\n}",
+      'function change {\n    vera.friend = ben\n    wait 1 ms\n    return "!"\n}',
+      'say selected().friend.heShe.replace("s", change())',
+      "exit",
+    ].join("\n");
+    const equivalent = assertRuntimeResumeEquivalent(source);
+    assert.deepEqual(
+      equivalent.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["!he"],
+      source,
+    );
+  }
 });
 
 test("a gender other than male or female gives no term defaults", () => {

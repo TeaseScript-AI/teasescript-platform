@@ -416,12 +416,13 @@ function freezePreparedReference(
       rootFrameId: GLOBAL_SCOPE_ID,
       rootName: speaker.reference.identifier,
       path: descriptor.path.slice(speaker.depth),
-      // An attached reference keeps a copy of its root exactly where the plan keeps one.
+      // An attached reference keeps a copy of its root exactly where the plan keeps one; a detached one, which always
+      // keeps one, stays detached and follows the speaker through that copy.
       capturedRoot:
         descriptor.capturedRoot === undefined
           ? undefined
           : cloneCapturedSerializableValue(speaker.reference),
-      detached: false,
+      detached: descriptor.detached,
     });
     serialized.properties.length = 0;
     for (const property of followed.properties) serialized.properties.push(property);
