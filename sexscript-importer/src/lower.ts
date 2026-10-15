@@ -14979,7 +14979,7 @@ function lowerObjectMethodCallExpression(
   // Groovy tokenize() exists only for text: the parts between any of the delimiter characters, without empty parts,
   // which are the runs of other characters that findAll() finds; delimiters known only at runtime go to a helper.
   if (name === "tokenize" && argumentsNodes.length <= 1 && targetNode !== null) {
-    const text = lowerExpression(targetNode, context);
+    const text = receivedText(targetNode, context);
     const written = argumentsNodes.length === 0 ? " \t\n\r\f" : constantString(argumentsNodes[0]!);
     const members =
       written === null
@@ -15595,7 +15595,7 @@ function textOperation(
         );
         return null;
       }
-      const target = lowerExpression(targetNode, context);
+      const target = receivedText(targetNode, context);
       const computed =
         replacementText === null ? lowerExpression(argumentsNodes[1]!, context) : null;
       if (target === null || (replacementText === null && computed === null)) return null;
@@ -15658,7 +15658,8 @@ function textOperation(
         );
         return null;
       }
-      const target = lowerExpression(targetNode, context);
+      const target =
+        regex === null ? lowerExpression(targetNode, context) : receivedText(targetNode, context);
       if (target === null) return null;
       const by: IrExpression = regex?.literal ?? {
         kind: "literal",
@@ -15731,6 +15732,25 @@ function textOperation(
   if (lowered === null) return null;
   noteCodePoints();
   return member(operation, lowered, target);
+}
+
+/**
+ * The text a Groovy string method ran on: a value that may be no text, such as one of a variable that held text or a
+ * number, as `${value}`, which Groovy's call would have failed on where it was none.
+ */
+function receivedText(node: AstNode, context: LowerContext): IrExpression | null {
+  const value = lowerExpression(node, context);
+  if (value === null || onlyOf(inferType(node, context.types), STRING)) return value;
+  // Text already: a written or joined text, or a helper's text, such as a list's notation.
+  helperResults ??= functionResultTypes(allHelperStatements());
+  const result = value.kind === "call" ? helperResults.get(value.name) : undefined;
+  if (
+    value.kind === "template" ||
+    (value.kind === "literal" && typeof value.value === "string") ||
+    (result?.kind === "scalar" && result.name === "string")
+  )
+    return value;
+  return { kind: "template", parts: [{ value }] };
 }
 
 /** Whether occurrences of a text can overlap: some proper start of it is also its end. */

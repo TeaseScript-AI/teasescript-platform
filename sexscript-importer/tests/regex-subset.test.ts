@@ -7,6 +7,7 @@ test("legacy regular expressions of literal text are searched as text", () => {
   assert.equal(literalPattern("BOSS"), "BOSS");
   assert.equal(literalPattern("\\\\"), "\\");
   assert.equal(literalPattern("\\|"), "|");
+  assert.equal(literalPattern("\\#X\\,"), "#X,");
   for (const pattern of ["", "\\[|\\]", "[^0-9X]", "\\W+", "(?i)Domme", "a.c", "x*"])
     assert.equal(literalPattern(pattern), null, pattern);
 });

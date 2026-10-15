@@ -1,4 +1,6 @@
 const META = new Set([..."\\^$.|?*+()[]{}"]);
+/** ASCII punctuation, which Java escapes as itself. */
+const PUNCTUATION = /^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]$/u;
 
 /**
  * The text a legacy regular expression of literal characters and escaped metacharacters matches, which text
@@ -38,14 +40,17 @@ export function javaReplacementText(replacement: string): string | null {
   return result;
 }
 
-/** The text a pattern of literal characters and escaped metacharacters matches; null for any other pattern. */
+/**
+ * The text a pattern of literal characters and escaped punctuation, such as `\\|` or `\\#`, matches; null for any other
+ * pattern.
+ */
 function literalText(pattern: string): string | null {
   let text = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
     if (character === "\\") {
       const next = pattern[index + 1];
-      if (next === undefined || !META.has(next)) return null;
+      if (next === undefined || !PUNCTUATION.test(next)) return null;
       text += next;
       index += 1;
       continue;

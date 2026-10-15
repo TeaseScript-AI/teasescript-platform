@@ -544,3 +544,21 @@ test(
     assert.match(source, /"ab"\.replace\(\/\(a\)\/, mark\.replace\("\$", "\$\$"\)\)/u);
   },
 );
+
+// Escaped punctuation, `\#`, is literal text, which replaces as text; a value that may be no text, such as one that held
+// text or a number, is matched as its text, `${value}`, which Groovy's call needed it to be.
+test(
+  "replaces escaped punctuation as text, also in a value that may be no text",
+  { skip },
+  async () => {
+    const source = await convert([
+      "def rows = [['#X bread', 1], ['#X milk', 0]]",
+      "def item = rows[1][0]",
+      "item = item.replaceAll('\\\\#X', 'two')",
+      "def words = item.tokenize()",
+      "show(item + ' ' + words.size())",
+    ]);
+    assert.match(source, /^item = "\$\{item\}"\.replace\("#X", "two"\)$/mu);
+    assert.deepEqual(run(source), ["two milk 2"]);
+  },
+);
