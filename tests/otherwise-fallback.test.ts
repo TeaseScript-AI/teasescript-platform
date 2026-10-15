@@ -412,6 +412,61 @@ test("a null check removes the null of a copy of a place that took null first", 
   );
 });
 
+test("a variable of unknown type holds null after a copy of a place that held only null", () => {
+  // As after 'let x = out[0]': a null check or a fallback replaces the null, also where a method, a member, a dict, an
+  // object, or a function gives the copy, and in a parameter without a type.
+  const reads: [string, string][] = [
+    ["let out = [null]", "out[0]"],
+    ["let out = [null]", "out.get(0, default: null)"],
+    ["let out = [null]", "out.removeLast()"],
+    ["let out = [null]", "out.last"],
+    ["let d = dict{ a: null }", 'd["a"]'],
+    ["let p = { v: null }", "p.v"],
+    ["let out = [null]\nfunction first {\n    return out[0]\n}", "first()"],
+  ];
+  for (const check of ['if x == null {\n    x = "z"\n}', 'x = x otherwise "z"']) {
+    const sources = [
+      ...reads.map(
+        ([start, read]) =>
+          `${HIDE}${start}\nlet x = hide(null)\nx = ${read}\n${check}\nsay x + "!"\nexit`,
+      ),
+      `let out = [null]\nfunction shout(x) {\n    x = out[0]\n    ${check}\n    return x + "!"\n}\nsay shout(1)\nexit`,
+    ];
+    for (const source of sources) assert.deepEqual(sayTexts(source), ["z!"], source);
+  }
+  // Without a check it is null, and a later store that decides the place decides what the copy holds.
+  const start = `${HIDE}let out = [null]\nlet x = hide(null)\nx = out[0]\n`;
+  for (const [source, message] of [
+    [
+      `${start}say x + "!"\nexit`,
+      `'+' joins text only with other text, not with null. Put the value in the text instead, as in "\${x}!".`,
+    ],
+    [
+      `${start}if x == null {\n    x = "z"\n}\nsay x + "!"\nout.add(5)\nexit`,
+      "'x' may be a whole number (integer). Check it first: if x is string { ... }",
+    ],
+  ] as const)
+    assert.deepEqual(
+      diagnostics(source).map(([, code, text]) => [code, text]),
+      [["TSV043", message]],
+      source,
+    );
+  // Where the next check cannot start with what decided the place, here a list with an element of unknown type, the
+  // variable keeps the copy, so a use that needs a number is still checked.
+  const loop = (use: string) =>
+    `${HIDE}let items = []\nitems.add(hide(1))\nlet x = null\nlet y = hide(null)\nrepeat 2 {\n    y = x\n    if y == null {\n        y = 0\n    }\n${use}\n    x = items\n}\nexit`;
+  assert.deepEqual(
+    diagnostics(loop("    say y + 1")).map(([, code, , text]) => [code, text]),
+    [["TSV043", "y"]],
+  );
+  assert.deepEqual(
+    sayTexts(
+      loop('    if y is integer {\n        say "integer"\n    } else {\n        say "list"\n    }'),
+    ),
+    ["integer", "list"],
+  );
+});
+
 test("a fallback that may run ends a narrowing that it may change, and one that never runs ends none", () => {
   const source = (value: string) =>
     `${HIDE}let count: integer? = hide(1)

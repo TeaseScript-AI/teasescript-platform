@@ -294,9 +294,23 @@ test("a name after a say mode or skip word stays the text, also when it is a uni
     ['let s = "Hi"\nsay bubble(color: "red") s, instant', "Hi", "bubble"],
     ['let h = "Hi"\nsay prose h, instant', "Hi", "prose"],
     ['let ms = "Hi"\nsay skippable ms, instant', "Hi", "bubble"],
-    // A month or a year written out after a value asks for 'calendar', but after a mode, a skip word, or a speaker it
-    // is the text too.
+    // A month or a year written out after a value asks for 'calendar', and 'calendar' alone for a unit after it, but
+    // after a mode, a skip word, or a speaker either is the text too.
     ['let months = "Hi"\nsay skippable months, instant', "Hi", "bubble"],
+    ['let calendar = "Hi"\nsay skippable calendar, instant', "Hi", "bubble"],
+    ['let calendar = "Hi"\nsay bubble(color: "red") calendar, instant', "Hi", "bubble"],
+    // So in a value that goes on after it, such as a type test.
+    [`${DYNAMIC}let ms = dynamic("Hi")\nsay skippable ms is string, instant`, "true", "bubble"],
+    [
+      `${DYNAMIC}let calendar = dynamic("Hi")\nsay skippable calendar is string, instant`,
+      "true",
+      "bubble",
+    ],
+    [
+      `${DYNAMIC}let calendar = dynamic("Hi")\nsay bubble(color: "red") calendar is not integer and true, instant`,
+      "true",
+      "bubble",
+    ],
     ['let year = "Hi"\nsay bubble() year, instant', "Hi", "bubble"],
     ['let y = "Hi"\nsay prose y, instant', "Hi", "prose"],
     [
