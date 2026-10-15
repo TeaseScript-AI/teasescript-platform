@@ -5,32 +5,45 @@ import { withNestedBlocks } from "./repeated-text.ts";
 /**
  * Legacy `int ms = seconds * 1000` followed by `sleep(ms)` waited the seconds in whole milliseconds: where the variable
  * serves only such waits, they wait the seconds, `wait seconds s` (V30 keeps a wait's fraction), and the variable goes.
- * The seconds are a variable that nothing assigns again in the function (or the file's top level), so each wait reads
- * the value the variable was computed from; a remainder below a millisecond, which legacy dropped, is kept.
+ * The seconds are a parameter of the function, or a variable declared once in it (or in the file's top level), that
+ * nothing assigns again, not even a function declared inside, which may run between the computation and a wait; so each
+ * wait reads the value the variable was computed from. A remainder below a millisecond, which legacy dropped, is kept.
  */
 export function withSecondWaits(statements: IrStatement[]): IrStatement[] {
-  return scope(statements).map((statement) =>
-    statement.kind === "function" ? { ...statement, body: scope(statement.body) } : statement,
+  return scope(statements, []).map((statement) =>
+    statement.kind === "function"
+      ? {
+          ...statement,
+          body: scope(
+            statement.body,
+            statement.parameters.map(({ name }) => name),
+          ),
+        }
+      : statement,
   );
 }
 
-/** The waits of one function body or top level, outside the functions it declares. */
-function scope(body: IrStatement[]): IrStatement[] {
-  const own = body.filter((statement) => statement.kind !== "function");
+/**
+ * The waits of one function body or top level with its `parameters`; the functions declared in it count where they
+ * read or assign a variable, and their own waits stay.
+ */
+function scope(body: IrStatement[], parameters: readonly string[]): IrStatement[] {
   const replaced = new Map<string, IrExpression>();
-  each(own, (statement) => {
+  each(body, (statement) => {
     if (statement.kind !== "let") return;
     const seconds = secondsOf(statement.value);
     const name = statement.name;
-    if (seconds === null || count(own, isDeclaration(name)) !== 1) return;
-    if (count(own, isDeclaration(seconds.name)) > 1) return;
-    if (count(own, isAssignment(name)) > 0 || count(own, isAssignment(seconds.name)) > 0) return;
+    if (seconds === null || count(body, isDeclaration(name)) !== 1) return;
+    const declared =
+      count(body, isDeclaration(seconds.name)) + (parameters.includes(seconds.name) ? 1 : 0);
+    if (declared !== 1) return;
+    if (count(body, isAssignment(name)) > 0 || count(body, isAssignment(seconds.name)) > 0) return;
     // Every reference is a wait that the rewrite reaches, each holding one.
     let waits = 0;
-    each(own, (item) => {
+    each(body, (item) => {
       if (item.kind === "wait" && millisecondsOf(item) === name) waits += 1;
     });
-    if (count(own, isReference(name)) === waits) replaced.set(name, seconds);
+    if (count(body, isReference(name)) === waits) replaced.set(name, seconds);
   });
   if (replaced.size === 0) return body;
   const rewrite = (items: IrStatement[]): IrStatement[] =>
@@ -79,11 +92,11 @@ function each(items: IrStatement[], visit: (statement: IrStatement) => void): vo
   }
 }
 
-/** The IR nodes below a value, statements and expressions alike, that `test` accepts, outside nested functions. */
+/** The IR nodes below a value, statements and expressions alike, also of nested functions, that `test` accepts. */
 function count(value: unknown, test: (node: Record<string, unknown>) => boolean): number {
   if (Array.isArray(value))
     return value.reduce((total: number, item) => total + count(item, test), 0);
-  if (!isRecord(value) || value.kind === "function") return 0;
+  if (!isRecord(value)) return 0;
   return Object.values(value).reduce(
     (total: number, child) => total + count(child, test),
     test(value) ? 1 : 0,
@@ -93,7 +106,11 @@ function count(value: unknown, test: (node: Record<string, unknown>) => boolean)
 const isDeclaration =
   (name: string) =>
   (node: Record<string, unknown>): boolean =>
-    (node.kind === "let" && node.name === name) || (node.kind === "for" && node.variable === name);
+    (node.kind === "let" && node.name === name) ||
+    (node.kind === "for" && node.variable === name) ||
+    (node.kind === "function" &&
+      Array.isArray(node.parameters) &&
+      node.parameters.some((parameter) => isRecord(parameter) && parameter.name === name));
 
 const isAssignment =
   (name: string) =>

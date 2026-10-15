@@ -582,11 +582,18 @@ test(
       // Milliseconds that the script reads otherwise stay.
       "def hold = { t -> int ms = t * 1000; sleep(ms); return ms }",
       "show(hold(0.25))",
+      // So do milliseconds of seconds that a function may change before the wait.
+      "def gap = 0.5",
+      "def shorten = { gap = 0.25 }",
+      "int pause = gap * 1000",
+      "shorten()",
+      "sleep(pause)",
     ]);
     assert.match(source, /^say prose xs\.last, instant$/mu);
     assert.match(source, /^\s+wait time\w* s$/mu);
     assert.doesNotMatch(source, /integ|let it =/u);
     assert.match(source, /^\s+wait ms ms$/mu);
+    assert.match(source, /^wait pause ms$/mu);
     assert.deepEqual(run(source), ["b", "done", "250"]);
   },
 );
