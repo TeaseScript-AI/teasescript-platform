@@ -235,7 +235,9 @@ test("retains earlier argument RNG progress when a later argument faults", () =>
   const failing = plan(
     [
       "function take(first, second) { return first }",
-      "take(random(), randomInteger(1..1))",
+      // A bound the compiler cannot know, so the empty range fails when the call runs.
+      "let one = 1",
+      "take(random(), randomInteger(1..one))",
       "exit",
     ].join("\n"),
   );
@@ -438,18 +440,19 @@ test("fails an invalid prepared receiver before evaluating a user-call argument"
 test("fails an earlier ordinary expression before a later user-call side effect", () => {
   const source = [
     "let order = []",
+    "let one = 1",
     'function later { order.add("later")\nreturn 1 }',
-    "let values = [randomInteger(1..1), later()]",
+    "let values = [randomInteger(1..one), later()]",
     "exit",
   ].join("\n");
   const result = runSource(source);
-  const call = source.indexOf("randomInteger(1..1)");
+  const call = source.indexOf("randomInteger(1..one)");
 
   assert.equal(result.snapshot.status, "failed");
   assert.equal(result.snapshot.failure?.code, "TSR041");
   assert.deepEqual(
     [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
-    [call, call + "randomInteger(1..1)".length],
+    [call, call + "randomInteger(1..one)".length],
   );
   // EVIDENCE: source fixture initializes order as a list before the failing built-in call.
   assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);

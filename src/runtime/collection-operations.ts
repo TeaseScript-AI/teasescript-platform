@@ -1,3 +1,4 @@
+import { withoutNegativeZero } from "../conversions.js";
 import { compareDurations, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -5,11 +6,13 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { valueKey, type SerializableRuntimeValue } from "./serializable-values.js";
 import { compareTemporal } from "./temporal-operations.js";
+import { groupedDigits } from "./text-length.js";
 import {
   describeRuntimeValue,
   isAnyDuration,
   isCalendarDuration,
   isDuration,
+  isRange,
   isTemporal,
 } from "./value-predicates.js";
 
@@ -152,9 +155,30 @@ class ValueIndex {
   }
 }
 
+/** The fix for a range where a list is needed, as for a set (V30 §6). */
+export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
+
+/** The most numbers `range.toList()` makes (V30 §6, docs/RESOURCE-LIMITS.md). */
+const MAX_RANGE_LIST_LENGTH = 1_000_000;
+
+/**
+ * Whether `toList()` on the range of whole numbers from `start` to `end` gives more than `MAX_RANGE_LIST_LENGTH`
+ * numbers, and so fails before it builds the list: the message, or `null`. The compiler and the runtime share it.
+ */
+export function rangeListLengthProblem(
+  start: number,
+  end: number,
+  inclusive: boolean,
+): string | null {
+  const length = end - start + (inclusive ? 1 : 0);
+  if (length <= MAX_RANGE_LIST_LENGTH) return null;
+  const range = `${withoutNegativeZero(start)}${inclusive ? "..=" : ".."}${withoutNegativeZero(end)}`;
+  return `toList() can make a list of at most ${groupedDigits(MAX_RANGE_LIST_LENGTH)} numbers, but ${range} holds ${groupedDigits(length)}. Use a smaller range.`;
+}
+
 /** A text for a set operation's argument that is neither a list nor a set. */
 export function setOperationArgumentMessage(name: string, value: SerializableRuntimeValue): string {
-  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.`;
+  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.${isRange(value) ? RANGE_LIST_FIX : ""}`;
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

@@ -352,7 +352,7 @@ test("rejects case values that are not literals, speakers, or number ranges", ()
   );
   assert.equal(
     messages[4],
-    "The range 6..1 counts down, so it contains no numbers. Put the lower bound first, as in 1..6 or 1..=6.",
+    "The range 6..1 contains no numbers: a range never counts down. Put the lower bound first, as in 1..6 or 1..=6.",
   );
 });
 

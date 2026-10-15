@@ -630,25 +630,27 @@ useEventListener(document, "click", (event: MouseEvent) => {
   )
     focusInput();
 });
-// So does a click on a permanent button, which stays in place and would keep it; one pressed from the keyboard, whose
-// click has no click count, keeps it. Its focus goes before the press runs, which may remove the button or let focus
-// move to the next one. While its block leaves the composer nothing to answer, the composer takes no focus; focus that
-// belongs to nothing returns to it with the next interaction or message pacing.
+// So does a click on a control that stays in place and would keep it: a permanent button, the theme and fullscreen
+// controls, or a button of the camera view, also in its floating window outside the composition. One pressed from the
+// keyboard, whose click has no click count, keeps it. Its focus goes before the press runs, which may remove a
+// permanent button or let focus move to the next one. While the composer has nothing to answer, such as while a
+// permanent button's block runs, it takes no focus; focus that belongs to nothing returns to it with the next
+// interaction or message pacing.
+const inPlaceControls =
+  "[data-permanent-button], [data-theme-mode-control], [data-fullscreen-control], [data-viewfinder-controls] button";
 useEventListener(
   document,
   "click",
   (event: MouseEvent) => {
     const button =
-      event.target instanceof Element
-        ? event.target.closest<HTMLElement>("[data-permanent-button]")
-        : null;
+      event.target instanceof Element ? event.target.closest<HTMLElement>(inPlaceControls) : null;
     if (
       button &&
       event.detail > 0 &&
       event.button === 0 &&
       hoverAvailable.value &&
       !textSelected() &&
-      composition.value?.contains(button)
+      (composition.value?.contains(button) || button.closest("[data-floating-viewfinder]") !== null)
     ) {
       button.blur();
       focusInput();

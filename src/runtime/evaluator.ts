@@ -100,6 +100,8 @@ import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./te
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
 import {
+  RANGE_LIST_FIX,
+  rangeListLengthProblem,
   SET_OPERATIONS,
   setOperationArgumentMessage,
   setOperationItems,
@@ -1643,6 +1645,7 @@ export class Evaluator {
         );
       return;
     }
+    if (isRange(receiver) && method === "toList") return;
     if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
@@ -2368,6 +2371,20 @@ export class Evaluator {
       this.#referenceEpoch++;
       return this.#callDict(receiver, expression, positional, named);
     }
+    if (
+      expression.callee.kind === "property" &&
+      expression.callee.name === "toList" &&
+      isRange(receiver)
+    ) {
+      const count = positional.length + Object.keys(named).length;
+      if (count > 0)
+        throw fault(
+          "TSR028",
+          `toList() takes no arguments, but this call has ${count}.`,
+          expression.span,
+        );
+      return rangeList(receiver, expression.span);
+    }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
@@ -2480,7 +2497,7 @@ export class Evaluator {
           if (!isList(other))
             throw fault(
               "TSR060",
-              `addAll() needs a list, not ${describeRuntimeValue(other)}.${isSet(other) ? " Copy a set into a list with toList() first." : ""}`,
+              `addAll() needs a list, not ${describeRuntimeValue(other)}.${isSet(other) ? " Copy a set into a list with toList() first." : isRange(other) ? RANGE_LIST_FIX : ""}`,
               span,
             );
           // Every element is checked before any is added, and copies are taken first, so a list can add itself.
@@ -4624,6 +4641,21 @@ export function assertIntegerRange(
   }
 }
 
+/**
+ * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them, and at
+ * most `MAX_RANGE_LIST_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
+ * numbers, so it takes them without a copy.
+ */
+function rangeList(range: SerializableRuntimeRange, span: SourceSpan): SerializableRuntimeList {
+  assertIntegerRange(range, "toList()", span);
+  const tooLong = rangeListLengthProblem(range.start, range.end, range.inclusive);
+  if (tooLong !== null) throw fault("TSR045", tooLong, span);
+  const items: number[] = [];
+  for (let position = 0, length = rangeLength(range); position < length; position += 1)
+    items.push(range.start + position);
+  return { kind: "list", items };
+}
+
 /** A range as the source writes it, such as `1..=6`. */
 function rangeText(range: SerializableRuntimeRange): string {
   return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
@@ -4807,8 +4839,12 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
 function joinFix(left: SerializableRuntimeValue, right: SerializableRuntimeValue): string {
   if (isSet(left) || isSet(right))
     return " Join sets with union(), or copy a set into a list with toList() first.";
+  if (isList(left) && isRange(right))
+    return " To add the numbers of a range, write list + range.toList().";
   if (isList(left))
     return " To add one element, use add(value), or write list + [value] for a new list.";
+  if (isRange(left) && isList(right))
+    return " To add the numbers of a range, write range.toList() + list.";
   if (typeof left !== "string" && isList(right)) return " Write [value] + list for a new list.";
   return isVisibleScalar(typeof left === "string" ? right : left)
     ? ' Put the value in the text instead, as in "${first}${second}".'
