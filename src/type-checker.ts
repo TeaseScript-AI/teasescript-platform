@@ -98,11 +98,13 @@ import {
   mayBeMessage,
   memberProblems,
   positionalMethodProblems,
+  RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
+import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import {
   compareDurations,
   divideDuration,
@@ -4170,9 +4172,9 @@ class TypeChecker {
   }
 
   /**
-   * A range that `for` goes through, `randomInteger` draws from, or a wait or timer counts in units has whole-number
-   * bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler cannot know is
-   * checked at runtime.
+   * A range that `for` goes through, `randomInteger` draws from, `toList` gives, or a wait or timer counts in units has
+   * whole-number bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler
+   * cannot know is checked at runtime.
    */
   #checkWholeRangeBounds(expression: Expression, bound: string): void {
     const range = unwrap(expression);
@@ -4186,6 +4188,22 @@ class TypeChecker {
           part.span,
         );
     }
+  }
+
+  /**
+   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_RANGE_LIST_LENGTH` numbers
+   * (V30 §6). Bounds that a number cannot hold exactly are left to the runtime, which names them.
+   */
+  #checkRangeListLength(expression: Expression): void {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return;
+    const start = staticNumber(range.start);
+    const end = staticNumber(range.end);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return;
+    const length = end! - start! + (range.inclusive ? 1 : 0);
+    if (!Number.isSafeInteger(length)) return;
+    const problem = rangeListLengthProblem(start!, end!, range.inclusive);
+    if (problem !== null) this.#report(typeCode.invalidOperand, problem, expression.span);
   }
 
   /** The type of an expression that {@link #expressionTask} already checked. */
@@ -6430,6 +6448,11 @@ class TypeChecker {
     )
       // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
+    // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
+    if (method === "toList") {
+      this.#checkWholeRangeBounds(callee.object, "A toList range bound");
+      this.#checkRangeListLength(callee.object);
+    }
     // Every member of a union must have the method (ADR 0021 rule 3.5). A speaker has no methods (V30 §37), and where
     // another member has the method, the runtime checks a speaker.
     const all = members(value);
@@ -6455,7 +6478,7 @@ class TypeChecker {
       const textual = TEXT_MEMBERS.has(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
-        return isListOrSet(kept) || kept.kind === "dict";
+        return isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range";
       });
       if (textual || COLLECTION_METHODS.has(method) || collection) {
         // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
@@ -6466,11 +6489,13 @@ class TypeChecker {
         const removable = mayBe(receiver, "messageHandle", "permanentButton");
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
-          // A list or set checks its own methods, also `indexOf` and `lastIndexOf`, which take any value on a list.
+          // A list or set checks its own methods, also `indexOf`, `lastIndexOf`, and `count`, which take any value on a
+          // list.
           if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
             return this.#collectionMethodType(method, kept, callee.property, expression, scope);
-          // Its other methods, and a dict's in a union, take their arguments without names, in their number (V30 §16).
-          if (isListOrSet(kept) || kept.kind === "dict")
+          // Its other methods, a dict's in a union, and a range's `toList` take their arguments without names, in their
+          // number (V30 §16).
+          if (isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range")
             this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
             this.#reportProblems(
@@ -6560,7 +6585,9 @@ class TypeChecker {
     this.#reportUnless(type, isList, argument, "addAll() needs a list", () =>
       members(type).some((member) => resolved(member).kind === "set")
         ? " Copy a set into a list with toList() first."
-        : "",
+        : members(type).some((member) => resolved(member).kind === "range")
+          ? RANGE_LIST_FIX
+          : "",
     );
     const list = isKnown(nonNullTypeForUse(type))
       ? members(type).every(isList)
@@ -9479,6 +9506,9 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     return member?.parameters ? textResultType(member) : undefined;
   }
   if (value.kind === "scalar") return temporalMethodType(value.name, method);
+  // A range gives its whole numbers as a new list (V30 §6).
+  if (value.kind === "range")
+    return method === "toList" ? { kind: "list", element: INTEGER_TYPE } : undefined;
   if (value.kind === "dict") {
     if (method === "contains") return BOOLEAN_TYPE;
     if (method === "clear") return NULL_TYPE;
@@ -10322,6 +10352,7 @@ function joinMessage(
 ): string | undefined {
   const list = (type: StaticType): boolean => resolved(type).kind === "list";
   const set = (type: StaticType): boolean => resolved(type).kind === "set";
+  const range = (type: StaticType): boolean => resolved(type).kind === "range";
   const text = (type: StaticType): boolean => isScalar(type, "string");
   const value = (operand: Expression): string => operandLabel(operand) ?? "value";
   const named = (operand: Expression, kind: string): string => expressionLabel(operand) ?? kind;
@@ -10329,7 +10360,10 @@ function joinMessage(
     return `'+' joins two texts or two lists, not ${describeValue(left)} and ${describeValue(right)}. ${SET_JOIN_FIX}`;
   if (list(left) && !list(right)) {
     const items = named(expression.left, "list");
-    return `'+' joins a list only with another list, not with ${describeValue(right)}. To add one element, use '${items}.add(${value(expression.right)})', or write '${items} + [${value(expression.right)}]' for a new list.`;
+    const fix = range(right)
+      ? `To add the numbers of a range, write '${items} + ${rangeListText(expression.right)}'.`
+      : `To add one element, use '${items}.add(${value(expression.right)})', or write '${items} + [${value(expression.right)}]' for a new list.`;
+    return `'+' joins a list only with another list, not with ${describeValue(right)}. ${fix}`;
   }
   if (text(left) !== text(right) && (text(left) || !list(right))) {
     const other = text(left) ? right : left;
@@ -10339,7 +10373,7 @@ function joinMessage(
     return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
   }
   if (list(right) && !list(left))
-    return `'+' joins a list only with another list, not with ${describeValue(left)}. Write '[${value(expression.left)}] + ${named(expression.right, "list")}' for a new list.`;
+    return `'+' joins a list only with another list, not with ${describeValue(left)}. ${range(left) ? `To add the numbers of a range, write '${rangeListText(expression.left)} + ${named(expression.right, "list")}'.` : `Write '[${value(expression.left)}] + ${named(expression.right, "list")}' for a new list.`}`;
   return undefined;
 }
 
@@ -10351,6 +10385,26 @@ function interpolationFix(expression: Extract<Expression, { kind: "binaryExpress
     plainText(operand) ?? `\${${operandLabel(operand) ?? "value"}}`;
   return `"${part(expression.left)}${part(expression.right)}"`;
 }
+
+/**
+ * The `toList()` call that gives the numbers of the range `operand`, as source text: `r.toList()` for one in a variable,
+ * `(1..=3).toList()` for one written with an operator, which binds less tightly than a method call, and
+ * `range.toList()` for one too long to show.
+ */
+function rangeListText(operand: Expression): string {
+  const text = expressionText(operand);
+  if (text === null) return "range.toList()";
+  return POSTFIX_OPERANDS.has(operand.kind) ? `${text}.toList()` : `(${text}).toList()`;
+}
+
+/** The expressions a method call can follow without parentheses. */
+const POSTFIX_OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+  "parenthesizedExpression",
+]);
 
 /** The source spelling of a variable or property path, a number or boolean literal, or plain text in quotes. */
 function operandLabel(expression: Expression): string | null {
@@ -10565,6 +10619,8 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
   const value = operandLabel(statement.value) ?? "value";
   if (isScalar(operand, "string") && isShowable(type))
     return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
+  if (resolved(operand).kind === "list" && resolved(type).kind === "range")
+    return ` To add the numbers of a range, use '${target} += ${rangeListText(statement.value)}'.`;
   if (resolved(operand).kind === "list" && resolved(type).kind !== "set")
     return ` To add one element, use '${target}.add(${value})'.`;
   return "";

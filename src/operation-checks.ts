@@ -76,6 +76,9 @@ export interface OperationProblem {
   readonly fix?: string;
 }
 
+/** The fix for a range where a list is needed, as for a set (V30 §6). */
+export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
+
 /** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
 const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
 
@@ -136,8 +139,7 @@ export function memberProblems(
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
       return takeProblems(name, undefined, property, call, typeOf);
-    // Only lists have `count`, and a list's `indexOf` and `lastIndexOf` take any value, so only one argument without a
-    // name is checked.
+    // A list's `indexOf`, `lastIndexOf`, and `count` take any value, so only one argument without a name is checked.
     if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
     // A list's `get` takes an index and a dict's a key, each with a `default:`.
     if (name === "get") return getProblems(undefined, property, call);
@@ -1015,7 +1017,7 @@ export function collectionMethodProblems(
     return [
       {
         kind: "invalidOperand",
-        message: `${name}() needs a list or a set, not ${describeValue(type)}.`,
+        message: `${name}() needs a list or a set, not ${describeValue(type)}.${members(type).some((member) => resolved(member).kind === "range") ? RANGE_LIST_FIX : ""}`,
         span: argument.span,
       },
     ];

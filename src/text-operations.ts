@@ -49,6 +49,7 @@ export const TEXT_MEMBERS: ReadonlyMap<string, TextMember> = new Map([
   member("endsWith", [part], "boolean"),
   member("indexOf", [partOrRegex], "integer?"),
   member("lastIndexOf", [partOrRegex], "integer?"),
+  member("count", [{ name: "part", kind: "nonEmptyTextOrRegex" }], "integer"),
   member(
     "substring",
     [

@@ -387,7 +387,8 @@ The current function subset includes:
 
 Implemented value operations include the V30 §8 text operations and regexes, joining two texts or two lists with `+`
 (§4), list `join`, `addAll`, `sort`, `shuffle`, `reverse`, `take`, `takeLast`, `indexOf`, `lastIndexOf`, `count`, and
-`get` with `default:`, the `intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`,
+`get` with `default:`, the `intersection`, `union`, and `difference` of lists and sets, a range's §6 `toList()`, the
+§13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
 `toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
 `hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the

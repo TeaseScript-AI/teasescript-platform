@@ -30,8 +30,8 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 
 /*
  * Regexes (V30 §8): the literal, the `regex` value, `toRegex`, the searches `matches`, `contains`, `find`, `capture`,
- * `indexOf`, `findAll`, and `lastIndexOf`, `split` and `replace` with a regex, and the work limit of each operation,
- * from source through the runtime, checkpoints, and storage.
+ * `indexOf`, `findAll`, `count`, and `lastIndexOf`, `split` and `replace` with a regex, and the work limit of each
+ * operation, from source through the runtime, checkpoints, and storage.
  */
 
 function said(...lines: string[]): string[] {
@@ -510,6 +510,19 @@ test("lastIndexOf with a regex gives the start of the last match, as findAll fin
   );
 });
 
+test("count with a regex gives the number of matches findAll finds", () => {
+  assert.deepEqual(
+    said(
+      'say "${"1980-2026-10-14".count(/\\d+/)} ${"Ab aB".count(/ab/i)} ${"abc".count(/x/)}"',
+      // An empty match counts, also right after a match, as for findAll.
+      'say "${"ab".count(/x*/)} ${"a".count(/a*/)} ${"".count(/x*/)} ${"😀😀".count(/x*/)}"',
+      // Matches do not overlap, as the text form counts occurrences.
+      'say "${"aaaa".count(/aa/)} ${"aaaa".count("aa")} ${"ababa".count(/aba/)}"',
+    ),
+    ["4 2 0", "3 2 1 3", "2 2 1"],
+  );
+});
+
 test("the regex operations check their arguments", () => {
   assert.deepEqual(diagnostics('let all = "a".findAll("a")\nexit'), [
     [
@@ -563,6 +576,7 @@ test("every regex operation stops at its work limit, at the same count each time
     ['"a1b22".split(/\\d/)', '["a", "b", "", ""]', 183],
     ['"a1b22".replace(/(\\d)/, "<$1>")', "a<1>b<2><2>", 459],
     ['"a1b22".lastIndexOf(/\\d+/)', "3", 195],
+    ['"a1b22".count(/\\d+/)', "2", 195],
   ];
   for (const [expression, said, units] of cases) {
     assert.equal(sayWithin(units, expression), said, expression);
@@ -579,6 +593,8 @@ test("the work limit stops repeated searches, long texts, and large results", ()
     sayWithin(MAX_REGEX_WORK, '"a".repeat(2000).findAll(/a.*b|a/).length'),
     TOO_MUCH_WORK,
   );
+  assert.equal(sayWithin(MAX_REGEX_WORK, '"a".repeat(200).count(/a.*b|a/)'), "200");
+  assert.equal(sayWithin(MAX_REGEX_WORK, '"a".repeat(2000).count(/a.*b|a/)'), TOO_MUCH_WORK);
   // Single searches count too.
   assert.equal(sayWithin(MAX_REGEX_WORK, '"a".repeat(1000000).contains(/x/)'), TOO_MUCH_WORK);
   // What a replace builds counts, so a few matches cannot make a huge text.
