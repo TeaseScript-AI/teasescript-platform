@@ -17,13 +17,24 @@
  * `$` does not match. Java ignores the case of ASCII letters only, and RE2 also matches
  * the Kelvin sign with k and the long s with s, so `(?i)` converts only without the letters k and s, characters other
  * than ASCII, `\w`, and ranges.
+ *
+ * A converted regex also tells its number of groups, which a replacement may name, and whether it can match no text
+ * (`empty`), where Java's split() separated otherwise than TeaseScript's.
  */
-export type JavaRegex = { pattern: string; flags: string } | { reason: string };
+export type JavaRegex =
+  { pattern: string; flags: string; groups: number; empty: boolean } | { reason: string };
 
 /** Java's line terminators, which its `.` and `$` treat apart. */
 const LINE_TERMINATORS = String.raw`\n\r\x{85}\x{2028}\x{2029}`;
 /** Java's `\s`. */
 const SPACES = String.raw`\t\n\x0B\f\r `;
+/** The control characters that RE2 escapes by a letter. */
+const ESCAPES = new Map([
+  ["\t", "\\t"],
+  ["\n", "\\n"],
+  ["\r", "\\r"],
+  ["\f", "\\f"],
+]);
 /** RE2's repetition limit. */
 const MAX_REPEAT = 1000;
 /**
@@ -53,10 +64,28 @@ function repeated(ending: Ending, min: number, unbounded: boolean): Ending {
 }
 
 /**
- * `within` says how the regex is used: `whole` for a match of the whole text (==~, matches()), `find` for a test of a
- * match anywhere (=~ as a condition), where a match may take one more character, but no match's text is used.
+ * A character as RE2 literal text: a metacharacter, the slash, and in a class `-` escaped, a control character or line
+ * break by its code, and null for a lone surrogate, which a TeaseScript pattern cannot hold.
  */
-export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
+export function re2Literal(character: string, inClass = false): string | null {
+  const code = character.codePointAt(0)!;
+  if (code >= 0xd800 && code <= 0xdfff) return null;
+  if ("\\.+*?()|[]{}^$/".includes(character) || (inClass && character === "-"))
+    return `\\${character}`;
+  const named = ESCAPES.get(character);
+  if (named !== undefined) return named;
+  if (code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029)
+    return `\\x{${code.toString(16)}}`;
+  return character;
+}
+
+/**
+ * `within` says how the regex is used: `whole` for a match of the whole text (==~, matches()), `find` for a test of a
+ * match anywhere (=~ as a condition), where a match may take one more character, but no match's text is used, and
+ * `all` for every match (replaceAll(), split(), tokenize()), whose text is used, so a `$` that Java also matched before
+ * a final line terminator does not convert.
+ */
+export function javaRegex(source: string, within: "whole" | "find" | "all"): JavaRegex {
   if (source.length > MAX_LENGTH)
     return { reason: `a pattern longer than ${MAX_LENGTH} characters` };
   // Modes at the start, `(?s)`, `(?i)`, or both, are the regex's flags.
@@ -67,17 +96,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   const fail = (reason: string): JavaRegex => ({ reason });
   const foldsApart = (character: string): boolean =>
     insensitive && (/[ksKS]/u.test(character) || character.codePointAt(0)! > 0x7f);
-  // A character as RE2 literal text: a metacharacter, the slash, and in a class `-` escaped, a control character or
-  // line break by its code, and null for a lone surrogate, which a TeaseScript pattern cannot hold.
-  const literal = (character: string, inClass = false): string | null => {
-    const code = character.codePointAt(0)!;
-    if (code >= 0xd800 && code <= 0xdfff) return null;
-    if ("\\.+*?()|[]{}^$/".includes(character) || (inClass && character === "-"))
-      return `\\${character}`;
-    if (code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029)
-      return `\\x{${code.toString(16)}}`;
-    return character;
-  };
+  const literal = re2Literal;
   const out: string[] = [];
   let index = 0;
   let depth = 0;
@@ -87,6 +106,16 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   let last: "atom" | "group" | null = null;
   // How the pattern so far may end (Ending).
   let ending: Ending = "start";
+  // Whether the pattern can match no text: of the current alternative, whether its part before the last element and
+  // that element can, whether an earlier alternative of its group can, and the same of each enclosing group.
+  let before = true;
+  let element = true;
+  let alternatives = false;
+  const enclosing: Array<{ before: boolean; element: boolean; alternatives: boolean }> = [];
+  const next = (empty: boolean): void => {
+    before &&= element;
+    element = empty;
+  };
   // An escape after `\` outside a class, or why it does not convert.
   const escape = (character: string | undefined): string | { reason: string } => {
     if (character === undefined) return { reason: "a trailing backslash" };
@@ -116,16 +145,23 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       out.push(text);
       last = "atom";
       ending = single("rDWs".includes(escaped!), "nDWs".includes(escaped!));
+      next(false);
     } else if (character === ".") {
       out.push(dotAll ? "." : `[^${LINE_TERMINATORS}]`);
       last = "atom";
       ending = single(dotAll, dotAll);
+      next(false);
     } else if (character === "^") {
       if (index !== 1) return fail("^ after the start of the pattern");
       out.push("^");
       last = null;
+      next(true);
     } else if (character === "$") {
       if (index !== characters.length) return fail("$ before the end of the pattern");
+      if (within === "all")
+        return fail(
+          "$, which Java also matched before a line terminator at the end, where the match is used",
+        );
       // Java's `$` also matched before a line terminator at the end, which a test may take into the match: the same
       // where no match ends between a final \r and \n, where Java's `$` did not match, so after a part whose last
       // character is no \r, or that can take the \n as well.
@@ -138,6 +174,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       }
       out.push(within === "whole" ? "$" : `(?:\\r\\n|[${LINE_TERMINATORS}])?$`);
       last = null;
+      next(true);
     } else if (character === "(") {
       let open = "(";
       if (characters[index] === "?") {
@@ -151,16 +188,23 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       depth += 1;
       last = null;
       ending = "start";
+      enclosing.push({ before, element, alternatives });
+      [before, element, alternatives] = [true, true, false];
     } else if (character === ")") {
       if (depth === 0) return fail("an unbalanced parenthesis");
       out.push(")");
       depth -= 1;
       last = "group";
       ending = "group";
+      const empty = alternatives || (before && element);
+      ({ before, element, alternatives } = enclosing.pop()!);
+      next(empty);
     } else if (character === "|") {
       out.push("|");
       last = null;
       ending = "start";
+      alternatives ||= before && element;
+      [before, element] = [true, true];
     } else if (character === "*" || character === "+" || character === "?") {
       if (last === null) return fail("a quantifier without anything to repeat");
       const quantified = quantifier(character);
@@ -168,6 +212,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       out.push(quantified);
       ending = repeated(ending, character === "+" ? 1 : 0, character !== "?");
       last = null;
+      if (character !== "+") element = true;
     } else if (character === "{") {
       const end = characters.indexOf("}", index);
       const bounds = /^(\d+)(?:(,)(\d*))?$/u.exec(
@@ -191,12 +236,14 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       out.push(quantified);
       ending = repeated(ending, low, bounds[2] !== undefined && high === null);
       last = null;
+      if (low === 0) element = true;
     } else if (character === "[") {
       const set = characterClass();
       if ("reason" in set) return set;
       out.push(set.text);
       last = "atom";
       ending = single(set.cr, set.lf);
+      next(false);
     } else {
       if (foldsApart(character)) return fail(FOLDS_APART);
       const text = literal(character);
@@ -204,6 +251,7 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
       out.push(text);
       last = "atom";
       ending = single(character === "\r", character === "\n");
+      next(false);
     }
   }
   if (depth !== 0) return fail("an unbalanced parenthesis");
@@ -212,7 +260,12 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
   // Also the length the expansions of `.`, `\s`, and `$` give.
   if (pattern.length > MAX_LENGTH)
     return fail(`a regex longer than ${MAX_LENGTH} characters once converted`);
-  return { pattern, flags: `${insensitive ? "i" : ""}${dotAll ? "s" : ""}` };
+  return {
+    pattern,
+    flags: `${insensitive ? "i" : ""}${dotAll ? "s" : ""}`,
+    groups,
+    empty: alternatives || (before && element),
+  };
 
   // A character class after its `[`: single characters, escaped punctuation, `\d \w \s`, and ranges of two single
   // characters; its `-` elsewhere only first or last.
@@ -287,4 +340,35 @@ export function javaRegex(source: string, within: "whole" | "find"): JavaRegex {
     }
     return { reason: "an unclosed class" };
   }
+}
+
+/**
+ * A Java replacement text (Matcher.appendReplacement) as the replacement of a TeaseScript regex search with `groups`
+ * groups (V30 §8 "Regexes"): `\x` is the character x, a `$` of it `$$`; `$n` names a group, read as Java read it, the
+ * first digit and each next one while the number stays a group. Null where Java failed, at a `$` without a group's
+ * number, a group the regex does not have, or a trailing backslash; for a named group `${name}`, which no converted
+ * regex has; and where a digit follows a group, which TeaseScript would read as part of its number.
+ */
+export function javaReplacement(text: string, groups: number): string | null {
+  const characters = [...text];
+  const digit = (character: string | undefined): boolean =>
+    character !== undefined && character >= "0" && character <= "9";
+  let out = "";
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index]!;
+    if (character === "\\") {
+      const escaped = characters[++index];
+      if (escaped === undefined) return null;
+      out += escaped === "$" ? "$$" : escaped;
+    } else if (character === "$") {
+      if (!digit(characters[index + 1])) return null;
+      let number = Number(characters[++index]);
+      if (number > groups) return null;
+      while (digit(characters[index + 1]) && number * 10 + Number(characters[index + 1]) <= groups)
+        number = number * 10 + Number(characters[++index]);
+      if (digit(characters[index + 1])) return null;
+      out += `$${number}`;
+    } else out += character;
+  }
+  return out;
 }

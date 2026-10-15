@@ -85,15 +85,8 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
     }
     let numbered = true
     for partValue in parts {
-      if partValue.length == 0 {
+      if not partValue.matches(/[0-9]+/) {
         numbered = false
-      }
-      let position = 0
-      while position < partValue.length {
-        if not "0123456789".contains(partValue.substring(position, position + 1)) {
-          numbered = false
-        }
-        position += 1
       }
     }
     if parts.length > 0 and numbered {
@@ -114,10 +107,7 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
       value = entries
     }
   }
-  if value == null {
-    value = whenMissing
-  }
-  return value
+  return value otherwise whenMissing
 }
 // Where a package has keys that are one another's elements, a key whose computed part is a whole number, or an element
 // of a list that only ever holds texts written out, cannot be such an element: it stays a plain save.

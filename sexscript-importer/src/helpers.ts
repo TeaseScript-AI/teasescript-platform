@@ -209,7 +209,6 @@ export type HelperName =
   | "times"
   | "castText"
   | "compare"
-  | "replaceChars"
   | "askInteger"
   | "askNumber"
   | "sendImage"
@@ -336,7 +335,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "times",
   "castText",
   "compare",
-  "replaceChars",
   "askInteger",
   "askNumber",
   "tokenize",
@@ -497,6 +495,9 @@ const call = (target: IrExpression, name: string, ...args: IrExpression[]): IrEx
   arguments: args,
 });
 const not = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "not", value });
+const regex = (pattern: string): IrExpression => ({ kind: "regex", pattern, flags: "" });
+const otherwise = (value: IrExpression, fallback: IrExpression): IrExpression =>
+  bin("otherwise", value, fallback);
 const typedLet = (name: string, type: string, value: IrExpression): IrStatement => ({
   kind: "let",
   name,
@@ -626,9 +627,13 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyRandom",
         ["limit"],
         [
-          ifS(bin("==", v("limit"), lit(null)), [ret(randomBelow(lit(100)))]),
           // A fractional bound was truncated toward zero, like (int) max.
-          letS("bound", bin("-", v("limit"), bin("%", v("limit"), lit(1)))),
+          letS("bound", {
+            kind: "call",
+            name: "toInteger",
+            positional: [otherwise(v("limit"), lit(100))],
+            named: {},
+          }),
           ifS(bin(">", v("bound"), lit(0)), [ret(randomBelow(v("bound")))]),
           ifS(bin("<", v("bound"), lit(0)), [
             ret({
@@ -641,7 +646,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
+  // Java %.Nf: the number rounded half up as it is written to `digits` decimals, as round(decimals:) rounds it, and
+  // written with exactly that many; `factor` is 10 to the power of `digits`.
   fixed: {
     name: "sexscriptLegacyFixed",
     build: () =>
@@ -652,7 +658,18 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("scaled", {
             kind: "call",
             name: "round",
-            positional: [bin("*", v("value"), v("factor"))],
+            positional: [
+              bin(
+                "*",
+                {
+                  kind: "call",
+                  name: "round",
+                  positional: [v("value")],
+                  named: { decimals: v("digits") },
+                },
+                v("factor"),
+              ),
+            ],
             named: {},
           }),
           letS("minus", lit("")),
@@ -688,11 +705,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       const rest = v("rest");
       const head = call(rest, "substring", lit(0), lit(1));
       const skip = set(rest, call(rest, "substring", lit(1)));
-      const digit = bin(
-        "and",
-        bin(">", prop(rest, "length"), lit(0)),
-        bin(">=", call(lit("0123456789"), "indexOf", head), lit(0)),
-      );
+      const digit = call(rest, "contains", regex("^[0-9]"));
       const number = (name: string): IrStatement => ({
         kind: "while",
         condition: digit,
@@ -720,7 +733,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("next", lit(0)),
           {
             kind: "while",
-            condition: bin(">=", call(rest, "indexOf", lit("%")), lit(0)),
+            condition: call(rest, "contains", lit("%")),
             body: [
               letS("at", call(rest, "indexOf", lit("%"))),
               set(v("result"), call(rest, "substring", lit(0), v("at")), "+="),
@@ -742,10 +755,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               ]),
               letS("conversion", head),
               skip,
-              letS("text", lit("")),
-              ifS(bin("<", v("next"), prop(v("values"), "length")), [
-                text(at(v("values"), v("next"))),
-              ]),
+              letS("text", call(v("values"), "get", v("next"), lit(""))),
               set(v("next"), lit(1), "+="),
               ifS(bin("==", v("conversion"), lit("d")), [
                 text({
@@ -902,80 +912,14 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyPathTag",
         ["path"],
         [
-          letS("tag", lit("")),
-          letS("gap", lit(false)),
-          forS(
-            "character",
-            {
-              kind: "methodCall",
-              target: { kind: "methodCall", target: v("path"), name: "lowercase", arguments: [] },
-              name: "split",
-              arguments: [lit("")],
-            },
-            [
-              ifS(
-                {
-                  kind: "methodCall",
-                  target: lit("abcdefghijklmnopqrstuvwxyz0123456789"),
-                  name: "contains",
-                  arguments: [v("character")],
-                },
-                [
-                  ifS(bin("and", v("gap"), bin("!=", v("tag"), lit(""))), [
-                    set(v("tag"), template(v("tag"), "-")),
-                  ]),
-                  set(v("tag"), template(v("tag"), v("character"))),
-                  set(v("gap"), lit(false)),
-                ],
-                [set(v("gap"), lit(true))],
-              ),
-            ],
+          ret(
+            call(
+              call(call(v("path"), "lowercase"), "replace", regex("[^a-z0-9]+"), lit("-")),
+              "replace",
+              regex("^-|-$"),
+              lit(""),
+            ),
           ),
-          ret(v("tag")),
-        ],
-      ),
-  },
-  // Java replaceAll() with one character class: each character in `chars` (or, with `keep`, each other character)
-  // becomes the replacement, a run of them at once with `runs`.
-  replaceChars: {
-    name: "sexscriptLegacyReplaceChars",
-    build: () =>
-      fn(
-        "sexscriptLegacyReplaceChars",
-        ["text", "chars", "keep", "replacement", "runs"],
-        [
-          letS("result", lit("")),
-          letS("inRun", lit(false)),
-          forS(
-            "character",
-            { kind: "methodCall", target: v("text"), name: "split", arguments: [lit("")] },
-            [
-              ifS(
-                bin(
-                  "==",
-                  {
-                    kind: "methodCall",
-                    target: v("chars"),
-                    name: "contains",
-                    arguments: [v("character")],
-                  },
-                  v("keep"),
-                ),
-                [
-                  set(v("result"), template(v("result"), v("character"))),
-                  set(v("inRun"), lit(false)),
-                ],
-                [
-                  ifS(
-                    { kind: "unary", operator: "not", value: bin("and", v("runs"), v("inRun")) },
-                    [set(v("result"), template(v("result"), v("replacement")))],
-                  ),
-                  set(v("inRun"), lit(true)),
-                ],
-              ),
-            ],
-          ),
-          ret(v("result")),
         ],
       ),
   },
@@ -1005,19 +949,9 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyAskInteger",
         ["prefill"],
         [
-          ifS({ kind: "typeTest", value: v("prefill"), type: "number" }, [
-            ifS(bin("==", bin("%", v("prefill"), lit(1)), lit(0)), [
-              ret({
-                kind: "input",
-                input: "askInteger",
-                defaultValue: {
-                  kind: "call",
-                  name: "floor",
-                  positional: [v("prefill")],
-                  named: {},
-                },
-              }),
-            ]),
+          // A whole number, also one such as 2.0, is an integer (V30 §13).
+          ifS({ kind: "typeTest", value: v("prefill"), type: "integer" }, [
+            ret({ kind: "input", input: "askInteger", defaultValue: v("prefill") }),
           ]),
           ret({ kind: "input", input: "askInteger" }),
         ],
@@ -1048,8 +982,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS(bin("<", v("position"), lit(0)), [
             ret(at(v("list"), bin("+", prop(v("list"), "length"), v("position")))),
           ]),
-          ifS(bin(">=", v("position"), prop(v("list"), "length")), [ret(lit(null))]),
-          ret(at(v("list"), v("position"))),
+          ret(call(v("list"), "get", v("position"), lit(null))),
         ],
       ),
   },
@@ -1215,9 +1148,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         name: string,
         ...args: IrExpression[]
       ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
-      const secret = SECRET_PARAMETER_PARTS.map((part) =>
-        method(v("name"), "contains", lit(part)),
-      ).reduce((left, right) => bin("or", left, right));
+      const secret = method(v("name"), "contains", regex(SECRET_PARAMETER_PARTS.join("|")));
       return fn(
         "sexscriptLegacyMaskUrl",
         ["url"],
@@ -1254,82 +1185,38 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   // The lines of a text as File.readLines() split them: at LF, CR, or CRLF, without an empty last line.
   textLines: {
     name: "sexscriptLegacyTextLines",
-    build: () => {
-      const replace = (target: IrExpression, from: string, to: string): IrExpression => ({
-        kind: "methodCall",
-        target,
-        name: "replace",
-        arguments: [lit(from), lit(to)],
-      });
-      return fn(
+    build: () =>
+      fn(
         "sexscriptLegacyTextLines",
         ["text"],
         [
-          letS("lines", {
-            kind: "methodCall",
-            target: replace(replace(template(v("text")), "\r\n", "\n"), "\r", "\n"),
-            name: "split",
-            arguments: [lit("\n")],
-          }),
+          letS("lines", call(template(v("text")), "split", regex("\\r\\n|\\r|\\n"))),
           ifS(bin("==", prop(v("lines"), "last"), lit("")), [
-            {
-              kind: "expression",
-              expression: {
-                kind: "methodCall",
-                target: v("lines"),
-                name: "removeLast",
-                arguments: [],
-              },
-              span: null,
-            },
+            { kind: "expression", expression: call(v("lines"), "removeLast"), span: null },
           ]),
           ret(v("lines")),
         ],
-      );
-    },
+      ),
   },
-  // Text without message markup markers, for a loop that shows it character by character (lower.ts plainCharacters).
+  // Text without message markup markers, for a loop that shows it character by character (lower.ts plainCharacters):
+  // without bold and italic stars, strike-through tildes, and underline and colour tags.
   plainText: {
     name: "sexscriptLegacyPlainText",
-    build: () => {
-      const method = (
-        target: IrExpression,
-        name: string,
-        ...args: IrExpression[]
-      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
-      const stripped = ["**", "~~", "[u]", "[/u]", "[/color]"].reduce(
-        (text, marker) => method(text, "replace", lit(marker), lit("")),
-        template(v("value")),
-      );
-      return fn(
+    build: () =>
+      fn(
         "sexscriptLegacyPlainText",
         ["value"],
         [
-          letS("text", stripped),
-          letS("start", method(v("text"), "indexOf", lit("[color="))),
-          {
-            kind: "while",
-            condition: bin(">=", v("start"), lit(0)),
-            body: [
-              letS("end", method(v("text"), "indexOf", lit("]"))),
-              ifS(bin("<", v("end"), v("start")), [
-                ret(method(v("text"), "replace", lit("*"), lit(""))),
-              ]),
-              set(
-                v("text"),
-                template(
-                  method(v("text"), "substring", lit(0), v("start")),
-                  method(v("text"), "substring", bin("+", v("end"), lit(1))),
-                ),
-              ),
-              set(v("start"), method(v("text"), "indexOf", lit("[color="))),
-            ],
-            span: null,
-          },
-          ret(method(v("text"), "replace", lit("*"), lit(""))),
+          ret(
+            call(
+              template(v("value")),
+              "replace",
+              regex("\\*|~~|\\[\\/?u\\]|\\[color=[^\\]]*\\]|\\[\\/color\\]"),
+              lit(""),
+            ),
+          ),
         ],
-      );
-    },
+      ),
   },
   // Legacy loadBoolean(): a stored value read as text is true only as "true" in any case; a missing one is false here.
   // Legacy showButton() with a timeout known only at runtime: the seconds until the click, at most the timeout; a zero
@@ -1400,7 +1287,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     name: "sexscriptLegacyReceiveInteger",
     build: () => {
       const missing = ret(v("whenMissing"));
-      const digits = v("digits");
       return {
         kind: "function",
         name: "sexscriptLegacyReceiveInteger",
@@ -1412,30 +1298,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("value", { kind: "load", key: v("key") }),
           ifS(bin("==", v("value"), lit(null)), [missing]),
           letS("text", template(v("value"))),
-          letS("digits", v("text")),
-          ifS(
-            bin(
-              "or",
-              call(v("text"), "startsWith", lit("-")),
-              call(v("text"), "startsWith", lit("+")),
-            ),
-            [set(digits, call(v("text"), "substring", lit(1)))],
-          ),
-          ifS(bin("==", digits, lit("")), [missing]),
-          forS("character", call(digits, "split", lit("")), [
-            ifS(not(call(lit("0123456789"), "contains", v("character"))), [missing]),
-          ]),
-          {
-            kind: "while",
-            condition: bin(
-              "and",
-              bin(">", prop(digits, "length"), lit(1)),
-              call(digits, "startsWith", lit("0")),
-            ),
-            body: [set(digits, call(digits, "substring", lit(1)))],
-            span: null,
-          },
-          ifS(bin(">", prop(digits, "length"), lit(10)), [missing]),
+          // A sign and at most ten digits after leading zeros, which the int range then bounds.
+          ifS(not(call(v("text"), "matches", regex("[+-]?0*[0-9]{1,10}"))), [missing]),
           letS("number", { kind: "call", name: "toInteger", positional: [v("text")], named: {} }),
           ifS(
             bin(
@@ -1465,9 +1329,14 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ],
       returnType: "integer",
       body: [
-        letS("value", { kind: "load", key: v("key") }),
-        ifS(bin("==", v("value"), lit(null)), [ret(v("whenMissing"))]),
-        ret({ kind: "call", name: "toInteger", positional: [v("value")], named: {} }),
+        ret({
+          kind: "call",
+          name: "toInteger",
+          positional: [
+            otherwise({ kind: "load", key: v("key"), defaultValue: lit(null) }, v("whenMissing")),
+          ],
+          named: {},
+        }),
       ],
       span: null,
     }),
@@ -1626,32 +1495,10 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ]),
             letS("numbered", lit(true)),
             forS("part", v("parts"), [
-              // Legacy took elements whose names start with a digit for a list, so an empty name makes a dict.
-              ifS(bin("==", prop(v("part"), "length"), lit(0)), [set(v("numbered"), lit(false))]),
-              letS("position", lit(0)),
-              {
-                kind: "while",
-                condition: bin("<", v("position"), prop(v("part"), "length")),
-                body: [
-                  ifS(
-                    not(
-                      call(
-                        lit("0123456789"),
-                        "contains",
-                        call(
-                          v("part"),
-                          "substring",
-                          v("position"),
-                          bin("+", v("position"), lit(1)),
-                        ),
-                      ),
-                    ),
-                    [set(v("numbered"), lit(false))],
-                  ),
-                  set(v("position"), lit(1), "+="),
-                ],
-                span: null,
-              },
+              // Legacy took elements whose names are digits for a list, so an empty name makes a dict.
+              ifS(not(call(v("part"), "matches", regex("[0-9]+"))), [
+                set(v("numbered"), lit(false)),
+              ]),
             ]),
             ifS(
               bin("and", bin(">", prop(v("parts"), "length"), lit(0)), v("numbered")),
@@ -1688,8 +1535,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               ],
             ),
           ]),
-          ifS(bin("==", v("value"), lit(null)), [set(v("value"), v("whenMissing"))]),
-          ret(v("value")),
+          ret(otherwise(v("value"), v("whenMissing"))),
         ],
         { whenMissing: lit(null) },
       ),
@@ -2199,54 +2045,32 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyItems",
         ["value"],
         [
-          ifS(bin("==", v("value"), lit(null)), [ret({ kind: "list", items: [] })]),
           ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
             ret({ kind: "methodCall", target: v("value"), name: "split", arguments: [lit("")] }),
           ]),
-          ret(v("value")),
+          ret(otherwise(v("value"), { kind: "list", items: [] })),
         ],
       ),
   },
-  // A path of the package as file tests compare it (packageFilePath in lower.ts).
+  // A path of the package as file tests compare it, as packageFilePath in lower.ts writes it: forward slashes, lower
+  // case, and without the slashes and `./` and then a `scripts/` folder at its start.
   packagePath: {
     name: "sexscriptLegacyPackagePath",
-    build: () => {
-      const path = v("path");
-      const startsWith = (text: string): IrExpression => ({
-        kind: "methodCall",
-        target: path,
-        name: "startsWith",
-        arguments: [lit(text)],
-      });
-      const drop = (length: number): IrStatement =>
-        set(path, {
-          kind: "methodCall",
-          target: path,
-          name: "substring",
-          arguments: [lit(length)],
-        });
-      return fn(
+    build: () =>
+      fn(
         "sexscriptLegacyPackagePath",
         ["path"],
         [
-          set(path, {
-            kind: "methodCall",
-            target: {
-              kind: "methodCall",
-              target: path,
-              name: "replace",
-              arguments: [lit("\\"), lit("/")],
-            },
-            name: "lowercase",
-            arguments: [],
-          }),
-          { kind: "while", condition: startsWith("/"), body: [drop(1)], span: null },
-          ifS(startsWith("./"), [drop(2)]),
-          ifS(startsWith("scripts/"), [drop(8)]),
-          ret(path),
+          ret(
+            call(
+              call(call(v("path"), "replace", lit("\\"), lit("/")), "lowercase"),
+              "replace",
+              regex("^(?:\\.?\\/)*(?:scripts\\/)?"),
+              lit(""),
+            ),
+          ),
         ],
-      );
-    },
+      ),
   },
   // The legacy online service kept a sent image and gave back a code to receive it with; the package's storage keeps
   // the photo reference under its code instead (owner decision 2026-10-05).

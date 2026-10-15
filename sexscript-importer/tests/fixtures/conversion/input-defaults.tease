@@ -1,8 +1,6 @@
 function sexscriptLegacyAskInteger(prefill) {
-  if prefill is number {
-    if prefill % 1 == 0 {
-      return askInteger prefill: floor(prefill)
-    }
+  if prefill is integer {
+    return askInteger prefill: prefill
   }
   return askInteger
 }

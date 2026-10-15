@@ -50,20 +50,7 @@ if w == null {
 }
 save w as "readDefault"
 let t = "<b>a</b>b"
-// NOTE SX_REGEX_WORKAROUND line 18: Workaround: a TeaseScript regex cannot replace text yet, so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").
-let withoutTags = ""
-let rest = t
-while rest.contains("<") {
-  let open = rest.indexOf("<") otherwise -1
-  let close = rest.substring(open).indexOf(">") otherwise -1
-  if close < 0 {
-    break
-  }
-  withoutTags += "${rest.substring(0, open)}"
-  rest = rest.substring(open + close + 1)
-}
-withoutTags += "${rest}"
-t = withoutTags
+t = t.replace(/<[^>]*>/, "")
 save t as "tags"
 // A fallback with effects runs only for a missing key.
 let counts = dict{}

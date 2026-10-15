@@ -238,13 +238,15 @@ test("keeps writes to a shared Calendar as manual work", { skip }, async () => {
 // draws from the session's random numbers, character arrays, Groovy's number predicates and overlapping counts, Java
 // number conversions, and collection constructors. Expected values follow from the Java and Groovy definitions.
 test("converts Java text, number, random, and collection APIs", { skip }, async () => {
-  const close = (expression: string, value: string) => `Math.abs(${expression} - ${value}) < 1e-12`;
+  const close = (expression: string, value: string, within = "1e-12") =>
+    `Math.abs(${expression} - ${value}) < ${within}`;
   const source = await convert([
     'show(URLEncoder.encode("Zoë & Bob", "UTF-8") + " " + URLEncoder.encode("a+b c/d*~", "UTF-8"))',
     `show("\${${close("Math.sqrt(16)", "4")}} \${${close("Math.sqrt(2)", "1.4142135623730951")}} \${${close("Math.log(Math.E)", "1")}} \${${close("Math.log(8) / Math.log(2)", "3")}}")`,
     `show("\${Math.pow(2, 10)} \${${close("Math.pow(9, 0.5)", "3")}} \${Math.pow(2, -2)} \${${close("Math.cos(Math.PI)", "-1")}} \${${close("Math.sin(Math.PI / 2)", "1")}}")`,
-    // Large angles reduce without losing the fraction, and beyond 2^26 turns stay within -1 to 1.
-    `show("\${${close("Math.sin(1e6)", "-0.34999350217129294")}} \${${close("Math.cos(12345.678)", "0.7101193587160628")}} \${Math.abs(Math.sin(1e18)) <= 1}")`,
+    // An angle in radians becomes degrees, which keeps a large angle within about 1e-9 of Java's result and a huge one
+    // within -1 to 1.
+    `show("\${${close("Math.sin(1e6)", "-0.34999350217129294", "1e-9")}} \${${close("Math.cos(12345.678)", "0.7101193587160628", "1e-9")}} \${Math.abs(Math.sin(1e18)) <= 1}")`,
     "def rnd = new Random()",
     "def roll = rnd.nextInt(6)",
     'show("${roll >= 0 && roll < 6} ${rnd.nextFloat() < 1} ${rnd.nextGaussian() < 100} ${rnd.nextBoolean() || true} ${Math.random() < 1}")',

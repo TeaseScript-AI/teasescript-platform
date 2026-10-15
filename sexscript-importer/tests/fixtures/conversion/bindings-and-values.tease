@@ -2,10 +2,7 @@ function sexscriptLegacyItemAt(listValue, position) {
   if position < 0 {
     return listValue[listValue.length + position]
   }
-  if position >= listValue.length {
-    return null
-  }
-  return listValue[position]
+  return listValue.get(position, default: null)
 }
 function randomIntegerValue(rangeValue) {
   return 99

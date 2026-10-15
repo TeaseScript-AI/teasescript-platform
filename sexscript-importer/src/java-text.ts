@@ -18,7 +18,7 @@ import {
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
 import { javaRegex } from "./java-regex.ts";
 import { whole } from "./java-time.ts";
-import { parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
+import { literalPattern, parseTailPattern } from "./regex-subset.ts";
 import { LIST, NULL, NUMBER, OBJECT, onlyOf, STRING } from "./types.ts";
 
 /** The values of a body that Java text, number, and random rules recognize. */
@@ -94,7 +94,7 @@ const URL_ENCODER = new Set(["URLEncoder", "java.net.URLEncoder"]);
 const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 
 const MATH_NOTE =
-  "Java computed this with its own floating-point library; the generated helper computes it with ordinary arithmetic, which can differ in the last digits (more for very large angles of cos and sin), and stops the script where Java gave NaN or Infinity, which are no TeaseScript numbers.";
+  "Java computed this with its own floating-point library, and sin() and cos() of an angle in radians, which becomes degrees here; the result can differ in the last digits (more for very large angles), and the script stops where Java gave NaN or Infinity, which are no TeaseScript numbers.";
 const ENCODE_NOTE =
   "Java encoded every character as UTF-8; the generated helper encodes printable ASCII and Latin-1 characters, tabs, and line breaks the same way and stops the script at any other character, such as another control character or an emoji.";
 const NUMBER_TEXT_NOTE =
@@ -423,11 +423,14 @@ const literal = (value: number | string | boolean | null): IrExpression => ({
   value,
 });
 
+/** The number π (V30 "Numeric functions"). */
+const PI: IrExpression = { kind: "variable", name: "pi", engine: true };
+
 /** Java class constants: `Math.PI` and `Math.E`. */
 export function textProperty(node: AstNode, name: string): IrExpression | undefined {
   const owner = dottedName(asNode(node.object));
   if (owner === null || !MATH_CLASSES.has(owner)) return undefined;
-  if (name === "PI") return literal(Math.PI);
+  if (name === "PI") return PI;
   if (name === "E") return literal(Math.E);
   return undefined;
 }
@@ -655,25 +658,21 @@ function mathCall(
   args: readonly AstNode[],
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
-  const helpers = new Map<string, { helper: "log" | "cos" | "sin" | "exp"; arity: number }>([
-    ["log", { helper: "log", arity: 1 }],
-    ["cos", { helper: "cos", arity: 1 }],
-    ["sin", { helper: "sin", arity: 1 }],
-    ["exp", { helper: "exp", arity: 1 }],
-  ]);
   if (name === "random" && args.length === 0) return call("random");
-  // TeaseScript's sqrt() and pow() give Java's results, and stop the script where Java gave NaN or Infinity, as the
-  // helpers for the other functions do (V30 "Numeric functions").
+  // TeaseScript's sqrt() and pow() give Java's results, and stop the script where Java gave NaN or Infinity (V30
+  // "Numeric functions"), as ln() and exp() do; sin() and cos() take degrees, where Java's took radians (V30
+  // "Exponentials, logarithms, and angles").
   if ((name === "sqrt" && args.length === 1) || (name === "pow" && args.length === 2)) {
     const lowered = lowerEach(args, host);
     return lowered === null ? null : call(name, ...lowered);
   }
-  const entry = helpers.get(name);
-  if (entry === undefined || args.length !== entry.arity) return undefined;
+  if (!["log", "exp", "sin", "cos"].includes(name) || args.length !== 1) return undefined;
   const lowered = lowerEach(args, host);
   if (lowered === null) return null;
   noteOnce(host, "SX_MATH_PRECISION", MATH_NOTE, node.span);
-  return host.helper(entry.helper, lowered);
+  if (name === "log") return call("ln", lowered[0]!);
+  if (name === "exp") return call("exp", lowered[0]!);
+  return call(name, binary("/", binary("*", lowered[0]!, literal(180)), PI));
 }
 
 /** Groovy `base ** exponent`, the power that Java's Math.pow() also gives. */
@@ -728,7 +727,8 @@ function randomDraw(
     case "nextBoolean":
       return args.length === 0 ? call("chance", literal(50)) : undefined;
     case "nextGaussian":
-      return args.length === 0 ? host.helper("gaussian", []) : undefined;
+      // The standard normal distribution that Java's polar method drew from.
+      return args.length === 0 ? call("randomNormal", literal(0), literal(1)) : undefined;
     default:
       return undefined;
   }
@@ -868,6 +868,19 @@ export function regexLiteral(
   within: "whole" | "find",
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
+  const regex = convertedRegex(node, within, host);
+  return regex && regex.literal;
+}
+
+/**
+ * A legacy regular expression as regexLiteral() converts it, also for every match (`all`, java-regex.ts), with the
+ * number of its groups and whether it can match no text.
+ */
+export function convertedRegex(
+  node: AstNode,
+  within: "whole" | "find" | "all",
+  host: JavaRuleHost,
+): { literal: IrExpression; groups: number; empty: boolean } | null | undefined {
   const pattern = constantString(node);
   if (pattern === null) return undefined;
   const regex = javaRegex(pattern, within);
@@ -880,7 +893,11 @@ export function regexLiteral(
     );
     return null;
   }
-  return { kind: "regex", pattern: regex.pattern, flags: regex.flags };
+  return {
+    literal: { kind: "regex", pattern: regex.pattern, flags: regex.flags },
+    groups: regex.groups,
+    empty: regex.empty,
+  };
 }
 
 /** The text Groovy matched a regular expression against: a value that may be no text as `${value}`. */
@@ -928,9 +945,8 @@ export function textFind(node: AstNode, host: JavaRuleHost): IrExpression | null
   const type = left === null ? 0 : host.valueType(left);
   if (left === null || right === null || pattern === null || (type & STRING) === 0)
     return undefined;
-  const subset = parseRegexSubset(pattern);
-  const search =
-    subset?.kind === "literal" ? literal(subset.text) : regexLiteral(right, "find", host);
+  const searched = literalPattern(pattern);
+  const search = searched !== null ? literal(searched) : regexLiteral(right, "find", host);
   if (search === null) return null;
   const value = host.lower(left);
   return value === null ? null : method(matchedText(value, type), "contains", search!);

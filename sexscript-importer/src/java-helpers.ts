@@ -9,11 +9,6 @@ import type { IrExpression, IrStatement } from "./ir.ts";
 export type JavaHelperName =
   | "calendarTime"
   | "formEncode"
-  | "log"
-  | "exp"
-  | "cos"
-  | "sin"
-  | "gaussian"
   | "javaTrim"
   | "isInteger"
   | "isNumber"
@@ -29,11 +24,6 @@ export type JavaHelperName =
 export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "calendarTime",
   "formEncode",
-  "log",
-  "exp",
-  "cos",
-  "sin",
-  "gaussian",
   "javaTrim",
   "isInteger",
   "isNumber",
@@ -47,7 +37,6 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
 ];
 
 const DEPENDENCIES = new Map<string, JavaHelperName[]>([
-  ["gaussian", ["log"]],
   ["isInteger", ["javaTrim"]],
   ["isNumber", ["javaTrim"]],
 ]);
@@ -66,7 +55,7 @@ const bin = (operator: string, left: IrExpression, right: IrExpression): IrExpre
   right,
 });
 const not = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "not", value });
-const neg = (value: IrExpression): IrExpression => ({ kind: "unary", operator: "-", value });
+const regex = (pattern: string): IrExpression => ({ kind: "regex", pattern, flags: "" });
 const call = (name: string, ...positional: IrExpression[]): IrExpression => ({
   kind: "call",
   name,
@@ -150,18 +139,6 @@ const fail = (reason: string, type = "number"): IrStatement[] => [
 const PRINTABLE = Array.from({ length: 95 }, (_, index) => String.fromCharCode(index + 32)).join(
   "",
 );
-const between = (value: IrExpression, low: string, high: string): IrExpression =>
-  bin("and", bin(">=", value, lit(low)), bin("<=", value, lit(high)));
-
-const LN2 = 0.6931471805599453;
-/**
- * 2 pi in three parts whose sum is exact to about 1e-32: the first has few enough bits that a whole multiple of it is
- * exact, so an angle reduces without losing its fraction.
- */
-const TWO_PI_HIGH = Math.floor(2 * Math.PI * 2 ** 24) / 2 ** 24;
-const TWO_PI_MIDDLE = 2 * Math.PI - TWO_PI_HIGH;
-const TWO_PI_LOW = 2.4492935982947064e-16;
-const POWER_32 = 4294967296;
 
 /** Java URLEncoder keeps these characters; it writes a space as `+` and every other character as `%XX` bytes. */
 const FORM_KEPT = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-*_";
@@ -192,53 +169,6 @@ function formCodes(): IrExpression {
       value: lit(code),
     })),
   };
-}
-
-/** A Taylor series of cos (start 1, first divisor 1) or sin (start the angle, first divisor 2) on [-pi, pi]. */
-function trigonometry(name: string, sine: boolean): IrStatement {
-  return fn(
-    name,
-    ["value"],
-    [
-      letS("turns", call("round", bin("/", v("value"), lit(2 * Math.PI)))),
-      letS(
-        "angle",
-        bin(
-          "-",
-          bin(
-            "-",
-            bin("-", v("value"), bin("*", v("turns"), lit(TWO_PI_HIGH))),
-            bin("*", v("turns"), lit(TWO_PI_MIDDLE)),
-          ),
-          bin("*", v("turns"), lit(TWO_PI_LOW)),
-        ),
-        "number",
-      ),
-      // Beyond 2^26 turns a multiple of the first part is no longer exact; the remainder keeps the angle in range.
-      ifS(bin("or", bin(">", v("turns"), lit(2 ** 26)), bin("<", v("turns"), lit(-(2 ** 26)))), [
-        set("angle", bin("%", v("value"), lit(2 * Math.PI))),
-        ifS(bin(">", v("angle"), lit(Math.PI)), [set("angle", lit(2 * Math.PI), "-=")]),
-        ifS(bin("<", v("angle"), lit(-Math.PI)), [set("angle", lit(2 * Math.PI), "+=")]),
-      ]),
-      letS("square", bin("*", v("angle"), v("angle")), "number"),
-      letS("term", sine ? v("angle") : lit(1.0), "number"),
-      letS("total", v("term"), "number"),
-      letS("divisor", lit(sine ? 2 : 1)),
-      whileS(bin("<", v("divisor"), lit(40)), [
-        set(
-          "term",
-          bin(
-            "/",
-            bin("*", neg(v("term")), v("square")),
-            bin("*", v("divisor"), bin("+", v("divisor"), lit(1))),
-          ),
-        ),
-        set("total", v("term"), "+="),
-        set("divisor", lit(2), "+="),
-      ]),
-      ret(v("total")),
-    ],
-  );
 }
 
 export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => IrStatement }> = {
@@ -337,112 +267,6 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         ],
       ),
   },
-  // Java Math.log(), the natural logarithm: value = mantissa * 2^exponent, then 2 atanh((m - 1) / (m + 1)).
-  log: {
-    name: "sexscriptLegacyLog",
-    build: () =>
-      fn(
-        "sexscriptLegacyLog",
-        ["value"],
-        [
-          ifS(bin("<=", v("value"), lit(0)), fail("Math.log() of zero or a negative number")),
-          letS("exponent", lit(0)),
-          letS("mantissa", v("value"), "number"),
-          whileS(bin(">", v("mantissa"), lit(POWER_32)), [
-            set("mantissa", bin("/", v("mantissa"), lit(POWER_32))),
-            set("exponent", lit(32), "+="),
-          ]),
-          whileS(bin("<", v("mantissa"), lit(1 / POWER_32)), [
-            set("mantissa", bin("*", v("mantissa"), lit(POWER_32))),
-            set("exponent", lit(32), "-="),
-          ]),
-          whileS(bin(">", v("mantissa"), lit(Math.SQRT2)), [
-            set("mantissa", bin("/", v("mantissa"), lit(2))),
-            set("exponent", lit(1), "+="),
-          ]),
-          whileS(bin("<", v("mantissa"), lit(Math.SQRT1_2)), [
-            set("mantissa", bin("*", v("mantissa"), lit(2))),
-            set("exponent", lit(1), "-="),
-          ]),
-          letS("ratio", bin("/", bin("-", v("mantissa"), lit(1)), bin("+", v("mantissa"), lit(1)))),
-          letS("square", bin("*", v("ratio"), v("ratio")), "number"),
-          letS("term", v("ratio"), "number"),
-          letS("total", lit(0.0), "number"),
-          letS("divisor", lit(1)),
-          whileS(bin("<", v("divisor"), lit(40)), [
-            set("total", bin("/", v("term"), v("divisor")), "+="),
-            set("term", bin("*", v("term"), v("square"))),
-            set("divisor", lit(2), "+="),
-          ]),
-          ret(bin("+", bin("*", v("exponent"), lit(LN2)), bin("*", lit(2), v("total")))),
-        ],
-      ),
-  },
-  // Java Math.exp(): value = halves * ln 2 + rest, a Taylor series of the rest, then doubled or halved.
-  exp: {
-    name: "sexscriptLegacyExp",
-    build: () =>
-      fn(
-        "sexscriptLegacyExp",
-        ["value"],
-        [
-          letS("halves", call("round", bin("/", v("value"), lit(LN2)))),
-          letS("rest", bin("-", v("value"), bin("*", v("halves"), lit(LN2)))),
-          letS("term", lit(1.0), "number"),
-          letS("total", lit(1.0), "number"),
-          letS("count", lit(1)),
-          whileS(bin("<", v("count"), lit(25)), [
-            set("term", bin("/", bin("*", v("term"), v("rest")), v("count"))),
-            set("total", v("term"), "+="),
-            set("count", lit(1), "+="),
-          ]),
-          whileS(bin(">", v("halves"), lit(0)), [
-            set("total", bin("*", v("total"), lit(2))),
-            set("halves", lit(1), "-="),
-          ]),
-          whileS(bin("<", v("halves"), lit(0)), [
-            set("total", bin("/", v("total"), lit(2))),
-            set("halves", lit(1), "+="),
-          ]),
-          ret(v("total")),
-        ],
-      ),
-  },
-  // Java Math.cos() and Math.sin() of an angle in radians.
-  cos: { name: "sexscriptLegacyCos", build: () => trigonometry("sexscriptLegacyCos", false) },
-  sin: { name: "sexscriptLegacySin", build: () => trigonometry("sexscriptLegacySin", true) },
-  // Java Random.nextGaussian(): the polar method on two uniform draws.
-  gaussian: {
-    name: "sexscriptLegacyGaussian",
-    build: () =>
-      fn(
-        "sexscriptLegacyGaussian",
-        [],
-        [
-          letS("first", lit(0.0), "number"),
-          letS("second", lit(0.0), "number"),
-          letS("square", lit(0.0), "number"),
-          whileS(bin("or", bin(">=", v("square"), lit(1)), bin("==", v("square"), lit(0))), [
-            set("first", bin("-", bin("*", lit(2), call("random")), lit(1))),
-            set("second", bin("-", bin("*", lit(2), call("random")), lit(1))),
-            set(
-              "square",
-              bin("+", bin("*", v("first"), v("first")), bin("*", v("second"), v("second"))),
-            ),
-          ]),
-          ret(
-            bin(
-              "*",
-              v("first"),
-              call(
-                "sqrt",
-                bin("/", bin("*", lit(-2), local("sexscriptLegacyLog", v("square"))), v("square")),
-              ),
-            ),
-          ),
-        ],
-      ),
-  },
   // Java trim(): the text without the characters up to U+0020 at both ends.
   javaTrim: {
     name: "sexscriptLegacyJavaTrim",
@@ -451,30 +275,14 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         "sexscriptLegacyJavaTrim",
         ["text"],
         [
-          letS("characters", method(v("text"), "split", lit(""))),
-          letS("start", lit(0)),
-          whileS(
-            bin(
-              "and",
-              bin("<", v("start"), length(v("characters"))),
-              bin("<=", at(v("characters"), v("start")), lit(" ")),
-            ),
-            [set("start", lit(1), "+=")],
+          ret(
+            method(v("text"), "replace", regex(String.raw`^[\x00-\x20]+|[\x00-\x20]+$`), lit("")),
           ),
-          letS("end", length(v("characters"))),
-          whileS(
-            bin(
-              "and",
-              bin(">", v("end"), v("start")),
-              bin("<=", at(v("characters"), bin("-", v("end"), lit(1))), lit(" ")),
-            ),
-            [set("end", lit(1), "-=")],
-          ),
-          ret(method(v("text"), "substring", v("start"), v("end"))),
         ],
       ),
   },
-  // Groovy isInteger(): Integer.valueOf() of the trimmed text, a sign and digits within the int range.
+  // Groovy isInteger(): Integer.valueOf() of the trimmed text, a sign and digits within the int range, which the
+  // digits after leading zeros, compared as text with the largest int of their sign, tell.
   isInteger: {
     name: "sexscriptLegacyIsInteger",
     build: () =>
@@ -483,31 +291,10 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         ["text"],
         [
           letS("digits", local("sexscriptLegacyJavaTrim", v("text"))),
+          ifS(not(method(v("digits"), "matches", regex("[+-]?[0-9]+"))), [ret(lit(false))]),
           letS("limit", lit("2147483647")),
-          ifS(
-            method(v("digits"), "startsWith", lit("-")),
-            [
-              set("limit", lit("2147483648")),
-              set("digits", method(v("digits"), "substring", lit(1))),
-            ],
-            [
-              ifS(method(v("digits"), "startsWith", lit("+")), [
-                set("digits", method(v("digits"), "substring", lit(1))),
-              ]),
-            ],
-          ),
-          ifS(bin("==", v("digits"), lit("")), [ret(lit(false))]),
-          forS("character", method(v("digits"), "split", lit("")), [
-            ifS(not(between(v("character"), "0", "9")), [ret(lit(false))]),
-          ]),
-          whileS(
-            bin(
-              "and",
-              bin(">", length(v("digits")), lit(1)),
-              method(v("digits"), "startsWith", lit("0")),
-            ),
-            [set("digits", method(v("digits"), "substring", lit(1)))],
-          ),
+          ifS(method(v("digits"), "startsWith", lit("-")), [set("limit", lit("2147483648"))]),
+          set("digits", method(v("digits"), "replace", regex("^[+-]?0*([0-9])"), lit("$1"))),
           ifS(bin("!=", length(v("digits")), length(v("limit"))), [
             ret(bin("<", length(v("digits")), length(v("limit")))),
           ]),
@@ -518,55 +305,20 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
   // Groovy isNumber(): new BigDecimal() of the trimmed text, a sign, digits with one optional point, and an exponent.
   isNumber: {
     name: "sexscriptLegacyIsNumber",
-    build: () => {
-      const character = at(v("characters"), v("index"));
-      const more = bin("<", v("index"), length(v("characters")));
-      const sign = bin("or", bin("==", character, lit("+")), bin("==", character, lit("-")));
-      return fn(
+    build: () =>
+      fn(
         "sexscriptLegacyIsNumber",
         ["text"],
         [
-          letS("characters", method(local("sexscriptLegacyJavaTrim", v("text")), "split", lit(""))),
-          letS("index", lit(0)),
-          ifS(bin("and", more, sign), [set("index", lit(1), "+=")]),
-          letS("digits", lit(0)),
-          letS("point", lit(false)),
-          whileS(more, [
-            ifS(
-              between(character, "0", "9"),
-              [set("digits", lit(1), "+=")],
-              [
-                ifS(
-                  bin("and", bin("==", character, lit(".")), not(v("point"))),
-                  [set("point", lit(true))],
-                  [{ kind: "break", span: null }],
-                ),
-              ],
+          ret(
+            method(
+              local("sexscriptLegacyJavaTrim", v("text")),
+              "matches",
+              regex(String.raw`[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`),
             ),
-            set("index", lit(1), "+="),
-          ]),
-          ifS(bin("==", v("digits"), lit(0)), [ret(lit(false))]),
-          ifS(
-            bin(
-              "and",
-              more,
-              bin("or", bin("==", character, lit("e")), bin("==", character, lit("E"))),
-            ),
-            [
-              set("index", lit(1), "+="),
-              ifS(bin("and", more, sign), [set("index", lit(1), "+=")]),
-              letS("exponent", lit(0)),
-              whileS(bin("and", more, between(character, "0", "9")), [
-                set("exponent", lit(1), "+="),
-                set("index", lit(1), "+="),
-              ]),
-              ifS(bin("==", v("exponent"), lit(0)), [ret(lit(false))]),
-            ],
           ),
-          ret(bin("==", v("index"), length(v("characters")))),
         ],
-      );
-    },
+      ),
   },
   // Groovy count(): every occurrence of a text, overlapping ones too; an empty text occurs before each character and
   // at the end.
@@ -598,12 +350,7 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         "sexscriptLegacyIndexFrom",
         ["text", "part", "start"],
         [
-          letS("from", v("start")),
-          ifS(bin("<", v("from"), lit(0)), [set("from", lit(0))]),
-          ifS(bin(">", v("from"), length(v("text"))), [
-            ifS(bin("==", v("part"), lit("")), [ret(length(v("text")))]),
-            ret(lit(-1)),
-          ]),
+          letS("from", call("clamp", v("start"), lit(0), length(v("text")))),
           letS("found", method(method(v("text"), "substring", v("from")), "indexOf", v("part"))),
           ifS(bin("<", v("found"), lit(0)), [ret(lit(-1))]),
           ret(bin("+", v("found"), v("from"))),
@@ -672,19 +419,15 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         "sexscriptLegacyFileName",
         ["path"],
         [
-          letS("name", method(v("path"), "replace", lit("\\"), lit("/"))),
-          whileS(
-            bin(
-              "and",
-              bin(">", length(v("name")), lit(1)),
-              method(v("name"), "endsWith", lit("/")),
+          // Separators at the end go, but a lone one stays.
+          letS(
+            "name",
+            method(
+              method(v("path"), "replace", lit("\\"), lit("/")),
+              "replace",
+              regex("(.)\\/+$"),
+              lit("$1"),
             ),
-            [
-              set(
-                "name",
-                method(v("name"), "substring", lit(0), bin("-", length(v("name")), lit(1))),
-              ),
-            ],
           ),
           ret(
             method(
@@ -704,25 +447,14 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         "sexscriptLegacyClockText",
         ["seconds"],
         [
-          letS(
-            "rest",
-            bin(
-              "-",
-              v("seconds"),
-              bin("*", call("floor", bin("/", v("seconds"), lit(86400))), lit(86400)),
-            ),
-          ),
-          letS("hours", call("floor", bin("/", v("rest"), lit(3600)))),
-          set("rest", bin("-", v("rest"), bin("*", v("hours"), lit(3600)))),
-          letS("minutes", call("floor", bin("/", v("rest"), lit(60)))),
-          set("rest", bin("-", v("rest"), bin("*", v("minutes"), lit(60)))),
+          letS("rest", call("mod", v("seconds"), lit(86400))),
           ret(
             template(
-              padded(v("hours"), 2),
+              padded(call("floor", bin("/", v("rest"), lit(3600))), 2),
               ":",
-              padded(v("minutes"), 2),
+              padded(call("floor", bin("/", call("mod", v("rest"), lit(3600)), lit(60))), 2),
               ":",
-              padded(v("rest"), 2),
+              padded(call("mod", v("rest"), lit(60)), 2),
             ),
           ),
         ],
@@ -737,16 +469,9 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         "sexscriptLegacyReversed",
         ["items"],
         [
-          letS("result", { kind: "list", items: [] }),
-          letS("index", bin("-", length(v("items")), lit(1))),
-          whileS(bin(">=", v("index"), lit(0)), [
-            {
-              kind: "expression",
-              expression: method(v("result"), "add", at(v("items"), v("index"))),
-              span: null,
-            },
-            set("index", lit(1), "-="),
-          ]),
+          // Assignment copies a list (ADR 0014), which reverse() then reverses in place (#860).
+          letS("result", v("items")),
+          { kind: "expression", expression: method(v("result"), "reverse"), span: null },
           ret(v("result")),
         ],
       ),

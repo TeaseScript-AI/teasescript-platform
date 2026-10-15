@@ -1,3 +1,8 @@
+let tau = 2 * pi
+// A static that operators compute from literals is a global, so the method that reads it is a global function too.
+function turns(count) {
+  return count * tau
+}
 showWait("Kneel")
 rounds(3, "Stroke")
 say prose "Twice ${twice(2)}", instant

@@ -86,7 +86,9 @@ import {
   withTupleAssignments,
 } from "./list-aliases.ts";
 import { fontSize, legacyHtmlToMarkup, type TextPart } from "./markup.ts";
-import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
+import { javaReplacementText, literalPattern } from "./regex-subset.ts";
+import { javaReplacement, re2Literal } from "./java-regex.ts";
+import { convertedRegex } from "./java-text.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import { menuIndexes } from "./menu-indexes.ts";
@@ -2313,7 +2315,7 @@ function lowerFileOnce(
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
   let stripsTags = false;
-  if (body !== null) walkAst(body, (node) => (stripsTags ||= regexWorkaround(node) === "tags"));
+  if (body !== null) walkAst(body, (node) => (stripsTags ||= removesTags(node)));
   // A module's `object.name`, without its receiver, is the script object's member, not a binding variable. A name of
   // the loading script's object, such as a field, is that object's member too (Groovy read the field where the
   // module's binding had no value).
@@ -4335,31 +4337,6 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
     asNode(root.right) === deferred
   )
     return null;
-  if (
-    regexWorkaround(deferred) !== null &&
-    target !== null &&
-    variableName(target) !== null &&
-    (root.kind === "declaration" || root.operator === "=") &&
-    asNode(root.right) === deferred
-  ) {
-    return (
-      lowerRegexWorkaround(
-        root.kind === "declaration",
-        variableName(target)!,
-        deferred,
-        span,
-        context,
-        target,
-      ) ?? [
-        unsupportedStatement(
-          context,
-          deferred,
-          "SX_STRING_METHOD",
-          "This regular expression could not be converted.",
-        ),
-      ]
-    );
-  }
   const conditionalForm =
     deferred.kind === "ternary" ||
     deferred.kind === "elvis" ||
@@ -4458,9 +4435,8 @@ function findDeferred(
   inputOptions = false,
 ): AstNode | null {
   if (node.kind === "closure") return null;
-  // A collection method with a closure becomes a loop before the statement (lowerCollectionAssignment), as does a
-  // regular expression with a workaround (lowerRegexWorkaround).
-  if (!inputOptions && (isCollectionLoop(node, context) || regexWorkaround(node) !== null)) {
+  // A collection method with a closure becomes a loop before the statement (lowerCollectionAssignment).
+  if (!inputOptions && isCollectionLoop(node, context)) {
     // The receiver runs first, so a part of it that needs its own statement comes first.
     const receiver = asNode(node.object);
     return (receiver === null ? null : findDeferred(receiver, context)) ?? node;
@@ -4534,7 +4510,7 @@ function isLoopMenu(node: AstNode, context: LowerContext): boolean {
 /** Whether an expression holds a conditional expression or an input, which need a statement of their own. */
 function needsOwnStatement(node: AstNode, context: LowerContext): boolean {
   if (node.kind === "closure") return false;
-  if (isCollectionLoop(node, context) || regexWorkaround(node) !== null) return true;
+  if (isCollectionLoop(node, context)) return true;
   if ((node.kind === "ternary" || node.kind === "elvis") && dictDefault(node, context) === null)
     return true;
   const call = node.kind === "methodCall" ? legacyApiCall(node, context) : null;
@@ -4642,13 +4618,9 @@ function hoistDeferred(
     [
       loop !== null
         ? `${loop.name}Result`
-        : regexWorkaround(deferred) === "words"
-          ? "words"
-          : regexWorkaround(deferred) === "tags"
-            ? "withoutTags"
-            : legacyApiCall(deferred, context)?.name === "getSelectedValue"
-              ? "selected"
-              : "conditional",
+        : legacyApiCall(deferred, context)?.name === "getSelectedValue"
+          ? "selected"
+          : "conditional",
       deferred,
     ] as const,
   ]) {
@@ -13348,10 +13320,10 @@ function sideEffectFree(node: AstNode, context: LowerContext): boolean {
 }
 
 /**
- * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536): `m[k] ?: d`,
- * `m.containsKey(k) ? m[k] : d`, and `m[k] != null ? m[k] : d`, also with the test negated and the branches swapped.
- * `exact` is false where Groovy also replaced a stored null, or, with a truth test, a stored false, 0, or empty value
- * other than the default itself. Null for any other expression, and for a null default, which `get` does not take.
+ * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536), whose default may be of any type, null too
+ * (#853): `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, and `m[k] != null ? m[k] : d`, also with the test negated and the
+ * branches swapped. `exact` is false where Groovy also replaced a stored null, or, with a truth test, a stored false, 0,
+ * or empty value other than the default itself. Null for any other expression.
  */
 function dictDefault(
   node: AstNode,
@@ -13380,16 +13352,8 @@ function dictDefault(
   const parts = read === null ? null : dictLookupParts(read, context);
   // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback with effects
   // keeps the conditional.
-  if (
-    parts === null ||
-    fallback === null ||
-    isNullConstant(fallback) ||
-    !sideEffectFree(fallback, context)
-  )
-    return null;
+  if (parts === null || fallback === null || !sideEffectFree(fallback, context)) return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
-  // The default has the dict's value type (#536); another fallback keeps the conditional.
-  if (!dictDefaultFits(parts, fallback, context)) return null;
   let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
   if (exact && test === "truth") {
     // Groovy's truth test also replaced the value type's false, 0, or empty value, which is exact only as default.
@@ -13402,23 +13366,6 @@ function dictDefault(
       (values === LIST && fallback.kind === "list" && nodeArray(fallback.items).length === 0);
   }
   return { parts, fallback, exact };
-}
-
-/** Whether a fallback may be a dict's `get` default: not of a type other than the dict's values (#536). */
-function dictDefaultFits(
-  parts: DictLookupParts,
-  fallback: AstNode,
-  context: LowerContext,
-): boolean {
-  const dict = bindingKey(parts.receiver, context.bindings) ?? "";
-  const values = (context.mapUses.dictionaryValues.get(dict) ?? 0) & ~NULL;
-  const fallbackType = inferType(fallback, context.types) & ~NULL;
-  return (
-    values === 0 ||
-    fallbackType === 0 ||
-    fallbackType === (UNKNOWN & ~NULL) ||
-    (fallbackType & ~values) === 0
-  );
 }
 
 /** A key test of a Groovy condition: `containsKey` or `in`, a null test, or a truth test of a lookup. */
@@ -13550,9 +13497,6 @@ function readThenDefault(
       // The online service's typed reads are storage reads too (SX_ONLINE_STORAGE).
       TYPED_ONLINE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
     ) ||
-    // A dict's default has its value type, as for `?:` (dictDefaultFits).
-    (dictLookupParts(read, context) !== null &&
-      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context)) ||
     // A received value that failed legacy's Integer cast read null too, so its default also replaces that, which only
     // a default the read's helper can take as a value does: a constant or a variable (sexscriptLegacyReceiveInteger).
     (legacyApiCall(read, context)?.name === "receiveInteger" &&
@@ -15014,13 +14958,25 @@ function lowerObjectMethodCallExpression(
     const args = lowerArguments(argumentsNodes, context);
     return action === null || args === null ? null : actionCall(action, args, context);
   }
-  // Groovy tokenize() exists only for text: the parts between any of the delimiter characters, without empty parts.
+  // Groovy tokenize() exists only for text: the parts between any of the delimiter characters, without empty parts,
+  // which are the runs of other characters that findAll() finds; delimiters known only at runtime go to a helper.
   if (name === "tokenize" && argumentsNodes.length <= 1 && targetNode !== null) {
     const text = lowerExpression(targetNode, context);
-    const delimiters =
-      argumentsNodes.length === 0
-        ? ({ kind: "literal", value: " \t\n\r\f" } as const)
-        : lowerExpression(argumentsNodes[0]!, context);
+    const written = argumentsNodes.length === 0 ? " \t\n\r\f" : constantString(argumentsNodes[0]!);
+    const members =
+      written === null
+        ? null
+        : [...new Set(written)].map((character) => re2Literal(character, true));
+    if (members !== null && members.length > 0 && members.every((member) => member !== null))
+      return text === null
+        ? null
+        : {
+            kind: "methodCall",
+            target: text,
+            name: "findAll",
+            arguments: [{ kind: "regex", pattern: `[^${members.join("")}]+`, flags: "" }],
+          };
+    const delimiters = lowerExpression(argumentsNodes[0]!, context);
     if (text === null || delimiters === null) return null;
     return useHelper(context, "tokenize", [text, delimiters]);
   }
@@ -15235,7 +15191,11 @@ function lowerObjectMethodCallExpression(
         ? `Groovy ${name}() counted the entries of this map, which is an object with fixed properties here; objects have no length. Use the map as a dict (#536) if it is a lookup table.`
         : name === "count"
           ? "Groovy count() counted every occurrence of a text, overlapping ones too; it converts where the searched value and the counted one are both proven text, and here one of them is not."
-          : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
+          : (name === "replaceAll" || name === "split") &&
+              argumentsNodes.length > 0 &&
+              typeof constantValue(argumentsNodes[0]) !== "string"
+            ? `Groovy ${name}() took a Java regular expression that is known only when the script runs; a Java pattern converts to a TeaseScript regex where the conversion can check that both match the same text, so this needs manual work (toRegex() makes a regex of pattern text).`
+            : `Groovy string method ${name}() has no TeaseScript text operation in this form.`,
     );
   }
   if (targetNode !== null && !isKnownListExpression(targetNode, context)) {
@@ -15588,64 +15548,105 @@ function textOperation(
       operation = name;
       break;
     case "replaceAll": {
-      // Java replaceAll() takes a regular expression and a replacement pattern; the regular expressions that text
-      // operations express (regex-subset.ts) convert, with a replacement of plain text or a computed text.
+      // Java replaceAll() takes a regular expression and a replacement pattern: literal text with a replacement of plain
+      // or computed text replaces as text, any other pattern as a TeaseScript regex (java-regex.ts) whose replacement
+      // inserts what Java's did, a computed replacement as literal text.
       const pattern = literalText(argumentsNodes[0]);
-      const subset = pattern === null ? null : parseRegexSubset(pattern);
-      if (argumentsNodes.length !== 2 || subset === null) return undefined;
+      if (argumentsNodes.length !== 2 || pattern === null) return undefined;
+      const searched = literalPattern(pattern);
       const replacementText = literalText(argumentsNodes[1]);
       const plain = replacementText === null ? null : javaReplacementText(replacementText);
-      if (replacementText !== null && plain === null) return undefined;
+      const search: IrExpression | null =
+        searched !== null && (replacementText === null || plain !== null)
+          ? { kind: "literal", value: searched }
+          : null;
+      const regex =
+        search === null ? convertedRegex(argumentsNodes[0]!, "all", javaHost(context)) : null;
+      if (search === null && regex == null) return null;
+      const replacement =
+        regex == null || replacementText === null
+          ? null
+          : javaReplacement(replacementText, regex.groups);
+      if (regex != null && replacementText !== null && replacement === null) {
+        addDiagnostic(
+          context,
+          "SX_JAVA_REPLACEMENT",
+          "error",
+          `Java's replacement "${replacementText}" has no TeaseScript replacement that inserts the same text: it names a group the regular expression does not have, is followed by a digit, or ends with a backslash.`,
+          node.span,
+        );
+        return null;
+      }
       const target = lowerExpression(targetNode, context);
-      const computed = plain === null ? lowerExpression(argumentsNodes[1]!, context) : null;
-      if (target === null || (plain === null && computed === null)) return null;
-      const replacement: IrExpression =
-        plain !== null
-          ? { kind: "literal", value: plain }
-          : onlyOf(inferType(argumentsNodes[1]!, context.types), STRING)
-            ? computed!
-            : { kind: "template", parts: [{ value: computed! }] };
-      if (subset.kind === "literal")
-        return member("replace", [{ kind: "literal", value: subset.text }, replacement], target);
-      if (subset.kind === "alternatives")
-        return subset.texts.reduce<IrExpression>(
-          (text, search) =>
-            member("replace", [{ kind: "literal", value: search }, replacement], text),
+      const computed =
+        replacementText === null ? lowerExpression(argumentsNodes[1]!, context) : null;
+      if (target === null || (replacementText === null && computed === null)) return null;
+      const computedText: IrExpression | null =
+        computed === null || onlyOf(inferType(argumentsNodes[1]!, context.types), STRING)
+          ? computed
+          : { kind: "template", parts: [{ value: computed }] };
+      if (search !== null)
+        return member(
+          "replace",
+          [search, plain !== null ? { kind: "literal", value: plain } : computedText!],
           target,
         );
-      addDiagnostic(
-        context,
-        "SX_REGEX_CHARACTERS",
-        "info",
-        "Java replaced the characters this character class matched; a helper replaces them character by character.",
-        node.span,
-      );
-      return useHelper(context, "replaceChars", [
+      return member(
+        "replace",
+        [
+          regex!.literal,
+          replacement !== null
+            ? { kind: "literal", value: replacement }
+            : member(
+                "replace",
+                [
+                  { kind: "literal", value: "$" },
+                  { kind: "literal", value: "$$" },
+                ],
+                computedText!,
+              ),
+        ],
         target,
-        { kind: "literal", value: subset.chars },
-        { kind: "literal", value: subset.negated },
-        replacement,
-        { kind: "literal", value: subset.runs },
-      ]);
+      );
     }
     case "split": {
-      // Java split() takes a regular expression and drops trailing empty parts.
+      // Java split() takes a regular expression and drops trailing empty parts: plain characters, and metacharacters
+      // escaped as in the patterns `\|` or `\.`, split as text, any other pattern as a TeaseScript regex (java-regex.ts)
+      // that cannot match no text, where Java's split() separated otherwise.
       const separator = literalText(argumentsNodes[0]);
       if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
-      // Plain characters, and metacharacters escaped as in the patterns `\|` or `\.`, match themselves.
-      if (!/^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator)) return undefined;
+      const plainSeparator = /^(?:[^\\^$.|?*+()[\]{}]|\\[^A-Za-z0-9])+$/u.test(separator);
+      const regex = plainSeparator
+        ? null
+        : convertedRegex(argumentsNodes[0]!, "all", javaHost(context));
+      if (regex === null && !plainSeparator) return null;
+      if (regex?.empty) {
+        addDiagnostic(
+          context,
+          "SX_JAVA_REGEX",
+          "error",
+          `Java's regular expression /${separator}/ has no TeaseScript regex that splits the same text: it can match no text, which Java's split() also took as a separator after another one.`,
+          node.span,
+        );
+        return null;
+      }
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
-      const plain: IrExpression = { kind: "literal", value: separator.replace(/\\(.)/gu, "$1") };
+      const by: IrExpression = regex?.literal ?? {
+        kind: "literal",
+        value: separator.replace(/\\(.)/gu, "$1"),
+      };
       // A part read at a fixed position is the same where Java had it, and a written text that does not end with the
       // separator has no trailing empty part; elsewhere a helper drops the trailing empty parts that Java dropped.
       const written = literalText(targetNode);
-      const separatorText = String(plain.value);
       if (
         context.indexedSplits.has(node) ||
-        (written !== null && written !== "" && !written.endsWith(separatorText))
+        (by.kind === "literal" &&
+          written !== null &&
+          written !== "" &&
+          !written.endsWith(String(by.value)))
       )
-        return member("split", [plain], target);
+        return member("split", [by], target);
       addDiagnostic(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
@@ -15653,7 +15654,7 @@ function textOperation(
         "Java split() dropped trailing empty parts, which TeaseScript split() keeps; a helper drops them.",
         node.span,
       );
-      return useHelper(context, "split", [target, plain]);
+      return useHelper(context, "split", [target, by]);
     }
     case "substring":
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;
@@ -17141,183 +17142,17 @@ function growingListWrite(
   ];
 }
 
-/**
- * The regular expressions of the corpus that a text loop stands in for, until TeaseScript has regular expressions (a
- * future `.ts` text library): `split(/\s+/)`, which splits at runs of whitespace, and `replaceAll(/<[^>]*>/, "")`,
- * which removes markup tags. Null for any other call.
- */
-function regexWorkaround(node: AstNode): "words" | "tags" | null {
+/** `replaceAll(/<[^>]*>/, "")`, with which a script removes markup tags from its text itself. */
+function removesTags(node: AstNode): boolean {
   const call = node.kind === "methodCall" ? callParts(node) : null;
-  if (call === null || call.inherited || asNode(node.object) === null) return null;
-  const text = (argument: AstNode | undefined): string | undefined => {
-    const value = argument === undefined ? undefined : constantValue(argument);
-    return typeof value === "string" ? value : undefined;
-  };
-  if (call.name === "split" && call.arguments.length === 1 && text(call.arguments[0]) === "\\s+")
-    return "words";
-  if (
+  return (
+    call !== null &&
+    !call.inherited &&
     call.name === "replaceAll" &&
     call.arguments.length === 2 &&
-    text(call.arguments[0]) === "<[^>]*>" &&
-    text(call.arguments[1]) === ""
-  )
-    return "tags";
-  return null;
-}
-
-/**
- * A workaround for a regular expression (regexWorkaround) as a loop that computes `target`, with a note naming it as
- * a workaround: the words of a text, split at spaces, tabs, and line breaks with empty parts left out, or a text
- * without the parts from each `<` to the next `>`.
- */
-function lowerRegexWorkaround(
-  declaration: boolean,
-  target: string,
-  node: AstNode,
-  span: SourceSpan | null,
-  context: LowerContext,
-  destination: AstNode = syntheticVariable(target, span),
-): IrStatement[] | null {
-  const kind = regexWorkaround(node);
-  const sourceNode = asNode(node.object)!;
-  // A source that may read the destination is read while a temporary collects the result.
-  if (kind !== null && !declaration && mayReadDestination(sourceNode, destination, context)) {
-    const temporary = freshName(kind === "words" ? "words" : "withoutTags", context);
-    const built = lowerRegexWorkaround(true, temporary, node, span, context);
-    return built === null
-      ? null
-      : [
-          ...built,
-          {
-            kind: "assign",
-            target: { kind: "variable", name: target },
-            operator: "=",
-            value: { kind: "variable", name: temporary },
-            span,
-          },
-        ];
-  }
-  const source = lowerExpression(sourceNode, context);
-  if (kind === null || source === null) return null;
-  const text = (operation: string, args: IrExpression[], value: IrExpression): IrExpression => ({
-    kind: "methodCall",
-    target: value,
-    name: operation,
-    arguments: args,
-  });
-  const literal = (value: string | number): IrExpression => ({ kind: "literal", value });
-  const variable = (name: string): IrExpression => ({ kind: "variable", name });
-  const result = variable(target);
-  const set = (value: IrExpression): IrStatement =>
-    declaration
-      ? { kind: "let", name: target, value, span }
-      : { kind: "assign", target: result, operator: "=", value, span };
-  addDiagnostic(
-    context,
-    "SX_REGEX_WORKAROUND",
-    "warning",
-    kind === "words"
-      ? "Workaround: a TeaseScript regex cannot split text yet, so a loop over the parts between spaces stands in for split(/\\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part."
-      : 'Workaround: a TeaseScript regex cannot replace text yet, so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").',
-    span,
+    constantValue(call.arguments[0]!) === "<[^>]*>" &&
+    constantValue(call.arguments[1]!) === ""
   );
-  if (kind === "words") {
-    const part = freshName("part", context);
-    const spaced = [literal("\t"), literal("\n"), literal("\r")].reduce(
-      (value, whitespace) => text("replace", [whitespace, literal(" ")], value),
-      source,
-    );
-    return [
-      set({ kind: "list", items: [] }),
-      {
-        kind: "for",
-        variable: part,
-        collection: text("split", [literal(" ")], spaced),
-        body: [
-          {
-            kind: "if",
-            condition: { kind: "binary", operator: "!=", left: variable(part), right: literal("") },
-            then: [
-              {
-                kind: "expression",
-                expression: {
-                  kind: "methodCall",
-                  target: result,
-                  name: "add",
-                  arguments: [variable(part)],
-                },
-                span,
-              },
-            ],
-            else: [],
-            span,
-          },
-        ],
-        span,
-      },
-    ];
-  }
-  const rest = freshName("rest", context);
-  const open = freshName("open", context);
-  const close = freshName("close", context);
-  const plus = (left: IrExpression, right: IrExpression): IrExpression => ({
-    kind: "binary",
-    operator: "+",
-    left,
-    right,
-  });
-  const join = (left: IrExpression, right: IrExpression): IrExpression => ({
-    kind: "template",
-    parts: [{ value: left }, { value: right }],
-  });
-  return [
-    set(literal("")),
-    { kind: "let", name: rest, value: source, span },
-    {
-      kind: "while",
-      condition: text("contains", [literal("<")], variable(rest)),
-      body: [
-        { kind: "let", name: open, value: text("indexOf", [literal("<")], variable(rest)), span },
-        {
-          kind: "let",
-          name: close,
-          value: text(
-            "indexOf",
-            [literal(">")],
-            text("substring", [variable(open)], variable(rest)),
-          ),
-          span,
-        },
-        {
-          kind: "if",
-          condition: { kind: "binary", operator: "<", left: variable(close), right: literal(0) },
-          then: [{ kind: "break", span }],
-          else: [],
-          span,
-        },
-        {
-          kind: "assign",
-          target: result,
-          operator: "=",
-          value: join(result, text("substring", [literal(0), variable(open)], variable(rest))),
-          span,
-        },
-        {
-          kind: "assign",
-          target: variable(rest),
-          operator: "=",
-          value: text(
-            "substring",
-            [plus(plus(variable(open), variable(close)), literal(1))],
-            variable(rest),
-          ),
-          span,
-        },
-      ],
-      span,
-    },
-    { kind: "assign", target: result, operator: "=", value: join(result, variable(rest)), span },
-  ];
 }
 
 /**

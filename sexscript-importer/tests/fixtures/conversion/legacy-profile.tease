@@ -78,15 +78,8 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
     }
     let numbered = true
     for part in parts {
-      if part.length == 0 {
+      if not part.matches(/[0-9]+/) {
         numbered = false
-      }
-      let position = 0
-      while position < part.length {
-        if not "0123456789".contains(part.substring(position, position + 1)) {
-          numbered = false
-        }
-        position += 1
       }
     }
     if parts.length > 0 and numbered {
@@ -107,10 +100,7 @@ function sexscriptLegacyLoad(key, whenMissing = null) {
       value = entries
     }
   }
-  if value == null {
-    value = whenMissing
-  }
-  return value
+  return value otherwise whenMissing
 }
 function sexscriptLegacyAskProfile {
   if load("intro.name", default: "") == "" {

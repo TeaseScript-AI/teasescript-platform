@@ -1,4 +1,4 @@
-global tau = 2 * 3.141592653589793
+// NOTE SX_CLASS_STATIC line 12: Groovy computed the static tau when the class was first used; it is no global, since computing it may fail at session start, so only a script that copies a method reading it computes it, and a failure of computing it happens there or not at all.
 // The shared functions of this helper class are static closures that the scripts call like methods.
 global function showWait(msg, tmo = 5) {
   say prose msg, instant
@@ -12,10 +12,6 @@ global function rounds(count, msg) {
 }
 global function twice(it = null) {
   return it * 2
-}
-// A static that operators compute from literals is a global, so the method that reads it is a global function too.
-global function turns(count) {
-  return count * tau
 }
 // A method that the scripts call keeps its parameter's type open, also where its own calls give it a number.
 global function check(n) {

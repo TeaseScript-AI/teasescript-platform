@@ -10,7 +10,7 @@ function sexscriptLegacyMaskUrl(url) {
   for pair in parts[1].split("&") {
     let field = pair.split("=")[0]
     let name = field.lowercase()
-    if name.contains("key") or name.contains("token") or name.contains("pass") or name.contains("secret") or name.contains("auth") {
+    if name.contains(/key|token|pass|secret|auth/) {
       masked.add("${field}=…")
     } else {
       masked.add(pair)

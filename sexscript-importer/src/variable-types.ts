@@ -2627,6 +2627,9 @@ const TEXT_RESULTS = new Map<string, TeaseType>([
   ["padStart", scalar("string")],
   ["padEnd", scalar("string")],
   ["split", listOf(scalar("string"))],
+  ["matches", scalar("boolean")],
+  ["findAll", listOf(scalar("string"))],
+  ["reverse", scalar("string")],
 ]);
 
 /** The current-time getters of #532 and what they return. */

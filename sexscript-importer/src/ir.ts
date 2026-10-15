@@ -255,7 +255,8 @@ export type IrExpression =
   /** `action` marks the ID of a function kept as a value; renaming the function renames the ID. */
   /** `decimal` writes a whole number as a decimal (`1.0`), which TeaseScript types as a number rather than an integer. */
   | { kind: "literal"; value: string | number | boolean | null; action?: true; decimal?: true }
-  | { kind: "variable"; name: string }
+  /** `engine` marks an engine constant, such as `pi`, which keeps its name where a legacy variable shared it. */
+  | { kind: "variable"; name: string; engine?: true }
   /** `set` marks a set literal `set[...]` (V30 §16); `lines` writes a long list with an item on each line. */
   | { kind: "list"; items: IrExpression[]; set?: true; lines?: true }
   /**

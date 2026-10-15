@@ -1,32 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { javaRegex } from "../src/java-regex.ts";
-import { javaReplacementText, parseRegexSubset, parseTailPattern } from "../src/regex-subset.ts";
+import { javaRegex, javaReplacement } from "../src/java-regex.ts";
+import { javaReplacementText, literalPattern, parseTailPattern } from "../src/regex-subset.ts";
 
-test("the regular expressions that text operations express are recognized", () => {
-  assert.deepEqual(parseRegexSubset("BOSS"), { kind: "literal", text: "BOSS" });
-  assert.deepEqual(parseRegexSubset("\\\\"), { kind: "literal", text: "\\" });
-  assert.deepEqual(parseRegexSubset("\\[|\\]"), { kind: "alternatives", texts: ["[", "]"] });
-  assert.deepEqual(parseRegexSubset("[^0-9X]"), {
-    kind: "class",
-    chars: "0123456789X",
-    negated: true,
-    runs: false,
-  });
-  assert.deepEqual(parseRegexSubset("[,\\|]"), {
-    kind: "class",
-    chars: ",|",
-    negated: false,
-    runs: false,
-  });
-  assert.deepEqual(parseRegexSubset("\\W+"), {
-    kind: "class",
-    chars: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_",
-    negated: true,
-    runs: true,
-  });
-  for (const pattern of ["(?i)Domme", "a.c", "^x", "([A-Z]+)\\(.*?\\)", "[a", "x*"])
-    assert.equal(parseRegexSubset(pattern), null, pattern);
+test("legacy regular expressions of literal text are searched as text", () => {
+  assert.equal(literalPattern("BOSS"), "BOSS");
+  assert.equal(literalPattern("\\\\"), "\\");
+  assert.equal(literalPattern("\\|"), "|");
+  for (const pattern of ["", "\\[|\\]", "[^0-9X]", "\\W+", "(?i)Domme", "a.c", "x*"])
+    assert.equal(literalPattern(pattern), null, pattern);
 });
 
 test("Java replacement texts are plain text unless they name a group", () => {
@@ -50,10 +32,17 @@ test("Java regular expressions as RE2 patterns", () => {
   const dot = String.raw`[^\n\r\x{85}\x{2028}\x{2029}]`;
   const converts = (
     pattern: string,
-    within: "whole" | "find",
+    within: "whole" | "find" | "all",
     expected: string,
     flags = "",
-  ): void => assert.deepEqual(javaRegex(pattern, within), { pattern: expected, flags }, pattern);
+  ): void => {
+    const regex = javaRegex(pattern, within);
+    assert.deepEqual(
+      "reason" in regex ? regex : { pattern: regex.pattern, flags: regex.flags },
+      { pattern: expected, flags },
+      pattern,
+    );
+  };
   converts(".{1,50}@x/y", "whole", `${dot}{1,50}@x\\/y`);
   converts("(?s)a.b", "whole", "a.b", "s");
   converts("(?si)\\.png", "whole", "\\.png", "is");
@@ -64,6 +53,7 @@ test("Java regular expressions as RE2 patterns", () => {
   converts("b$", "whole", "b$");
   converts("b$", "find", String.raw`b(?:\r\n|[\n\r\x{85}\x{2028}\x{2029}])?$`);
   converts("^\\s*$", "find", String.raw`^[\t\n\x0B\f\r ]*(?:\r\n|[\n\r\x{85}\x{2028}\x{2029}])?$`);
+  converts("([\\w]\\s*)[\\(|{]", "all", String.raw`([\w][\t\n\x0B\f\r ]*)[\(\|\{]`);
   for (const [pattern, reason] of [
     ["(a)\\1", "a backreference"],
     ["a(?=b)", "a lookaround, a named or atomic group, or a mode inside the pattern"],
@@ -88,4 +78,45 @@ test("Java regular expressions as RE2 patterns", () => {
     [".".repeat(35), "a regex longer than 1000 characters once converted"],
   ])
     assert.deepEqual(javaRegex(pattern!, "find"), { reason }, pattern);
+});
+
+// A regex whose matches are used (replaceAll(), split()) takes no `$`, which Java also matched before a final line
+// terminator; it tells its groups, which a replacement names, and whether it can match no text, which split() rejects.
+test("Java regular expressions whose every match is used", () => {
+  assert.deepEqual(javaRegex('^"|"$', "all"), {
+    reason:
+      "$, which Java also matched before a line terminator at the end, where the match is used",
+  });
+  const shape = (pattern: string): { groups: number; empty: boolean } | { reason: string } => {
+    const regex = javaRegex(pattern, "all");
+    return "reason" in regex ? regex : { groups: regex.groups, empty: regex.empty };
+  };
+  assert.deepEqual(shape("a"), { groups: 0, empty: false });
+  assert.deepEqual(shape("(a)(?:b)(c)?"), { groups: 2, empty: false });
+  const empty = (pattern: string): boolean | string => {
+    const regex = javaRegex(pattern, "all");
+    return "reason" in regex ? regex.reason : regex.empty;
+  };
+  for (const pattern of ["", "a*", "a?", "a{0,3}", "(a|)", "a|b*", "(?:ab)*", "^", "(a*)(b?)"])
+    assert.equal(empty(pattern), true, pattern);
+  for (const pattern of ["a+", "(a|b)", "a*b", "(a*)b|c", "[,]\\s*", "a{1,3}"])
+    assert.equal(empty(pattern), false, pattern);
+});
+
+// Java read `$n` as the first digit and each next one while the number stays a group, `\x` as x; a group the regex
+// lacks, `$` without a number, a named group, and a trailing backslash failed or do not convert.
+test("Java replacements as TeaseScript regex replacements", () => {
+  assert.equal(javaReplacement("$1[", 1), "$1[");
+  assert.equal(javaReplacement("\\$x\\\\", 0), "$$x\\");
+  assert.equal(javaReplacement("$0-$12", 12), "$0-$12");
+  assert.equal(javaReplacement("$2$1", 2), "$2$1");
+  for (const [text, groups] of [
+    ["$2", 1],
+    ["$12", 1],
+    ["$", 1],
+    ["${name}", 1],
+    ["a\\", 0],
+    ["$x", 1],
+  ] as const)
+    assert.equal(javaReplacement(text, groups), null, text);
 });

@@ -1585,9 +1585,10 @@ test(
   },
 );
 
-// A read with a default for a missing key uses get(key, default:) only with a default of the dict's value type.
+// A read with a default for a missing key uses get(key, default:) also with a default of another type than the dict's
+// values, which joins the result's type (#853).
 test(
-  "keeps read-then-default code whose default has another type than the dict's values",
+  "reads a missing key with a default of another type than the dict's values",
   { skip: parserUnavailable },
   async () => {
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-default-"));
@@ -1598,8 +1599,7 @@ test(
         'def m = [a: "text"]\ndef k = "b"\ndef x = m[k]\nif (x == null) x = 3\nsave("result", x)\n',
       );
       const output = emitTease(await convert(sourcePath));
-      assert.doesNotMatch(output, /m\.get\(/u);
-      assert.match(output, /^x = x otherwise 3$/mu);
+      assert.match(output, /^let x = m\.get\(k, default: 3\)$/mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

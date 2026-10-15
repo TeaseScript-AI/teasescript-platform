@@ -14,10 +14,7 @@ function sexscriptLegacyCall(action, args): boolean | number | string | null {
   }
 }
 function sexscriptLegacyRandom(limitValue) {
-  if limitValue == null {
-    return randomInteger(0..100)
-  }
-  let bound = limitValue - limitValue % 1
+  let bound = toInteger(limitValue otherwise 100)
   if bound > 0 {
     return randomInteger(0..bound)
   }

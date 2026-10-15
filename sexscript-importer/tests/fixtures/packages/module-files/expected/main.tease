@@ -1,8 +1,5 @@
 global function sexscriptLegacyRandom(limit) {
-  if limit == null {
-    return randomInteger(0..100)
-  }
-  let bound = limit - limit % 1
+  let bound = toInteger(limit otherwise 100)
   if bound > 0 {
     return randomInteger(0..bound)
   }

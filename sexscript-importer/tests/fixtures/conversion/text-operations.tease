@@ -1,5 +1,5 @@
 function sexscriptLegacyFixed(value, digits, factor) {
-  let scaled = round(value * factor)
+  let scaled = round(round(value, decimals: digits) * factor)
   let minus = ""
   if scaled < 0 {
     minus = "-"
@@ -16,7 +16,7 @@ function sexscriptLegacyFormat(pattern, values) {
   let result = ""
   let rest = pattern
   let next = 0
-  while rest.indexOf("%") != null {
+  while rest.contains("%") {
     let at = rest.indexOf("%") otherwise -1
     result += rest.substring(0, at)
     rest = rest.substring(at + 1)
@@ -31,7 +31,7 @@ function sexscriptLegacyFormat(pattern, values) {
       rest = rest.substring(1)
     }
     let width = 0
-    while rest.length > 0 and "0123456789".indexOf(rest.substring(0, 1)) != null {
+    while rest.contains(/^[0-9]/) {
       width = width * 10 + toInteger(rest.substring(0, 1))
       rest = rest.substring(1)
     }
@@ -39,17 +39,14 @@ function sexscriptLegacyFormat(pattern, values) {
     if rest.startsWith(".") {
       digits = 0
       rest = rest.substring(1)
-      while rest.length > 0 and "0123456789".indexOf(rest.substring(0, 1)) != null {
+      while rest.contains(/^[0-9]/) {
         digits = digits * 10 + toInteger(rest.substring(0, 1))
         rest = rest.substring(1)
       }
     }
     let conversion = rest.substring(0, 1)
     rest = rest.substring(1)
-    let text = ""
-    if next < values.length {
-      text = values[next]
-    }
+    let text = values.get(next, default: "")
     next += 1
     if conversion == "d" {
       text = toString(toInteger(text))
@@ -77,24 +74,6 @@ function sexscriptLegacyTextAt(text, position) {
     at += text.length
   }
   return text.substring(at, at + 1)
-}
-function sexscriptLegacyTokenize(text, delimiters) {
-  let tokens = []
-  let current = ""
-  for character in text.split("") {
-    if delimiters.contains(character) {
-      if current != "" {
-        tokens.add(current)
-      }
-      current = ""
-    } else {
-      current = "${current}${character}"
-    }
-  }
-  if current != "" {
-    tokens.add(current)
-  }
-  return tokens
 }
 function sexscriptLegacySplit(text, separator) {
   let partsValue = text.split(separator)
@@ -145,7 +124,7 @@ for step in [1, 2] {
 trail += "!"
 say prose trail, instant
 // tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
-let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")
+let fields = "a,b,,c;d".findAll(/[^,;]+/)
 // NOTE SX_FORMAT line 36: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
 let stamp = "07:05, ${sexscriptLegacyFixed(12.345, 1, 10)}%"
 say prose "${fields.length} fields at ${stamp}", instant
@@ -158,7 +137,7 @@ if pictures == "" or pictures == "" {
 let pictureList = sexscriptLegacySplit(pictures, "|")
 say prose "${pictureList.length} pictures, first ${pictures.split("|")[0]}", instant
 // The parts tokenize() gives are texts, so a character of one is read as text (SubChallenges' FindImage).
-for word in sexscriptLegacyTokenize("Kneel, now.", " ") {
+for word in "Kneel, now.".findAll(/[^ ]+/) {
   // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
   // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
   // NOTE SX_LENGTH_RECEIVER line 45: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.

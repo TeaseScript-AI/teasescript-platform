@@ -22,22 +22,7 @@ function sexscriptLegacyReceiveInteger(key, whenMissing = null) {
     return whenMissing
   }
   let text = "${value}"
-  let digits = text
-  if text.startsWith("-") or text.startsWith("+") {
-    digits = text.substring(1)
-  }
-  if digits == "" {
-    return whenMissing
-  }
-  for character in digits.split("") {
-    if not "0123456789".contains(character) {
-      return whenMissing
-    }
-  }
-  while digits.length > 1 and digits.startsWith("0") {
-    digits = digits.substring(1)
-  }
-  if digits.length > 10 {
+  if not text.matches(/[+-]?0*[0-9]{1,10}/) {
     return whenMissing
   }
   let numberValue = toInteger(text)

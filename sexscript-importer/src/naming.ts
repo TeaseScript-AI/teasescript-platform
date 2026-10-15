@@ -277,7 +277,9 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
   const child = (value: IrExpression): IrExpression => renameExpression(value, scope, renamer);
   switch (expression.kind) {
     case "variable":
-      return { ...expression, name: scope.get(expression.name) ?? expression.name };
+      return expression.engine === true
+        ? expression
+        : { ...expression, name: scope.get(expression.name) ?? expression.name };
     case "call":
       return {
         ...expression,
