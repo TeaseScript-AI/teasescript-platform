@@ -230,6 +230,14 @@ test("invalid random built-in arguments fail with source-associated errors", () 
       [["TSV010", message, staticRange]],
     );
   }
+  // A named argument is the error then, not the empty range.
+  assert.deepEqual(
+    compileSource("say randomInteger(range: 3..=1)\nexit").diagnostics.map(({ code, message }) => [
+      code,
+      message,
+    ]),
+    [["TSV022", "randomInteger(...) takes no named arguments. Remove 'range:'."]],
+  );
 });
 
 test("chance at both ends of the percentage range is certain", () => {

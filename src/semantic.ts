@@ -2315,6 +2315,8 @@ class SemanticValidator {
                   argument.span,
                 );
             } else if (
+              // A named argument is the error the call check reports.
+              expression.arguments[0]!.kind === "positionalArgument" &&
               start !== undefined &&
               end !== undefined &&
               (argument.inclusive ? end < start : end <= start)
