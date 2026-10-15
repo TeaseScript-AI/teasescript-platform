@@ -1640,7 +1640,7 @@ operation, and each operation may use at most the [regex work limit](RESOURCE-LI
 A charge that would pass it throws before that work runs, and so does a search whose NFA would nest deeper than the [NFA
 nesting limit](RESOURCE-LIMITS.md#retained-poc-policies-and-defaults) instead of reaching the host's stack limit; re2js
 keeps no machine it interrupted, and the operation fails with `TSR087` without a result, so a restored or replayed
-session fails at the same instruction. `findAll`,
+session fails at the same instruction. `findAll`, `count`,
 `lastIndexOf`, `split`, and `replace` search again from the end of each match, one code point further after an empty
 one, and charge each match and each piece of text before they add it, so a result stays within the limit. `replace`
 reads its replacement once, before the first search.

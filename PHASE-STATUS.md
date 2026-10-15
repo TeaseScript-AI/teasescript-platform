@@ -23,7 +23,7 @@ accept syntax, architecture, or implementation details.
   `lastIndexOf`, `count`, and `get` with `default:`, `+` on two texts or two lists, the
   `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, `toJson`/`fromJson`/`toBase64`/`fromBase64` for data
   that other programs exchange, with stored files as data URLs, `fileFromBase64`/`fileToBase64` for stored files of any
-  type, `hashText`/`hashFile` SHA-256 hashes, RE2 regex literals, `toRegex`, the regex searches `matches`, `contains`, `find`, `capture`, `indexOf`, `findAll`, and `lastIndexOf`, and `split` and `replace` with a regex, within a work limit,
+  type, `hashText`/`hashFile` SHA-256 hashes, RE2 regex literals, `toRegex`, the regex searches `matches`, `contains`, `find`, `capture`, `indexOf`, `findAll`, `count`, and `lastIndexOf`, and `split` and `replace` with a regex, within a work limit,
   list `addAll`, `sort`/`shuffle`/`reverse` and set
   operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
   (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
