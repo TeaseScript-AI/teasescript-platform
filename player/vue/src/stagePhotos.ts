@@ -19,13 +19,18 @@ let photoCache: Promise<Cache | null> | undefined;
 /**
  * The Player's cache of Stage photo files, emptied when the page first uses it, so that a later visit downloads files
  * that changed meanwhile; `null` where the browser offers no Cache Storage, as outside a secure context, or refuses it.
+ * Pages empty and open it one after another, so each page has a cache of its own: a page keeps using its cache after a
+ * later page removed it by name, while two pages that opened it at the same moment would share one that either trims.
  */
 function openPhotoCache(): Promise<Cache | null> | null {
   if (typeof caches === "undefined") return null;
-  photoCache ??= caches
-    .delete(PHOTO_CACHE)
-    .then(() => caches.open(PHOTO_CACHE))
-    .catch(() => null);
+  const reset = async () => {
+    await caches.delete(PHOTO_CACHE);
+    return caches.open(PHOTO_CACHE);
+  };
+  const resetInTurn = async () =>
+    "locks" in navigator ? await navigator.locks.request(PHOTO_CACHE, reset) : reset();
+  photoCache ??= resetInTurn().catch(() => null);
   return photoCache;
 }
 
@@ -279,11 +284,17 @@ export function preloadStagePhotos(sources: readonly string[]): () => void {
   };
 }
 
-/** Removes the files of other photos from the Player's cache, such as those of an earlier script. */
+/**
+ * Removes the files of other photos from the Player's cache, such as those of an earlier script; one still being
+ * written, whose download may have ended before the write, goes once it is written.
+ */
 async function keepOnly(sources: readonly string[]) {
   const cache = await openPhotoCache();
   if (!cache) return;
-  const kept = new Set(sources.map((source) => new URL(source, document.baseURI).href));
+  const address = (source: string) => new URL(source, document.baseURI).href;
+  const kept = new Set(sources.map(address));
+  for (const [source, written] of writing)
+    if (!kept.has(address(source))) void written.then(() => cache.delete(source));
   for (const request of await cache.keys()) if (!kept.has(request.url)) void cache.delete(request);
 }
 
