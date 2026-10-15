@@ -308,6 +308,7 @@ export function emitExpression(expression: IrExpression): string {
     case "regex":
       return `/${expression.pattern}/${expression.flags}`;
     case "literal":
+      if (expression.constant !== undefined) return expression.constant;
       return typeof expression.value === "string"
         ? (blockString([{ text: expression.value }]) ?? `"${escapeStringText(expression.value)}"`)
         : expression.decimal === true && /^-?\d+$/u.test(String(expression.value))

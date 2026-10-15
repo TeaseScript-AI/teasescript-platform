@@ -321,7 +321,7 @@
       "category": "b",
       "reason": "Webcam corner time (owner request 2026-10-13), with the source patch webcam-cornertime-export: the corner time task the player copies into cornertime.github.io, which legacy wrote to toy_ct_input.txt and opened in the computer's editor, shows with exportText as that file, where the player copies or downloads it. exportText has no legacy form, so this is an output edit of the generated showPopup.",
       "file": "toy/cornertime.tease",
-      "baseHash": "82d85e943fe443774b79478183fc09833abcd8049b76910afda0cee30fc20019",
+      "baseHash": "27fd1d4a27d382b0f03c89bba9f305a447030baf90ea2dd24ec7f68ba2cebc84",
       "edits": [
         {
           "find": "  showPopup ctinput\n",

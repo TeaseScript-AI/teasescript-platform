@@ -423,8 +423,8 @@ const literal = (value: number | string | boolean | null): IrExpression => ({
   value,
 });
 
-/** The number π (V30 "Numeric functions"). */
-const PI: IrExpression = { kind: "variable", name: "pi", engine: true };
+/** The number π, written `pi` (V30 "Numeric functions"). */
+const PI: IrExpression = { kind: "literal", value: Math.PI, constant: "pi" };
 
 /** Java class constants: `Math.PI` and `Math.E`. */
 export function textProperty(node: AstNode, name: string): IrExpression | undefined {
