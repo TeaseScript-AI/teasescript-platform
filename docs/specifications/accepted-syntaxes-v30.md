@@ -948,7 +948,7 @@ A returned value may be stored directly:
 
 ```text
 let damage = calculateDamage(
-    player: player,
+    attacker: player,
     weapon: weapon
 )
 ```
@@ -2152,8 +2152,8 @@ function openDoor {
 Return a value:
 
 ```text
-function calculateDamage(player, weapon) {
-    return player.strength + weapon.power
+function calculateDamage(attacker, weapon) {
+    return attacker.strength + weapon.power
 }
 ```
 
@@ -2167,10 +2167,10 @@ Optional return-type annotation follows the parameters:
 
 ```text
 function calculateDamage(
-    player,
+    attacker,
     weapon
 ): number {
-    return player.strength + weapon.power
+    return attacker.strength + weapon.power
 }
 ```
 
