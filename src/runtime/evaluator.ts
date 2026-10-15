@@ -1358,10 +1358,10 @@ export class Evaluator {
       // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
         const speaker = this.speakerById(object.speakerId, target.span);
-        // A store into a property that others are read through, such as `gender` for the terms it gives, changes them
-        // too, so a reference prepared to one keeps the value it leads to now.
+        // A reference prepared to the property, through any name for the speaker, keeps the value it leads to now; so
+        // does one to a property read through it, as a term through `gender`.
         const has = (name: string) => speaker.properties.some((property) => property.name === name);
-        for (const name of propertiesReadThrough(has, target.name)) {
+        for (const name of [target.name, ...propertiesReadThrough(has, target.name)]) {
           const path: PreparedReferenceStep[] = [{ kind: "property", name }];
           detachPreparedReferencesForMutation(this.snapshot, {
             rootFrameId: GLOBAL_SCOPE_ID,

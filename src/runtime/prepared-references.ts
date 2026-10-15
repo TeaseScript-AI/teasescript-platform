@@ -223,7 +223,9 @@ export function detachPreparedReferencesForMutation(
       } catch {
         continue;
       }
-      if (descriptor.detached) continue;
+      // A detached reference holds a copy of its root, which changes only where its path goes through a speaker, whose
+      // properties stay shared state, as for a receiver that `speaker` or a function result gave.
+      if (descriptor.detached && mutation.speakerPath == null) continue;
       const changedDepth = preparedReferenceMutationDepth(snapshot, descriptor, mutation, false);
       if (changedDepth === null) continue;
       freezePreparedReference(snapshot, temporary.value, descriptor, changedDepth);
