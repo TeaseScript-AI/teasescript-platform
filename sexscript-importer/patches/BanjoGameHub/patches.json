@@ -41,6 +41,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): Game of Chance (Banjo/gameofchance_ee) keeps a deck of 52 + jokerChance slots (dealt = new boolean[52+jokerChance]), but a redraw of a dealt card picks cardValue = getRandom(14), left from the older 56-slot game (gameofchance.groovy: new boolean[56]), so value 13 of the last suit indexes slot 52, past the deck when fewer than 1 joker is set; Java failed there too, as with a negative number of jokers, which the settings accepted (V2 explorer turn 15: TSR025 at Banjo/gameofchance_ee.tease:648, dealt[52] with 51 elements after the entry -1). Evident intent: a redraw takes one of the 13 card values, getRandom(13), as the first draw does (randomCard % 13), and the number of jokers is at least 0, asked again as the other settings are.",
       "diff": "reroll-values.diff"
+    },
+    {
+      "id": "second-opponent",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the penalty box (Banjo/penaltybox) picks a second opponent at random and, where it is the first one, takes the next, wrapping back by two past the end with if(pickOpponent2>opponentArray.size()); where the first pick was the last opponent, the next one is opponentArray[size()], past the list, which Groovy read as null and TeaseScript stops at (TSR025). Evident intent: the wrap applies from the size on, >=, so the second opponent is the one before the first (coordinator, speaker work 2026-10-15).",
+      "diff": "second-opponent.diff"
     }
   ]
 }

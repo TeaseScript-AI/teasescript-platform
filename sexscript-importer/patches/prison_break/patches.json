@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "blowjob-block",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the BlowJob3 block sends a player who cheated before (prison_break.PB_BJCheat still in the future) to block=\"BlowKob3a\", a typo of the block \"BlowJob3a\" a few lines further, so the block switch fell to its default, which showed \"Unfinished ? (BlowKob3a)\" and ended the game. Evident intent: the block BlowJob3a (coordinator, speaker work 2026-10-15).",
+      "diff": "blowjob-block.diff"
+    }
+  ]
+}
