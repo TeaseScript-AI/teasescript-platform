@@ -58,6 +58,8 @@ import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
 import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { evaluateTagSteps } from "../src/tag-query.js";
+import { PLAYER } from "../src/speaker-terms.js";
+import type { RuntimeAccountInput } from "../src/runtime/account.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import {
   mediaTerminalProgressMs,
@@ -434,6 +436,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly randomControl?: RandomControlOptions;
   /** The references of the stored files the stored values hold, which the host's file store vouches for (V30 §33). */
   readonly storedFiles?: readonly string[];
+  /** The person fields of the player's account, which the script reads as `account` (V30 §37); none by default. */
+  readonly account?: RuntimeAccountInput;
 }
 
 /**
@@ -536,6 +540,7 @@ export function createPlayerRuntimeSession(
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
     ...(options.debugMode === undefined ? {} : { debugMode: options.debugMode }),
     ...(options.storedFiles === undefined ? {} : { storedFiles: options.storedFiles }),
+    ...(options.account === undefined ? {} : { account: options.account }),
   });
   const recorder = options.recorder ?? null;
   const debugTrace = options.debugTrace ?? null;
@@ -2345,8 +2350,15 @@ function appendTranscript(
   }
   for (const event of events) {
     if (event.kind === "say") {
-      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
-      if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
+      // A message of `player` is the player's own, as an answer is (V30 §37).
+      const speakerId =
+        event.speaker === null
+          ? "narrator"
+          : event.speaker.identifier === PLAYER
+            ? "user"
+            : speakerKey(event.speaker);
+      if (event.speaker !== null && speakerId !== "user")
+        speakers[speakerId] = speakerPresentation(event.speaker);
       rows.set(event.sequence, transcriptEntries.length);
       transcriptEntries.push(
         Object.freeze({
@@ -2389,6 +2401,7 @@ function appendTranscript(
           id: `${TRANSCRIPT_EVENT_ID}${event.sequence}`,
           speakerId: "user",
           text: event.text,
+          presentation: event.presentation,
           ...(responseKinds.has(event.sequence)
             ? { responseKind: responseKinds.get(event.sequence)! }
             : {}),

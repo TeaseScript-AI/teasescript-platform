@@ -77,3 +77,20 @@ function noOption(mode: "bubble" | "prose", name: string): string {
 function notSide(name: "position" | "align", value: SerializableRuntimeValue): string {
   return `A message's ${name} must be "left", "center", or "right", but this is ${shownChoice(value)}.`;
 }
+
+/**
+ * The presentation of the player's answer to a button or ask: the player's own, resolved as for a message of `player`
+ * without options. An answer cannot fail, so where the player's options would fail such a message (TSR050), the
+ * answer takes the Player's defaults.
+ */
+export function answerPresentation(
+  player: RuntimeSpeakerSnapshot | null,
+  span: SourceSpan,
+): MessagePresentation {
+  try {
+    return resolveMessagePresentation(null, player, span);
+  } catch (error) {
+    if (!(error instanceof RuntimeFault)) throw error;
+    return resolveMessagePresentation(null, null, span);
+  }
+}

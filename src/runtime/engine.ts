@@ -931,6 +931,10 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "copyAccount":
+      evaluator.copyAccount(copySpan(instruction.span));
+      advance(snapshot);
+      return;
     case "enterScope":
       assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
       snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
@@ -2965,6 +2969,7 @@ function selectiveSayStagingClone(
     // Records are never changed in place; a shown message adds one.
     liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
     debugMode: snapshot.debugMode,
+    account: snapshot.account,
     // A say changes no control state; the operation's control keeps it.
     randomControl: snapshot.randomControl,
     maxCallDepth: snapshot.maxCallDepth,

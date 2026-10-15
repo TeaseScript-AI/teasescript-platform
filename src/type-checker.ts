@@ -136,7 +136,7 @@ import {
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
-import { GENDER_TERMS, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
+import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -223,7 +223,13 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { checksProperties, typePlan } from "./type-plans.js";
-import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
+import {
+  accountCopy,
+  copiesAccount,
+  PLAYER_DECLARATION,
+  runsOnItsOwn,
+  sessionDeclarations,
+} from "./project-globals.js";
 import {
   detachedType,
   sameStorageKeyTypes,
@@ -1195,6 +1201,9 @@ class TypeChecker {
    */
   readonly #anySpeaker = new PropertyTable();
 
+  /** A `player.copyFrom(account)` of the project, which gives the player its copied fields from the start. */
+  #accountCopy: CallExpression | undefined;
+
   /**
    * For each declared speaker by its name, the properties that its declaration or an assignment through its name gives
    * it, which decide the reads of its fields of {@link SPEAKER_FIELDS}.
@@ -1203,6 +1212,9 @@ class TypeChecker {
 
   /** The reads of speaker fields that this check noted, each once (see {@link #noteSpeakerField}). */
   readonly #fieldReads = new Set<Expression>();
+
+  /** The calls `player.copyFrom(account)` that are statements of their own, the only place the copy may stand. */
+  readonly #copyStatements = new WeakSet<Expression>();
 
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
@@ -1426,6 +1438,14 @@ class TypeChecker {
         : null;
     }
     if (node.kind !== "propertyAccessExpression") return null;
+    // A person field of the player that a copy of the account gives has the account's type, which no first value
+    // changes.
+    if (
+      this.#accountCopy !== undefined &&
+      PERSON_FIELDS.has(node.property.name) &&
+      this.#speakerName(node.object, scope) === PLAYER
+    )
+      return null;
     // Only a property that an object or a speaker keeps has a first value; one that a dict, list, or set computes,
     // such as `keys`, has none.
     const receivers = members(nonNullType(this.#typeOf(node.object))).map(resolved);
@@ -1473,6 +1493,7 @@ class TypeChecker {
             this.#declareFunction(statement, file, this.#project),
           );
     this.#effects = { shared: new Map(), loops };
+    this.#accountCopy = accountCopy(programs);
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -1588,6 +1609,23 @@ class TypeChecker {
     (this.#anySpeaker.sources ??= new Set()).add(properties);
     const gets = new Set<string>();
     this.#speakerGets.set(declaration.name.name, gets);
+    // A copy of the account anywhere, also in a block or function checked later, gives the player each person field,
+    // and its terms and name lists text from the start, decided at the copy.
+    const copy = declaration === PLAYER_DECLARATION ? this.#accountCopy : undefined;
+    if (copy !== undefined)
+      for (const name of PERSON_FIELDS) {
+        gets.add(name);
+        if (this.#keepsType(name))
+          properties.set(
+            name,
+            decidedSlot(
+              freshPlaceType(
+                SPEAKER_NAME_LISTS.has(name) ? { kind: "list", element: STRING_TYPE } : STRING_TYPE,
+              ),
+              copy.span,
+            ),
+          );
+      }
     for (const property of declaration.properties) {
       const name = property.name.name;
       gets.add(name);
@@ -1654,7 +1692,7 @@ class TypeChecker {
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
-    const example = speaker ?? this.#speakerProperties.keys().next().value ?? "name";
+    const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
       name,
@@ -1664,7 +1702,7 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? null,
+          speaker ?? this.#onlySpeaker(),
           name,
           custom,
           [...custom, ...SPEAKER_FIELDS],
@@ -1672,6 +1710,52 @@ class TypeChecker {
         );
       },
     );
+  }
+
+  /**
+   * A field of the account (V30 §37): a person field, as text, or a name list, as a list of text. The account may lack
+   * it when the script runs, which fails then; an unknown field is an error.
+   */
+  #accountFieldType(read: PropertyAccessExpression): StaticType {
+    const name = read.property.name;
+    if (SPEAKER_NAME_LISTS.has(name)) return { kind: "list", element: STRING_TYPE };
+    if (PERSON_FIELDS.has(name)) return STRING_TYPE;
+    this.#report(
+      typeCode.invalidOperand,
+      `The account has no field '${name}'.${
+        misspelledPropertyHint(name, [...PERSON_FIELDS]) ||
+        " Read a person field, as in 'account.firstName', 'account.heShe', or 'account.petNames'."
+      }`,
+      read.property.span,
+    );
+    return UNKNOWN_TYPE;
+  }
+
+  /**
+   * `player.copyFrom(account)`, a statement of its own, copies the account's person fields into the player (V30 §37),
+   * so the player gets each of them, which the account may still lack when the script runs, and its terms and name
+   * lists hold text (see {@link copyStores}). Any other form of `copyFrom` is an error.
+   */
+  *#copyFromTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
+    if (!copiesAccount(expression) || !this.#copyStatements.has(expression)) {
+      const callee = unwrap(expression.callee);
+      if (callee.kind === "propertyAccessExpression")
+        yield* compileChild(this.#expressionTask(callee.object, scope));
+      for (const argument of expression.arguments)
+        if (!isAccountName(argument.value))
+          yield* compileChild(this.#expressionTask(argument.value, scope));
+      this.#report(
+        typeCode.invalidOperand,
+        "'copyFrom' only copies the account into the player: write 'player.copyFrom(account)' on a line of its own.",
+        callee.kind === "propertyAccessExpression" ? callee.property.span : expression.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    // The copy is checked as the stores it makes, so it gives the player each field, decides or widens each place, and
+    // conflicts with another type that the script gave a field, as such a store would.
+    for (const store of copyStores(expression))
+      yield* compileChild(this.#assignmentTask(store, scope));
+    return NULL_TYPE;
   }
 
   /**
@@ -1690,6 +1774,21 @@ class TypeChecker {
       name: read.property.name,
       span: read.property.span,
     });
+  }
+
+  /** A declared speaker for a message to name in its example, other than the built-in `player`. */
+  #exampleSpeaker(): string {
+    for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return name;
+    return "name";
+  }
+
+  /**
+   * The speaker that a read from a speaker the compiler cannot tell apart reaches when the project declares no other
+   * one: the built-in `player`, if the project has it.
+   */
+  #onlySpeaker(): string | null {
+    for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return null;
+    return this.#speakerGets.has(PLAYER) ? PLAYER : null;
   }
 
   /**
@@ -1877,6 +1976,7 @@ class TypeChecker {
         yield* compileChild(this.#assignmentTask(statement, scope));
         return true;
       case "expressionStatement":
+        if (copiesAccount(statement.expression)) this.#copyStatements.add(statement.expression);
         yield* compileChild(this.#expressionTask(statement.expression, scope));
         return true;
       case "speakerDeclaration":
@@ -3998,6 +4098,7 @@ class TypeChecker {
         return { kind: "object", properties };
       }
       case "propertyAccessExpression": {
+        if (isAccountName(expression.object)) return this.#accountFieldType(expression);
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
         const name = expression.property.name;
         this.#noteSpeakerRead(expression, object, scope);
@@ -5770,10 +5871,10 @@ class TypeChecker {
           this.#report(
             typeCode.invalidOperand,
             missingSpeakerFieldMessage(
-              check.speaker,
+              check.speaker ?? this.#onlySpeaker(),
               check.name,
               fieldSources(check.name),
-              check.speaker ?? this.#speakerGets.keys().next().value ?? "name",
+              check.speaker ?? this.#exampleSpeaker(),
             ),
             check.span,
           );
@@ -5976,6 +6077,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
+    if (method === "copyFrom") return yield* compileChild(this.#copyFromTask(expression, scope));
     // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
     if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
       this.#noteChanged(callee.object);
@@ -9637,6 +9739,41 @@ const SPEAKER_FIELDS: ReadonlySet<string> = new Set([
   ...GENDER_TERMS.keys(),
   ...SPEAKER_NAME_LISTS,
 ]);
+
+/** The stores of each `player.copyFrom(account)` (see {@link copyStores}), made once for each, so every check sees them. */
+const COPY_STORES = new WeakMap<CallExpression, readonly AssignmentStatement[]>();
+
+/**
+ * The stores `player.<field> = account.<field>` that `player.copyFrom(account)` stands for in the type check, one for
+ * each person field, at the call's place.
+ */
+function copyStores(call: CallExpression): readonly AssignmentStatement[] {
+  const made = COPY_STORES.get(call);
+  if (made !== undefined) return made;
+  const span = call.span;
+  const named = (name: string): Identifier => ({ kind: "identifier", name, span });
+  const field = (object: string, name: string): PropertyAccessExpression => ({
+    kind: "propertyAccessExpression",
+    object: named(object),
+    property: named(name),
+    span,
+  });
+  const stores = [...PERSON_FIELDS].map((name): AssignmentStatement => ({
+    kind: "assignmentStatement",
+    operator: "=",
+    target: field(PLAYER, name),
+    value: field("account", name),
+    span,
+  }));
+  COPY_STORES.set(call, stores);
+  return stores;
+}
+
+/** Whether `expression` is the protected `account`, which no binding can have as its name. */
+function isAccountName(expression: Expression): boolean {
+  const node = unwrap(expression);
+  return node.kind === "identifier" && node.name === "account";
+}
 
 /**
  * The fields of which a speaker needs one for a read of its field `name` to find a value: `title` and `shortTitle` stand

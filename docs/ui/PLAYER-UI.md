@@ -738,7 +738,9 @@ Received bubbles align left and player-authored bubbles align right. The Player 
 alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. Messages
 occupy at most `75%` of the conversation width and `65ch`. Consecutive messages group only while both the speaker and
 presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
-messages do not. Speaker identity colour/font and per-message rich-text styling are content presentation, not
+messages do not: answers, and messages of the built-in speaker `player`
+([V30 §37](../specifications/accepted-syntaxes-v30.md#speaker-declaration-and-say-as)), which take the player's
+presentation like an authored message. Speaker identity colour/font and per-message rich-text styling are content presentation, not
 application palette roles. Adjacent bubbles in one speaker/presentation group have a 3px gap. Separate bubble groups
 start 12px apart. Prose keeps its own spacing.
 
@@ -767,7 +769,7 @@ Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
 spans, values, and validated HTTP(S) links; it does not interpret authored HTML or use a raw-HTML rendering path. Links
 open a new browsing context with opener isolation. Spoiler markup and reveal controls are removed.
-Player-authored transcript messages remain plain text and do not enter the markup parser.
+Answers remain plain text and do not enter the markup parser; a message of `player` is an authored message.
 
 A script message can change in place through its handle ([`RUNTIME.md`](../RUNTIME.md#message-handles)). Its entry keeps
 its identity, place, grouping, speaker, and presentation and shows the new text; history shows the current text, with no

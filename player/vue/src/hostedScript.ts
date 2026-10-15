@@ -5,6 +5,7 @@ import {
   createPlayerRuntimeSession,
   type PlayerProject,
 } from "../../runtime-adapter.js";
+import type { RuntimeAccountInput } from "../../../src/runtime/account.js";
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/index.js";
@@ -16,6 +17,8 @@ export interface ScriptHost {
   readonly storageScope: string;
   /** The package's name, such as its folder, which the random draw picker's breadcrumb starts with, if known. */
   readonly name?: string;
+  /** The person fields of the player's account that the session starts with (V30 §37), if the host has them. */
+  readonly account?: RuntimeAccountInput;
   resolveAsset(path: string): string | null;
   load(): Promise<{
     readonly project: string | PlayerProject;
@@ -65,6 +68,7 @@ export function prepareHostedScript(
             ...player.scriptStorageOptions(),
             // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
             ...player.temporalCapture(),
+            ...(host.account === undefined ? {} : { account: host.account }),
           }),
         new Map(
           typeof project === "string"

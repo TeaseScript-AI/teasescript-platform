@@ -1,4 +1,5 @@
 import { editDistance } from "./form-fields.js";
+import { PLAYER } from "./speaker-terms.js";
 
 /**
  * The message for a read of a property that an object does not have, naming the properties it has: at runtime
@@ -46,7 +47,9 @@ export function missingSpeakerPropertyMessage(
   return (
     found +
     (misspelledPropertyHint(name, names) ||
-      ` Give the property a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`)
+      (speaker === PLAYER
+        ? ` Assign it before reading it, as in 'player.${name} = ...'.`
+        : ` Give the property a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`))
   );
 }
 
@@ -65,6 +68,9 @@ export function missingSpeakerFieldMessage(
     speaker === null ? `No speaker has '${name}'` : `Speaker '${speaker}' has no '${name}'`;
   const whom = speaker === null ? "a speaker" : "it";
   const needed = sources.length === 1 ? "one" : alternatives(sources);
+  // The player has no declaration: an assignment or a copy of the account gives it a field.
+  if (speaker === PLAYER)
+    return `${subject}: no assignment or copy of the account gives ${whom} ${needed}. Copy the account with 'player.copyFrom(account)', or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} before reading it.`;
   const fix = sources.includes("gender")
     ? `Give ${whom} a gender, as in 'speaker ${example} { gender: "female" }', or assign '${speaker === null ? "" : `${speaker}.`}${name}' before reading it.`
     : `Give ${whom} a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`;

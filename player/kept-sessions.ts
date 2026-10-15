@@ -243,6 +243,7 @@ function validEvent(event: Record<string, unknown>): boolean {
         event["target"] === "standardChat" &&
         isCountOrNull(event["requestingSpeakerId"]) &&
         isText(event["text"]) &&
+        isMessagePresentation(event["presentation"]) &&
         isSpan(event["span"])
       );
     case "permanentButtonPressed":

@@ -305,6 +305,7 @@ export {
   type RuntimeStatus,
   type SnapshotValidationResult,
 } from "./runtime/state.js";
+export type { RuntimeAccountFieldSnapshot, RuntimeAccountInput } from "./runtime/account.js";
 export type {
   CaptureUnavailableReason,
   RuntimeActionSettlementSnapshot,

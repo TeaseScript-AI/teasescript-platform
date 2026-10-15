@@ -156,6 +156,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
       case "calendarDuration":
       case "identifier":
       case "debugMode":
+      case "accountField":
       case "temporary":
       case "list":
       case "object":

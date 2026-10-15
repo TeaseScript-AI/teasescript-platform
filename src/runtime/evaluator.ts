@@ -33,10 +33,13 @@ import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../messag
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
+  PERSON_FIELDS,
+  PLAYER,
   propertiesReadThrough,
   speakerPropertySource,
   speakerPropertyValue,
 } from "../speaker-terms.js";
+import { accountFieldValue } from "./account.js";
 import {
   LIST_STATISTICS,
   linearRegression,
@@ -406,6 +409,7 @@ export class Evaluator {
           | "calendarDuration"
           | "identifier"
           | "debugMode"
+          | "accountField"
           | "temporary"
           | "preparedReference";
       }
@@ -426,6 +430,24 @@ export class Evaluator {
           true,
         );
         return this.snapshot.debugMode;
+      case "accountField": {
+        const value = accountFieldValue(this.snapshot.account, expression.name);
+        if (value === undefined)
+          throw fault(
+            "TSR017",
+            `The account has no '${expression.name}': the player's account does not give one. Give the player a value of its own instead, as in 'player.${expression.name} = ...'.`,
+            expression.span,
+          );
+        // The host gave the account, so a read has no recorded origin.
+        this.trace?.readState(
+          stateKey("account", expression.name),
+          null,
+          `account.${expression.name}`,
+          value,
+          true,
+        );
+        return value;
+      }
       case "duration":
         return exactDuration(expression.milliseconds);
       case "calendarDuration":
@@ -831,6 +853,7 @@ export class Evaluator {
         case "calendarDuration":
         case "identifier":
         case "debugMode":
+        case "accountField":
         case "temporary":
         case "preparedReference":
           value = this.#evaluateLeaf(expression);
@@ -1759,11 +1782,60 @@ export class Evaluator {
     return visibleText(value, span, currentTemporalContext(this.snapshot));
   }
 
+  /**
+   * `player.copyFrom(account)` (V30 §37): the player gets a copy of each person field of the account and loses each one
+   * the account lacks, in place, so its other properties keep their order.
+   */
+  public copyAccount(span: SourceSpan): void {
+    const player = this.speakerByName(PLAYER, span);
+    const reference: SerializableRuntimeValue = {
+      kind: "speakerReference",
+      speakerId: player.id,
+      identifier: player.identifier,
+    };
+    // The copy may change every person field, so a reference prepared to one keeps the value it leads to now.
+    for (const name of PERSON_FIELDS) {
+      const path: PreparedReferenceStep[] = [{ kind: "property", name }];
+      detachPreparedReferencesForMutation(this.snapshot, {
+        rootFrameId: GLOBAL_SCOPE_ID,
+        rootName: player.identifier,
+        path,
+        speakerPath: { speakerId: player.id, path },
+      });
+    }
+    for (const name of PERSON_FIELDS) {
+      const value = this.snapshot.account.find((field) => field.name === name)?.value;
+      if (value === undefined) {
+        const index = player.properties.findIndex((property) => property.name === name);
+        if (index >= 0) player.properties.splice(index, 1);
+        continue;
+      }
+      setSpeakerProperty(player, name, value, span);
+      if (this.trace === null) continue;
+      // Each field depends only on the account's field it copies.
+      const previous = this.trace.push();
+      this.trace.readState(stateKey("account", name), null, `account.${name}`, value, true);
+      this.#writeState(reference, name, value, span, { property: name });
+      this.trace.pop(previous);
+    }
+  }
+
   public outputSpeaker(
     speaker: RuntimeSpeakerSnapshot,
     span: SourceSpan,
     events: InterpreterEvent[],
   ): OutputSpeaker {
+    // The player's own message shows no name and no avatar (V30 §37).
+    if (speaker.identifier === PLAYER)
+      return Object.freeze({
+        identifier: PLAYER,
+        displayName: "",
+        color: normalizeColor(
+          speaker.properties.find((property) => property.name === "color")?.value,
+        ),
+        font: optionalSpeakerString(speaker, "font", span),
+        avatar: null,
+      });
     const explicit = this.#speakerText(speaker, "displayName", span);
     let displayName: string;
     let fallback = false;

@@ -319,6 +319,39 @@ exit
   );
 });
 
+test("a message of player is the player's own, as an answer is, with the player's presentation", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'speaker vera {\n    displayName: "Vera"\n}',
+      'player.bubble = { background: "#334455" }',
+      'say as vera "Ready?", instant',
+      'say as player "I am *ready*.", instant',
+      'let answer = askChoice "Yes", "No"',
+      "exit",
+    ].join("\n"),
+  );
+  const foreground = playerRuntimeForeground(session);
+  if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
+  session = selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session;
+  const entries = session.transcriptEntries.flatMap((entry) =>
+    entry.kind === "message" ? [entry] : [],
+  );
+  assert.deepEqual(
+    entries.map((entry) => [entry.speakerId === "user", entry.text]),
+    [
+      [false, "Ready?"],
+      [true, "I am ready."],
+      [true, "Yes"],
+    ],
+  );
+  // The player's message shows its markup, and the player is no speaker the conversation names.
+  assert.ok(entries[1]!.content !== undefined && entries[2]!.content === undefined);
+  assert.ok(!Object.values(session.speakers).some((speaker) => speaker.identityId === "player"));
+  const background = normalizeColor("#334455");
+  assert.equal(entries[1]!.presentation?.background, background);
+  assert.equal(entries[2]!.presentation?.background, background);
+});
+
 test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
     'let choice = askChoice "First", "Second"\nsay choice, instant\nexit',

@@ -37,6 +37,25 @@ export const SPEAKER_NAME_LISTS: ReadonlySet<string> = new Set([
   "lovingNames",
 ]);
 
+/** The name of the built-in speaker for the person playing the tease (V30 §37). */
+export const PLAYER = "player";
+
+/**
+ * The person fields of a speaker and of the account: the name fields, `alias`, `gender`, the terms of
+ * {@link GENDER_TERMS}, and the name lists. `player.copyFrom(account)` copies them; the account has no others.
+ */
+export const PERSON_FIELDS: ReadonlySet<string> = new Set([
+  "title",
+  "shortTitle",
+  "firstName",
+  "lastName",
+  "displayName",
+  "alias",
+  "gender",
+  ...GENDER_TERMS.keys(),
+  ...SPEAKER_NAME_LISTS,
+]);
+
 /**
  * What a speaker whose own properties `own` gives reads as its property `name`: its own value; else for `title` its
  * `shortTitle` and for `shortTitle` its `title`; else for a term the default of its gender (see {@link GENDER_TERMS});

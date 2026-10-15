@@ -31,6 +31,13 @@ import { cloneFormState, cloneFormUi } from "./actions/form.js";
 import { DEFAULT_CHAT_PACING_SETTINGS, type ChatPacingSettings } from "../chat-pacing.js";
 import { speakerPropertyValue } from "../speaker-terms.js";
 import {
+  accountFromInput,
+  accountProblem,
+  cloneAccount,
+  type RuntimeAccountFieldSnapshot,
+  type RuntimeAccountInput,
+} from "./account.js";
+import {
   type CompiledFunctionDefinition,
   type Instruction,
   type InstructionPlan,
@@ -125,7 +132,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 82;
+export const RUNTIME_SNAPSHOT_VERSION = 83;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -172,6 +179,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextPermanentButtonId",
   "liveMessages",
   "debugMode",
+  "account",
   "randomControl",
   "maxCallDepth",
   "status",
@@ -489,6 +497,8 @@ export interface RuntimeSnapshot {
   readonly liveMessages: RuntimeLiveMessageSnapshot[];
   /** What the protected `debugMode` reads: whether the host runs the session in Debug. Only the host changes it. */
   debugMode: boolean;
+  /** The read-only account that the host gave at the start: the person fields `account` reads (V30 §37). */
+  readonly account: RuntimeAccountFieldSnapshot[];
   /**
    * Controlled randomness (docs/RUNTIME.md#controlled-randomness): how many chosen outcomes this state's history
    * accepted, and a draw the engine paused at; `null` until a host chooses an outcome or pauses.
@@ -511,6 +521,8 @@ export interface FreshRuntimeOptions {
   readonly persistentScriptStorage?: boolean;
   /** What the protected `debugMode` reads at first; `false` without one. `setDebugMode` changes it later. */
   readonly debugMode?: boolean;
+  /** The person fields of the player's account, which `account` reads (V30 §37); without them it has none. */
+  readonly account?: RuntimeAccountInput;
   /**
    * The references of stored files that the stored values hold, which the host's file store vouches for, so that
    * `toJson` and `fileToBase64` know them as files (V30 §33).
@@ -617,6 +629,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   }
   const debugMode = capturedOptions.debugMode === undefined ? false : capturedOptions.debugMode;
   if (typeof debugMode !== "boolean") throw new TypeError("debugMode must be a boolean.");
+  const account = accountFromInput(capturedOptions.account);
   const storedFiles = capturedOptions.storedFiles === undefined ? [] : capturedOptions.storedFiles;
   if (!Array.isArray(storedFiles) || !storedFiles.every(isStoredFileReference))
     throw new TypeError("storedFiles must be a list of stored file references.");
@@ -695,6 +708,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextPermanentButtonId: 1,
     liveMessages: [],
     debugMode,
+    account,
     randomControl: null,
     maxCallDepth,
     status: "ready",
@@ -794,6 +808,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
     liveMessages: snapshot.liveMessages.map((message) => ({ ...message })),
     debugMode: snapshot.debugMode,
+    account: cloneAccount(snapshot.account),
     randomControl: cloneRandomControl(snapshot.randomControl),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
@@ -1386,6 +1401,8 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   if (typeof value.debugMode !== "boolean") errors.push("Runtime debugMode must be a boolean.");
+  const accountFailure = accountProblem(value.account);
+  if (accountFailure !== null) errors.push(accountFailure);
   validateRandomControl(value.randomControl, value, plan, errors);
   validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
