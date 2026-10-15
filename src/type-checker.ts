@@ -465,10 +465,11 @@ type Decided = Map<Declaration, Map<string, Decision>>;
 type Copies = Map<Declaration, Map<string, string>>;
 
 /**
- * The `otherwise` expressions whose value counted as null so far where they were checked, but which a later value
- * decided in a way that a next check cannot start with: their result keeps that value's place (see {@link fallbackType}).
+ * The `otherwise` expressions, and the assignments to a variable of unknown type, whose value counted as null so far
+ * where they were checked, but which a later value decided in a way that a next check cannot start with: their result
+ * keeps that value's place (see {@link fallbackType}).
  */
-type KeptFallbacks = Set<Expression>;
+type KeptFallbacks = Set<Expression | AssignmentStatement>;
 
 /**
  * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
@@ -1158,7 +1159,9 @@ class TypeChecker {
   /** Whether this check found a copy of an undecided place that earlier checks did not (see {@link Copies}). */
   copiedMore = false;
 
-  /** Whether this check found a fallback to keep that earlier checks did not (see {@link KeptFallbacks}). */
+  /**
+   * Whether this check found a fallback or assignment to keep that earlier checks did not (see {@link KeptFallbacks}).
+   */
   keptMore = false;
 
   readonly #kept: KeptFallbacks;
@@ -1180,8 +1183,11 @@ class TypeChecker {
    */
   readonly #anySpeaker = new PropertyTable();
 
-  /** The fallbacks of this check that replaced places that so far held only null, with those places. */
-  readonly #replaced: { readonly node: Expression; readonly slots: readonly OpenType[] }[] = [];
+  /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
+  readonly #replaced: {
+    readonly node: Expression | AssignmentStatement;
+    readonly slots: readonly OpenType[];
+  }[] = [];
 
   /**
    * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
@@ -1252,8 +1258,9 @@ class TypeChecker {
       this.#copies.set(place.root, copies);
       this.copiedMore = true;
     }
-    // A fallback replaced a place that held only null where it was checked. When something decided that place after
-    // all, also in a way the next check cannot start with, the fallback keeps it from then on (see `fallbackType`).
+    // A fallback or an assignment replaced a place that held only null where it was checked. When something decided
+    // that place after all, also in a way the next check cannot start with, it keeps that place from then on (see
+    // `fallbackType`).
     const known = new Map<OpenType, boolean>();
     for (const { node, slots } of this.#replaced)
       if (!this.#kept.has(node) && !slots.every((slot) => heldOnlyNull(slot, known))) {
@@ -2572,7 +2579,17 @@ class TypeChecker {
       // The store checks a load's default, but stores the loaded value (see `#storeLoaded`).
       if (checked !== statement.value) this.#storeLoaded(place.type, value, statement.value);
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
-      if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
+      if (variable !== undefined) {
+        let held = this.#capture(statement.value);
+        // A copy of a place that so far held only null, such as an element of `[null]`, is null here, as for
+        // `otherwise` (see `fallbackType`): no store into a variable of unknown type decides the copy, as after `let`.
+        const slot = resolved(variable.type).kind === "unknown" ? nullOnlySlot(held) : undefined;
+        if (slot !== undefined && !this.#kept.has(statement)) {
+          this.#replaced.push({ node: statement, slots: [slot] });
+          held = NULL_TYPE;
+        }
+        this.#assigned(variable, held);
+      }
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
