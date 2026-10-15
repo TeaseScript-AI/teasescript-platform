@@ -6,6 +6,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): the BlowJob3 block sends a player who cheated before (prison_break.PB_BJCheat still in the future) to block=\"BlowKob3a\", a typo of the block \"BlowJob3a\" a few lines further, so the block switch fell to its default, which showed \"Unfinished ? (BlowKob3a)\" and ended the game. Evident intent: the block BlowJob3a (coordinator, speaker work 2026-10-15).",
       "diff": "blowjob-block.diff"
+    },
+    {
+      "id": "bully-swirlie-cases",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the bullies' swirlie scene (block BullySwirlie, a complete scene that ends in the next morning) could never come: in the Severity3 punishments it is a second case 3 after DiaperMarshmallow's, so Groovy's switch always took the first, and in the bullies' pick Bully3 it is case 6 of getRandom(6), which gives 0 to 5. Evident intent: one more choice in each pick; give it case 4 of getRandom(5) in Severity3 and pick Bully3 from getRandom(7).",
+      "diff": "bully-swirlie-cases.diff"
     }
   ]
 }

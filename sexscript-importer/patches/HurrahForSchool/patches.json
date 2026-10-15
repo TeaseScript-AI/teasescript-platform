@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "picture-flag-question",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): after the player's school photo was uploaded, a line left over from testing, getBoolean(loadBoolean(\"Sch.SchoolPictureTaken\")) at the left margin, put the flag just saved (true) to the player as a yes/no question whose answer nothing used. Remove it.",
+      "diff": "picture-flag-question.diff"
+    },
+    {
+      "id": "kit-replies",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
+      "diff": "kit-replies.diff"
+    }
+  ]
+}

@@ -62,6 +62,13 @@
       "category": "e",
       "reason": "The bedtime spreader-bar choice tests clothes.spreader_bar, which nothing saves; the toy chest saves the spreader bar as toys.spreader_bar, so the choice always went back to picking a toy. Read toys.spreader_bar.",
       "diff": "spreader-bar-key.diff"
+    },
+    {
+      "id": "ready-replies",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
+      "diff": "ready-replies.diff"
     }
   ]
 }

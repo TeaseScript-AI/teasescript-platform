@@ -132,6 +132,20 @@
       "category": "b",
       "reason": "The account-manipulation reboot animation starts dialog with an opening <font size='20'><b> and shows dialog + \"</b></font>\" as the dots grow, so neither part of a show holds a whole span and the converted dots lost their size and bold. Grow only the dots and wrap each show in the font and bold, as legacy rendered it.",
       "diff": "reboot-dots-span.diff"
+    },
+    {
+      "id": "corner-talk-picture",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the picture showed Brianna, the receptionist, while the mistress declined the player's refusal to raise the corner times at the end of a punishment (Punish finish): the branch calls setImageReception(), copied together with its text from the reception's corner-time talk in DisciplineClinicMain, where Brianna says it. The sibling branch of the same question in finish calls setImageImplement(), the mistress's picture: use it here too.",
+      "diff": "corner-talk-picture.diff"
+    },
+    {
+      "id": "alexis-intro-picture",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the picture still showed the previous screen while Alexis introduced herself (mistressInfo): her branch sets her intro picture after her first message, while every other mistress's branch sets it before. Set it before the first message; the second setImageIntro() stays.",
+      "diff": "alexis-intro-picture.diff"
     }
   ]
 }

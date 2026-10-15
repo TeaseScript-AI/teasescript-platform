@@ -55,6 +55,13 @@
       "category": "e",
       "reason": "The bed-time clock edge subtracts jewell.latehours, the late-hours setting of the jewell tease, which this package never saves, so it stopped there in Groovy as in the conversion. Take a missing setting as 0, jewell's own default.",
       "diff": "late-hours.diff"
+    },
+    {
+      "id": "ready-replies",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
+      "diff": "ready-replies.diff"
     }
   ]
 }

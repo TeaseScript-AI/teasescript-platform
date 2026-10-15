@@ -6,6 +6,20 @@
       "category": "e",
       "reason": "Days 1 and 2 show the closing picture with showImage(...), which is not a SexScript function (Groovy failed there); every other picture in the scripts uses setImage.",
       "diff": "set-image-name.diff"
+    },
+    {
+      "id": "bryce-next-counselor",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): at the end of her soft-cock rounds on day 2, Bryce said Daisy was anxious to get her hands on the player, a line copied with this whole branch from day 1's start002 section, where Daisy comes next; on day 2 Bryce sends the player back to Jayden (\"Now take that little boner back to Jayden\", and the next section is Jayden002). Name Jayden.",
+      "diff": "bryce-next-counselor.diff"
+    },
+    {
+      "id": "bryce-closing-picture",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the picture at Bryce's closing words on day 7 (section C004, \"Well done, holding back like that like a good boy…\") was Bella's page 17664/140, copied with those words from the end of Bella's section C003, where the same line and picture close it. Bryce's section otherwise shows her page 17664/160 and her Bryci gifs: show page 160 there.",
+      "diff": "bryce-closing-picture.diff"
     }
   ]
 }

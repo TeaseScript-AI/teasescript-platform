@@ -20,6 +20,13 @@
       "category": "b",
       "reason": "Version 0.1 lives in scripts/Hard times/ but restarts itself with return \"Hard times\", which the legacy player resolved against the scripts root and did not find, so the session ended. Return its path from the scripts root.",
       "diff": "v01-restart.diff"
+    },
+    {
+      "id": "ruin-picture",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the picture showed the blowjob scene's woman (kathia_nobili/fast3.jpg; in v0.1 Hard times/fast3.jpg, the same image) at \"HANDS OFF!!! RUIN IT!!\", in the middle of the ruin scene, whose other pictures are lady_fyre's ruin1, ruin2, ruin4, ruin2, ruin5 and ruin6; ruin3.jpg is in the script's own image list but used nowhere. Show lady_fyre/ruin3.jpg (v0.1: Hard times/ruin3.jpg) there, in v1.2, its German copy, and v0.1.",
+      "diff": "ruin-picture.diff"
     }
   ]
 }

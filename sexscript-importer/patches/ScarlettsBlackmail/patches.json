@@ -13,6 +13,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): the profile is sent in chunks under scriptVersion_id_<n>, and sendProfileEncrypted stores their count under scriptVersion_id; on a returning visit (initiation completed) the script read receiveString(scriptVersion_id) as the profile, which is the count, so Groovy took the number's text as the profile and the next additions were stored after it, and the typed conversion stopped there (V2 explorer: TSR017). Evident intent: the returning visit continues the stored profile, which the first visit puts together from its chunks; the patch does the same, in ScarlettsBlackmail.groovy and ScarlettsBlackmail_de.groovy.",
       "diff": "profile-chunks-return.diff"
+    },
+    {
+      "id": "menu-goddess",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The menu run of a returning player (initiation completed) read the chosen goddess only inline, as loadString(\"ScarlettsBlackmail.goddess\") in the path of her picture, so the speaker data's names rule, which follows the variable goddess, could not name her there, and every menu message was Goddess Scarlett's even when Christina's picture showed. Read the key once into def goddess at the start of that branch and use it in both picture paths, in the English and the German script; legacy behaviour is unchanged.",
+      "diff": "menu-goddess.diff"
     }
   ]
 }

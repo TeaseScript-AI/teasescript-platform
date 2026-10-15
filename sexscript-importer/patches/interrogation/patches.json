@@ -20,6 +20,26 @@
       "category": "e",
       "reason": "The number of sex partners is asked as free text (getString) and saved as typed, and closing a session clears the collateral answer by saving \"\"; the summary then reads it with loadInteger(), which parsed the text as a Double and stopped the script on \"\" or on any answer that is not a number. The summary's null check shows the intent: a missing count reads as 0. The summary now reads the text and parses it as loadInteger() did, as a number whose whole part it takes (\"12.0\" is 12), where it is one, else takes it as missing.",
       "diff": "sex-partners-text.diff"
+    },
+    {
+      "id": "degrading-names",
+      "layer": "output",
+      "category": "speakers",
+      "reason": "The chest word the player must write is the script's own list of degrading names for the player, which TeaseScript keeps on the built-in player speaker (V30 §37 name lists, owner 2026-10-15): the list fills player.degradingNames, and the text picks one of them as interpolation does. Groovy has no form for the player speaker, so this is an output edit.",
+      "file": "interrogation.tease",
+      "baseHash": "c72279de241edecf670e8aba773a4edc2517ce8257adce6e306b2ba089da82dd",
+      "edits": [
+        {
+          "find": "let insult = [\"slut\", \"slave\", \"whore\"]\n",
+          "replace": "player.degradingNames = [\"slut\", \"slave\", \"whore\"]\n",
+          "count": 1
+        },
+        {
+          "find": "**${insult.random}**",
+          "replace": "**${player.degradingNames}**",
+          "count": 1
+        }
+      ]
     }
   ]
 }
