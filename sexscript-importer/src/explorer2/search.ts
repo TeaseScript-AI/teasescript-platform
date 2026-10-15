@@ -211,6 +211,16 @@ const MAX_TYPED_LENGTH = 200;
 const MAX_CANDIDATES = 4096;
 /** Candidates a target tries first; each time it runs out, it comes back with this many times more. */
 const FIRST_BUDGET = 64;
+/**
+ * A run stops on a plateau, as V1's runs until stalled do, when no new code or way came for {@link PLATEAU_FACTOR} times
+ * the work it took to its last one (in the runner's units, see `Runner.work`), and at least this much work plus this
+ * much per instruction of the plan. Measured on the batch-33 corpus's progress (both seeds): it stops 52 of 178 and 61 of
+ * 185 runs early, mostly small units whose last new code came in the first seconds, and 4 and 2 of them would have found
+ * more (0.4–5% of their plan) later.
+ */
+const PLATEAU_WORK = 10_000_000;
+const PLATEAU_WORK_PER_INSTRUCTION = 10_000;
+const PLATEAU_FACTOR = 8;
 const BUDGET_GROWTH = 2;
 /**
  * Interactions a check plays past the one its target was at, at most: the change may add or remove a few before the
@@ -264,7 +274,7 @@ export interface Visit {
 
 export interface Explore2Result {
   readonly search: {
-    readonly stoppedBy: "exhausted" | "budget" | "memory";
+    readonly stoppedBy: "exhausted" | "plateau" | "budget" | "memory";
     readonly audit: { readonly result: "complete" | "incomplete" | "capped" };
     readonly states: number;
     readonly operations: number;
@@ -486,6 +496,8 @@ export function explore2(
   const checksOf = new Map<number, number>();
   const debugCheck = { ms: 0, instructions: 0, steps: 0, traced: 0, tracedMs: 0, tracedWork: 0 };
   const outOfTime = () => performance.now() - started >= options.budgetMs;
+  /** The work done when a play last ran new code or took a new way (see {@link PLATEAU_FACTOR}). */
+  let progressWork = 0;
 
   /** Answer children played per interaction instruction. */
   const answeredAt = new Map<number, number>();
@@ -885,9 +897,11 @@ export function explore2(
       }
     for (const decision of played.decisions) {
       const way = decision.instruction * 2 + decision.way;
+      if (!ways.has(way)) progressWork = runner.work;
       ways.add(way);
       lastChildOf.delete(way);
     }
+    if (found > 0) progressWork = runner.work;
     if (played.end === "failed" && played.failure !== null) {
       const failure = played.failure;
       const key = `${failure.code}@${failure.path}:${failure.line}`;
@@ -1990,7 +2004,7 @@ export function explore2(
     place: -1,
     answer: "",
   });
-  let stoppedBy: "exhausted" | "budget" | "memory" = "exhausted";
+  let stoppedBy: Explore2Result["search"]["stoppedBy"] = "exhausted";
   // The work each kind did so far (in the runner's units: see `Runner.work`), and the new instructions it found and the
   // work it took lately (moving totals): the kind that finds most per unit of work goes next, except that each kind gets
   // a share while it has work. Totals rather than an average of each play's ratio: a cheap play that finds one
@@ -2031,6 +2045,18 @@ export function explore2(
       }
       charge("decisions", sideStarted, sideFound);
       continue;
+    }
+    // After what checks found is played: a plateau, no new code or way for many times as long as the run took to its last
+    // one (see `PLATEAU_FACTOR`).
+    if (
+      runner.work - progressWork >=
+      Math.max(
+        PLATEAU_WORK + PLATEAU_WORK_PER_INSTRUCTION * instructions.length,
+        PLATEAU_FACTOR * progressWork,
+      )
+    ) {
+      stoppedBy = "plateau";
+      break;
     }
     const ready = KINDS.filter((kind) => kind !== "walks" || recent.length > 0)
       .filter((kind) => kind !== "decisions" || decisionsQueue.size > 0)
@@ -2384,7 +2410,7 @@ export function explore2(
       stoppedBy,
       audit: {
         result:
-          stoppedBy !== "exhausted"
+          stoppedBy !== "exhausted" && stoppedBy !== "plateau"
             ? "capped"
             : open === 0 &&
                 queueCut === 0 &&
@@ -3095,6 +3121,10 @@ const OPEN_NOTES: Readonly<Record<string, string>> = {
 };
 /** What the report says of a way the search did not finish with when it stopped, by why it stopped. */
 const STOP_NOTES = {
+  plateau: {
+    trying: "the playtester stopped, as long play found nothing new, while it tried it",
+    untried: "the playtester stopped, as long play found nothing new, before it tried it",
+  },
   budget: {
     trying: "the time ran out while the playtester tried it",
     untried: "the time ran out before the playtester tried it",
