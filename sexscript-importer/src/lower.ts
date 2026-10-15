@@ -57,6 +57,7 @@ import {
   withoutRepeatedText,
 } from "./repeated-text.ts";
 import { withElapsedDurations } from "./elapsed-time.ts";
+import { withSecondWaits } from "./second-waits.ts";
 import { withMessageHandles } from "./message-handles.ts";
 import { withParsedLoads } from "./parsed-loads.ts";
 import { withFillableLoads, withStorageDefaults } from "./storage-keys.ts";
@@ -3313,7 +3314,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
     ]);
   }
   if (replaced.size === 0 && staleText.size === 0)
-    return withListAppends(withProvenGaugeWaits(result.statements));
+    return withSecondWaits(withListAppends(withProvenGaugeWaits(result.statements)));
   const replace = (items: IrStatement[]): IrStatement[] =>
     items.flatMap((statement): IrStatement[] => {
       if (isStale(statement)) return [];
@@ -3340,7 +3341,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
           return [statement];
       }
     });
-  return withListAppends(withProvenGaugeWaits(replace(result.statements)));
+  return withSecondWaits(withListAppends(withProvenGaugeWaits(replace(result.statements))));
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
@@ -10261,7 +10262,8 @@ function rangeDirection(range: Extract<IrExpression, { kind: "range" }>): IrExpr
 /**
  * The loops through a Groovy range whose direction shows only at runtime (rangeDirection) go through the positions of
  * the range, an ascending TeaseScript range from 0, and take each number from the first bound in the range's
- * direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset * sign(n - 1) … }`, so that a pass may end the loop
+ * direction, `for iOffset in 0..=abs(n - 1) { let i = 1 + iOffset * sign(n - 1) … }` (without `i` where nothing reads
+ * it, as in `(1..n).each { swat() }`), so that a pass may end the loop
  * or wait before the next number is computed. A bound that the body may change, through a variable it sets or a
  * function of the script it calls, is computed once before the loop, as Groovy computed the range. This runs after the
  * passes that read a loop's range, such as the counters of withMessageHandles; withCountedLoops has folded the loops
@@ -10323,7 +10325,10 @@ export function withGroovyRanges(
           to: call(inclusive ? "floor" : "ceil", call("abs", distance)),
           inclusive,
         },
-        body: [{ kind: "let", name: variable, value: number, span }, ...body],
+        // A loop that only counts, whose number nothing reads, takes none.
+        body: readsVariable(body, variable)
+          ? [{ kind: "let", name: variable, value: number, span }, ...body]
+          : body,
       },
     ];
   });
@@ -12680,6 +12685,15 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         };
       }
     }
+    // A read of a list's last element, `list[list.size() - 1]`, is its `last` (V30 "List properties"), which fails on an
+    // empty list as the index did.
+    if (
+      targetNode !== null &&
+      !context.writeTargets.has(node) &&
+      isLastPositionOf(indexNode, targetNode) &&
+      isKnownListExpression(targetNode, context)
+    )
+      return { kind: "property", target, name: "last" };
     if (
       negativeIndex !== null &&
       targetNode !== null &&
@@ -14602,11 +14616,14 @@ function negativeConstantIndex(node: AstNode): number | null {
   return null;
 }
 
-/** Recognizes `getRandom(list.size)`, `getRandom(list.size())`, or `getRandom(list.length)` for `list`. */
-function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): boolean {
-  const call = legacyApiCall(index, context);
-  if (call === null || call.name !== "getRandom" || call.arguments.length !== 1) return false;
-  const bound = call.arguments[0]!;
+/** Recognizes `list.size() - 1`, `list.size - 1`, or `list.length - 1` for `list`. */
+function isLastPositionOf(index: AstNode, list: AstNode): boolean {
+  const left = index.kind === "binary" && text(index.operator) === "-" ? asNode(index.left) : null;
+  return left !== null && constantValue(asNode(index.right)!) === 1 && isSizeOf(left, list);
+}
+
+/** Recognizes `list.size`, `list.size()`, or `list.length` for `list`. */
+function isSizeOf(bound: AstNode, list: AstNode): boolean {
   const sizeName =
     bound.kind === "property"
       ? constantString(bound.property)
@@ -14616,6 +14633,13 @@ function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): 
   if (sizeName !== "size" && sizeName !== "length") return false;
   const receiver = asNode(bound.object);
   return receiver !== null && sameReference(receiver, list);
+}
+
+/** Recognizes `getRandom(list.size)`, `getRandom(list.size())`, or `getRandom(list.length)` for `list`. */
+function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): boolean {
+  const call = legacyApiCall(index, context);
+  if (call === null || call.name !== "getRandom" || call.arguments.length !== 1) return false;
+  return isSizeOf(call.arguments[0]!, list);
 }
 
 /** Whether `value` reads `list` at a position written the same way as `index`. */

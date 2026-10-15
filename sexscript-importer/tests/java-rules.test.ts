@@ -566,3 +566,27 @@ test(
     assert.deepEqual(run(source), ["two milk 2"]);
   },
 );
+
+// A read of a list's last element is `last`; seconds that legacy slept in whole milliseconds are waited as seconds; a
+// range loop whose number nothing reads takes none.
+test(
+  "reads a last element as last, waits seconds as seconds, and counts without an unread number",
+  { skip },
+  async () => {
+    const source = await convert([
+      'def xs = ["a", "b"]',
+      "show(xs[xs.size() - 1])",
+      "def swat = { n, time -> int integ = time * 1000; (1..n).each { sleep(integ) } }",
+      "swat(2, 0.5)",
+      'show("done")',
+      // Milliseconds that the script reads otherwise stay.
+      "def hold = { t -> int ms = t * 1000; sleep(ms); return ms }",
+      "show(hold(0.25))",
+    ]);
+    assert.match(source, /^say prose xs\.last, instant$/mu);
+    assert.match(source, /^\s+wait time\w* s$/mu);
+    assert.doesNotMatch(source, /integ|let it =/u);
+    assert.match(source, /^\s+wait ms ms$/mu);
+    assert.deepEqual(run(source), ["b", "done", "250"]);
+  },
+);

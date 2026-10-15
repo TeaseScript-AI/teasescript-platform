@@ -5,7 +5,7 @@ function change {
 }
 let earlier = value
 let conditional = "no"
-if change() == true {
+if change() {
   conditional = "yes"
 }
 say prose "${earlier}${conditional}", instant

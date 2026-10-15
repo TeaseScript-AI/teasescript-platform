@@ -1388,8 +1388,8 @@ const TRUTH_HELPER = "sexscriptLegacyTruth";
 
 /**
  * Groovy truth of a call of a package function that returns a boolean on every path is that boolean, so the truth
- * helper goes, `if percentChance(40)` (Domme3's class function), which each file's typing could not see, as the function
- * is in another file. A name that several files define tells nothing. The helper goes where no file calls it any more.
+ * helper or the test for true goes, `if percentChance(40)` (Domme3's class function), which each file's typing could
+ * not see, as the function is in another file. A name that several files define tells nothing. The helper goes where no file calls it any more.
  */
 function withBooleanResultTruths(programs: MigrationProgram[]): MigrationProgram[] {
   const functions = programs.flatMap((program) =>
@@ -1404,12 +1404,22 @@ function withBooleanResultTruths(programs: MigrationProgram[]): MigrationProgram
     ),
   );
   if (booleans.size === 0) return programs;
+  const boolean = (value: IrExpression | undefined): value is IrExpression =>
+    value?.kind === "call" && booleans.has(value.name);
   const expression = (value: IrExpression): IrExpression => {
     const next = mapChildren(value, expression);
     const tested = next.kind === "call" && next.name === TRUTH_HELPER ? next.positional : [];
-    return tested.length === 1 && tested[0]!.kind === "call" && booleans.has(tested[0]!.name)
-      ? tested[0]!
-      : next;
+    if (tested.length === 1 && boolean(tested[0])) return tested[0];
+    // A test of such a call for true, `percentChance(15) == true`, is the call.
+    if (
+      next.kind === "binary" &&
+      next.operator === "==" &&
+      boolean(next.left) &&
+      next.right.kind === "literal" &&
+      next.right.value === true
+    )
+      return next.left;
+    return next;
   };
   const statements = (items: IrStatement[]): IrStatement[] =>
     items.map((item) => mapOwnExpressions(withNestedBlocks(item, statements), expression));

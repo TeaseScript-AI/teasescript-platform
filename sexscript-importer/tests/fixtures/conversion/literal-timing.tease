@@ -149,7 +149,6 @@ function countDown(text, timeValue, speed) {
   let leftValue = timeValue / speed
   let itTo = floor(timeValue / speed)
   for itOffset in 0..=floor(abs(itTo - 1)) {
-    let it = 1 + itOffset * sign(itTo - 1)
     say prose """
       ${text}
 
