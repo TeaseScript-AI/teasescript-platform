@@ -1699,7 +1699,7 @@ class TypeChecker {
   /**
    * `player.copyFrom(account)`, a statement of its own, copies the account's person fields into the player (V30 §37),
    * so the player gets each of them, which the account may still lack when the script runs, and its terms and name
-   * lists hold text. Any other form of `copyFrom` is an error.
+   * lists hold text (see {@link copyStores}). Any other form of `copyFrom` is an error.
    */
   *#copyFromTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     if (!copiesAccount(expression) || !this.#copyStatements.has(expression)) {
@@ -1716,21 +1716,10 @@ class TypeChecker {
       );
       return UNKNOWN_TYPE;
     }
-    const gets = this.#speakerGets.get(PLAYER)!;
-    const properties = this.#speakerProperties.get(PLAYER)!;
-    for (const name of PERSON_FIELDS) {
-      gets.add(name);
-      if (this.#keepsType(name) && !properties.has(name))
-        properties.set(
-          name,
-          decidedSlot(
-            freshPlaceType(
-              SPEAKER_NAME_LISTS.has(name) ? { kind: "list", element: STRING_TYPE } : STRING_TYPE,
-            ),
-            expression.span,
-          ),
-        );
-    }
+    // The copy is checked as the stores it makes, so it gives the player each field, decides or widens each place, and
+    // conflicts with another type that the script gave a field, as such a store would.
+    for (const store of copyStores(expression))
+      yield* compileChild(this.#assignmentTask(store, scope));
     return NULL_TYPE;
   }
 
@@ -9715,6 +9704,35 @@ const SPEAKER_FIELDS: ReadonlySet<string> = new Set([
   ...GENDER_TERMS.keys(),
   ...SPEAKER_NAME_LISTS,
 ]);
+
+/** The stores of each `player.copyFrom(account)` (see {@link copyStores}), made once for each, so every check sees them. */
+const COPY_STORES = new WeakMap<CallExpression, readonly AssignmentStatement[]>();
+
+/**
+ * The stores `player.<field> = account.<field>` that `player.copyFrom(account)` stands for in the type check, one for
+ * each person field, at the call's place.
+ */
+function copyStores(call: CallExpression): readonly AssignmentStatement[] {
+  const made = COPY_STORES.get(call);
+  if (made !== undefined) return made;
+  const span = call.span;
+  const named = (name: string): Identifier => ({ kind: "identifier", name, span });
+  const field = (object: string, name: string): PropertyAccessExpression => ({
+    kind: "propertyAccessExpression",
+    object: named(object),
+    property: named(name),
+    span,
+  });
+  const stores = [...PERSON_FIELDS].map((name): AssignmentStatement => ({
+    kind: "assignmentStatement",
+    operator: "=",
+    target: field(PLAYER, name),
+    value: field("account", name),
+    span,
+  }));
+  COPY_STORES.set(call, stores);
+  return stores;
+}
 
 /** Whether `expression` is the protected `account`, which no binding can have as its name. */
 function isAccountName(expression: Expression): boolean {

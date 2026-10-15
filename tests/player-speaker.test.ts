@@ -179,12 +179,21 @@ test("the player and the account have compile errors that name the form that exi
     ),
     [],
   );
+  for (const before of ["", "player.petNames = []\n"])
+    assert.deepEqual(
+      mismatches(`${before}player.copyFrom(account)\nplayer.petNames.add(3)\nexit`).map(
+        ([code, , text]) => [code, text],
+      ),
+      [["TSV041", "3"]],
+      before,
+    );
+  // A field the script gave another type conflicts with the copy, as a store of the account's field would.
   assert.deepEqual(
-    mismatches("player.copyFrom(account)\nplayer.petNames.add(3)\nexit").map(([code, , text]) => [
+    mismatches("player.petNames = [1]\nplayer.copyFrom(account)\nexit").map(([code, , text]) => [
       code,
       text,
     ]),
-    [["TSV041", "3"]],
+    [["TSV041", "player.copyFrom(account)"]],
   );
 });
 
