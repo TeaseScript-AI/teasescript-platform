@@ -61,8 +61,8 @@ async function toolsMenuChecks(page) {
   return "PASS the tools menu opens tools that the sidebar keeps, also in the narrow drawer that Escape closes";
 }
 
-// Fullscreen goes on and off with focus kept on its control; a refused change is reported, and a browser without
-// fullscreen offers the control disabled.
+// Fullscreen goes on and off from the keyboard with focus kept on its control; a refused change is reported, and a
+// browser without fullscreen offers the control disabled.
 async function fullscreenChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -70,19 +70,20 @@ async function fullscreenChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   const fullscreen = page.locator("[data-fullscreen-control]");
-  await fullscreen.click();
+  await fullscreen.focus();
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
   await page.getByRole("button", { name: "Exit fullscreen", exact: true }).waitFor();
   check(
     await fullscreen.evaluate((element) => document.activeElement === element),
-    "Entering fullscreen must restore control focus",
+    "Entering fullscreen from the keyboard must keep control focus",
   );
-  await fullscreen.click();
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => !document.fullscreenElement);
   await page.getByRole("button", { name: "Enter fullscreen", exact: true }).waitFor();
   check(
     await fullscreen.evaluate((element) => document.activeElement === element),
-    "Leaving fullscreen must restore control focus",
+    "Leaving fullscreen from the keyboard must keep control focus",
   );
   await page.evaluate(() => {
     document.documentElement.requestFullscreen = () => Promise.reject(new Error("test rejection"));
@@ -473,12 +474,23 @@ async function startComposerFocusChecks(page) {
     )
     .catch(() => {});
   check(await inputFocused(), "A permanent button pressed with the mouse kept typing focus");
+  // So does the fullscreen control pressed with the mouse.
+  await page.locator("[data-fullscreen-control]").click();
+  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+  await page
+    .waitForFunction(
+      () => document.activeElement?.matches("[data-composer-input]") === true,
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "The fullscreen control pressed with the mouse kept typing focus");
   await page.keyboard.press("Space");
   await page
     .locator("[data-foreground-controls]")
     .getByRole("button", { name: "Done counting", exact: true })
     .waitFor({ state: "detached", timeout: 2000 });
-  return "PASS the composer takes and keeps focus, also after a permanent button pressed with the mouse, where Space presses the showButton";
+  return "PASS the composer takes and keeps focus, also after a permanent button or the fullscreen control pressed with the mouse, where Space presses the showButton";
 }
 
 async function composerSendFocusChecks(page) {

@@ -311,8 +311,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return enterDebugRoom(normalStorage.scope, debugRoom.value ?? { session: false }, durable);
     });
   // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
-  // (`storedEntries`) equal to what the provider holds, so Play again starts without reading storage again. A failed
-  // change leaves them as they were; session-local values (`null`) stay session-local.
+  // (`storedEntries`) equal to what the provider holds, so the Start that follows the end dialog runs without reading
+  // storage again. A failed change leaves them as they were; session-local values (`null`) stay session-local.
   const scriptStorage: ScriptStorageProvider | undefined = storageProvider && {
     scope: storageProvider.scope,
     load: () => storageProvider.load(),
@@ -666,7 +666,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
-  // The latest Start, offered again after an import replaced the saved data, and by Play again.
+  // The latest Start, which the start page offers again where no kept session goes on, as after the end dialog or an
+  // import that replaced the saved data, and which the debug room's restarts run.
   const lastStart = shallowRef<PlayerSessionStart | null>(null);
   // The source text of each file of the script Start runs, by path, when its host supplied it.
   let scriptSources: ReadonlyMap<string, string> = new Map();
