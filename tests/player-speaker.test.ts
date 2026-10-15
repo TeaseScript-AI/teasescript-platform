@@ -164,6 +164,14 @@ test("the player and the account have compile errors that name the form that exi
       ],
     ],
   );
+  // Through an alias, when the project declares no other speaker, a read can only reach the player.
+  assert.deepEqual(mismatches("let current = player\nsay current.firstName\nexit"), [
+    [
+      "TSV043",
+      "Speaker 'player' has no 'firstName': no assignment or copy of the account gives it one. Copy the account with 'player.copyFrom(account)', or assign 'player.firstName' before reading it.",
+      "firstName",
+    ],
+  ]);
   // A copy anywhere gives the player every person field, and its terms and lists hold text.
   assert.deepEqual(
     mismatches(

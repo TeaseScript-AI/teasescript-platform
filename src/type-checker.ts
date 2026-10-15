@@ -1667,7 +1667,7 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? null,
+          speaker ?? this.#onlySpeaker(),
           name,
           custom,
           [...custom, ...SPEAKER_FIELDS],
@@ -1756,6 +1756,15 @@ class TypeChecker {
   #exampleSpeaker(): string {
     for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return name;
     return "name";
+  }
+
+  /**
+   * The speaker that a read from a speaker the compiler cannot tell apart reaches when the project declares no other
+   * one: the built-in `player`, if the project has it.
+   */
+  #onlySpeaker(): string | null {
+    for (const name of this.#speakerGets.keys()) if (name !== PLAYER) return null;
+    return this.#speakerGets.has(PLAYER) ? PLAYER : null;
   }
 
   /**
@@ -5838,7 +5847,7 @@ class TypeChecker {
           this.#report(
             typeCode.invalidOperand,
             missingSpeakerFieldMessage(
-              check.speaker,
+              check.speaker ?? this.#onlySpeaker(),
               check.name,
               fieldSources(check.name),
               check.speaker ?? this.#exampleSpeaker(),
