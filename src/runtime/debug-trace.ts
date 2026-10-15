@@ -359,6 +359,11 @@ export interface DebugDependencies {
   omitted: number;
   /** The IDs as a set, once there are more than a scan checks quickly. */
   seen?: Set<number> | undefined;
+  /**
+   * IDs that come before `ids`, last first, put in front by a merge. An ID may come again later, where it does not count:
+   * `settled` gives the IDs in order, each once.
+   */
+  front?: number[] | undefined;
 }
 
 export function emptyDependencies(): DebugDependencies {
@@ -755,20 +760,18 @@ export class TraceStore {
 
   /**
    * Makes `deps` the collector of the frame being evaluated after `child` finished, which it adds. Into an empty
-   * collector, the finished child's causes move instead of being copied, so a chain of nested expressions collects
-   * in work proportional to its causes.
+   * collector, the finished child's causes move instead of being copied, and a few causes go in front of a child's many
+   * instead of the many after the few. A merge therefore costs the shorter side, so an expression nested on either side
+   * collects in work proportional to its causes.
    */
   focus(deps: DebugDependencies, child: DebugDependencies | null, merge: boolean): void {
     if (child !== null && merge && this.#failure === null) {
-      if (deps.ids.length > 0 || deps.omitted > 0) addAll(deps, child, this.#limit());
-      else if (child !== deps) {
-        deps.ids = child.ids;
-        deps.omitted = child.omitted;
-        deps.seen = child.seen;
-        child.ids = [];
-        child.omitted = 0;
-        child.seen = undefined;
-      }
+      if (deps.ids.length > 0 || deps.front !== undefined || deps.omitted > 0) {
+        if (child !== deps && precedes(deps, child, this.#limit())) {
+          prepend(deps, child);
+          adopt(deps, child);
+        } else addAll(deps, child, this.#limit());
+      } else if (child !== deps) adopt(deps, child);
     }
     this.acc = deps;
   }
@@ -779,6 +782,7 @@ export class TraceStore {
     this.acc.ids.length = 0;
     this.acc.omitted = 0;
     this.acc.seen = undefined;
+    this.acc.front = undefined;
     this.acc.ids.push(id);
   }
 
@@ -877,12 +881,12 @@ export class TraceStore {
    */
   copyTemporary(callFrameId: number, temporaryId: number, value: SerializableRuntimeValue): void {
     if (this.#failure !== null) return;
-    const deps = this.acc;
-    if (deps.ids.length !== 1 || deps.omitted !== 0) {
+    const ids = settled(this.acc);
+    if (ids.length !== 1 || this.acc.omitted !== 0) {
       this.writeTemporary(callFrameId, temporaryId, value);
       return;
     }
-    if (!this.alias(temporaryKey(callFrameId, temporaryId), deps.ids[0]!))
+    if (!this.alias(temporaryKey(callFrameId, temporaryId), ids[0]!))
       this.writeTemporary(callFrameId, temporaryId, value);
   }
 
@@ -1368,7 +1372,7 @@ export class TraceStore {
       sceneTimeMs: decided?.sceneTimeMs ?? this.#sceneTimeMs,
       preview: preview?.text ?? null,
       previewTruncated: preview?.truncated ?? false,
-      dependencies: Object.freeze([...deps.ids]),
+      dependencies: Object.freeze([...settled(deps)]),
       omitted: deps.omitted,
       detail,
       control,
@@ -1671,10 +1675,13 @@ function storageKeyOf(key: string): string {
 
 function addDependency(deps: DebugDependencies, id: number, limit: number): void {
   const ids = deps.ids;
-  if (ids.length < SCANNED_DEPENDENCIES || limit <= SCANNED_DEPENDENCIES) {
+  if (
+    deps.seen === undefined &&
+    (ids.length < SCANNED_DEPENDENCIES || limit <= SCANNED_DEPENDENCIES)
+  ) {
     if (ids.includes(id)) return;
   } else if ((deps.seen ??= new Set(ids)).has(id)) return;
-  if (ids.length >= limit) {
+  if ((deps.seen?.size ?? ids.length) >= limit) {
     deps.omitted += 1;
     return;
   }
@@ -1683,8 +1690,73 @@ function addDependency(deps: DebugDependencies, id: number, limit: number): void
 }
 
 function addAll(target: DebugDependencies, source: DebugDependencies, limit: number): void {
-  for (const id of source.ids) addDependency(target, id, limit);
+  for (const id of settled(source)) addDependency(target, id, limit);
   target.omitted += source.omitted;
+}
+
+/** The IDs of `deps` in order, each once; puts `front` in place first. */
+function settled(deps: DebugDependencies): number[] {
+  const front = deps.front;
+  if (front === undefined) return deps.ids;
+  const ids: number[] = [];
+  const placed = new Set<number>();
+  const place = (id: number) => {
+    if (placed.has(id)) return;
+    placed.add(id);
+    ids.push(id);
+  };
+  for (let index = front.length - 1; index >= 0; index -= 1) place(front[index]!);
+  for (const id of deps.ids) place(id);
+  deps.ids = ids;
+  deps.front = undefined;
+  return ids;
+}
+
+/** The IDs `deps` holds, an ID that `front` repeats counted again. */
+function held(deps: DebugDependencies): number {
+  return deps.ids.length + (deps.front?.length ?? 0);
+}
+
+/**
+ * Whether `deps` should go in front of `child` rather than `child` after `deps`: when `child` is long and holds more,
+ * and the two together stay within the limit, so the result is the same.
+ */
+function precedes(deps: DebugDependencies, child: DebugDependencies, limit: number): boolean {
+  const length = held(child);
+  return (
+    limit > SCANNED_DEPENDENCIES &&
+    length > SCANNED_DEPENDENCIES &&
+    length > held(deps) &&
+    (deps.seen?.size ?? deps.ids.length) + (child.seen?.size ?? child.ids.length) <= limit
+  );
+}
+
+/** Puts the IDs of `deps` in front of those of `child`, in work proportional to `deps`. */
+function prepend(deps: DebugDependencies, child: DebugDependencies): void {
+  const seen = (child.seen ??= new Set(child.ids));
+  const front = (child.front ??= []);
+  // `front` holds IDs last first: those of `deps` from its last back to its first.
+  for (let index = deps.ids.length - 1; index >= 0; index -= 1) {
+    front.push(deps.ids[index]!);
+    seen.add(deps.ids[index]!);
+  }
+  for (const id of deps.front ?? []) {
+    front.push(id);
+    seen.add(id);
+  }
+  child.omitted += deps.omitted;
+}
+
+/** Moves what `child` holds into `deps`, which holds nothing of its own any longer, and leaves `child` empty. */
+function adopt(deps: DebugDependencies, child: DebugDependencies): void {
+  deps.ids = child.ids;
+  deps.omitted = child.omitted;
+  deps.seen = child.seen;
+  deps.front = child.front;
+  child.ids = [];
+  child.omitted = 0;
+  child.seen = undefined;
+  child.front = undefined;
 }
 
 /** Bytes counted for a stage's undo entry of `key`, which it keeps while the stage lasts. */
@@ -1705,7 +1777,7 @@ function encloses(outer: PlanSourceLocation, inner: PlanSourceLocation): boolean
 }
 
 function copyDependencies(deps: DebugDependencies): DebugDependencies {
-  return { ids: [...deps.ids], omitted: deps.omitted };
+  return { ids: [...settled(deps)], omitted: deps.omitted };
 }
 
 const PREVIEW_SPAN: PlanSourceLocation = Object.freeze({

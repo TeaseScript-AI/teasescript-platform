@@ -1615,6 +1615,79 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   assert.equal(all.omittedDependencies, 0);
 });
 
+test("uncapped causes merge in work proportional to them on whichever side an expression nests", () => {
+  // Sums of operands drawn from fewer variables, so a variable comes again on either side of a merge.
+  const shapes: Record<string, (operands: readonly string[]) => string> = {
+    left: (operands) => operands.join(" + "),
+    right: (operands) => operands.reduceRight((inner, operand) => `${operand} + (${inner})`),
+    // Groups of one, two, and three operands, nested on alternating sides.
+    mixed: (operands) => {
+      const groups: string[] = [];
+      for (let start = 0, size = 1; start < operands.length; start += size, size = (size % 3) + 1)
+        groups.push(`(${operands.slice(start, start + size).join(" + ")})`);
+      return groups.reduceRight((inner, group, index) =>
+        index % 2 === 0 ? `${group} + (${inner})` : `(${inner}) + ${group}`,
+      );
+    },
+  };
+  const has = Set.prototype.has;
+  const add = Set.prototype.add;
+  const includes = Array.prototype.includes;
+  /** Dependency lookups during a traced run of `total = shape`, and the variables `total` depends on. */
+  const traced = (shape: string, count: number) => {
+    const pool = (count * 3) / 4;
+    const operands = Array.from({ length: count }, (_, index) => `v${(index * 7) % pool}`);
+    const expression = shapes[shape]!(operands);
+    const plan = compile(
+      [
+        ...Array.from({ length: pool }, (_, index) => `let v${index} = ${index}`),
+        `let total = ${expression}`,
+        "exit",
+      ].join("\n"),
+    );
+    const session = createFreshRuntimeSession(plan, { seed: SEED });
+    const trace = new RuntimeDebugContext({ maxDependencies: Infinity });
+    let lookups = 0;
+    // Merging causes deduplicates them by a scan or a set: count those lookups while the traced run evaluates.
+    Set.prototype.has = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return has.call(this, value);
+    };
+    Set.prototype.add = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return add.call(this, value);
+    };
+    // EVIDENCE: invariant: the wrapper forwards every call unchanged to the original includes, so it has its type.
+    Array.prototype.includes = function (this: unknown[], ...args: Parameters<typeof includes>) {
+      lookups += 1;
+      return includes.apply(this, args);
+    } as typeof includes;
+    try {
+      session.run({ debugTrace: trace });
+    } finally {
+      Set.prototype.has = has;
+      Set.prototype.add = add;
+      Array.prototype.includes = includes;
+    }
+    const scope = session.exportTrustedSnapshot().frames[0]!.id;
+    const sum = record(trace, trace.variableRecord(scope, "total"));
+    assert.equal(sum.omittedDependencies, 0);
+    // Evaluation reads the operands from left to right: each variable counts where it is first read.
+    const variables = [...new Set(expression.match(/v\d+/gu) ?? [])];
+    assert.deepEqual(
+      sum.dependencies.map((dependency) => dependency.id),
+      variables.map((name) => trace.variableRecord(scope, name)),
+    );
+    return lookups;
+  };
+  for (const shape of Object.keys(shapes)) {
+    const small = traced(shape, 256);
+    const large = traced(shape, 1024);
+    // Four times the operands: linear work grows about fourfold, a merge copying the longer side sixteenfold.
+    assert.ok(large < 6 * small, `${shape}: ${small} lookups for 256 operands, ${large} for 1024`);
+  }
+});
+
 /** A record as data that does not change while the trace keeps it: dependencies and `control` by ID. */
 function recordData(entry: RuntimeDebugRecord) {
   return {
