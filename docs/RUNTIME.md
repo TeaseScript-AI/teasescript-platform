@@ -215,8 +215,8 @@ Choice buttons may occupy one or two rows. The Player application may render the
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
 presentation is not canonical runtime/checkpoint state and does not change values, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `askChoice`. The one-option
-`showButton` completes through its rendered control or composer submission of its exact, non-empty visible label;
-other text and Space with the empty focused composer do not activate it.
+`showButton` completes through its rendered control, composer submission of its exact, non-empty visible label, or
+Space with the empty focused composer, since its button is always preselected; other text does not activate it.
 
 Field hints, control labels, requesting-speaker metadata, localized validation feedback, and accessibility labels are not duplicate speaker transcript messages.
 
