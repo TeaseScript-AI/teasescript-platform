@@ -10367,14 +10367,24 @@ function interpolationFix(expression: Extract<Expression, { kind: "binaryExpress
 }
 
 /**
- * The `toList()` call that gives the numbers of the range `operand`, as source text: `(1..=3).toList()` for a range
- * written out, `r.toList()` for one in a variable, and `range.toList()` for one too long to show.
+ * The `toList()` call that gives the numbers of the range `operand`, as source text: `r.toList()` for one in a variable,
+ * `(1..=3).toList()` for one written with an operator, which binds less tightly than a method call, and
+ * `range.toList()` for one too long to show.
  */
 function rangeListText(operand: Expression): string {
   const text = expressionText(operand);
   if (text === null) return "range.toList()";
-  return operand.kind === "rangeExpression" ? `(${text}).toList()` : `${text}.toList()`;
+  return POSTFIX_OPERANDS.has(operand.kind) ? `${text}.toList()` : `(${text}).toList()`;
 }
+
+/** The expressions a method call can follow without parentheses. */
+const POSTFIX_OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+  "parenthesizedExpression",
+]);
 
 /** The source spelling of a variable or property path, a number or boolean literal, or plain text in quotes. */
 function operandLabel(expression: Expression): string | null {

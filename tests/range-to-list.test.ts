@@ -14,6 +14,10 @@ import { sayTexts } from "./helpers/runtime-events.js";
 // A parameter without a type or default is unknown, so `pick(...)` gives a value the compiler cannot know.
 const PICK = "function pick(value) {\n    return value\n}\n";
 
+/** `maybe(flag)` gives a range or null. */
+const MAYBE =
+  "function maybe(flag: boolean): range? {\n    if flag {\n        return 1..=3\n    }\n    return null\n}\n";
+
 function said(...lines: string[]): string[] {
   const result = runValidSource([...lines, "exit"].join("\n"));
   assert.equal(result.snapshot.failure, null, lines.join("\n"));
@@ -130,6 +134,7 @@ test("a range given where a list is needed names toList in the fix", () => {
     [
       "let x = [0]\nx += 1..=3\nexit",
       "let x = [0]\nlet r = 1..3\nx += r\nexit",
+      `${MAYBE}let x = [0]\nlet r = maybe(true)\nlet backup = 4..=5\nx += r otherwise backup\nexit`,
       "let x = [0]\nlet y = x + (1..3)\nexit",
       "let x = [0]\nlet y = (1..3) + x\nexit",
       "let x = [0]\nx.addAll(1..=3)\nexit",
@@ -147,6 +152,12 @@ test("a range given where a list is needed names toList in the fix", () => {
         [
           "TSV041",
           "'x' holds a list (integer[]), so a range cannot be added to it. To add the numbers of a range, use 'x += r.toList()'.",
+        ],
+      ],
+      [
+        [
+          "TSV041",
+          "'x' holds a list (integer[]), so a range cannot be added to it. To add the numbers of a range, use 'x += (r otherwise backup).toList()'.",
         ],
       ],
       [
@@ -180,6 +191,13 @@ test("a range given where a list is needed names toList in the fix", () => {
         ],
       ],
     ],
+  );
+  // The fix runs as written, also where the range is the result of an operator.
+  assert.deepEqual(
+    runValidSource(
+      `${MAYBE}let x = [0]\nlet r = maybe(true)\nlet backup = 4..=5\nx += (r otherwise backup).toList()\nsay x\nexit`,
+    ).snapshot.failure,
+    null,
   );
   // A range the compiler cannot see fails with the same fix when the script runs.
   const join =
