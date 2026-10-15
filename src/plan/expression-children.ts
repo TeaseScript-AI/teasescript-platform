@@ -7,6 +7,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
     case "calendarDuration":
     case "identifier":
     case "debugMode":
+    case "accountField":
     case "temporary":
     case "preparedReference":
       return [];

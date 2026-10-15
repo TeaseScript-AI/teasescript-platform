@@ -79,6 +79,8 @@ export interface PlayerTranscriptEvent {
   readonly target: "standardChat";
   readonly requestingSpeakerId: number | null;
   readonly text: string;
+  /** The player's presentation when the answer completed, as for a message of `player` (V30 §37). */
+  readonly presentation: MessagePresentation;
   readonly span: SourceSpan;
 }
 

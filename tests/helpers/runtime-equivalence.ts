@@ -28,6 +28,7 @@ import {
   type RuntimeSessionView,
   type RuntimeSnapshot,
 } from "../../src/index.js";
+import type { RuntimeAccountInput } from "../../src/runtime/account.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 import { interruptFrame } from "../../src/runtime/activations.js";
 import { executionRunnable } from "../../src/runtime/operations/observe-time.js";
@@ -49,6 +50,8 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly images?: readonly ProjectImageFile[];
   /** The host's stored values when the session starts, such as values an earlier session saved. */
   readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** The person fields of the player's account that the session starts with. */
+  readonly account?: RuntimeAccountInput;
   /** How the session ends: `halted` by default, or `failed` for a scenario that ends with a runtime error. */
   readonly ending?: "halted" | "failed";
   /**
@@ -129,6 +132,7 @@ export function assertRuntimeResumeEquivalent(
   const fresh = {
     seed,
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+    ...(options.account === undefined ? {} : { account: options.account }),
   };
   const initial = createImmediatePacingRuntimeSnapshot(plan, fresh);
   const initialSnapshotValidation = validateRuntimeSnapshot(initial, plan);
