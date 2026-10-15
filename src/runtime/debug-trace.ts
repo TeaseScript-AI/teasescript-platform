@@ -1488,9 +1488,12 @@ export class TraceStore {
     for (const index of places) {
       const record = this.#records[index];
       if (record === undefined) continue;
-      // An alias that no longer names the record leaves its list, so that no later pruning looks at it again.
+      // The list keeps each key that still names the record once: `alias` lists a key again after it named another
+      // record. So a later pruning looks at no entry it looked at before, except the index entries naming the record.
       if (record.aliases !== null) {
-        const aliases = record.aliases.filter((key) => this.#versions.get(key) === record.id);
+        const aliases = [...new Set(record.aliases)].filter(
+          (key) => this.#versions.get(key) === record.id,
+        );
         record.aliases = aliases.length > 0 ? aliases : null;
       }
       if (record instanceof ReleasedRecord && !this.#named(record)) {

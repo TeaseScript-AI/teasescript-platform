@@ -1848,10 +1848,49 @@ test("released records leave the trace, while later records and the version inde
   );
 });
 
-test("a release drops many ended aliases of one record in work proportional to them", () => {
-  // Each round of the block keeps `value` across a call in a temporary of its own call, an alias of the same record.
-  const lookups = (rounds: number) => {
-    const plan = compile(
+test("releases drop the ended aliases of one record in work proportional to them", () => {
+  /** Index lookups of every release, which runs after each instruction when `everyInstruction`, then once at the end. */
+  const lookups = (source: string, everyInstruction: boolean, observe?: number) => {
+    const trace = new RuntimeDebugContext({ maxRecords: 100_000 });
+    const session = createFreshRuntimeSession(compile(source), {
+      seed: SEED,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    const get = Map.prototype.get;
+    let releasing = false;
+    let count = 0;
+    Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+      if (releasing) count += 1;
+      return get.call(this, key);
+    };
+    const release = () => {
+      releasing = true;
+      try {
+        trace.release(Infinity);
+      } finally {
+        releasing = false;
+      }
+    };
+    const observed = everyInstruction ? { instructionObserver: { after: release } } : {};
+    try {
+      session.run({ debugTrace: trace, ...observed });
+      if (observe !== undefined) {
+        session.observeTime(observe, [], { debugTrace: trace });
+        session.run({ debugTrace: trace, ...observed });
+      }
+      release();
+    } finally {
+      Map.prototype.get = get;
+    }
+    assert.equal(session.view().status, "halted");
+    return count;
+  };
+  // Each round of the block keeps `value` across a call in a temporary of that round's call, an alias of the same
+  // record, and the last release drops all of them.
+  const ended = (rounds: number) =>
+    lookups(
       [
         "function zero {",
         "    return 0",
@@ -1868,36 +1907,44 @@ test("a release drops many ended aliases of one record in work proportional to t
         "clock.stop()",
         "exit",
       ].join("\n"),
+      false,
+      rounds,
     );
-    const trace = new RuntimeDebugContext({ maxRecords: 100_000 });
-    const session = createFreshRuntimeSession(plan, {
-      seed: SEED,
-      baseDelayMs: 0,
-      delayPerWordMs: 0,
-      delayPerCharacterMs: 0,
-    });
-    session.run({ debugTrace: trace });
-    session.observeTime(rounds, [], { debugTrace: trace });
-    session.run({ debugTrace: trace });
-    assert.equal(session.view().status, "halted");
-    const get = Map.prototype.get;
-    let count = 0;
-    // Count the index lookups of the release that drops every alias of the ended calls.
-    Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
-      count += 1;
-      return get.call(this, key);
-    };
-    try {
-      trace.release(Infinity);
-    } finally {
-      Map.prototype.get = get;
-    }
-    return count;
-  };
-  const small = lookups(64);
-  const large = lookups(256);
-  // Four times the rounds: linear work grows about fourfold, looking at every alias again for each one sixteenfold.
-  assert.ok(large < 6 * small, `${small} index lookups for 64 rounds, ${large} for 256`);
+  // Each round lists the root call's temporary as an alias of `none` again, and calls that also keep `none` across a
+  // call end: many releases each look at the record while that one alias still names it.
+  const listedAgain = (rounds: number) =>
+    lookups(
+      [
+        "let none: number? = null",
+        "function zero {",
+        "    return 0",
+        "}",
+        "function peek {",
+        "    let copy = [none, zero()]",
+        "    return 0",
+        "}",
+        "function touch {",
+        "    let copy = [none, zero()]",
+        "    peek()",
+        "    peek()",
+        "    return 0",
+        "}",
+        `repeat ${rounds} {`,
+        "    let out = none otherwise touch()",
+        "}",
+        "exit",
+      ].join("\n"),
+      true,
+    );
+  for (const [name, scenario] of [
+    ["ended", ended],
+    ["listed again", listedAgain],
+  ] as const) {
+    const small = scenario(64);
+    const large = scenario(256);
+    // Four times the rounds: linear work grows about fourfold, looking at the same aliases again sixteenfold.
+    assert.ok(large < 6 * small, `${name}: ${small} index lookups for 64 rounds, ${large} for 256`);
+  }
 });
 
 test("release does nothing while an instruction runs, as a builtin it calls sees", () => {
