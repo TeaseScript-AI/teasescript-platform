@@ -630,6 +630,32 @@ useEventListener(document, "click", (event: MouseEvent) => {
   )
     focusInput();
 });
+// So does a click on a permanent button, which stays in place and would keep it; one pressed from the keyboard, whose
+// click has no click count, keeps it. Its focus goes before the press runs, which may remove the button or let focus
+// move to the next one. While its block leaves the composer nothing to answer, the composer takes no focus; focus that
+// belongs to nothing returns to it with the next interaction or message pacing.
+useEventListener(
+  document,
+  "click",
+  (event: MouseEvent) => {
+    const button =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-permanent-button]")
+        : null;
+    if (
+      button &&
+      event.detail > 0 &&
+      event.button === 0 &&
+      hoverAvailable.value &&
+      !textSelected() &&
+      composition.value?.contains(button)
+    ) {
+      button.blur();
+      focusInput();
+    }
+  },
+  { capture: true },
+);
 // A message's pacing gives the composer its default focus when focus belongs to nothing, as an interaction does, such
 // as after a button pressed with the mouse left with its interaction.
 watch(

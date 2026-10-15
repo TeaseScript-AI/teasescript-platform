@@ -1,7 +1,0 @@
-let preset = { name: "Corner time ü", minutes: 15, lines: ["Face the wall", "Hands behind your back 😀"] }
-let code = toBase64(toJson(preset))
-exportText("-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${code}\n-----END CORNERTIME CUSTOM PUNISHMENT-----", title: "Your preset", fileName: "preset.txt")
-say "Closed the preset", instant
-exportText("A reload shows this one again")
-say "Closed after the reload", instant
-exit
