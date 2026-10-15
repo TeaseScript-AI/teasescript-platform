@@ -1827,8 +1827,11 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   `recentMessages`, `outputRecord`, and `stageImageRecord` no longer give them, and a dependency on one reads as not
   retained. The version index keeps naming them, so `variableRecord` and `storageRecord` still give their IDs and
   later records still name them as dependencies: record IDs and dependencies stay those of a trace that releases
-  nothing. A released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge
-  toward the accounted bytes while the index names it, until the bounds drop it with its index entries. `release` works
+  nothing. A release also drops the index entries of scopes and calls that have ended, which execution never reads
+  again, so after one, `variableRecord` may give `null` for a scope that the snapshot no longer has. It drops them once
+  the index has doubled since a release last did, so the work stays proportional to the entries added meanwhile. A
+  released record keeps its place in the bounds: it counts toward `maxRecords`, and with a small charge toward the
+  accounted bytes while the index names it, until the bounds drop it with its index entries. `release` works
   between operations, also after one threw, and in an instruction observer's callbacks; while an operation otherwise
   runs, as in a builtin, `randomControl.decide`, or `capturedMedia.holds`, it does nothing. `status()` counts and names
   retained records only; its `nextRecord`, the ID the next record gets, stays meaningful after a release: the records an

@@ -1615,6 +1615,79 @@ test("a small byte budget evicts by size, and wide expressions keep at most the 
   assert.equal(all.omittedDependencies, 0);
 });
 
+test("uncapped causes merge in work proportional to them on whichever side an expression nests", () => {
+  // Sums of operands drawn from fewer variables, so a variable comes again on either side of a merge.
+  const shapes: Record<string, (operands: readonly string[]) => string> = {
+    left: (operands) => operands.join(" + "),
+    right: (operands) => operands.reduceRight((inner, operand) => `${operand} + (${inner})`),
+    // Groups of one, two, and three operands, nested on alternating sides.
+    mixed: (operands) => {
+      const groups: string[] = [];
+      for (let start = 0, size = 1; start < operands.length; start += size, size = (size % 3) + 1)
+        groups.push(`(${operands.slice(start, start + size).join(" + ")})`);
+      return groups.reduceRight((inner, group, index) =>
+        index % 2 === 0 ? `${group} + (${inner})` : `(${inner}) + ${group}`,
+      );
+    },
+  };
+  const has = Set.prototype.has;
+  const add = Set.prototype.add;
+  const includes = Array.prototype.includes;
+  /** Dependency lookups during a traced run of `total = shape`, and the variables `total` depends on. */
+  const traced = (shape: string, count: number) => {
+    const pool = (count * 3) / 4;
+    const operands = Array.from({ length: count }, (_, index) => `v${(index * 7) % pool}`);
+    const expression = shapes[shape]!(operands);
+    const plan = compile(
+      [
+        ...Array.from({ length: pool }, (_, index) => `let v${index} = ${index}`),
+        `let total = ${expression}`,
+        "exit",
+      ].join("\n"),
+    );
+    const session = createFreshRuntimeSession(plan, { seed: SEED });
+    const trace = new RuntimeDebugContext({ maxDependencies: Infinity });
+    let lookups = 0;
+    // Merging causes deduplicates them by a scan or a set: count those lookups while the traced run evaluates.
+    Set.prototype.has = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return has.call(this, value);
+    };
+    Set.prototype.add = function (this: Set<unknown>, value: unknown) {
+      lookups += 1;
+      return add.call(this, value);
+    };
+    // EVIDENCE: invariant: the wrapper forwards every call unchanged to the original includes, so it has its type.
+    Array.prototype.includes = function (this: unknown[], ...args: Parameters<typeof includes>) {
+      lookups += 1;
+      return includes.apply(this, args);
+    } as typeof includes;
+    try {
+      session.run({ debugTrace: trace });
+    } finally {
+      Set.prototype.has = has;
+      Set.prototype.add = add;
+      Array.prototype.includes = includes;
+    }
+    const scope = session.exportTrustedSnapshot().frames[0]!.id;
+    const sum = record(trace, trace.variableRecord(scope, "total"));
+    assert.equal(sum.omittedDependencies, 0);
+    // Evaluation reads the operands from left to right: each variable counts where it is first read.
+    const variables = [...new Set(expression.match(/v\d+/gu) ?? [])];
+    assert.deepEqual(
+      sum.dependencies.map((dependency) => dependency.id),
+      variables.map((name) => trace.variableRecord(scope, name)),
+    );
+    return lookups;
+  };
+  for (const shape of Object.keys(shapes)) {
+    const small = traced(shape, 256);
+    const large = traced(shape, 1024);
+    // Four times the operands: linear work grows about fourfold, a merge copying the longer side sixteenfold.
+    assert.ok(large < 6 * small, `${shape}: ${small} lookups for 256 operands, ${large} for 1024`);
+  }
+});
+
 /** A record as data that does not change while the trace keeps it: dependencies and `control` by ID. */
 function recordData(entry: RuntimeDebugRecord) {
   return {
@@ -1632,11 +1705,29 @@ const RELEASED = [
   "    }",
   "    return n + addUp(n - 1)",
   "}",
+  // The block reads and changes a variable of a call that ended, which its scope keeps.
+  "function arm(n) {",
+  "    let note = n * 2",
+  "    timer async 2 s {",
+  "        note += base",
+  '        say "note ${note}", instant',
+  "    }",
+  "}",
+  "arm(3)",
+  // Its own variables stay read while the calls it makes end.
+  "function countUp(from) {",
+  "    let running = from",
+  "    for j in 1..=40 {",
+  "        running += addUp(j % 4)",
+  "    }",
+  "    return running",
+  "}",
   "let total = 0",
   "for i in 1..=40 {",
   "    total += addUp(i % 4)",
   "}",
   "wait 1 s",
+  "let counted = countUp(base)",
   "let later = base + total",
   "for pass in 1..=3 {",
   "    let inner = pass + later",
@@ -1725,6 +1816,18 @@ test("released records leave the trace, while later records and the version inde
     assert.equal(released.record(expected.at(-1)!.id), null);
     assert.deepEqual([released.outputs(), released.recentMessages()], [[], []]);
     assert.equal(released.outputRecord(1), null);
+    // The releases dropped the index entries of calls that ended, and never pointed one at another version.
+    const ended = [
+      ...new Set(
+        expected.flatMap((entry) => (entry.variable?.name === "n" ? [entry.variable.scope] : [])),
+      ),
+    ];
+    const versions = ended.map((scope) => [
+      kept.variableRecord(scope, "n"),
+      released.variableRecord(scope, "n"),
+    ]);
+    assert.ok(versions.every(([was, now]) => was !== null && (now === null || now === was)));
+    assert.ok(versions.filter(([, now]) => now === null).length > ended.length / 2);
   }
 
   // A later record names a released cause, which reads as no longer retained.
@@ -1743,6 +1846,105 @@ test("released records leave the trace, while later records and the version inde
     ),
     { id: base, retained: false },
   );
+});
+
+test("releases drop the ended aliases of one record in work proportional to them", () => {
+  /** Index lookups of every release, which runs after each instruction when `everyInstruction`, then once at the end. */
+  const lookups = (source: string, everyInstruction: boolean, observe?: number) => {
+    const trace = new RuntimeDebugContext({ maxRecords: 100_000 });
+    const session = createFreshRuntimeSession(compile(source), {
+      seed: SEED,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    const get = Map.prototype.get;
+    let releasing = false;
+    let count = 0;
+    Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+      if (releasing) count += 1;
+      return get.call(this, key);
+    };
+    const release = () => {
+      releasing = true;
+      try {
+        trace.release(Infinity);
+      } finally {
+        releasing = false;
+      }
+    };
+    const observed = everyInstruction ? { instructionObserver: { after: release } } : {};
+    try {
+      session.run({ debugTrace: trace, ...observed });
+      if (observe !== undefined) {
+        session.observeTime(observe, [], { debugTrace: trace });
+        session.run({ debugTrace: trace, ...observed });
+      }
+      release();
+    } finally {
+      Map.prototype.get = get;
+    }
+    assert.equal(session.view().status, "halted");
+    return count;
+  };
+  // Each round of the block keeps `value` across a call in a temporary of that round's call, an alias of the same
+  // record, and the last release drops all of them.
+  const ended = (rounds: number) =>
+    lookups(
+      [
+        "function zero {",
+        "    return 0",
+        "}",
+        "function arm {",
+        "    let value = 1",
+        "    return timer(duration: 1 ms, async: true, repeat: true) {",
+        "        let copy = value + zero()",
+        "        say copy, instant",
+        "    }",
+        "}",
+        "let clock = arm()",
+        `wait ${rounds} ms`,
+        "clock.stop()",
+        "exit",
+      ].join("\n"),
+      false,
+      rounds,
+    );
+  // Each round lists the root call's temporary as an alias of `none` again, and calls that also keep `none` across a
+  // call end: many releases each look at the record while that one alias still names it.
+  const listedAgain = (rounds: number) =>
+    lookups(
+      [
+        "let none: number? = null",
+        "function zero {",
+        "    return 0",
+        "}",
+        "function peek {",
+        "    let copy = [none, zero()]",
+        "    return 0",
+        "}",
+        "function touch {",
+        "    let copy = [none, zero()]",
+        "    peek()",
+        "    peek()",
+        "    return 0",
+        "}",
+        `repeat ${rounds} {`,
+        "    let out = none otherwise touch()",
+        "}",
+        "exit",
+      ].join("\n"),
+      true,
+    );
+  for (const [name, scenario] of [
+    ["ended", ended],
+    ["listed again", listedAgain],
+  ] as const) {
+    const small = scenario(64);
+    const large = scenario(256);
+    // Four times the rounds: linear work grows about fourfold, looking at the same aliases again sixteenfold.
+    assert.ok(large < 6 * small, `${name}: ${small} index lookups for 64 rounds, ${large} for 256`);
+  }
 });
 
 test("release does nothing while an instruction runs, as a builtin it calls sees", () => {
