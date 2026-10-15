@@ -1,3 +1,4 @@
+import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
 import { withLegacyStorage } from "./legacy-storage.ts";
 import {
   constantString,
@@ -2102,17 +2103,8 @@ function withLoadedModules(
 }
 
 /** Words an identifier choice value may not be (V30 §38 grammar keywords and protected type names). */
-const RESERVED_IDS = new Set([
-  ..."let function return if else switch case default repeat for in while break continue and or not set true false".split(
-    " ",
-  ),
-  ..."null choose askChoice speaker say as label goto call end exit fallback global tagged save load delete is".split(
-    " ",
-  ),
-  ..."string boolean integer number date time datetime timestamp absoluteDateTime duration list dict object range media script timer".split(
-    " ",
-  ),
-]);
+/** The names TeaseScript protects, the compiler's own list, which no menu identifier takes. */
+const RESERVED_IDS: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
 
 /**
  * For each script an entry menu offers, an identifier from its file name, such as `intro` for `intro.tease` and
