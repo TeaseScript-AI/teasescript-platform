@@ -138,7 +138,7 @@ const avatarStyle = computed(() => ({
         >
           <MessageHeader v-if="name !== ''" inset>{{ name }}</MessageHeader>
           <TranscriptMarkup
-            v-if="!player && entry.content"
+            v-if="entry.content"
             :content="entry.content"
             :backdrop="appearance.backdrop"
             :cover="appearance.cover"
@@ -199,7 +199,8 @@ const avatarStyle = computed(() => ({
   background: var(--message-surface);
   border-color: var(--message-separator);
 }
-.message-speaker.message-authored {
+/* After the speaker's surface, so an authored fill also replaces it; the player's messages take one too. */
+.message-authored {
   background: var(--message-authored-fill);
 }
 .message-authored,

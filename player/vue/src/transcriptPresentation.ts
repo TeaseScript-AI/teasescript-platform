@@ -4,6 +4,8 @@ import { readabilityFor } from "./messageContrast";
 
 export interface TranscriptPalette {
   readonly surface: string;
+  /** The background of the player's own messages. */
+  readonly reply: string;
   readonly canvas: string;
   /** The background where a Stage photo's vignette is strongest, or `null` without one. */
   readonly edge: string | null;
@@ -89,7 +91,9 @@ export function resolveAppearance(
   const backdrop =
     authoredBackground ??
     (authored?.kind !== "prose"
-      ? palette.surface
+      ? entry.kind === "message" && entry.speakerId === "user"
+        ? palette.reply
+        : palette.surface
       : palette.edge === null
         ? palette.canvas
         : [palette.canvas, palette.edge]);
