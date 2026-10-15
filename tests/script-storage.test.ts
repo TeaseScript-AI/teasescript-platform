@@ -68,6 +68,7 @@ test("host-acknowledged saves seed a new session without losing stored value typ
       'save set["a", "b"] as "set"',
       'save 2..=5 as "range"',
       'save 1.5 s as "duration"',
+      'save pi rad as "angle"',
       "exit",
     ].join("\n"),
   );
@@ -86,6 +87,7 @@ test("host-acknowledged saves seed a new session without losing stored value typ
     { key: "set", value: { kind: "set", items: ["a", "b"] } },
     { key: "range", value: { kind: "range", start: 2, end: 5, inclusive: true } },
     { key: "duration", value: { kind: "duration", milliseconds: 1_500 } },
+    { key: "angle", value: { kind: "angle", degrees: 180 } },
   ];
   const recorded: { key: string; value: SerializableRuntimeValue }[] = [];
   let written = run(writer, createFreshRuntimeSnapshot(writer, { persistentScriptStorage: true }));

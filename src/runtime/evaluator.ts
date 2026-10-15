@@ -33,6 +33,18 @@ import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../messag
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
+  ANGLE_ARITHMETIC_ROUTE,
+  ANGLE_FUNCTIONS,
+  angleArgumentMessage,
+  angleArithmetic,
+  angleDegrees,
+  anglePropertyMessage,
+  angleValue,
+  compareAngles,
+  formatAngle,
+  type StoredAngle,
+} from "../angle.js";
+import {
   PERSON_FIELDS,
   PLAYER,
   propertiesReadThrough,
@@ -180,6 +192,7 @@ import {
 } from "./state.js";
 import {
   describeRuntimeValue,
+  isAngle,
   isAnyDuration,
   isCalendarDuration,
   isDict,
@@ -1056,6 +1069,8 @@ export class Evaluator {
             value = !result.value;
           } else if (isAnyDuration(result.value)) {
             value = expression.operator === "+" ? result.value : negateDuration(result.value);
+          } else if (isAngle(result.value)) {
+            value = expression.operator === "+" ? result.value : angleValue(-result.value.degrees);
           } else {
             if (typeof result.value !== "number") {
               const operand = operandLabel(expression.operand);
@@ -1103,6 +1118,27 @@ export class Evaluator {
               expression.span,
             );
           value = duration;
+          break;
+        }
+        case "angleUnit": {
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.operand));
+            continue;
+          }
+          if (typeof result.value !== "number")
+            throw fault(
+              "TSR027",
+              `A unit follows a number, but this is ${describeShownValue(result.value)}. ${isAngle(result.value) ? `Remove the '${expression.unit}' after it.` : `Use a number before the '${expression.unit}'.`}`,
+              expression.operand.span,
+            );
+          const degrees = angleDegrees(result.value, expression.unit);
+          if (degrees === undefined)
+            throw fault(
+              "TSR036",
+              `The number ${operandText(result.value)} before the '${expression.unit}' gives an angle too large to represent. Use a smaller number.`,
+              expression.span,
+            );
+          value = angleValue(degrees);
           break;
         }
         case "binary":
@@ -1904,7 +1940,7 @@ export class Evaluator {
     if (!value.items.every(isVisibleScalar))
       throw fault(
         "TSR021",
-        "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
+        "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
         span,
       );
     return visibleText(
@@ -1987,7 +2023,7 @@ export class Evaluator {
     if (!isVisibleScalar(item))
       throw fault(
         "TSR021",
-        "join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes. Select an element or a property first.",
+        "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
         span,
       );
     return visibleText(item, span, currentTemporalContext(this.snapshot));
@@ -2035,6 +2071,7 @@ export class Evaluator {
       return this.#joined(expression, left, right);
     const temporal = temporalBinary(expression.operator, left, right, expression.span);
     if (temporal !== undefined) return temporal;
+    if (isAngle(left) || isAngle(right)) return angleBinary(expression, left, right);
     if (isAnyDuration(left) || isAnyDuration(right))
       return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
@@ -2206,6 +2243,7 @@ export class Evaluator {
       if (name === "toRegex") return regexFromText(positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
+      if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
@@ -3544,7 +3582,10 @@ export class Evaluator {
     return read === undefined ? named.default! : read;
   }
 
-  /** `min` or `max` of two or more values that are all numbers, all durations, or all date or time values of one kind. */
+  /**
+   * `min` or `max` of two or more values that are all numbers, all durations, all angles, or all date or time values of
+   * one kind.
+   */
   #minMaxBuiltin(
     name: string,
     positional: readonly SerializableRuntimeValue[],
@@ -3556,7 +3597,7 @@ export class Evaluator {
     if ((positional.length < 2 || Object.keys(named).length !== 0) && !list)
       throw fault(
         "TSR028",
-        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
+        `${name}(...) takes two or more numbers, durations, angles, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
         span,
       );
     if (list) {
@@ -3576,17 +3617,31 @@ export class Evaluator {
         isTemporal(value) && isTemporal(first) && value.kind === first.kind,
     );
     const durations = positional.every(isDuration) || positional.every(isCalendarDuration);
-    if (!numbers && !durations && temporals.length !== positional.length) {
+    const angles = positional.every(isAngle);
+    if (!numbers && !durations && !angles && temporals.length !== positional.length) {
       const other = positional.find(
-        (value) => typeof value !== "number" && !isAnyDuration(value) && !isTemporal(value),
+        (value) =>
+          typeof value !== "number" &&
+          !isAnyDuration(value) &&
+          !isAngle(value) &&
+          !isTemporal(value),
       );
       throw fault(
         "TSR059",
         other === undefined
-          ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, or all dates, times, datetimes, or absolute dates and times.`
-          : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
+          ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times.`
+          : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeRuntimeValue(other)}.`,
         span,
       );
+    }
+    if (angles) {
+      const values = positional.filter(isAngle);
+      let best = values[0]!;
+      for (const candidate of values) {
+        const order = compareAngles(candidate, best);
+        if (name === "min" ? order < 0 : order > 0) best = candidate;
+      }
+      return { ...best };
     }
     if (temporals.length === positional.length) {
       let best = temporals[0]!;
@@ -3669,7 +3724,7 @@ export class Evaluator {
       if (typeof value === "number") return value;
       throw fault(
         "TSR059",
-        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
         span,
       );
     };
@@ -3871,6 +3926,7 @@ export class Evaluator {
       return property;
     }
     if (isDuration(value)) throw fault("TSR017", durationPropertyMessage(name), span);
+    if (isAngle(value)) throw fault("TSR017", anglePropertyMessage(name), span);
     if (isTemporal(value)) {
       const property = temporalProperty(value, name);
       if (property === undefined)
@@ -4295,12 +4351,16 @@ function noArithmeticResult(
       expression.span,
     );
   }
-  // A duration divided by a duration is a number, and any other step with a duration gives a duration.
+  // A duration or an angle divided by one of its kind is a number, and any other step with one gives one of its kind.
   const what =
-    (isAnyDuration(left) || isAnyDuration(right)) &&
-    !(operator === "/" && isAnyDuration(left) && isAnyDuration(right))
-      ? "a duration too long"
-      : "a number too large";
+    operator === "/" &&
+    ((isAnyDuration(left) && isAnyDuration(right)) || (isAngle(left) && isAngle(right)))
+      ? "a number too large"
+      : isAnyDuration(left) || isAnyDuration(right)
+        ? "a duration too long"
+        : isAngle(left) || isAngle(right)
+          ? "an angle too large"
+          : "a number too large";
   return fault(
     code,
     `${label === null ? values : `${subject} is ${values}, which`} gives ${what} to represent. Use smaller values.`,
@@ -4318,21 +4378,92 @@ function removableHandleMethodMessage(
     : `Permanent buttons have no method '${method}'. Use remove().`;
 }
 
-/** An operand's kind, with the value of a number or duration, such as `a duration (1 s)`. */
+/** An operand's kind, with the value of a number, duration, or angle, such as `a duration (1 s)`. */
 function kindAndValue(value: SerializableRuntimeValue): string {
-  return typeof value === "number" || isAnyDuration(value)
+  return typeof value === "number" || isAnyDuration(value) || isAngle(value)
     ? `${describeRuntimeValue(value)} (${operandText(value)})`
     : describeRuntimeValue(value);
 }
 
-/** A number or duration operand as a message shows it. */
+/** A number, duration, or angle operand as a message shows it. */
 function operandText(value: SerializableRuntimeValue): string {
   if (typeof value === "number") return String(withoutNegativeZero(value));
+  if (isAngle(value)) return formatAngle(value);
   return isAnyDuration(value) ? formatDuration(value) : describeRuntimeValue(value);
 }
 
 function isZero(value: SerializableRuntimeValue): boolean {
-  return value === 0 || (isAnyDuration(value) && durationFamily(durationParts(value)) === "zero");
+  return (
+    value === 0 ||
+    (isAnyDuration(value) && durationFamily(durationParts(value)) === "zero") ||
+    (isAngle(value) && value.degrees === 0)
+  );
+}
+
+/**
+ * Angle arithmetic and comparison (V30 §13): angles add, subtract, and compare by size, divide into a number, and
+ * multiply or divide by a number. Any other operand or operator is an error that names what works.
+ */
+function angleBinary(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+): SerializableRuntimeValue {
+  const operator = expression.operator;
+  const compares = ["<", "<=", ">", ">="].includes(operator);
+  if (compares && isAngle(left) && isAngle(right)) {
+    const order = compareAngles(left, right);
+    if (operator === "<") return order < 0;
+    if (operator === "<=") return order <= 0;
+    if (operator === ">") return order > 0;
+    return order >= 0;
+  }
+  const operand = (value: SerializableRuntimeValue): number | StoredAngle | undefined =>
+    typeof value === "number" || isAngle(value) ? value : undefined;
+  const a = operand(left);
+  const b = operand(right);
+  const result = a === undefined || b === undefined ? undefined : angleArithmetic(operator, a, b);
+  if (result !== undefined) {
+    if (!Number.isFinite(typeof result === "number" ? result : result.degrees))
+      throw noArithmeticResult(expression, left, right);
+    return result;
+  }
+  throw fault(
+    "TSR009",
+    compares
+      ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use an angle on both sides.`
+      : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. ${ANGLE_ARITHMETIC_ROUTE}`,
+    expression.span,
+  );
+}
+
+/** A call of an angle function (V30 §13), whose arguments must be of the kinds it takes. */
+function angleFunction(
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): number | StoredAngle {
+  const { parameters, takes, example, apply } = ANGLE_FUNCTIONS.get(name)!;
+  if (positional.length !== parameters.length || Object.keys(named).length !== 0)
+    throw fault(
+      "TSR028",
+      `${name}(...) takes ${parameters.length === 1 ? `one ${takes}` : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
+      span,
+    );
+  const values = positional.map((value) => {
+    if (takes === "angle" && isAngle(value)) return value;
+    if (takes === "number" && typeof value === "number") return value;
+    throw fault(
+      "TSR059",
+      angleArgumentMessage(name, takes, describeRuntimeValue(value), typeof value),
+      span,
+    );
+  });
+  const result = apply(values);
+  if (typeof result !== "number" && "failure" in result)
+    throw fault(result.code, result.failure, span);
+  return result;
 }
 
 /** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */

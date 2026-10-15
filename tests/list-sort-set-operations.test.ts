@@ -206,7 +206,7 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "let flags = [true, false]\nflags.sort()\nexit",
       "TSV043",
-      "sort() sorts numbers, text, durations, or date and time values, not true or false (boolean).",
+      "sort() sorts numbers, text, durations, angles, or date and time values, not true or false (boolean).",
       "sort",
     ],
     [
@@ -288,7 +288,7 @@ test("values the compiler cannot know are checked at runtime", () => {
   );
   assert.deepEqual(failure(`${DYNAMIC}let items = dynamic([true])\nitems.sort()\nexit`), [
     "TSR060",
-    "sort() sorts numbers, text, durations, or date and time values, not true or false (boolean).",
+    "sort() sorts numbers, text, durations, angles, or date and time values, not true or false (boolean).",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let tags = dynamic(set[1, 2])\ntags.reverse()\nexit`), [
     "TSR016",

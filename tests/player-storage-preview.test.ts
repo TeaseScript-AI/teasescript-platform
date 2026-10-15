@@ -34,6 +34,7 @@ test("each saved value is previewed by its type", () => {
       'save { level: 2, tags: ["a"] } as "object"',
       'save 2..=5 as "range"',
       'save 1.5 s as "duration"',
+      'save 1 rad as "angle"',
       'save toDate("2026-10-06") as "date"',
       'save toTime("21:30") as "time"',
       'save toDateTime("2026-10-06T21:30") as "datetime"',
@@ -61,6 +62,12 @@ test("each saved value is previewed by its type", () => {
   });
   assert.deepEqual(preview("range"), { type: "Range", text: "2 to 5", photo: null, size: null });
   assert.equal(preview("duration").type, "Duration");
+  assert.deepEqual(preview("angle"), {
+    type: "Angle",
+    text: "57.29577951308232°",
+    photo: null,
+    size: null,
+  });
   assert.deepEqual(preview("date"), { type: "Date", text: "2026-10-06", photo: null, size: null });
   assert.deepEqual(preview("time"), { type: "Time", text: "21:30", photo: null, size: null });
   assert.deepEqual(preview("datetime"), {

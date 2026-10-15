@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { ANGLE_FUNCTIONS, angleValue } from "../src/angle.js";
 import { compileSource } from "../src/compiler.js";
 import { NUMERIC_FUNCTIONS } from "../src/numeric-functions.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
@@ -29,29 +30,39 @@ function failure(source: string): [string | undefined, string | undefined] {
 /** Hides a value's type from the compiler, as host data or untyped storage would. */
 const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
 
+/**
+ * The result of a numeric function, or of an angle function with its angles in degrees: an argument of `sin`, `cos`, or
+ * `tan` is an angle of that many degrees, and an angle result is its degrees.
+ */
 function apply(name: string, ...values: number[]): number | undefined {
+  const angular = ANGLE_FUNCTIONS.get(name);
+  if (angular !== undefined) {
+    const result = angular.apply(
+      values.map((value) => (angular.takes === "number" ? value : angleValue(value))),
+    );
+    return typeof result === "number" ? result : "degrees" in result ? result.degrees : undefined;
+  }
   const result = NUMERIC_FUNCTIONS.get(name)!.apply(values, {}, () => {
     throw new Error("no draws");
   });
   return typeof result === "number" ? result : undefined;
 }
 
-test("angles are in degrees, and exact angles give exact results", () => {
+test("exact angles give exact results", () => {
   assert.deepEqual(
     said(
       [
-        'say "${sin(30)} ${sin(90)} ${sin(180)} ${sin(-390)} ${cos(60)} ${cos(90)} ${cos(120)} ${tan(45)} ${tan(135)}"',
+        'say "${sin(30 deg)} ${sin(90 deg)} ${sin(180 deg)} ${sin(-390 deg)} ${cos(60 deg)} ${cos(90 deg)} ${cos(120 deg)} ${tan(45 deg)} ${tan(135 deg)}"',
         'say "${asin(0.5)} ${asin(-1)} ${acos(0.5)} ${acos(-1)} ${acos(0)} ${atan(1)} ${atan(1e300)}"',
         'say "${atan2(1, 1)} ${atan2(1, -1)} ${atan2(0, -1)} ${atan2(-1, 0)} ${atan2(0, 0)}"',
         'say "${exp(0)} ${ln(1)} ${log10(1000)} ${log10(0.001)} ${round(exp(1), decimals: 5)}"',
-        "let rise: number = sin(30) * 10",
         "exit",
       ].join("\n"),
     ),
     [
       "0.5 1 0 -0.5 0.5 0 -0.5 1 -1",
-      "30 -90 60 180 90 45 90",
-      "45 135 180 -90 0",
+      "30° -90° 60° 180° 90° 45° 90°",
+      "45° 135° 180° -90° 0°",
       "1 0 3 -3 2.71828",
     ],
   );
@@ -82,13 +93,14 @@ test("a call without a finite result is a compile error when the arguments are k
     ["log10(-1)", "log10(-1) has no result: only a number above 0 has a logarithm."],
     ["asin(2)", "asin(2) has no result: only a number from -1 through 1 has an arcsine."],
     ["acos(-1.5)", "acos(-1.5) has no result: only a number from -1 through 1 has an arccosine."],
-    ["tan(90)", "tan(90) has no result: the tangent of 90 degrees is infinite."],
-    ["tan(-270)", "tan(-270) has no result: the tangent of -270 degrees is infinite."],
+    ["tan(90 deg)", "tan(90°) has no result: the tangent of 90° is infinite."],
+    ["tan(-270 deg)", "tan(-270°) has no result: the tangent of -270° is infinite."],
+    ["tan((pi / 2) rad)", "tan(90°) has no result: the tangent of 90° is infinite."],
     ["exp(1000)", "exp(1000) gives a number too large to represent. Use smaller values."],
   ];
   for (const [call, message] of cases) {
     assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, call]], call);
-    const hidden = call.replace(/\((-?[\d.]+)\)/u, "(dynamic($1))");
+    const hidden = call.replace(/\((.+)\)/u, "(dynamic($1))");
     assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), ["TSR036", message], hidden);
   }
   assert.deepEqual(diagnostics('say sin("30")\nexit')[0]?.[0], "TSV043");
@@ -164,7 +176,7 @@ test("drawn values survive checkpoint resume", () => {
     "wait 1 s",
     "let count = randomPert(5, 10, 20)",
     "wait 1 s",
-    'say "${pause > 0} ${share >= 0 and share <= 1} ${count >= 5 and count <= 20} ${sin(30)}"',
+    'say "${pause > 0} ${share >= 0 and share <= 1} ${count >= 5 and count <= 20} ${sin(30 deg)}"',
     "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);

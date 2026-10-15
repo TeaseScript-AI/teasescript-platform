@@ -1,19 +1,5 @@
 import { rounded, withoutNegativeZero } from "./conversions.js";
-import {
-  acosDegrees,
-  asinDegrees,
-  atan2Degrees,
-  atanDegrees,
-  cosDegrees,
-  exp,
-  ln,
-  log10,
-  randomBeta,
-  randomNormal,
-  randomPert,
-  sinDegrees,
-  tanDegrees,
-} from "./deterministic-math.js";
+import { exp, ln, log10, randomBeta, randomNormal, randomPert } from "./deterministic-math.js";
 
 /** What the compiler knows about one argument of a numeric function. */
 export interface NumericArgument {
@@ -192,39 +178,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
   ],
   ["ln", real(["value"], "ln(10)", ln, LOGARITHM("ln"))],
   ["log10", real(["value"], "log10(1000)", log10, LOGARITHM("log10"))],
-  ["sin", real(["degrees"], "sin(30)", sinDegrees, () => "")],
-  ["cos", real(["degrees"], "cos(60)", cosDegrees, () => "")],
-  [
-    "tan",
-    real(
-      ["degrees"],
-      "tan(45)",
-      tanDegrees,
-      ([degrees]) =>
-        `tan(${degrees}) has no result: the tangent of ${degrees} degrees is infinite.`,
-    ),
-  ],
-  [
-    "asin",
-    real(
-      ["value"],
-      "asin(0.5)",
-      asinDegrees,
-      ([value]) => `asin(${value}) has no result: only a number from -1 through 1 has an arcsine.`,
-    ),
-  ],
-  [
-    "acos",
-    real(
-      ["value"],
-      "acos(0.5)",
-      acosDegrees,
-      ([value]) =>
-        `acos(${value}) has no result: only a number from -1 through 1 has an arccosine.`,
-    ),
-  ],
-  ["atan", real(["value"], "atan(1)", atanDegrees, () => "")],
-  ["atan2", real(["y", "x"], "atan2(1, 1)", atan2Degrees, () => "")],
   [
     "randomNormal",
     {

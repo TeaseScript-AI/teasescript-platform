@@ -311,13 +311,31 @@ function degreeReduction(x: number): readonly [number, number] {
   return [r - q * 90, ((q % 4) + 4) % 4];
 }
 
-/** Linear small-angle limit, scaled first to retain subnormal low bits.
- * For |x| < 2^-40, the omitted relative cubic term is < 2^-80. */
-function linearDegrees(x: number, inverse: boolean): number {
+/** x times 180/pi (inverse) or pi/180, rounded once, scaled first to retain
+ * subnormal low bits; `undefined` beyond the largest double. */
+function angleProduct(x: number, inverse: boolean): number | undefined {
   if (x === 0) return x;
   const [m, e] = decompose(Math.abs(x));
   const factor: DD = inverse ? [DEG_HI, DEG_LO] : [RAD_HI, RAD_LO];
-  return rounded(multiply([x < 0 ? -m : m, 0], factor), e)!;
+  return rounded(multiply([x < 0 ? -m : m, 0], factor), e);
+}
+
+/** Linear small-angle limit. For |x| < 2^-40, the omitted relative cubic
+ * term is < 2^-80. */
+function linearDegrees(x: number, inverse: boolean): number {
+  return angleProduct(x, inverse)!;
+}
+
+/** x radians in degrees, or `undefined` when that is beyond the largest
+ * double. `radiansToDegrees(Math.PI)` is exactly 180. */
+export function radiansToDegrees(x: number): number | undefined {
+  return angleProduct(x, true);
+}
+
+/** x degrees in radians. `degreesToRadians(180)` is exactly Math.PI. */
+export function degreesToRadians(x: number): number {
+  // pi/180 is below 1, so the product is always finite.
+  return angleProduct(x, false)!;
 }
 
 /** sin/cos Taylor polynomials after reduction. Eighteen terms give

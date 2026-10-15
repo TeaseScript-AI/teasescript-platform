@@ -1,4 +1,5 @@
 import type {
+  SerializableRuntimeAngle,
   SerializableRuntimeDate,
   SerializableRuntimeDateTime,
   SerializableRuntimeCalendarDuration,
@@ -56,6 +57,10 @@ export function isCalendarDuration(
   value: SerializableRuntimeValue,
 ): value is SerializableRuntimeCalendarDuration {
   return typeof value === "object" && value !== null && value.kind === "calendarDuration";
+}
+
+export function isAngle(value: SerializableRuntimeValue): value is SerializableRuntimeAngle {
+  return typeof value === "object" && value !== null && value.kind === "angle";
 }
 
 /** An exact or a calendar duration. */
@@ -128,6 +133,8 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "an absolute date and time";
     case "calendarDuration":
       return "a calendar duration";
+    case "angle":
+      return "an angle";
     case "script":
       return "a script reference";
     default:

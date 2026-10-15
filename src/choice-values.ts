@@ -10,6 +10,7 @@ import {
 const CHOICE_VALUE_KINDS: ReadonlySet<string> = new Set([
   "duration",
   "calendarDuration",
+  "angle",
   "date",
   "time",
   "datetime",
@@ -17,7 +18,7 @@ const CHOICE_VALUE_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether `value` is a canonical choice value: a scalar, a duration, or a date or time value. A number is finite and
+ * Whether `value` is a canonical choice value: a scalar, a duration, an angle, or a date or time value. A number is finite and
  * never `-0`.
  */
 export function isInteractionChoiceValue(value: unknown): value is InteractionChoiceValue {

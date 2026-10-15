@@ -30,6 +30,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return [expression.callee, ...expression.arguments.map((a) => a.value)];
     case "unary":
     case "unit":
+    case "angleUnit":
       return [expression.operand];
     case "typeTest":
       return [expression.value];

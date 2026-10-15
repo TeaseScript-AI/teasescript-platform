@@ -22,7 +22,13 @@ import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import { compileRegex, replacementParts, type ReplacementPart } from "../regex.js";
 import { REGEX_WORK_EXCEEDED, RegexWork, type RegexProgram } from "../regex-engine.js";
-import { describeRuntimeValue, isAnyDuration, isDuration, isRegex } from "./value-predicates.js";
+import {
+  describeRuntimeValue,
+  isAngle,
+  isAnyDuration,
+  isDuration,
+  isRegex,
+} from "./value-predicates.js";
 import type { SerializableRegex, SerializableRuntimeValue } from "./serializable-values.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -55,7 +61,10 @@ export function missingMemberMessage(
     ? ""
     : value === null
       ? " Check that it is not null first."
-      : typeof value === "number" || typeof value === "boolean" || isAnyDuration(value)
+      : typeof value === "number" ||
+          typeof value === "boolean" ||
+          isAnyDuration(value) ||
+          isAngle(value)
         ? " Convert it to text first with toString(...)."
         : "";
   return `${description} has no ${use} '${name}'.${fix}`;

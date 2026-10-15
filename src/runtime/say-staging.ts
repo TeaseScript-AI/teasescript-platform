@@ -50,6 +50,8 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "acos",
   "atan",
   "atan2",
+  "toDeg",
+  "toRad",
   "sum",
   "average",
   "median",
@@ -169,6 +171,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
       case "typeTest":
       case "unary":
       case "unit":
+      case "angleUnit":
       case "binary":
       case "range":
       case "storageLoad":

@@ -60,6 +60,7 @@ import type {
   ShowPopupStatement,
   OpenUrlStatement,
   ExportTextStatement,
+  AngleExpression,
   CalendarDurationUnit,
   DurationUnit,
   UnitExpression,
@@ -92,6 +93,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
+import { angleUnit } from "./angle.js";
 import { calendarDurationUnit, elapsedDurationUnit, UNIT_OPERANDS } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
@@ -1182,7 +1184,7 @@ class Parser {
     const value = yield* parseChild(speculative.#parseOr());
     if (value === null) return false;
     // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
-    // text whose name is a unit word, also `calendar`.
+    // text whose name is a unit word, also `calendar` or an angle unit.
     if (unitAfterWord(value, this.#peek(), speculative.#unitlessCalendars)) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
@@ -3834,7 +3836,9 @@ class Parser {
       const exact = elapsedDurationUnit(token.lexeme);
       // A month or a year needs `calendar` here too, also as `mo` or `y`.
       const withoutCalendar = calendarDurationUnit(token.lexeme);
-      if (exact !== undefined) {
+      if (angleUnit(token.lexeme) !== undefined) {
+        result = this.#angleExpression(expression, start);
+      } else if (exact !== undefined) {
         this.#advance();
         result = withUnit({ calendar: false, unit: exact }, token);
       } else if (token.lexeme === "calendar") {
@@ -3846,19 +3850,29 @@ class Parser {
         result = withUnit({ calendar: true, unit: withoutCalendar }, this.#advance());
       }
     }
-    if (result.kind !== "durationLiteral" && result.kind !== "unitExpression") return result;
-    // `5 s ms` or `1 h 30 min`: the parts of a duration are added with `+`.
+    return this.#reportSecondUnit(result);
+  }
+
+  /**
+   * One duration or angle has one unit: a second unit or a second amount with a unit right after it is an error, as in
+   * `5 s ms` or `1 h 30 min`, and parts are added with `+`.
+   */
+  #reportSecondUnit(result: Expression): Expression {
+    const angle = result.kind === "angleExpression";
+    if (!angle && result.kind !== "durationLiteral" && result.kind !== "unitExpression")
+      return result;
     const next = this.#peek();
     const unitWord = (candidate: Token): boolean =>
       candidate.kind === TokenKind.Identifier &&
       (candidate.lexeme === "calendar" ||
         elapsedDurationUnit(candidate.lexeme) !== undefined ||
-        calendarDurationUnit(candidate.lexeme) !== undefined);
+        calendarDurationUnit(candidate.lexeme) !== undefined ||
+        angleUnit(candidate.lexeme) !== undefined);
     if (unitWord(next)) {
       this.#advance();
       this.#reportToken(
         parserDiagnosticCode.unsupportedDurationUnit,
-        `This duration already has a unit. Remove the '${next.lexeme}' after it.`,
+        `This ${angle ? "angle" : "duration"} already has a unit. Remove the '${next.lexeme}' after it.`,
         next,
       );
     } else if (next.kind === TokenKind.NumberLiteral && unitWord(this.#peek(1))) {
@@ -3866,11 +3880,34 @@ class Parser {
       this.#advance();
       this.#reportSpan(
         parserDiagnosticCode.unsupportedDurationUnit,
-        "Add the parts of a duration with '+', as in '1 h + 30 min'.",
+        angle
+          ? "Add the parts of an angle with '+', as in '90 deg + 30 deg'."
+          : "Add the parts of a duration with '+', as in '1 h + 30 min'.",
         spanFrom(next.span, this.#previous().span),
       );
     }
     return result;
+  }
+
+  /**
+   * The angle unit that comes next after `operand`, which begins at `start`: the number before it as an angle, such as
+   * `90 deg` or `(a + b) rad` (V30 §13). A space must come before the unit, unlike in `90deg`.
+   */
+  #angleExpression(operand: Expression, start: number): AngleExpression {
+    const token = this.#advance();
+    if (token.span.start.offset === operand.span.end.offset)
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedDurationUnit,
+        `A unit needs a space before it. Write '${this.#sourceText(start, this.#current - 1)} ${token.lexeme}'.`,
+        token,
+      );
+    return Object.freeze({
+      kind: "angleExpression",
+      operand,
+      unit: angleUnit(token.lexeme)!,
+      unitSpan: copySpan(token.span),
+      span: spanFrom(operand.span, token.span),
+    });
   }
 
   *#finishCall(callee: Expression, left: Token): ParseTask<CallExpression> {
@@ -3946,9 +3983,10 @@ class Parser {
    * A unit identifier directly after a number literal on the same line forms a duration literal: an exact unit, or
    * `calendar` and a calendar unit (ADR 0026). A month or year without `calendar` is an error that suggests it.
    */
-  #parseDurationUnit(amount: NumberLiteral): Expression {
+  #parseDurationUnit(amount: NumberLiteral, start: number): Expression {
     if (!this.#check(TokenKind.Identifier)) return amount;
     const token = this.#peek();
+    if (angleUnit(token.lexeme) !== undefined) return this.#angleExpression(amount, start);
     const literal = (
       unit:
         | { readonly calendar: false; readonly unit: DurationUnit }
@@ -4075,7 +4113,7 @@ class Parser {
         numericType: /[.eE]/u.test(token.lexeme) ? "number" : "integer",
         span: copySpan(token.span),
       });
-      return this.#parseDurationUnit(amount);
+      return this.#parseDurationUnit(amount, this.#current - 1);
     }
     if (this.#match(TokenKind.KeywordTrue)) {
       return Object.freeze({ kind: "booleanLiteral", value: true, span: copySpan(token.span) });
@@ -4091,16 +4129,19 @@ class Parser {
       this.#advance();
       return yield* parseChild(this.#withinDelimiters(this.#parseDictLiteral(token)));
     }
-    // The protected constant `pi` (V30 §13) is the number it names.
+    // The protected constant `pi` (V30 §13) is the number it names, and like a number it may take a unit: `pi rad`.
     if (this.#checkIdentifier("pi")) {
       this.#advance();
-      return Object.freeze({
-        kind: "numberLiteral",
-        raw: "pi",
-        value: 3.141592653589793,
-        numericType: "number",
-        span: copySpan(token.span),
-      });
+      return this.#parseDurationUnit(
+        Object.freeze({
+          kind: "numberLiteral",
+          raw: "pi",
+          value: 3.141592653589793,
+          numericType: "number",
+          span: copySpan(token.span),
+        }),
+        this.#current - 1,
+      );
     }
     if (
       this.#match(TokenKind.Identifier) ||
@@ -5498,6 +5539,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "absoluteDateTime",
       "duration",
       "calendarDuration",
+      "angle",
       "list",
       "dict",
       "object",
@@ -5800,7 +5842,11 @@ function unitAfterWord(value: Expression, word: Token, unitless: WeakSet<Express
   let node = value;
   for (;;) {
     const operand =
-      node.kind === "unitExpression" ? node.operand : unitless.has(node) ? node : undefined;
+      node.kind === "unitExpression" || node.kind === "angleExpression"
+        ? node.operand
+        : unitless.has(node)
+          ? node
+          : undefined;
     if (operand !== undefined) {
       if (operand.span.start.offset !== word.span.start.offset) return false;
       return (

@@ -103,7 +103,7 @@ test("statistics have the types of their values", () => {
 
 test("statistics report empty lists, values they cannot read, and percentages outside 0 through 100", () => {
   assert.deepEqual(diagnostics('say sum(["a"])\nexit'), [
-    ["TSV043", "sum(...) needs numbers or durations, not text (string).", '["a"]'],
+    ["TSV043", "sum(...) needs numbers, durations, or angles, not text (string).", '["a"]'],
   ]);
   assert.deepEqual(diagnostics("say median(5)\nexit"), [
     ["TSV043", "median(...) needs a list, not a whole number (integer).", "5"],
@@ -155,7 +155,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       "sum([dynamic(2), dynamic(1 s)])",
       "TSR060",
-      "sum(...) needs values of one kind: all numbers or all durations.",
+      "sum(...) needs values of one kind: all numbers, all durations, or all angles.",
     ],
     [
       'sum(dynamic([{ n: 1 }]), by: "count")',
@@ -317,7 +317,7 @@ test("possibly null lists and values of list functions need a check first", () =
     ],
   );
   assert.deepEqual(diagnostics("let samples: integer?[] = [1, null]\nsay sum(samples)\nexit"), [
-    ["TSV043", "sum(...) needs numbers or durations, not null.", "samples"],
+    ["TSV043", "sum(...) needs numbers, durations, or angles, not null.", "samples"],
   ]);
   // Known elements and a known property name are checked also where the property's type stays unknown.
   assert.deepEqual(

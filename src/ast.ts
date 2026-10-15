@@ -481,6 +481,7 @@ export type ScalarTypeName =
   | "absoluteDateTime"
   | "duration"
   | "calendarDuration"
+  | "angle"
   | "script"
   | "regex";
 
@@ -650,6 +651,7 @@ export type Expression =
   | NumberLiteral
   | DurationLiteral
   | UnitExpression
+  | AngleExpression
   | StringLiteral
   | RegexLiteral
   | ListLiteral
@@ -802,6 +804,21 @@ export type UnitExpression = {
   | { readonly calendar: false; readonly unit: DurationUnit }
   | { readonly calendar: true; readonly unit: CalendarDurationUnit }
 );
+
+/** Angle units (V30 §13): degrees and radians. */
+export type AngleUnit = "deg" | "rad";
+
+/**
+ * A unit of angle after a number literal, `pi`, a name, a member, a call, or parentheses: the number before it as an
+ * angle, such as `90 deg`, `pi rad`, or `(a + b) deg`.
+ */
+export interface AngleExpression {
+  readonly kind: "angleExpression";
+  readonly operand: Expression;
+  readonly unit: AngleUnit;
+  readonly unitSpan: SourceSpan;
+  readonly span: SourceSpan;
+}
 
 /**
  * A regex literal `/source/flags` (V30 §8): the pattern exactly as written between the slashes, and the flags as written

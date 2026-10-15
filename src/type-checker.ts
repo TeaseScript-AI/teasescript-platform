@@ -103,6 +103,12 @@ import {
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
+import {
+  ANGLE_ARITHMETIC_ROUTE,
+  ANGLE_FUNCTIONS,
+  anglePropertyMessage,
+  type StoredAngle,
+} from "./angle.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import {
@@ -121,6 +127,7 @@ import {
   type AnyDuration,
 } from "./duration.js";
 import {
+  isStaticDuration,
   knownOperands,
   knownStep,
   staticChoiceValue,
@@ -149,6 +156,7 @@ import {
   DATETIME_TYPE,
   decidedType,
   describeValue,
+  ANGLE_TYPE,
   CALENDAR_DURATION_TYPE,
   DURATION_TYPE,
   elementStoreType,
@@ -4418,12 +4426,21 @@ class TypeChecker {
         );
         return type;
       }
+      case "angleExpression": {
+        const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
+        this.#reportUnless(operand, isNumeric, expression.operand, "A unit follows a number", () =>
+          isScalar(nonNullTypeForUse(operand), "angle")
+            ? ` Remove the '${expression.unit}' after it.`
+            : ` Use a number before the '${expression.unit}'.`,
+        );
+        return ANGLE_TYPE;
+      }
       case "unaryExpression": {
         if (expression.operator === "not")
           return yield* compileChild(this.#valueOfConditionTask(expression, scope));
         const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
         return this.#operation(expression.operator, [operand], expression, (value) =>
-          isNumeric(value) || isScalar(value, "duration", "calendarDuration")
+          isNumeric(value) || isScalar(value, "duration", "calendarDuration", "angle")
             ? negatedValues(resolved(value), expression.operator)
             : undefined,
         );
@@ -5708,6 +5725,7 @@ class TypeChecker {
           (isScalar(a, "string") && isScalar(b, "string")) ||
           (isScalar(a, "duration") && isScalar(b, "duration")) ||
           (isScalar(a, "calendarDuration") && isScalar(b, "calendarDuration")) ||
+          (isScalar(a, "angle") && isScalar(b, "angle")) ||
           // Date and time values order only within one kind (V30 §35).
           (isTemporal(a) && typeName(a) === typeName(b))
             ? BOOLEAN_TYPE
@@ -5762,7 +5780,7 @@ class TypeChecker {
     const operator = expression.operator;
     const duration = (operand: Expression): AnyDuration | undefined => {
       const value = this.#known(operand);
-      return value !== null && typeof value === "object" ? value : undefined;
+      return isStaticDuration(value) ? value : undefined;
     };
     const number = (operand: Expression): number | undefined => {
       const value = this.#known(operand);
@@ -5804,13 +5822,7 @@ class TypeChecker {
   #checkLocalCalendarOffset(target: StaticType, operand: Expression, span: SourceSpan): void {
     if (!isScalar(target, "date", "datetime")) return;
     const value = this.#known(operand);
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      !isCalendar(value) ||
-      value.milliseconds === 0
-    )
-      return;
+    if (!isStaticDuration(value) || !isCalendar(value) || value.milliseconds === 0) return;
     this.#report(
       typeCode.invalidOperand,
       isScalar(target, "date")
@@ -5821,8 +5833,8 @@ class TypeChecker {
   }
 
   /**
-   * The number or duration `expression` is known to have at compile time, folded once per expression from its operands'
-   * known values. Iterative, so a long chain of steps does not deepen the native stack.
+   * The number, duration, or angle `expression` is known to have at compile time, folded once per expression from its
+   * operands' known values. Iterative, so a long chain of steps does not deepen the native stack.
    */
   #known(expression: Expression): StaticScalar | undefined {
     const pending: Expression[] = [expression];
@@ -6846,6 +6858,50 @@ class TypeChecker {
     return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
   }
 
+  /**
+   * Checks the arguments of an angle function and gives its result type (V30 §13). A plain number where an angle is
+   * needed names the unit to write, and a call whose arguments the compiler can see and that has no result is a compile
+   * error.
+   */
+  #angleFunctionType(
+    name: string,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const angleFunction = ANGLE_FUNCTIONS.get(name)!;
+    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const takes = (member: StaticType): boolean =>
+      angleFunction.takes === "angle" ? isScalar(member, "angle") : isNumeric(member);
+    // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5).
+    const several = problems.every((problem) => problem.kind === "invalidOperand")
+      ? expression.arguments.flatMap((item, index) =>
+          members(values[index]!).length > 1 ? [{ item, type: values[index]! }] : [],
+        )
+      : [];
+    const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
+    this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
+    for (const { item, type } of several)
+      this.#reportUnless(
+        type,
+        takes,
+        item.value,
+        `${name}(...) takes ${angleFunction.takes === "angle" ? "an angle" : "a number"}`,
+      );
+    if (problems.length === 0) {
+      const known = expression.arguments.map((item) => this.#known(item.value));
+      const fits = (value: StaticScalar | undefined): value is number | StoredAngle =>
+        angleFunction.takes === "angle"
+          ? value !== null && typeof value === "object" && value.kind === "angle"
+          : typeof value === "number";
+      if (known.every(fits)) {
+        const result = angleFunction.apply(known);
+        if (typeof result !== "number" && "failure" in result)
+          this.#report(typeCode.invalidOperand, result.failure, expression.span);
+      }
+    }
+    return angleFunction.returns === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
+  }
+
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
   #builtinType(
     name: string,
@@ -6853,6 +6909,7 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
+    if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
     // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
@@ -6927,9 +6984,11 @@ class TypeChecker {
               ? "durations"
               : isScalar(member, "calendarDuration")
                 ? "calendar durations"
-                : isTemporal(member)
-                  ? typeName(member)
-                  : undefined;
+                : isScalar(member, "angle")
+                  ? "angles"
+                  : isTemporal(member)
+                    ? typeName(member)
+                    : undefined;
         const families = expression.arguments.map((item) => [
           ...new Set(members(nonNullType(this.#typeOf(item.value))).map(familyOf)),
         ]);
@@ -6942,7 +7001,7 @@ class TypeChecker {
         const knownFamilies = new Set(
           expression.arguments.map((item) => {
             const value = this.#known(item.value);
-            return value !== null && typeof value === "object" && isCalendar(value)
+            return isStaticDuration(value) && isCalendar(value)
               ? durationFamily(durationParts(value))
               : "zero";
           }),
@@ -6959,7 +7018,7 @@ class TypeChecker {
             this.#typeOf(item.value),
             (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, or all dates, times, datetimes, or absolute dates and times`,
+            `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
@@ -6967,6 +7026,7 @@ class TypeChecker {
         if (numbers.every((number) => isScalar(number, "duration"))) return DURATION_TYPE;
         if (numbers.every((number) => isScalar(number, "calendarDuration")))
           return CALENDAR_DURATION_TYPE;
+        if (numbers.every((number) => isScalar(number, "angle"))) return ANGLE_TYPE;
         // Date and time values of one kind give a value of that kind (V30 §35).
         if (
           numbers.every(
@@ -7151,6 +7211,14 @@ class TypeChecker {
       this.#report(
         typeCode.invalidOperand,
         `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
+        expression.property.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    if (isScalar(value, "angle")) {
+      this.#report(
+        typeCode.invalidOperand,
+        anglePropertyMessage(name, expressionLabel(expression.object) ?? "value"),
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -7406,7 +7474,7 @@ class TypeChecker {
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
-                "A choice list element must be text, a number, true, false, null, a duration, a date or time value, or a choice object { value?, text, background? }.",
+                "A choice list element must be text, a number, true, false, null, a duration, an angle, a date or time value, or a choice object { value?, text, background? }.",
                 option.expression.span,
               ),
           );
@@ -7542,7 +7610,7 @@ class TypeChecker {
         this.#checkMembers(property.value, propertyType, isChoiceValue, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
-            "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
+            "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value.",
             property.value.span,
           ),
         );
@@ -7581,7 +7649,7 @@ class TypeChecker {
             typeCode.unshowableValue,
             member.kind === "dict"
               ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, script references, and regexes, and selects one element of a list.`,
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -7589,7 +7657,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -7605,7 +7673,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, script references, and regexes, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
           element.span,
         ),
       );
@@ -8999,6 +9067,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   BOOLEAN_TYPE,
   DURATION_TYPE,
   CALENDAR_DURATION_TYPE,
+  ANGLE_TYPE,
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
@@ -9513,7 +9582,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
           : name === "exactOffset"
             ? DURATION_TYPE
             : undefined;
-      if (value.name === "duration") return undefined;
+      if (value.name === "duration" || value.name === "angle") return undefined;
       return temporalFieldType(value.name, name);
     case "range":
     case "null":
@@ -9916,9 +9985,9 @@ function buttonLiteral(entry: Expression): ScalarValue | null | undefined {
 function literalValue(expression: Expression): ScalarValue | null | undefined {
   const known = staticChoiceValue(expression)?.value;
   // An exact duration is compared by its length, so it stands for its milliseconds in a duration type. A calendar
-  // duration has no fixed length and is not tracked.
+  // duration has no fixed length, and an angle is not tracked.
   if (known === null || typeof known !== "object") return known;
-  return isCalendar(known) ? undefined : known.milliseconds;
+  return known.kind === "angle" || isCalendar(known) ? undefined : known.milliseconds;
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
@@ -9949,7 +10018,8 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
   const value = known.value;
-  if (value !== null && typeof value === "object" && isCalendar(value)) return undefined;
+  if (value !== null && typeof value === "object" && (value.kind === "angle" || isCalendar(value)))
+    return undefined;
   return [
     value !== null && typeof value === "object"
       ? { value: value.milliseconds, duration: true }
@@ -10307,7 +10377,7 @@ function operatorMessage(
 ): string {
   const [left, right] = operands;
   if (operands.length === 1)
-    return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
+    return `'${operator}' needs a number, a duration, or an angle, but this is ${describeValue(left!)}.`;
   const duration = (type: StaticType): boolean => isScalar(type, "duration", "calendarDuration");
   // A calendar day or month has no fixed length, so it has no order or ratio against exact time (ADR 0026).
   const mixedDurations =
@@ -10319,7 +10389,7 @@ function operatorMessage(
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
     if (temporal !== undefined)
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
-    return `'${operator}' compares two numbers, two texts, two durations, or two calendar durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+    return `'${operator}' compares two numbers, two texts, two durations, two calendar durations, or two angles, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
   if (operator === "/" && mixedDurations)
     return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length. Divide two calendar durations, or two durations.";
@@ -10328,6 +10398,17 @@ function operatorMessage(
       ? joinMessage(expression, left!, right!)
       : undefined;
   if (joined !== undefined) return joined;
+  const angle = (type: StaticType): boolean => isScalar(type, "angle");
+  if (angle(left!) || angle(right!)) {
+    if (
+      (operator === "+" || operator === "-") &&
+      expression.kind === "binaryExpression" &&
+      (isNumeric(left!) || isNumeric(right!))
+    ) {
+      return `An angle and a number cannot be combined with '${operator}'. ${unitFix(isNumeric(left!) ? expression.left : expression.right, "deg")}`;
+    }
+    return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}. ${ANGLE_ARITHMETIC_ROUTE}`;
+  }
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
     const number =
       expression.kind === "binaryExpression"
@@ -10527,9 +10608,9 @@ function timeUnitFix(
     : `Give the ${range ? "range" : "number"} a unit, such as '${written} ${form}'.`;
 }
 
-/** Give a number a unit: `'5 s'`, `'count s'`, or `'(count + 1) s'`. */
-function unitFix(number: Expression | null): string {
-  const form = number === null ? "5 s" : unitForm(number);
+/** Give a number a unit: `'5 s'`, `'count s'`, or `'(count + 1) s'`, or with `deg` an angle unit, as in `'90 deg'`. */
+function unitFix(number: Expression | null, unit: "s" | "deg" = "s"): string {
+  const form = number === null ? (unit === "s" ? "5 s" : "90 deg") : unitForm(number, unit);
   return form === null
     ? "Put the expression in parentheses with a unit after them."
     : `Give the number a unit, such as '${form}'.`;
@@ -10640,6 +10721,9 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
   const literal = unwrap(statement.value);
   if (literal.kind === "numberLiteral" && isScalar(operand, "duration", "absoluteDateTime"))
     return ` Give the number a unit, such as '${literal.raw} s'.`;
+  if (literal.kind === "numberLiteral" && isScalar(operand, "angle"))
+    return ` Give the number a unit, such as '${literal.raw} deg'.`;
+  if (isScalar(operand, "angle")) return " Use an angle such as '90 deg' instead.";
   // No operator reads a zone (ADR 0026): local values move by calendar units, absolute ones by durations.
   if (isScalar(operand, "date") && isScalar(type, "duration"))
     return " Use calendar units, such as '1 calendar day'.";
@@ -10673,6 +10757,7 @@ function conversionFix(
   const kept = resolved(nonNullType(target));
   if (isScalar(kept, "integer") && isScalar(value, "number")) return `${ROUND_FIX}.`;
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
+  if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
   const conversion = [...CONVERSION_RESULTS].find(
     ([, result]) => isTemporalConversionResult(result) && isScalar(kept, result),
@@ -10852,6 +10937,8 @@ function elementFix(
     return ` To allow fractions, ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
+  if (isScalar(collection.element, "angle") && isNumeric(value))
+    return " Give the number a unit, such as '90 deg'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
   if (declared !== null && isAnnotatable(both))
     return ` To allow both, ${declareAs(declared, `${typeName(both)}${optional}`)}.`;
