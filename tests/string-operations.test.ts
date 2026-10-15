@@ -156,6 +156,48 @@ test("indexOf and lastIndexOf give null for a part that does not occur, so a pos
   );
 });
 
+test("count gives how often a part occurs, counted from the start without overlap", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${"banana".count("a")} ${"banana".count("ana")} ${"aaaa".count("aa")} ${"banana".count("x")}"',
+        // Literal and case-sensitive, like indexOf, and counted in code points.
+        'say "${"Banana".count("b")} ${"a.b.c".count(".")} ${"😀a😀".count("😀")} ${"".count("a")}"',
+        // A list still counts its elements.
+        'say "${[1, 2, 1].count(1)} ${["a", "ab"].count("a")}"',
+        'let n: integer = "abab".count("ab")',
+        'say "${n}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["3 1 2 0", "0 2 2 0", "2 1", "2"],
+  );
+  assert.deepEqual(
+    [
+      'let t = "abc"\nsay t.count("")\nexit',
+      'let t = "abc"\nsay t.count(1)\nexit',
+      'let t = "abc"\nsay t.count()\nexit',
+    ].map((source) => diagnostics(source)),
+    [
+      [["TSV043", "count() needs non-empty text for 'part'.", '""']],
+      [
+        [
+          "TSV043",
+          "count() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+          "1",
+        ],
+      ],
+      [["TSV020", "count() takes 1 argument (part), received 0.", "t.count()"]],
+    ],
+  );
+  // Text the compiler cannot know is checked when the script runs, on a receiver of known or unknown type.
+  for (const source of ["say text.count(part)\nexit", 'say "abc".count(part)\nexit']) {
+    const result = runWithGlobals(source, { text: "abc", part: "" });
+    assert.equal(result.snapshot.failure?.code, "TSR057", source);
+    assert.equal(result.snapshot.failure?.message, "count() needs non-empty text for 'part'.");
+  }
+});
+
 test("case conversion is locale independent", () => {
   assert.deepEqual(
     said('say "Straße".uppercase()\nsay "TITLE".lowercase()\nsay "ß".uppercaseFirst()\nexit'),

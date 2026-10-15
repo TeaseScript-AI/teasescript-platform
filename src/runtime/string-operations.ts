@@ -99,8 +99,8 @@ function isLowSurrogate(unit: number): boolean {
 
 /**
  * The UTF-16 offsets, in order, of the literal matches of a non-empty `search` that start and end on code points. With
- * `overlapping`, every match; otherwise each match starts at or after the end of the previous one, as `split` and
- * `replace` consume them. One Knuth-Morris-Pratt pass over the text keeps the work linear even when many candidate
+ * `overlapping`, every match; otherwise each match starts at or after the end of the previous one, as `count`, `split`,
+ * and `replace` consume them. One Knuth-Morris-Pratt pass over the text keeps the work linear even when many candidate
  * matches fall inside a surrogate pair and must be skipped.
  */
 function* literalMatches(text: string, search: string, overlapping: boolean): Generator<number> {
@@ -185,6 +185,12 @@ export function callStringMethod(
       let offset = -1;
       for (const match of literalMatches(text, texts[0]!, true)) offset = match;
       return offset < 0 ? null : codePointCount(text, offset);
+    }
+    // Occurrences counted from the start, each after the end of the previous one, as `split` and `replace` find them.
+    case "count": {
+      let occurrences = 0;
+      for (const _match of literalMatches(text, texts[0]!, false)) occurrences += 1;
+      return occurrences;
     }
     case "substring": {
       const length = stringLength(text);
@@ -347,8 +353,8 @@ function regexOperation(
 
 /**
  * The result of a text operation with a regex. `matches` tests the whole text; `contains`, `indexOf`, `find`, and
- * `capture` read the first leftmost match; `findAll`, `split`, `replace`, and `lastIndexOf` read every match, as
- * `regexMatches` finds them. RE2 reports UTF-16 offsets, and a position counts the code points up to it once. Each
+ * `capture` read the first leftmost match; `findAll`, `count`, `split`, `replace`, and `lastIndexOf` read every match,
+ * as `regexMatches` finds them. RE2 reports UTF-16 offsets, and a position counts the code points up to it once. Each
  * match, and each piece of a result before it is added, charges `work`, so a result never outgrows the work limit.
  */
 function regexResult(
@@ -389,6 +395,12 @@ function regexResult(
       for (const [start, end] of regexMatches(text, program, false, work))
         found.push(piece(start!, end!));
       return { kind: "list", items: found };
+    }
+    // The number of matches findAll finds, without building their text.
+    case "count": {
+      let matches = 0;
+      for (const _match of regexMatches(text, program, false, work)) matches += 1;
+      return matches;
     }
     case "lastIndexOf": {
       // The start of the last match as findAll finds them, so the matches do not overlap.
@@ -436,10 +448,10 @@ function regexResult(
 }
 
 /**
- * The matches of a regex in `text` for `findAll`, `split`, `replace`, and `lastIndexOf` (V30 §8): each one the leftmost
- * match from where the previous one ended, so they do not overlap. An empty match counts, also right after another
- * match; the next search starts one code point after it, and one at the end of the text is the last. Each match charges
- * `work` for handling it.
+ * The matches of a regex in `text` for `findAll`, `count`, `split`, `replace`, and `lastIndexOf` (V30 §8): each one
+ * the leftmost match from where the previous one ended, so they do not overlap. An empty match counts, also right after
+ * another match; the next search starts one code point after it, and one at the end of the text is the last. Each
+ * match charges `work` for handling it.
  */
 function* regexMatches(
   text: string,

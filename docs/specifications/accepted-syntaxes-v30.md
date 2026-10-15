@@ -787,6 +787,7 @@ say toString(7).padStart(3, "0")          // 007
 | `text.contains(part)` | `true` when `part` occurs in `text` |
 | `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
 | `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `null` when `part` does not occur |
+| `text.count(part)` | how many times `part` occurs, counted from the start without overlap: `"banana".count("ana")` is `1` (owner decision, 2026-10-15) |
 | `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
 | `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
 | `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
@@ -810,8 +811,8 @@ Rules:
       say path.substring(slash + 1)
   }
   ```
-- Searching and replacing compare text literally and case-sensitively. A `replace` search text and a padding `fill`
-  must be non-empty.
+- Searching and replacing compare text literally and case-sensitively. A `replace` search text, a `count` part, and a
+  padding `fill` must be non-empty.
 - Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
   case folding and is not reversible: `"ß".uppercase().lowercase()` is `"ss"`. Composed and decomposed forms of the same
   visible text are different text, and `split("")` returns code points, so a flag emoji gives two parts.
@@ -868,6 +869,7 @@ These text operations take a regex:
 | `text.capture(regex)` | a `string?[]?`: `null` without a match, otherwise the whole match at index 0 followed by each group in the order of its opening parenthesis; a group that did not take part is `null`, and an empty one is `""` |
 | `text.indexOf(regex)` | the position of the first match, or `null` |
 | `text.findAll(regex)` | a `string[]` of every match, or `[]` |
+| `text.count(regex)` | the number of matches, as `text.findAll(regex).length` (owner decision, 2026-10-15) |
 | `text.lastIndexOf(regex)` | the position of the last match, or `null` |
 | `text.split(regex)` | a `string[]` of the parts between matches |
 | `text.replace(regex, replacement)` | the text with every match replaced |
@@ -876,8 +878,8 @@ These text operations take a regex:
   `"a"`. `matches` tests the whole text, also with `m`: `"a\nb".matches(/^a$/m)` is `false`.
 - Positions count code points, as for the other text operations. A named group, `(?<name>...)`, keeps its number in
   `capture`.
-- `findAll`, `lastIndexOf`, `split`, and `replace` take every match in turn, each the leftmost one from where the
-  previous one ended, so matches do not overlap. An empty match counts, also right after another match, and the next
+- `findAll`, `count`, `lastIndexOf`, `split`, and `replace` take every match in turn, each the leftmost one from where
+  the previous one ended, so matches do not overlap. An empty match counts, also right after another match, and the next
   search starts one character later: `"ab".findAll(/x*/)` is `["", "", ""]`, `"a".findAll(/a*/)` is `["a", ""]`, and
   `"ab".replace(/x*/, "-")` is `"-a-b-"`.
 - `lastIndexOf` gives the start of the last match: `"2026-10-14".lastIndexOf(/\d+/)` is `8`. Since matches do not

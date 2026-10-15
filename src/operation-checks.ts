@@ -136,8 +136,7 @@ export function memberProblems(
     // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
     if (name === "take" || name === "takeLast")
       return takeProblems(name, undefined, property, call, typeOf);
-    // Only lists have `count`, and a list's `indexOf` and `lastIndexOf` take any value, so only one argument without a
-    // name is checked.
+    // A list's `indexOf`, `lastIndexOf`, and `count` take any value, so only one argument without a name is checked.
     if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
     // A list's `get` takes an index and a dict's a key, each with a `default:`.
     if (name === "get") return getProblems(undefined, property, call);
