@@ -382,9 +382,10 @@ let shares: integer = 10 / 5          // compile error: a quotient is a number
 let shares: integer = floor(10 / 5)   // valid
 ```
 
-Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-and-durations). `+` also
-joins two values of the same kind: two texts give one text, and two lists give a new list ([§16](#16-lists)); `+=` joins
-the same way. Nothing converts: text and another value, or a list and a single value, is a compile error that points to
+Arithmetic applies to numbers, to durations as described in [§35](#35-date-time-and-durations), and to angles as
+described in [Exponentials, logarithms, and angles](#exponentials-logarithms-and-angles). `+` also joins two values of
+the same kind: two texts give one text, and two lists give a new list ([§16](#16-lists)); `+=` joins the same way.
+Nothing converts: text and another value, or a list and a single value, is a compile error that points to
 interpolation or to `add`, and a runtime error when the compiler cannot see the kinds:
 
 ```text
@@ -1223,6 +1224,7 @@ datetime
 absoluteDateTime
 duration
 calendarDuration
+angle
 ```
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
@@ -1384,7 +1386,7 @@ fits when every element or value fits, and an object fits when each known proper
 
 | Conversion | Converts | Result |
 | --- | --- | --- |
-| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, date and time values, script references, and regexes | the same text as `"${value}"` |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, angles, date and time values, script references, and regexes | the same text as `"${value}"` |
 | `toNumber(value)` | numbers, and number text | a `number` |
 | `toInteger(value)` | numbers, and number text | an `integer` |
 | `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
@@ -1419,10 +1421,10 @@ ceil(-2.5)   // -2
 ```
 
 `min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
-([§16](#statistics)), which are all numbers, all durations, all calendar durations of one family, or all date and time
-values of one kind ([§35](#35-date-time-and-durations)). The result is an `integer` when every argument is an `integer`,
-a `number` otherwise, and for durations and date and time values the chosen value itself. Mixing numbers, durations,
-calendar durations or their families, or temporal kinds, other values, `null`, and named
+([§16](#statistics)), which are all numbers, all durations, all calendar durations of one family, all angles, or all
+date and time values of one kind ([§35](#35-date-time-and-durations)). The result is an `integer` when every argument is
+an `integer`, a `number` otherwise, and for durations, angles, and date and time values the chosen value itself. Mixing
+numbers, durations, calendar durations or their families, angles, or temporal kinds, other values, `null`, and named
 arguments are compile errors when the types show them, and runtime errors otherwise:
 
 ```text
@@ -1455,6 +1457,7 @@ fromBase64(text, default: value)
 | `date`, `time`, `datetime` | ISO text, as `.toISO()` gives it |
 | `absoluteDateTime` | ISO text in UTC, ending in `Z` |
 | `duration` | its number of milliseconds |
+| `angle` | its number of degrees |
 | `speaker` | an object with a copy of its properties |
 
 A `calendarDuration`, `range`, `script`, `regex`, `timer`, `media`, `messageHandle`, or permanent button cannot be
@@ -1584,37 +1587,53 @@ round(pi * 2 * 2, decimals: 2)   // 12.57
   factorial, `gcd`, bitwise operations, and general number formatting.
 
 ### Exponentials, logarithms, and angles
-**Status:** Accepted (Owner decision, 2026-10-07)
+**Status:** Accepted (Owner decision, 2026-10-07; angles with a unit: Owner decision, 2026-10-16)
 
 | Function | Result |
 | --- | --- |
 | `exp(value)` | e raised to the value |
 | `ln(value)` | the natural logarithm, for a value above 0 |
 | `log10(value)` | the logarithm to base 10, for a value above 0: `log10(1000)` is `3` |
-| `sin(degrees)`, `cos(degrees)`, `tan(degrees)` | the sine, cosine, or tangent of an angle in degrees |
-| `asin(value)`, `acos(value)` | the angle in degrees of a sine or cosine from -1 through 1 |
-| `atan(value)` | the angle in degrees of a tangent, between -90 and 90 |
-| `atan2(y, x)` | the angle in degrees of the direction from the origin to the point (x, y), above -180 and up to 180 |
+| `sin(angle)`, `cos(angle)`, `tan(angle)` | the sine, cosine, or tangent of an angle |
+| `asin(value)`, `acos(value)` | the angle of a sine or cosine from -1 through 1 |
+| `atan(value)` | the angle of a tangent, above -90° and below 90° |
+| `atan2(y, x)` | the angle of the direction from the origin to the point (x, y), above -180° and up to 180° |
+| `toDeg(angle)`, `toRad(angle)` | the size of an angle as a number of degrees or of radians |
 
-Angles are in degrees, both the argument of `sin`, `cos`, and `tan` and the result of `asin`, `acos`, `atan`, and
-`atan2`. `asin` gives -90 through 90, `acos` 0 through 180, and `atan2(0, 0)` is 0. Each function returns a `number`.
+An angle is a value of type `angle`: a number with the unit `deg` (`degree`, `degrees`) or `rad` (`radian`,
+`radians`), such as `90 deg`, `pi rad`, or `heading deg`. The unit follows a number, a name, a member, a call, or
+parentheses and binds as a duration unit does ([§35](#durations)). `sin`, `cos`, and `tan` take an angle and return
+a `number`, `asin`, `acos`, `atan`, and `atan2` return an angle, and `toDeg` and `toRad` return a `number`. `asin`
+gives -90° through 90°, `acos` 0° through 180°, and `atan2(0, 0)` is 0°. A plain number where an angle is needed,
+as in `sin(90)`, is a compile error that names both units, and a runtime error when the compiler cannot see the
+type. `toDeg` and `toRad` take only an angle: give a number its unit first, as in `toRad(180 deg)` or
+`toRad(input deg)`.
+
+Angles add, subtract, and negate, multiply and divide by a number, and divide by an angle, which gives a `number`.
+They compare by size, so `180 deg == pi rad`, and `min`, `max`, and `sort()` order them by size. `sum` adds angles;
+the other statistics functions and the numeric functions such as `abs` and `mod` do not take them. Other
+combinations, such as an angle plus a number, are errors. An angle shows in degrees with a degree sign: `say
+asin(0.5)` shows `30°`, and `say pi rad` shows `180°`.
 
 ```text
-sin(30)          // 0.5
-cos(90)          // 0
-tan(45)          // 1
-atan2(1, -1)     // 135
+sin(30 deg)          // 0.5
+cos(pi rad)          // -1
+tan(45 deg)          // 1
+atan2(1, -1)         // 135°
+toDeg(pi rad)        // 180
+toRad(180 deg)       // 3.141592653589793
+sin(asin(0.5))       // 0.5
 log10(0.001)     // -3
 round(exp(1), decimals: 5)   // 2.71828
 ```
 
 - A call without a finite result fails like the other numeric functions: `ln` or `log10` of a number of at most 0,
-  `asin` or `acos` of a number outside -1 through 1, `tan` of an odd multiple of 90, and `exp` of a number too large.
+  `asin` or `acos` of a number outside -1 through 1, `tan` of an odd multiple of 90°, and `exp` of a number too large.
   It is a compile error when the compiler can see the arguments, and runtime error `TSR036` otherwise.
 - The results are the same on every device and browser, because the engine computes them with its own arithmetic
   instead of the browser's. They are the nearest number to the exact result in all but extremely rare cases. Exact
-  angles give exact results, such as `sin(30)` and `cos(90)`, and `log10` of a power of ten as written, such as `0.001`,
-  is exactly that power.
+  angles give exact results, such as `sin(30 deg)` and `cos(90 deg)`, and `log10` of a power of ten as written, such as
+  `0.001`, is exactly that power.
 
 ## 14. Scope
 **Status:** Accepted
@@ -1802,8 +1821,8 @@ let newest = tasks.removeLast()
 
 `items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
 `["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
-Elements may be text, numbers, `true` or `false`, `null`, durations, date and time values, script references, and
-regexes, shown as `${...}` shows them; any other element raises an error.
+Elements may be text, numbers, `true` or `false`, `null`, durations, angles, date and time values, script references,
+and regexes, shown as `${...}` shows them; any other element raises an error.
 
 List properties:
 
@@ -1834,7 +1853,7 @@ say "Come closer, ${account.petNames}"
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
 
 An interpolated list may contain any value that `${...}` shows on its own: text, numbers, `true` and `false`, `null`,
-durations, date and time values, script references ([§29](#29-script-files-and-paths)), and regexes. A list holds one element type ([§12](#12-variable-declarations)), and integers and
+durations, angles, date and time values, script references ([§29](#29-script-files-and-paths)), and regexes. A list holds one element type ([§12](#12-variable-declarations)), and integers and
 numbers together are numbers. The selected element is shown as that value would be:
 
 ```text
@@ -1860,7 +1879,8 @@ let stranger = speakers.random
 ```
 
 `say` is also a debugging aid for whole values. Like Python's `print`, it shows text, numbers, `true` and `false`,
-`null`, durations, and date and time values as it does on their own, and every other value in a code-like notation:
+`null`, durations, angles, and date and time values as it does on their own, and every other value in a code-like
+notation:
 
 ```text
 let petNames = ["pet", "puppy", "toy"]
@@ -1880,13 +1900,13 @@ say music                      // <media "music.mp3", playing at 12 seconds>
 say beat                       // <timer "Beat", 7 seconds left>
 ```
 
-In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), a duration shows as it
-does on its own, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and
-values in order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
-`playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it has one and
-its state: the time left (after `paused,` when paused), `stopped`, or `finished`. A permanent button identifier shows
-the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the state at the moment
-`say` runs. Message markup is not applied to the notation.
+In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), a duration or an angle
+shows as it does on its own, a set shows like a list, an object shows its properties in order, a dict shows its quoted
+keys and values in order, and a range shows as written. A speaker shows its identifier. A media handle shows its file
+and state: `playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it
+has one and its state: the time left (after `paused,` when paused), `stopped`, or `finished`. A permanent button
+identifier shows the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the
+state at the moment `say` runs. Message markup is not applied to the notation.
 
 Other text fields, such as a button label, an ask question, an input hint, the `text` of a choice object, a timer label,
 or a speaker's name or title, do not select from a list. A list there is a compile error when the compiler can see it,
@@ -1954,8 +1974,8 @@ Runtime behavior:
   list and a set, are never equal. List `contains(value)`, `indexOf(value)`, `lastIndexOf(value)`, `count(value)`, and
   `remove(value)` use this equality, so they also find objects and nested lists; `remove(value)` removes the first
   equal element.
-- A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
-  ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
+- A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, angles, date and time
+  values ([§35](#35-date-time-and-durations)), lists, objects, dicts, sets, ranges, speakers, timer and media
   handles, script references, and regexes. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
   the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
   `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
@@ -1971,8 +1991,8 @@ Runtime behavior:
   or warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
-  together), all text, all durations, all calendar durations of one family, or all dates, all times, all datetimes, or all
-  absolute dates and times
+  together), all text, all durations, all calendar durations of one family, all angles, or all dates, all times, all
+  datetimes, or all absolute dates and times
   ([§35](#35-date-time-and-durations)); text is ordered by Unicode code point, independently of locale, so
   `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime
   error otherwise.
@@ -2090,7 +2110,8 @@ stddev(scores)          // 2.8809720581775866
 max(scores)             // 18
 ```
 
-- The values are numbers or durations, and for `min` and `max` also date and time values of one kind
+- The values are numbers or durations, for `sum`, `min`, and `max` also angles, and for `min` and `max` also date and
+  time values of one kind
   ([§35](#35-date-time-and-durations)). With `by:`, the values are a property of a list of objects:
   `median(sessions, by: "count")`.
 - `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
@@ -2099,7 +2120,7 @@ max(scores)             // 18
 - `stddev` is the sample standard deviation: the square root of the summed squared distances to the average, divided by
   the number of values minus 1.
 - `sum`, `min`, and `max` of integers are integers; `average`, `median`, `percentile`, and `stddev` of numbers are
-  numbers. Durations give durations, and `min` and `max` give the chosen value.
+  numbers. Durations give durations, the `sum` of angles is an angle, and `min` and `max` give the chosen value.
 - The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
   on every device, also for values that cancel or are very large or very small.
 - The statistics take durations, not calendar durations, because a calendar day or month has no fixed length.
@@ -2316,7 +2337,7 @@ let door = askChoice win: "Open a door", lose: ["Open a door", "Open a door"]   
 Rules:
 
 - A button shows its option, or its choice object's `text`, as `${...}` shows it: text, a number, `true` or `false`,
-  `null`, a duration, or a date or time value.
+  `null`, a duration, an angle, or a date or time value.
 - Options with and without a written value may be mixed.
 - When all values have the same type, the result has that type; integers and numbers together are numbers.
 - Values of different types, such as text and numbers, give a union ([§13](#13-explicit-types)). Only a place declared
@@ -3706,10 +3727,10 @@ Rules:
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
-Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, date and
-time values, and `script` references ([§29](#29-script-files-and-paths)), including nested `null`. Wider persistent-data
-support is not yet implemented; this subset is not a permanent language limit. The compiler rejects a default whose type
-is known and does not fit the declared type. Replacement-value recovery under
+Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, angles,
+date and time values, and `script` references ([§29](#29-script-files-and-paths)), including nested `null`. Wider
+persistent-data support is not yet implemented; this subset is not a permanent language limit. The compiler rejects a
+default whose type is known and does not fit the declared type. Replacement-value recovery under
 [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -5519,6 +5540,7 @@ datetime
 absoluteDateTime
 duration
 calendarDuration
+angle
 list
 dict
 object
@@ -5575,6 +5597,8 @@ asin
 acos
 atan
 atan2
+toDeg
+toRad
 toString
 toNumber
 toInteger
