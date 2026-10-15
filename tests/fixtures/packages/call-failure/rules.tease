@@ -1,4 +1,0 @@
-global function punish(count: number) {
-    let rounds = count - 3
-    say "Doing ${count / rounds} rounds."
-}

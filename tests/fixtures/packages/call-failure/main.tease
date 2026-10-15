@@ -1,7 +1,0 @@
----
-title: "Call failure"
----
-say "Ready?"
-showButton "Continue"
-punish(3)
-exit
