@@ -1695,15 +1695,12 @@ class TypeChecker {
   /**
    * Whether the speaker `speaker`, or some speaker for `null`, gets one of the sources of its field `name`: by its
    * declaration or an assignment through its name, or through a store the compiler cannot check, which may reach any
-   * speaker.
+   * speaker. `anySpeaker` holds what some speaker gets.
    */
-  #getsField(speaker: string | null, name: string): boolean {
-    const sources = fieldSources(name);
-    if (sources.some((source) => this.#unchecked.has(source))) return true;
-    const speakers =
-      speaker === null ? [...this.#speakerGets.values()] : [this.#speakerGets.get(speaker)];
-    return speakers.some(
-      (gets) => gets !== undefined && sources.some((source) => gets.has(source)),
+  #getsField(speaker: string | null, name: string, anySpeaker: ReadonlySet<string>): boolean {
+    const gets = speaker === null ? anySpeaker : this.#speakerGets.get(speaker);
+    return fieldSources(name).some(
+      (source) => this.#unchecked.has(source) || gets?.has(source) === true,
     );
   }
 
@@ -5759,12 +5756,15 @@ class TypeChecker {
       }
     const verdicts = missingPropertyReads(checked);
     const missing = new Map(sites.map((site, index) => [site, verdicts[index]]));
+    // What some speaker gets, for reads from a speaker the compiler cannot tell apart, once the first needs it.
+    let anySpeaker: ReadonlySet<string> | undefined;
     for (const check of this.#deferred) {
       let found: readonly Diagnostic[] = [];
       if (check.kind === "nullOnly") {
         if (check.slots.every((slot) => heldOnlyNull(slot, known))) found = check.diagnostics;
       } else if (check.kind === "speakerField") {
-        if (!this.#getsField(check.speaker, check.name)) {
+        anySpeaker ??= new Set([...this.#speakerGets.values()].flatMap((gets) => [...gets]));
+        if (!this.#getsField(check.speaker, check.name, anySpeaker)) {
           this.#file = check.file;
           const before = this.diagnostics.length;
           this.#report(

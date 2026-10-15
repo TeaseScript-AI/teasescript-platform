@@ -799,6 +799,30 @@ test("speaker and handle properties are state that every name for them reads", (
   assert.ok(!repeated.some((step) => step.target === "timer.pause()"));
 });
 
+test("a term that a speaker's gender gives, or a title read through the other one, comes from that property", () => {
+  const played = traced(
+    [
+      "speaker guide {",
+      '    gender: "female"',
+      '    shortTitle: "Miss"',
+      '    hisHer: "their"',
+      "}",
+      'let changed = "male"',
+      "guide.gender = changed",
+      'let short = "Ms"',
+      "guide.shortTitle = short",
+      'say "${guide.heShe} ${guide.title} ${guide.hisHer}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const [term, title, explicit] = causes(played.trace, outputOf(played, "he Ms their"));
+  assert.ok(lineage(played.trace, term!.id).some((step) => step.target === "changed"));
+  assert.ok(lineage(played.trace, title!.id).some((step) => step.target === "short"));
+  // A term set explicitly keeps its own origin.
+  assert.ok(!lineage(played.trace, explicit!.id).some((step) => step.target === "changed"));
+});
+
 test("an overwritten property value is no cause of the value that replaced it", () => {
   for (const viaAlias of [false, true]) {
     const writer = viaAlias ? "other" : "guide";

@@ -32,7 +32,11 @@ import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
-import { speakerPropertyValue } from "../speaker-terms.js";
+import {
+  propertiesReadThrough,
+  speakerPropertySource,
+  speakerPropertyValue,
+} from "../speaker-terms.js";
 import {
   LIST_STATISTICS,
   linearRegression,
@@ -1353,12 +1357,20 @@ export class Evaluator {
       }
       // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(
-          this.speakerById(object.speakerId, target.span),
-          target.name,
-          value,
-          target.span,
-        );
+        const speaker = this.speakerById(object.speakerId, target.span);
+        // A store into a property that others are read through, such as `gender` for the terms it gives, changes them
+        // too, so a reference prepared to one keeps the value it leads to now.
+        const has = (name: string) => speaker.properties.some((property) => property.name === name);
+        for (const name of propertiesReadThrough(has, target.name)) {
+          const path: PreparedReferenceStep[] = [{ kind: "property", name }];
+          detachPreparedReferencesForMutation(this.snapshot, {
+            rootFrameId: GLOBAL_SCOPE_ID,
+            rootName: speaker.identifier,
+            path,
+            speakerPath: { speakerId: speaker.id, path },
+          });
+        }
+        setSpeakerProperty(speaker, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
@@ -3710,10 +3722,20 @@ export class Evaluator {
     object: ExpressionPlan | null = null,
   ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span, object);
-    if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
-      return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
+      const speaker = this.speakerById(value.speakerId, span);
+      // A value that a speaker reads through another property, such as a term its gender gives, comes from that one.
+      if (this.trace !== null)
+        this.#readState(
+          value,
+          speakerPropertySource(
+            (own) => speaker.properties.some((property) => property.name === own),
+            name,
+          ),
+        );
+      return this.#getSpeakerProperty(speaker, name, span);
     }
+    if (this.trace !== null) this.#readState(value, name);
     if (isList(value) || isSet(value))
       return this.#getCollectionProperty(value, name, span, object);
     if (typeof value === "string") {

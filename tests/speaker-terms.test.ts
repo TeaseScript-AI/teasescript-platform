@@ -81,6 +81,34 @@ test("a speaker's gender gives the default of every term, and a term set explici
   );
 });
 
+test("a store into a gender or a title keeps the value of a term or title read through it before", () => {
+  // The receiver of `replace` is read before its argument changes what the speaker reads, through its name or an
+  // alias; every boundary, also while the function waits, goes through a JSON checkpoint.
+  const suffix = (change: string) =>
+    `function suffix {\n    ${change}\n    wait 1 ms\n    return "!"\n}`;
+  for (const [declaration, change, read, said] of [
+    ['gender: "female"', 'vera.gender = "other"', 'vera.heShe.replace("s", suffix())', "!he"],
+    ['gender: "female"', 'vera.gender = "male"', 'vera.heShe.replace("s", suffix())', "!he"],
+    ['gender: "female"', 'vera.gender = "male"', 'current.himHer.replace("h", suffix())', "!er"],
+    ['shortTitle: "Miss"', 'vera.shortTitle = "Ms"', 'vera.title.replace("M", suffix())', "!iss"],
+    ['title: "Miss"', 'vera.title = "Ms"', 'current.shortTitle.replace("M", suffix())', "!iss"],
+  ] as const) {
+    const source = [
+      `speaker vera {\n    displayName: "Vera"\n    ${declaration}\n}`,
+      "let current = vera",
+      suffix(change),
+      `say ${read}`,
+      "exit",
+    ].join("\n");
+    const equivalent = assertRuntimeResumeEquivalent(source);
+    assert.deepEqual(
+      equivalent.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      [said],
+      source,
+    );
+  }
+});
+
 test("a gender other than male or female gives no term defaults", () => {
   const result = runValidSource(
     'speaker vera {\n    displayName: "Vera"\n    gender: "nonbinary"\n    hisHer: "their"\n}\nsay vera.hisHer\nsay vera.heShe\nexit',

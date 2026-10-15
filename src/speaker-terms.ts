@@ -55,3 +55,25 @@ export function speakerPropertyValue<T>(
   const gender = own("gender");
   return gender === "male" ? term[0] : gender === "female" ? term[1] : undefined;
 }
+
+/**
+ * The property that a speaker reads its property `name` from, when `has` tells which properties it has of its own:
+ * `name` itself, or the one {@link speakerPropertyValue} falls back to.
+ */
+export function speakerPropertySource(has: (name: string) => boolean, name: string): string {
+  if (has(name)) return name;
+  if (name === "title" && has("shortTitle")) return "shortTitle";
+  if (name === "shortTitle" && has("title")) return "title";
+  return GENDER_TERMS.has(name) ? "gender" : name;
+}
+
+/**
+ * The properties other than `name` that a speaker reads through `name` (see {@link speakerPropertySource}), whose
+ * values a store into `name` therefore changes too: the terms it lacks for `gender`, and the other title.
+ */
+export function propertiesReadThrough(has: (name: string) => boolean, name: string): string[] {
+  if (name === "gender") return [...GENDER_TERMS.keys()].filter((term) => !has(term));
+  if (name === "title" && !has("shortTitle")) return ["shortTitle"];
+  if (name === "shortTitle" && !has("title")) return ["title"];
+  return [];
+}
