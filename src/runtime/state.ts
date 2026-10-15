@@ -29,6 +29,7 @@ import type {
 } from "./actions/model.js";
 import { cloneFormState, cloneFormUi } from "./actions/form.js";
 import { DEFAULT_CHAT_PACING_SETTINGS, type ChatPacingSettings } from "../chat-pacing.js";
+import { speakerPropertyValue } from "../speaker-terms.js";
 import {
   type CompiledFunctionDefinition,
   type Instruction,
@@ -2061,22 +2062,15 @@ function serializedSpeakerProperty(
   if (!isPlainRecord(speaker) || !Array.isArray(speaker.properties)) {
     return { found: false, value: null };
   }
-  const names =
-    name === "title"
-      ? ["title", "shortTitle"]
-      : name === "shortTitle"
-        ? ["shortTitle", "title"]
-        : [name];
-  for (const candidateName of names) {
-    const property = speaker.properties.find(
+  const properties = speaker.properties;
+  const value = speakerPropertyValue((candidateName) => {
+    const property = properties.find(
       (candidate) =>
         isPlainRecord(candidate) && candidate.name === candidateName && "value" in candidate,
     );
-    if (isPlainRecord(property)) {
-      return { found: true, value: property.value };
-    }
-  }
-  return { found: false, value: null };
+    return isPlainRecord(property) ? property.value : undefined;
+  }, name);
+  return value === undefined ? { found: false, value: null } : { found: true, value };
 }
 
 function validateCallFrames(

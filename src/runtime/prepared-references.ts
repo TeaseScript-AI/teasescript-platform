@@ -22,6 +22,7 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
+import { speakerPropertyValue } from "../speaker-terms.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -572,12 +573,10 @@ function resolvePreparedReferenceStep(
   if (isSpeakerReference(value)) {
     const speaker = snapshot.speakers.find((candidate) => candidate.id === value.speakerId);
     if (speaker === undefined) return { found: false, value: null };
-    let property = speaker.properties.find((candidate) => candidate.name === step.name)?.value;
-    if (property === undefined && step.name === "title") {
-      property = speaker.properties.find((candidate) => candidate.name === "shortTitle")?.value;
-    } else if (property === undefined && step.name === "shortTitle") {
-      property = speaker.properties.find((candidate) => candidate.name === "title")?.value;
-    }
+    const property = speakerPropertyValue(
+      (name) => speaker.properties.find((candidate) => candidate.name === name)?.value,
+      step.name,
+    );
     return property === undefined
       ? { found: false, value: null }
       : { found: true, value: property };

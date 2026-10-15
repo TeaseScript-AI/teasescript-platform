@@ -32,6 +32,7 @@ import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import { speakerPropertyValue } from "../speaker-terms.js";
 import {
   LIST_STATISTICS,
   linearRegression,
@@ -3036,12 +3037,10 @@ export class Evaluator {
     name: string,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    let property = speaker.properties.find((item) => item.name === name)?.value;
-    if (property === undefined && name === "title") {
-      property = speaker.properties.find((item) => item.name === "shortTitle")?.value;
-    } else if (property === undefined && name === "shortTitle") {
-      property = speaker.properties.find((item) => item.name === "title")?.value;
-    }
+    const property = speakerPropertyValue(
+      (own) => speaker.properties.find((item) => item.name === own)?.value,
+      name,
+    );
     if (property === undefined)
       throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
     return property;
