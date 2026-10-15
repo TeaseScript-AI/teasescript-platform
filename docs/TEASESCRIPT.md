@@ -416,10 +416,11 @@ names, and `is` type tests are available, and tests, `!= null`, and assignments 
 null value where its non-null type is required is a compile error that names the check and a fallback with
 `otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
 unsupported operand or such a property read `TSV043`, returns of different types, list elements of different types, or
-an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison
-warning `TSV046`, and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot
-know, such as storage under a computed key, host data, or an unknown parameter, is stored in a place whose type is at
-least partly known, the plan carries that type and the runtime checks the value before storing it (`TSR058`).
+an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison,
+or a `for` or `toList()` range with a number literal on each side that contains no numbers (V30 §6), warning `TSV046`,
+and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot know, such as storage
+under a computed key, host data, or an unknown parameter, is stored in a place whose type is at least partly known, the
+plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

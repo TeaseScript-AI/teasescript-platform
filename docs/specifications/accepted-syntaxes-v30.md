@@ -586,6 +586,9 @@ may produce `5`, `6`, `7`, `8`, or `9`.
 
 may also produce `10`.
 
+`5..5` and a reversed range such as `5..1` contain no numbers: a range never counts down. A `for` loop over such a range
+runs zero times, and `toList()` returns `[]`. When both bounds are written as numbers, the compiler warns.
+
 `for` ([§23](#23-loops)), `randomInteger` ([Randomness](#randomness)), and `toList()` give the whole numbers of a range,
 and `wait` and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them
 needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with
@@ -4264,7 +4267,7 @@ function describe(answer: integer | string?) {
 - Compile errors:
   - a case value that is not one of the forms above, such as a range with a computed bound (use `if` instead);
   - a range that contains no numbers: `5..5` excludes its end (write `case 5` or `5..=5`), and a reversed range such as
-    `5..1` counts down (write `1..5` or `1..=5`);
+    `5..1` contains none either, since a range never counts down (write `1..5` or `1..=5`);
   - a case value that repeats or overlaps an earlier case value (§6), such as `2` after `2.0` or after `1..5`;
   - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
     range on text.

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
@@ -44,9 +47,7 @@ function failure(source: string): [string, string, string] | null {
 test("toList gives the whole numbers of a range in order, as for goes through them", () => {
   assert.deepEqual(
     said(
-      "say (1..=5).toList()\nsay (1..5).toList()\nsay (-2..=1).toList()",
-      // An empty or reversed range gives no numbers, as a for loop over it runs no times.
-      "say (1..1).toList()\nsay (5..=1).toList()\nsay (3..=3).toList()",
+      "say (1..=5).toList()\nsay (1..5).toList()\nsay (-2..=1).toList()\nsay (3..=3).toList()",
       // A range kept in a variable, or in a list, has it too.
       "let r = 2..=4",
       "let ranges = [r]",
@@ -62,8 +63,6 @@ test("toList gives the whole numbers of a range in order, as for goes through th
       "[1, 2, 3, 4, 5]",
       "[1, 2, 3, 4]",
       "[-2, -1, 0, 1]",
-      "[]",
-      "[]",
       "[3]",
       "[2, 3, 4]",
       "3",
@@ -82,6 +81,44 @@ test("toList gives the whole numbers of a range in order, as for goes through th
   assertRuntimeResumeEquivalent(
     "let r = 1..=3\nlet numbers = r.toList()\nnumbers.add(4)\nsay numbers\nexit",
   );
+});
+
+test("toList gives [] for a range that contains no numbers, with a warning when both bounds are numbers", () => {
+  const source = [
+    "say (1..1).toList()",
+    "say (5..=1).toList()",
+    // A computed bound or a variable stays silent, even where the compiler knows its value.
+    "let high = 5",
+    "let reversed = 5..=1",
+    "say (high..=1).toList()",
+    "say ((2 + 3)..=1).toList()",
+    "say reversed.toList()",
+    "exit",
+  ].join("\n");
+  assert.deepEqual(diagnostics(source), [
+    [
+      "TSV046",
+      "This range contains no numbers, so toList() returns []: '1..1' excludes its end. Write '1..=1' for the single number 1.",
+      "(1..1)",
+    ],
+    [
+      "TSV046",
+      "This range contains no numbers, so toList() returns []: a range never counts down. Write '1..=5' to count up.",
+      "(5..=1)",
+    ],
+  ]);
+  const plan = compileValidPlan(source, {}, ["TSV046", "TSV046"]);
+  assert.deepEqual(sayTexts(run(plan, createImmediatePacingRuntimeSnapshot(plan))), [
+    "[]",
+    "[]",
+    "[]",
+    "[]",
+    "[]",
+  ]);
+  // A call with an argument is an error, without the warning on top.
+  assert.deepEqual(diagnostics("say (4..1).toList(1)\nexit"), [
+    ["TSV020", "toList() takes no arguments, received 1.", "(4..1).toList(1)"],
+  ]);
 });
 
 test("toList needs whole-number bounds, checked when the script compiles where it can and otherwise when it runs", () => {
