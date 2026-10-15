@@ -502,14 +502,19 @@ useEventListener(document, "fullscreenchange", () => {
 });
 async function toggleFullscreen() {
   fullscreenError.value = "";
+  // Focus that the change leaves on nothing returns to where it was: the control pressed from the keyboard, or the
+  // composer that a mouse press gave it to (RuntimeInteraction.vue).
+  const focused = document.activeElement;
   try {
     // Full-document preview keeps body-portaled Reka surfaces in fullscreen too.
     // The production iframe must separately be granted fullscreen by its host.
     if (document.fullscreenElement) await document.exitFullscreen();
     else await document.documentElement.requestFullscreen();
-    document
-      .querySelector<HTMLButtonElement>("[data-fullscreen-control]")
-      ?.focus({ preventScroll: true });
+    if (
+      (document.activeElement === null || document.activeElement === document.body) &&
+      focused instanceof HTMLElement
+    )
+      focused.focus({ preventScroll: true });
   } catch {
     fullscreenError.value = "Fullscreen could not be changed. Please try again.";
   }
