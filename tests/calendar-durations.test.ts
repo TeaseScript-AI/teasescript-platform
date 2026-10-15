@@ -179,9 +179,37 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     "let a = [f() calendar mo, 1 calendar day]",
   ])
     compileValidPlan(`${named}${source}\nexit`);
-  assert.deepEqual(diagnostics("let a = 2 calendar\nexit"), [
-    ["TSP033", "Expected a calendar unit after 'calendar': day, week, month, or year."],
-  ]);
+  // Without a unit after it, 'calendar' gets the same error after a name, a member, an element, a call, or parentheses
+  // as after a number, at the word, also where a list or an operator goes on after it.
+  for (const [source, column] of [
+    ["let a = 2 calendar", 10],
+    ["let a = n calendar", 10],
+    ["let a = p.delay calendar", 16],
+    ["let a = getDate() + xs[0] calendar", 26],
+    ["let a = [f() calendar, 1 calendar day]", 13],
+    ["let a = (n + 1) calendar + 1 s", 16],
+  ] as const) {
+    const full = `${named}${source}\nexit`;
+    assert.deepEqual(
+      compileSource(full).diagnostics.map(({ code, message, span }) => [
+        code,
+        message,
+        span.start.line,
+        span.start.column,
+        full.slice(span.start.offset, span.end.offset),
+      ]),
+      [
+        [
+          "TSP033",
+          "Expected a calendar unit after 'calendar': day, week, month, or year.",
+          6,
+          column,
+          "calendar",
+        ],
+      ],
+      source,
+    );
+  }
   // Elsewhere 'calendar' is an ordinary name.
   assert.deepEqual(says("let calendar = { month: 3 }\nsay calendar.month * 2\nexit"), ["6"]);
 });

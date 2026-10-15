@@ -375,6 +375,8 @@ class Parser {
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
   /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §1). */
   #insideDelimiters = false;
+  /** The values before a `calendar` without a unit, so that after a `say` mode or skip word, `calendar` is the text. */
+  readonly #unitlessCalendars = new WeakSet<Expression>();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   readonly #shared: SharedParse;
 
@@ -1180,8 +1182,8 @@ class Parser {
     const value = yield* parseChild(speculative.#parseOr());
     if (value === null) return false;
     // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
-    // text whose name is a unit word.
-    if (unitAfterWord(value, this.#peek())) return false;
+    // text whose name is a unit word, also `calendar`.
+    if (unitAfterWord(value, this.#peek(), speculative.#unitlessCalendars)) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
       if (speculative.#canParseInstantPacingAlias(statement)) {
@@ -3830,19 +3832,15 @@ class Parser {
           span: spanFrom(expression.span, last.span),
         });
       const exact = elapsedDurationUnit(token.lexeme);
-      const after = this.#peek(1);
-      const calendar =
-        token.lexeme === "calendar" && after.kind === TokenKind.Identifier
-          ? calendarDurationUnit(after.lexeme)
-          : undefined;
       // A month or a year needs `calendar` here too, also as `mo` or `y`.
       const withoutCalendar = calendarDurationUnit(token.lexeme);
       if (exact !== undefined) {
         this.#advance();
         result = withUnit({ calendar: false, unit: exact }, token);
-      } else if (calendar !== undefined) {
-        this.#advance();
-        result = withUnit({ calendar: true, unit: calendar }, this.#advance());
+      } else if (token.lexeme === "calendar") {
+        const unit = this.#calendarUnit(this.#advance());
+        if (unit !== undefined) result = withUnit({ calendar: true, unit }, this.#advance());
+        else this.#unitlessCalendars.add(expression);
       } else if (withoutCalendar !== undefined) {
         this.#reportCalendarUnitWithoutCalendar(this.#sourceText(start, this.#current), token);
         result = withUnit({ calendar: true, unit: withoutCalendar }, this.#advance());
@@ -3965,19 +3963,8 @@ class Parser {
         span: spanFrom(amount.span, last.span),
       });
     if (token.lexeme === "calendar") {
-      this.#advance();
-      const next = this.#peek();
-      const unit =
-        next.kind === TokenKind.Identifier ? calendarDurationUnit(next.lexeme) : undefined;
-      if (unit === undefined) {
-        this.#reportToken(
-          parserDiagnosticCode.unsupportedDurationUnit,
-          "Expected a calendar unit after 'calendar': day, week, month, or year.",
-          token,
-        );
-        return amount;
-      }
-      return literal({ calendar: true, unit }, this.#advance());
+      const unit = this.#calendarUnit(this.#advance());
+      return unit === undefined ? amount : literal({ calendar: true, unit }, this.#advance());
     }
     const exact = elapsedDurationUnit(token.lexeme);
     if (exact !== undefined) return literal({ calendar: false, unit: exact }, this.#advance());
@@ -3985,6 +3972,22 @@ class Parser {
     if (calendar === undefined) return amount;
     this.#reportCalendarUnitWithoutCalendar(amount.raw, token);
     return literal({ calendar: true, unit: calendar }, this.#advance());
+  }
+
+  /**
+   * The calendar unit that comes next, after the word `calendar`, or `undefined` once an error names the units that may
+   * follow `calendar`, the same after a number as after a name.
+   */
+  #calendarUnit(calendar: Token): CalendarDurationUnit | undefined {
+    const next = this.#peek();
+    const unit = next.kind === TokenKind.Identifier ? calendarDurationUnit(next.lexeme) : undefined;
+    if (unit === undefined)
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedDurationUnit,
+        "Expected a calendar unit after 'calendar': day, week, month, or year.",
+        calendar,
+      );
+    return unit;
   }
 
   /** A month or a year after `amount` without `calendar`; days and weeks are exact units. */
@@ -5790,13 +5793,15 @@ function innermostOpeners(tokens: readonly Token[]): (TokenKind | undefined)[] {
 
 /**
  * Whether `value` starts with the say mode or skip word `word` itself and a unit after it: the bare word, or a mode with
- * its named options, as in `bubble(color: "red") s`. A member, an element, or a call with values stays a value.
+ * its named options, as in `bubble(color: "red") s`, also before a `calendar` without a unit (`unitless`). A member, an
+ * element, or a call with values stays a value.
  */
-function unitAfterWord(value: Expression, word: Token): boolean {
+function unitAfterWord(value: Expression, word: Token, unitless: WeakSet<Expression>): boolean {
   let node = value;
   for (;;) {
-    if (node.kind === "unitExpression") {
-      const operand = node.operand;
+    const operand =
+      node.kind === "unitExpression" ? node.operand : unitless.has(node) ? node : undefined;
+    if (operand !== undefined) {
       if (operand.span.start.offset !== word.span.start.offset) return false;
       return (
         operand.kind === "identifier" ||
