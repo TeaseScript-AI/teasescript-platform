@@ -381,14 +381,24 @@ export function withSpeakers(
         if (line === null) continue;
         let found = 0;
         statements = mapStatements(statements, (statement) => {
-          if (
-            statement.kind !== "say" ||
-            statement.speaker !== undefined ||
-            statement.span?.line !== line
-          )
-            return [statement];
+          if (statement.span?.line !== line) return [statement];
+          if (statement.kind === "say") {
+            if (statement.speaker !== undefined) return [statement];
+            found += 1;
+            return said(statement, item.speaker);
+          }
+          // An ask on the line is asked as the speaker; the player asks nothing.
+          if (item.speaker === PLAYER) return [statement];
+          let asked = false;
+          const next = mapOwnExpressions(statement, (value) =>
+            withAsker(value, () => {
+              asked = true;
+              return speakerOf(item.speaker);
+            }),
+          );
+          if (!asked) return [statement];
           found += 1;
-          return said(statement, item.speaker);
+          return [next];
         });
         if (found === 0 && !unconverted(statements, line))
           problems.push(`switch "message": "${item.message}" says nothing`);
@@ -643,6 +653,8 @@ function nameUpdate(rule: SpeakerNames, speaker: string, local: string): IrState
             },
           ),
         };
+  // A plain name, as where a character introduces herself, needs no test.
+  if (read.size === 0) return { kind: "assign", target: own, operator: "=", value, span: null };
   const condition = [...read]
     .map((name): IrExpression => ({
       kind: "binary",
@@ -681,12 +693,15 @@ function nameUpdate(rule: SpeakerNames, speaker: string, local: string): IrState
   };
 }
 
-/** A template's texts and placeholders, alternating (`"Miss {}"` is `["Miss ", "", ""]`); null where one is malformed. */
+/**
+ * A template's texts and placeholders, alternating (`"Miss {}"` is `["Miss ", "", ""]`, a plain name `"Julie"` is
+ * `["Julie"]`); null where a placeholder is malformed.
+ */
 function placeholders(template: string): string[] | null {
   const parts = template.split(/\{([^{}]*)\}/u);
   for (let index = 1; index < parts.length; index += 2)
     if (parts[index] !== "" && !PLACEHOLDER.test(parts[index]!)) return null;
-  return parts.length > 1 ? parts : null;
+  return parts;
 }
 
 /** A template's `{expression}`: a variable, then items and fields, such as `galleryname[loop]` or `list[0].name`. */
@@ -817,6 +832,13 @@ function labelledAsk(
   };
   const next = mapOwnExpressions(statement, ask);
   return next === statement ? [statement] : [...named, next];
+}
+
+/** An ask of a value, also the target of a method call chain (`askText(…).replace(…)`), asked as `speaker()`. */
+function withAsker(value: IrExpression, speaker: () => string): IrExpression {
+  if (value.kind === "methodCall") return { ...value, target: withAsker(value.target, speaker) };
+  if (value.kind !== "input" || value.speaker !== undefined) return value;
+  return { ...value, speaker: speaker() };
 }
 
 /** The text labels of the data, each with the text a message starts with: `Name:`, or its `form`. */

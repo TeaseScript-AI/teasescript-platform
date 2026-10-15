@@ -488,6 +488,7 @@ test(
           'opponent = "Ann"',
           'show("Next.")',
           'if (getBoolean("Kitty: Ready?")) show(opponent + ": Go.")',
+          'def again = getBoolean("Play again?")',
           "",
         ].join("\n"),
       );
@@ -495,7 +496,7 @@ test(
         path.join(work, "patches/Walk/speakers.json"),
         JSON.stringify({
           speakers: {
-            host: { firstName: "Kitty" },
+            host: { title: "Host" },
             opp: { displayName: "Opponent" },
             guest: { displayName: "Guest" },
           },
@@ -508,6 +509,7 @@ test(
             { image: "do", speaker: "host" },
             { function: "scripts/start.groovy:greet", speaker: "guest" },
             { after: "scripts/start.groovy:9", speaker: "host" },
+            { message: "scripts/start.groovy:15", speaker: "system" },
           ],
           names: [
             {
@@ -523,6 +525,13 @@ test(
               speaker: "guest",
               template: "Guest of {opponent}",
             },
+            // A role until the introduction, then the name.
+            {
+              after: ["scripts/start.groovy:10"],
+              files: "all",
+              speaker: "host",
+              template: "Kitty",
+            },
           ],
         }),
       );
@@ -536,6 +545,9 @@ test(
         /say prose "Next\.", instant\nif opponent != null \{\n {2}let shownName = "Guest of \$\{opponent\}"\.trim\(\)/u,
         // A labelled question is asked as its speaker.
         /if askBoolean as host prose "Ready\?" \{\n {2}opp\.displayName = "\$\{opponent\}"\n {2}say as opp prose "Go\.", instant\n\}/u,
+        /say prose "Back\.", instant\nhost\.displayName = "Kitty"\n/u,
+        // An ask on a message switch's line is asked as its speaker.
+        /let again = askBoolean as system prose "Play again\?"/u,
       ])
         assert.match(start, expected);
       const report: unknown = JSON.parse(

@@ -1161,9 +1161,7 @@ export function lowerPackage(
       withStorageDefaults(
         withNullableParameters(
           withClasses.map((program, index) =>
-            index === entryIndex
-              ? withProfile(withSpokenStart(program, spoken), withClasses)
-              : program,
+            index === entryIndex ? withProfile(program, withClasses) : program,
           ),
         ),
         false,
@@ -1172,7 +1170,11 @@ export function lowerPackage(
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-      composed: programs.map(withDefaults),
+      composed: programs
+        .map(withDefaults)
+        .map((program, index) =>
+          index === entryIndex ? withSpokenStart(program, spoken) : program,
+        ),
       main: null,
       paths: files.map(() => null),
       speakerProblems: spoken?.problems ?? [],
@@ -1218,7 +1220,7 @@ export function lowerPackage(
       new Set([...project].filter((name) => !own.has(name))),
     );
   };
-  const apartMain = apart(withSpokenStart(shared.main, spoken), true);
+  const apartMain = apart(shared.main, true);
   const apartPrograms = withClasses.map((program, index) => {
     if (index === legacyMain) return apartMain;
     const position = outputIndexes.indexOf(index);
@@ -1259,8 +1261,10 @@ export function lowerPackage(
   ).map(withDefaults);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-    composed: programs,
-    main: legacyMain !== null ? { file: legacyMain } : { menu: main! },
+    composed: programs.map((program, index) =>
+      index === legacyMain ? withSpokenStart(program, spoken) : program,
+    ),
+    main: legacyMain !== null ? { file: legacyMain } : { menu: withSpokenStart(main!, spoken) },
     paths,
     speakerProblems: spoken?.problems ?? [],
   };
@@ -1302,8 +1306,9 @@ function systemSpeaker(): IrStatement[] {
 }
 
 /**
- * The package's speakers declared where it starts, right after the importer's own `speaker system`, and its default
- * speaker set before the story begins (owner decision 2026-10-15: all of them at the top of main.tease).
+ * The package's speakers declared first in main.tease, the importer's own `speaker system` before them, and its default
+ * speaker set before the story begins (owner decision 2026-10-15: all speakers are the first thing main.tease shows).
+ * It runs on main.tease as written, after the passes that put helpers at its start.
  */
 function withSpokenStart(
   program: MigrationProgram,
@@ -1311,24 +1316,18 @@ function withSpokenStart(
 ): MigrationProgram {
   if (spoken === null || (spoken.declarations.length === 0 && spoken.start.length === 0))
     return program;
-  const declared = program.statements.some(
-    (statement) => statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER,
-  );
+  const isSystem = (statement: IrStatement): boolean =>
+    statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER;
+  const system = program.statements.filter(isSystem);
   // The data's switches to `system` need it too.
-  const statements =
-    spoken.system && !declared ? [...systemSpeaker(), ...program.statements] : program.statements;
-  const system = statements.findIndex(
-    (statement) => statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER,
-  );
-  const lead = statements.findIndex((statement) => statement.kind !== "comment");
-  const at = system >= 0 ? system + 1 : lead < 0 ? statements.length : lead;
+  const declared = system.length > 0 ? system.slice(0, 1) : spoken.system ? systemSpeaker() : [];
   return {
     ...program,
     statements: [
-      ...statements.slice(0, at),
+      ...declared,
       ...spoken.declarations,
       ...spoken.start,
-      ...statements.slice(at),
+      ...program.statements.filter((statement) => !isSystem(statement)),
     ],
   };
 }

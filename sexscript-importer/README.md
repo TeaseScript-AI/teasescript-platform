@@ -259,7 +259,7 @@ source patches, and a line a source patch changes, or an anchor that matches not
 }
 ```
 
-- `speakers` become declarations at the top of `main.tease`, under the importer's `speaker system`, with the person
+- `speakers` become the first declarations of `main.tease`, right after the importer's `speaker system`, with the person
   fields of V30 §37 (`title`, `firstName`, `lastName`, `shortTitle`; `displayName` only where the shown name is not
   their join). An identifier that the code uses gets `Speaker` added. `system` (menus, settings, notices), `narrator`
   (story narration, declared "Narrator" when used), and the engine's `player` need no entry.
@@ -271,15 +271,16 @@ source patches, and a line a source patch changes, or an anchor that matches not
   speaker.
 - `switches` set the default speaker from that point on (`entry`: a file's start; `function`: a function's start;
   `image`: before each picture whose path starts with that text, the longest that matches; `at`/`after`: before/after
-  the statement on that line). `message` says only the messages of that line as the speaker. The player speaks single
-  messages only (`message` or a prefix), each with the comment `// SX_PLAYER_LINE` above it, which the owner calls
-  provisional.
+  the statement on that line). `message` says only the messages of that line as the speaker, and asks the questions on
+  it as the speaker (the player asks nothing). The player speaks single messages only (`message` or a prefix), each
+  with the comment `// SX_PLAYER_LINE` above it, which the owner calls provisional.
 - `names` set `<speaker>.displayName` after each assignment of `variable` in `files` (lines in `except` skipped), and
   after the statement of each `after` line: by `values` (an unlisted value keeps the name, or takes `otherwise`), by a
   `template` whose `{}` is the value (or its `values` text), or both. A template's `{expression}` reads a variable, an
-  item, or a field: `"{owner_title}{owner_name}"`, `"{galleryname[loop]}"`. Every variable the rule reads must hold a
-  value, and the name is trimmed; a blank name, as a load of a key never saved gives, names nobody. The update stands
-  where the rule says, so each variable it reads must exist there.
+  item, or a field: `"{owner_title}{owner_name}"`, `"{galleryname[loop]}"`; an `after` rule's template may be a plain
+  name, as where a character shown by a role (her `displayName`) introduces herself. Every variable the rule reads
+  must hold a value, and the name is trimmed; a blank name, as a load of a key never saved gives, names nobody. The
+  update stands where the rule says, so each variable it reads must exist there.
 
 `node tools/speaker-check.ts <package-dir>...` plays converted packages in the runtime and lists each message with its
 speaker and picture, and, where characters have picture folders of their own, the messages one says over another's.
