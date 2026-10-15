@@ -13306,25 +13306,19 @@ function dictLookup(
 
 /**
  * Whether evaluating a dict's fallback can neither fail nor change anything, as `default:` evaluates it also where
- * Groovy did not: a constant, a variable, a negated number, `+`, `-`, or `*` of numbers that are never null, and a
- * list, map, or text of such parts.
+ * Groovy did not: a constant, a variable, a negated number that is never null, and a list, map, or text of such parts;
+ * not arithmetic, whose result may be too large.
  */
 function failsNever(node: AstNode, context: LowerContext): boolean {
   const never = (child: AstNode): boolean => failsNever(child, context);
-  const number = (child: AstNode | null): boolean =>
-    child !== null && never(child) && onlyOf(inferType(child, context.types), NUMBER);
   switch (node.kind) {
     case "constant":
     case "variable":
       return true;
-    case "unaryMinus":
-      return number(asNode(node.value));
-    case "binary":
-      return (
-        ["+", "-", "*"].includes(String(node.operator)) &&
-        number(asNode(node.left)) &&
-        number(asNode(node.right))
-      );
+    case "unaryMinus": {
+      const value = asNode(node.value);
+      return value !== null && never(value) && onlyOf(inferType(value, context.types), NUMBER);
+    }
     case "list":
     case "map":
     case "mapEntry":
