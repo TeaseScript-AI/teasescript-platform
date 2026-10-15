@@ -134,7 +134,7 @@ test("the player and the account have compile errors that name the form that exi
   );
   // Types: other forms of `copyFrom`, unknown account fields, and player fields that nothing gives it.
   const form =
-    "Only 'player.copyFrom(account)', on a line of its own, copies person fields: it copies the account into the player.";
+    "'copyFrom' only copies the account into the player: write 'player.copyFrom(account)' on a line of its own.";
   assert.deepEqual(
     mismatches(
       [

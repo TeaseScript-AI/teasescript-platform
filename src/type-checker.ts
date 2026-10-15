@@ -1746,7 +1746,7 @@ class TypeChecker {
           yield* compileChild(this.#expressionTask(argument.value, scope));
       this.#report(
         typeCode.invalidOperand,
-        "Only 'player.copyFrom(account)', on a line of its own, copies person fields: it copies the account into the player.",
+        "'copyFrom' only copies the account into the player: write 'player.copyFrom(account)' on a line of its own.",
         callee.kind === "propertyAccessExpression" ? callee.property.span : expression.span,
       );
       return UNKNOWN_TYPE;
