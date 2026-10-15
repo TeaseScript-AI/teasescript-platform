@@ -234,6 +234,7 @@ import {
 import {
   detachedType,
   sameStorageKeyTypes,
+  sameDeclaredKeys,
   sameReadKeys,
   sameReadStorageKeyTypes,
   sameType,
@@ -362,11 +363,13 @@ export function checkTypes(
   // so they settle at once; the bound only guards against a load type that changes with variable types. When they
   // changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that the
   // next check would read changed, the next check would repeat this one exactly, so it is not run.
-  const guess = storageGuess(programs);
+  let guess: ReadonlyMap<string, StorageKeyType> | null = storageGuess(programs);
+  let guessedAgain = false;
   let storage: ReadonlyMap<string, StorageKeyType> = guess;
-  let guessed = true;
   let storageRounds = 0;
   for (;;) {
+    const guessed = storage === guess;
+    const uncheckedBefore = guessed ? [...unchecked] : [];
     const checker = new TypeChecker(
       options,
       widened,
@@ -381,6 +384,26 @@ export function checkTypes(
       lines,
     );
     checker.check(programs);
+    // A key whose type the runtime cannot check has none.
+    const found = new Map(
+      [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
+    );
+    // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
+    // the check starts again from nothing, with the found types as the guess. Its loads then read them, since loads
+    // take them from declarations, which no check changes; should they not, it starts again without a guess.
+    if (guessed && !checker.loadsReadFound(found)) {
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      unchecked.clear();
+      for (const name of uncheckedBefore) unchecked.add(name);
+      guess = guessedAgain ? null : found;
+      guessedAgain = true;
+      storage = guess ?? new Map();
+      storageRounds = 0;
+      continue;
+    }
     // A check that found more of them read those properties with the types they no longer keep, so what it found rests
     // on those types: the next check starts again from nothing but the larger set, which only grows.
     if (checker.uncheckedMore) {
@@ -388,8 +411,7 @@ export function checkTypes(
       decided.clear();
       copies.clear();
       kept.clear();
-      storage = guess;
-      guessed = true;
+      storage = guess ?? new Map();
       storageRounds = 0;
       continue;
     }
@@ -397,12 +419,6 @@ export function checkTypes(
     // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
     let storageRead = false;
     if (storageRounds < MAX_STORAGE_ROUNDS) {
-      // A key whose type the runtime cannot check has none.
-      const found = new Map(
-        [...storageKeyTypes(checker.storageLoads)].filter(
-          ([, kept]) => typePlan(kept.type) !== null,
-        ),
-      );
       if (guessed) {
         // As for a first check that read no types, they changed from none when it found some, but in what it read only
         // when it found others than it read.
@@ -416,14 +432,9 @@ export function checkTypes(
       }
       if (storageChanged) storageRounds += 1;
     }
-    guessed = false;
-    // A load that read its default's type reads the type that another load declares from the next check on, and one
-    // that read a type that the guess declared but no load does reads its default's type then, so what this check
-    // decided may rest on the wrong type: the next check decides again.
-    if (
-      ![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true) &&
-      ![...checker.keysReadAsDeclared].some((key) => storage.get(key)?.declared !== true)
-    )
+    // A load that read its default's type reads the type that another load declares from the next check on, so what
+    // this check decided may rest on the wrong type: the next check decides again.
+    if (![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true))
       checker.recordDecisions();
     // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
     // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
@@ -556,8 +567,9 @@ function storageGuess(programs: readonly Program[]): Map<string, StorageKeyType>
       annotation === null ? null : typeFromAnnotation(annotation),
     );
     const first = types[0] ?? null;
+    const text = first === null ? null : typeKey(first, false);
     const type =
-      first !== null && types.every((other) => other !== null && sameType(other, first))
+      first !== null && types.every((other) => other !== null && typeKey(other, false) === text)
         ? first
         : undefined;
     byName.set(name, type);
@@ -1527,27 +1539,26 @@ class TypeChecker {
   readonly #storage: ReadonlyMap<string, StorageKeyType>;
 
   /**
-   * In a first check, which reads guessed types, the keys whose type it read, each with whether a message named the line
-   * of a load of the key, so that the end of the check can tell whether it read the types it found (see
-   * {@link readsFound}); otherwise `null`.
+   * In a check that reads guessed types, the keys whose type it read, each with whether a message named the line of a
+   * load of the key, so that the end of the check can tell whether it read the types it found (see {@link readsFound});
+   * otherwise `null`.
    */
   readonly #guessedReads: Map<string, boolean> | null;
+
+  /**
+   * In a check that reads guessed types, the keys whose type a load without a declared type of its own read, which
+   * decides the value it gives (see {@link loadsReadFound}); otherwise `null`.
+   */
+  readonly #guessedLoads: Set<string> | null;
 
   /** The loads of storage keys written as string literals that have a type, in checking order. */
   readonly storageLoads: StorageLoad[] = [];
 
   /**
-   * The keys of loads that read their default's type because the previous check found no type for the key, or because
-   * the guess declared none. Where another load declares its type, they read that type in the next check, so what this
-   * check decided from them may be wrong.
+   * The keys of loads that read their default's type because the previous check found no type for the key. Where another
+   * load declares its type, they read that type in the next check, so what this check decided from them may be wrong.
    */
   readonly keysReadAsDefault = new Set<string>();
-
-  /**
-   * The keys of loads that read the type the guess declared for them. Where no load declares their type, they read their
-   * default's type in the next check, so what this check decided from them may be wrong.
-   */
-  readonly keysReadAsDeclared = new Set<string>();
 
   /**
    * The declared type of the variable that a `load` starts or is assigned to, which the load reads the stored value as
@@ -1580,6 +1591,7 @@ class TypeChecker {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#storage = storage;
     this.#guessedReads = guessed ? new Map() : null;
+    this.#guessedLoads = guessed ? new Set() : null;
     this.#widened = widened;
     this.#decided = decided;
     this.#copies = copies;
@@ -4437,6 +4449,7 @@ class TypeChecker {
         // another load of the key declares, or else as its default's type (rule 6.2).
         const own = this.#loadReceivers.get(expression);
         const kept = this.#storageType(key);
+        if (own === undefined) this.#guessedLoads?.add(key);
         const given = nonNullType(fallback);
         const givenKind = resolved(given).kind;
         let read: StaticType;
@@ -4455,7 +4468,6 @@ class TypeChecker {
         } else if (kept?.declared === true) {
           read = detachedType(kept.type);
           this.#declaredLoads.add(expression);
-          if (this.#guessedReads !== null) this.keysReadAsDeclared.add(key);
           // A default the compiler cannot know may be anything, also null; it is checked when the load uses it.
           if (mayBeUnknown(fallback)) {
             this.storageLoads.push({ key, type: read, at: expression.span, declared: false });
@@ -4483,7 +4495,7 @@ class TypeChecker {
           // A default of a type the compiler cannot know, or that no value decided yet, gives a value it cannot know.
           if (givenKind === "unknown" || givenKind === "open") return UNKNOWN_TYPE;
           read = given;
-          if (kept === undefined || this.#guessedReads !== null) this.keysReadAsDefault.add(key);
+          if (kept === undefined) this.keysReadAsDefault.add(key);
           // Each type that loads without a declared type read before this one accepts every value of it, or it of them.
           const earlier = kept?.loads ?? [];
           const text = typeKey(read);
@@ -7973,6 +7985,13 @@ class TypeChecker {
    */
   public readsFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
     return this.#guessedReads === null || sameReadKeys(this.#storage, found, this.#guessedReads);
+  }
+
+  /** As {@link readsFound}, but only for what its loads without a declared type of their own read. */
+  public loadsReadFound(found: ReadonlyMap<string, StorageKeyType>): boolean {
+    return (
+      this.#guessedLoads === null || sameDeclaredKeys(this.#storage, found, this.#guessedLoads)
+    );
   }
 
   *#storageKeyTask(expression: Expression, scope: Scope): CompileTask<void> {

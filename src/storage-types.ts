@@ -183,6 +183,25 @@ export function sameReadKeys(
   return true;
 }
 
+/**
+ * Whether loads that read the types of `keys` in `read` read what `found` gives them: whether the type is declared, and a
+ * declared type with union members and object properties in their order.
+ */
+export function sameDeclaredKeys(
+  read: ReadonlyMap<string, StorageKeyType>,
+  found: ReadonlyMap<string, StorageKeyType>,
+  keys: Iterable<string>,
+): boolean {
+  for (const key of keys) {
+    const kept = read.get(key);
+    const other = found.get(key);
+    if ((kept?.declared === true) !== (other?.declared === true)) return false;
+    if (kept?.declared === true && typeKey(kept.type, false) !== typeKey(other!.type, false))
+      return false;
+  }
+  return true;
+}
+
 function sameReadKeyType(
   kept: StorageKeyType,
   other: StorageKeyType | undefined,

@@ -314,6 +314,46 @@ test("a key type that only a later check settles still decides the saves and the
   );
 });
 
+test("nothing that a check decides from another declared type of a key than the first one stays", () => {
+  // The function body declares the key first in the source, but the check takes the body after the file's statements:
+  // their declaration decides, so the list holds numbers, `b` stays a whole number, and only the body is an error.
+  const later = (declared: string, value: string) =>
+    `function later {\n    let other: ${declared} = load("k", default: ${value})\n}\n`;
+  assert.deepEqual(
+    errors(
+      `${later("string", '""')}let declared: number = load("k", default: 0)\nlet xs = []\nsay xs[0]\nxs.add(load("k", default: 0))\nlet n: number = xs[0]\nexit`,
+    ).map(([code, message]) => [code, message]),
+    [
+      [
+        "TSV041",
+        'Storage key "k" is declared as a number on line 4, so it cannot be declared as text (string) here. Declare its type at one load only. The other loads use that type.',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    errors(
+      `${later("number", "0")}let whole: integer = load("k", default: 0)\nlet b = 0\nb = load("k", default: 0)\nsay [1][b]\nexit`,
+    ).map(([code, message]) => [code, message]),
+    [
+      [
+        "TSV041",
+        'Storage key "k" is declared as a whole number (integer) on line 4, so it cannot be declared as a number here. Declare its type at one load only. The other loads use that type.',
+      ],
+    ],
+  );
+  // A load assigned to a variable reads that variable's declared type, here with its members in their written order.
+  const numberOrText = { kind: "union", members: [{ kind: "number" }, { kind: "string" }] };
+  assert.deepEqual(
+    plan(
+      'function first {\n    let receiver: number | string = 0\n    receiver = load("k", default: 0)\n    let xs = []\n    say xs[0]\n    xs.add(load("k", default: 0))\n    let copy = load("copy", default: xs)\n}\nfunction other {\n    let receiver: string | number = ""\n}\nfirst()\nexit',
+    ).storageTypes,
+    [
+      { key: "copy", type: { kind: "list", element: numberOrText } },
+      { key: "k", type: numberOrText },
+    ],
+  );
+});
+
 test("a key computed at runtime has no type", () => {
   assert.deepEqual(
     codes(
