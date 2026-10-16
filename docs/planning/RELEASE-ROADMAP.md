@@ -110,8 +110,8 @@ and breaking changes remain acceptable.
 - [ ] **Review all author- and player-facing messages**
   - **Outcome:** Review every compiler diagnostic, runtime error, developer warning, and Player error or status message
     in one pass, so that each one uses plain language for non-programmers, names the problem and a concrete fix, and
-    fits the product's tone. No current message wording is owner-approved. Record the agreed message style once in its
-    canonical document and apply it consistently. An example is the Player's "Choice text is not available."
+    fits the product's tone. Most current message wording is not owner-approved. Record the agreed message style once in
+    its canonical document and apply it consistently.
   - **Trigger:** Start after the syntax work of tracker #512 has landed, so messages for the settled syntax are reviewed
     once, and before Alpha testing with authors.
   - **Reference:** Tracker #512, the diagnostic catalog in [`TEASESCRIPT.md`](../TEASESCRIPT.md), and

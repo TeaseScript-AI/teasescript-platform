@@ -61,6 +61,19 @@ test("a wrong answer to a typed ask or form field tells the player what was aske
   }
 });
 
+test("typed text that matches no button or more than one tells the player to use the buttons", () => {
+  const session = createPlayerRuntimeSession(
+    'let answer = askChoice kneel: "Kneel", down: "Kneel", "Stand"\nexit',
+  );
+  for (const [text, message] of [
+    ["Sit", "That is wrong. Type the exact text of one button, or use the buttons above."],
+    ["Kneel", "More than one button has this text. Use the buttons above."],
+  ] as const) {
+    const rejected = submitPlayerRuntimeComposer(session, text);
+    assert.deepEqual(rejected?.outcome, { kind: "invalidPayload", message }, text);
+  }
+});
+
 test("a malformed host payload is not reported as a wrong answer", () => {
   const oversized = "1".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1);
   for (const ask of ["askText", "askNumber", "askInteger", "askDate", "askTime", "askDateTime"]) {
@@ -89,6 +102,30 @@ test("a malformed host payload is not reported as a wrong answer", () => {
         /^That is wrong/,
       );
     }
+  }
+  const choicePlan = compileValidPlan('let answer = askChoice "Kneel", "Stand"\nexit');
+  const choice = run(choicePlan, createFreshRuntimeSnapshot(choicePlan)).snapshot;
+  const choiceAction = choice.foregroundAction;
+  assert.ok(choiceAction?.kind === "interaction");
+  for (const payload of [
+    { kind: "submittedText", submittedText: 5 },
+    { kind: "submittedText", submittedText: oversized },
+    { kind: "selectedOption", optionIndex: 2 },
+  ]) {
+    const { outcome } = completeAction(choicePlan, choice, {
+      actionId: choiceAction.actionId,
+      actionKind: "interaction",
+      interactionKind: choiceAction.interactionKind,
+      payload,
+    });
+    assert.deepEqual(
+      outcome,
+      {
+        kind: "invalidPayload",
+        message: "Choice completion payload does not match the offered options.",
+      },
+      JSON.stringify(payload).slice(0, 60),
+    );
   }
   const plan = compileValidPlan(FORM);
   const { snapshot } = run(plan, createFreshRuntimeSnapshot(plan));
