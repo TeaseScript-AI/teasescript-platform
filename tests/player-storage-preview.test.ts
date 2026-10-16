@@ -7,11 +7,16 @@ import {
   storageOutline,
   storagePreview,
 } from "../player/storage-preview.js";
-import { createPlayerRuntimeSession, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
-import type { SerializableRuntimeValue } from "../src/index.js";
+import {
+  createPlayerRuntimeSession,
+  playerRuntimeDebugVariables,
+  playerRuntimeSnapshot,
+} from "../player/runtime-adapter.js";
+import { RUNTIME_DEBUG_TRACE_LIMITS, type SerializableRuntimeValue } from "../src/index.js";
 
-// Debug's Storage tab previews each saved value by its type. The values come from real saves, as the Player stores
-// them; members are listed only on request, in their order, with the label that names them.
+// Debug's Storage tab previews each saved value by its type, in the engine's notation that Variables shows too. The
+// values come from real saves, as the Player stores them; members are listed only on request, in their order, with the
+// label that names them.
 
 function savedValues(source: string) {
   const session = createPlayerRuntimeSession(`${source}\nexit`);
@@ -45,98 +50,119 @@ test("each saved value is previewed by its type", () => {
     ].join("\n"),
   );
   const preview = (key: string) => {
-    const { type, text, photo, size } = storagePreview(saved.get(key)!);
-    return { type, text, photo, size };
+    const { type, photo, size } = storagePreview(saved.get(key)!);
+    return { type, photo, size };
   };
-  assert.deepEqual(preview("integer"), { type: "Integer", text: "3", photo: null, size: null });
-  assert.deepEqual(preview("number"), { type: "Number", text: "2.5", photo: null, size: null });
-  assert.deepEqual(preview("text"), { type: "Text", text: '"Ada"', photo: null, size: null });
-  assert.deepEqual(preview("flag"), { type: "Yes/no", text: "true", photo: null, size: null });
-  assert.deepEqual(preview("list"), { type: "List", text: "2 items", photo: null, size: 2 });
-  assert.deepEqual(preview("set"), { type: "Set", text: "2 items", photo: null, size: 2 });
-  assert.deepEqual(preview("object"), {
-    type: "Object",
-    text: "2 properties",
-    photo: null,
-    size: 2,
-  });
-  assert.deepEqual(preview("range"), { type: "Range", text: "2 to 5", photo: null, size: null });
-  assert.equal(preview("duration").type, "Duration");
-  assert.deepEqual(preview("angle"), {
-    type: "Angle",
-    text: "57.29577951308232°",
-    photo: null,
-    size: null,
-  });
-  assert.deepEqual(preview("date"), { type: "Date", text: "2026-10-06", photo: null, size: null });
-  assert.deepEqual(preview("time"), { type: "Time", text: "21:30", photo: null, size: null });
-  assert.deepEqual(preview("datetime"), {
-    type: "Date and time",
-    text: "2026-10-06T21:30",
+  const scalar = (type: string) => ({ type, photo: null, size: null });
+  assert.deepEqual(preview("integer"), scalar("Integer"));
+  assert.deepEqual(preview("number"), scalar("Number"));
+  assert.deepEqual(preview("text"), scalar("Text"));
+  assert.deepEqual(preview("flag"), scalar("Yes/no"));
+  assert.deepEqual(preview("list"), { type: "List", photo: null, size: 2 });
+  assert.deepEqual(preview("set"), { type: "Set", photo: null, size: 2 });
+  assert.deepEqual(preview("object"), { type: "Object", photo: null, size: 2 });
+  assert.deepEqual(preview("dict"), { type: "Dict", photo: null, size: 1 });
+  assert.deepEqual(preview("range"), scalar("Range"));
+  assert.deepEqual(preview("duration"), scalar("Duration"));
+  assert.deepEqual(preview("angle"), scalar("Angle"));
+  assert.deepEqual(preview("date"), scalar("Date"));
+  assert.deepEqual(preview("time"), scalar("Time"));
+  assert.deepEqual(preview("datetime"), scalar("Date and time"));
+  assert.deepEqual(preview("absoluteDateTime"), scalar("Absolute date and time"));
+  assert.deepEqual(storagePreview(null), {
+    type: "Nothing",
+    text: "null",
     photo: null,
     size: null,
   });
-  assert.equal(preview("absoluteDateTime").type, "Absolute date and time");
-  assert.deepEqual(preview("dict"), { type: "Dict", text: "1 entry", photo: null, size: 1 });
-  assert.deepEqual(
-    storageMembers(saved.get("dict")!).map((member) => member.label),
-    ['"a b"'],
+  assert.equal(
+    storagePreview({ kind: "script", path: "rooms/hall.tease", label: null }).type,
+    "Script",
   );
-  assert.deepEqual(
-    storagePreview({ kind: "script", path: "rooms/hall.tease", label: "door" }).text,
-    "rooms/hall.tease, label door",
-  );
-  assert.deepEqual(storagePreview({ kind: "regex", source: "\\d+", flags: "i" }), {
-    type: "Regex",
-    text: "/\\d+/i",
-    photo: null,
-    size: null,
-  });
+  assert.equal(storagePreview({ kind: "regex", source: "\\d+", flags: "i" }).type, "Regex");
   // Text shaped like a photo reference stays text; the store decides whether it names a saved photo.
-  assert.deepEqual(preview("photo"), {
+  assert.deepEqual(storagePreview(saved.get("photo")!), {
     type: "Text",
-    text: JSON.stringify(reference),
+    text: `"${reference}"`,
     photo: reference,
     size: null,
   });
-  assert.deepEqual(preview("note"), {
-    type: "Text",
-    text: '"captured-media:note"',
-    photo: null,
-    size: null,
-  });
-  // A long text is shortened for the preview only.
-  assert.equal(storagePreview("x".repeat(200)).text.length, 80);
+  assert.deepEqual(preview("note"), scalar("Text"));
 });
 
-test("a long text shows the start of its JSON, also one too long to write whole", (context) => {
-  const texts = [
-    "x".repeat(78),
-    "x".repeat(79),
-    "x".repeat(81),
-    '"'.repeat(100),
-    `${"a".repeat(76)}\n${"b".repeat(10)}`,
-    // A surrogate pair just inside and just across the end of the shown start, and a lone surrogate across it.
-    `${"a".repeat(77)}😀z`,
-    `${"a".repeat(79)}😀z`,
-    `${"a".repeat(77)}\ud800${"a".repeat(10)}`,
+test("a saved value and a dict key show in TeaseScript notation, as Variables shows the same value", () => {
+  // Each value is saved and kept in a variable, and the session waits at a question, where Variables lists them.
+  const values: readonly [name: string, literal: string][] = [
+    ["textValue", '"a\\${b}"'],
+    ["quotedValue", '"say \\"hi\\"\\n"'],
+    ["rangeValue", "1..5"],
+    ["inclusiveValue", "2..=5"],
+    ["dateValue", 'toDate("2026-10-04")'],
+    ["timeValue", 'toTime("21:30")'],
+    ["dateTimeValue", 'toDateTime("2026-10-06T21:30")'],
+    ["instantValue", 'toAbsoluteDateTime("2026-10-06T19:30:00Z")'],
+    ["durationValue", "1.5 s"],
+    ["angleValue", "1 rad"],
+    ["scriptValue", 'script("rooms/hall.tease", label: "start")'],
+    ["listValue", "[1, 2, 3]"],
+    ["setValue", 'set["a", "b"]'],
+    ["objectValue", '{ level: 2, tags: ["a"] }'],
+    ["dictValue", 'dict{ "a b": 1, "c\\${d}": 2 }'],
   ];
-  // The preview is the text's JSON, cut to 80 characters with an ellipsis.
-  const expected = texts.map((text) => {
-    const json = JSON.stringify(text);
-    return json.length <= 80 ? json : `${json.slice(0, 79)}…`;
+  const main = [
+    ...values.map(([name, literal]) => `let ${name} = ${literal}\nsave ${name} as "${name}"`),
+    'let stop = askChoice "Stop"',
+    "exit",
+  ].join("\n");
+  const session = createPlayerRuntimeSession({
+    files: [
+      { path: "main.tease", source: main },
+      { path: "rooms/hall.tease", source: 'label start\nsay "hall"\nexit' },
+    ],
   });
-  // V8 cannot write a text longer than its limit as JSON; here no text longer than the preview can be written whole.
-  const stringify = JSON.stringify;
-  context.mock.method(JSON, "stringify", (value: unknown, ...rest: []) => {
-    if (typeof value === "string" && value.length > 80)
-      throw new RangeError("Invalid string length");
-    return stringify(value, ...rest);
-  });
-  assert.deepEqual(
-    texts.map((text) => storagePreview(text).text),
-    expected,
+  const saved = new Map(
+    playerRuntimeSnapshot(session).scriptStorage.map((entry) => [entry.key, entry.value]),
   );
+  const { variables } = playerRuntimeDebugVariables(session);
+  const shown = new Map(
+    [...variables.globals, ...variables.frames.flatMap((frame) => frame.variables)].map(
+      (variable) => [variable.name, `${variable.preview}${variable.truncated ? "…" : ""}`],
+    ),
+  );
+  for (const [name] of values) {
+    assert.ok(shown.has(name), name);
+    assert.equal(storagePreview(saved.get(name)!).text, shown.get(name), name);
+  }
+  // Not JSON: a text escapes `${` as its literal does, and a range, a script reference and a date read as code.
+  const text = (name: string) => storagePreview(saved.get(name)!).text;
+  assert.equal(text("textValue"), '"a\\${b}"');
+  assert.equal(text("quotedValue"), '"say \\"hi\\"\\n"');
+  assert.equal(text("rangeValue"), "1..5");
+  assert.equal(text("scriptValue"), 'script("rooms/hall.tease", label: "start")');
+  assert.equal(text("dateValue"), "<date 2026-10-04>");
+  assert.deepEqual(
+    storageMembers(saved.get("dictValue")!).map((member) => member.label),
+    ['"a b"', '"c\\${d}"'],
+  );
+});
+
+test("a long value shows the start of its notation, cut at the engine's preview limit", () => {
+  const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
+  assert.equal(storagePreview("x".repeat(limit)).text, `"${"x".repeat(limit - 1)}…`);
+  assert.equal(storagePreview("x".repeat(limit - 2)).text, `"${"x".repeat(limit - 2)}"`);
+  // A wide list is written only as far as the limit.
+  const wide = storagePreview({
+    kind: "list",
+    items: Array.from({ length: 100_000 }, (_, index) => index),
+  }).text;
+  assert.ok(wide.startsWith("[0, 1, 2, 3"));
+  assert.equal(wide.length, limit + 1);
+  assert.ok(wide.endsWith("…"));
+  const longKey = storageMembers({
+    kind: "dict",
+    entries: [{ key: "k".repeat(limit * 2), value: 1 }],
+  });
+  assert.equal(longKey[0]?.label, `"${"k".repeat(limit - 1)}…`);
 });
 
 test("members are listed in order with their index, property name, or dict key", () => {

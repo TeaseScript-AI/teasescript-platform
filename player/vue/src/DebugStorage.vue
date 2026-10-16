@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { isWellFormedCapturedMediaReference } from "../../captured-media.js";
 import { capturedMediaReferences } from "../../captured-media-persistence.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
+import { storageNotation } from "../../storage-preview.js";
 import StorageEditDialog, { type StorageEdit } from "./StorageEditDialog.vue";
 import StoragePhoto from "./StoragePhoto.vue";
 import StorageValue from "./StorageValue.vue";
@@ -55,7 +56,7 @@ const editing = shallowRef<StorageEdit | null>(null);
 const savedNote = ref<string | null>(null);
 function onSaved(result: { key: string; live: boolean; deleted: boolean }) {
   editing.value = null;
-  const key = JSON.stringify(result.key);
+  const key = storageNotation(result.key);
   savedNote.value = result.deleted
     ? result.live
       ? `Deleted ${key}; the running session's next load gets its default.`
@@ -125,7 +126,7 @@ async function refreshNow() {
     <!-- Stacked rows: a narrow panel has no room for a key column beside nested values. -->
     <ul v-if="saved.state === 'ready' && saved.entries.length" class="grid divide-y border-y" aria-label="Saved values">
       <li v-for="entry in saved.entries" :key="entry.key" class="grid min-w-0 gap-1 py-2" data-debug-storage-row>
-        <span class="break-words font-mono font-semibold" data-debug-storage-key>{{ JSON.stringify(entry.key) }}</span>
+        <span class="break-words font-mono font-semibold" data-debug-storage-key>{{ storageNotation(entry.key) }}</span>
         <StorageValue :value="entry.value" :player="player" />
         <div class="flex flex-wrap gap-2">
           <Button
@@ -157,7 +158,7 @@ async function refreshNow() {
       <ul class="grid gap-2" data-debug-storage-photos>
         <li v-for="photo in photos" :key="photo.reference" class="flex min-w-0 items-center gap-2">
           <StoragePhoto :key="photo.reference" :reference="photo.reference" :player="player" />
-          <span class="min-w-0 break-all">Used by {{ photo.usedBy.map((key) => JSON.stringify(key)).join(", ") }}</span>
+          <span class="min-w-0 break-all">Used by {{ photo.usedBy.map(storageNotation).join(", ") }}</span>
         </li>
       </ul>
     </section>

@@ -12,11 +12,14 @@ import { openDebugHistorySpill } from "../player/debug-history-indexeddb.js";
 import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
+  playerTemporalContext,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
+  submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
+import type { PlayerTranscriptEntryPresentation } from "../player/model.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind").
@@ -306,6 +309,42 @@ test("the grey future is the transcript of the state Forward restores after the 
   assert.ok(future.entries.every((entry) => !shownTranscript.includes(entry.id)));
   // The answer keeps its mark as a choice.
   assert.equal(future.entries[0]?.kind === "message" && future.entries[0].responseKind, "choice");
+});
+
+test("the grey future shows a submitted form's answers as Forward does, in the session's date presentation", async () => {
+  const formSummary = (entries: readonly PlayerTranscriptEntryPresentation[]) => {
+    for (const entry of entries)
+      if (entry.kind === "message" && entry.formSummary) return entry.formSummary;
+    return undefined;
+  };
+  for (const locale of ["en-US", "nl-NL"]) {
+    const first = createPlayerRuntimeSession(
+      [
+        'let when = askForm "When?", fields: { day: toDate("2026-10-04") }',
+        'say "Noted"',
+        "exit",
+      ].join("\n"),
+      { temporalContext: playerTemporalContext({ timeZone: "UTC", locale }) },
+    );
+    const history = new DebugHistory(first.plan, Promise.resolve(null));
+    history.follow(first, unmarked);
+    const submitted = submitPlayerRuntimeForm(first)!.session;
+    const live = formSummary(submitted.transcriptEntries);
+    assert.ok(live?.[0]?.kind === "value", locale);
+    // The live transcript writes the date as the player's language does, not as the ISO date the script wrote.
+    assert.notEqual(live[0].value, "2026-10-04", locale);
+    await history.back(0, () => ({ session: submitted, marks: unmarked }));
+    assert.deepEqual(
+      formSummary(rewindFutureTranscript(history.shown!, history.future!).entries),
+      live,
+      locale,
+    );
+    assert.deepEqual(
+      formSummary(restored(history, await history.forward()).transcriptEntries),
+      live,
+      locale,
+    );
+  }
 });
 
 test("Back and Forward show a changed message as each state had it, and the grey future does not repeat it", async () => {

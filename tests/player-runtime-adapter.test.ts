@@ -1530,7 +1530,10 @@ test("a removed message keeps its row, marked removed, also through a restore an
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
   assert.deepEqual(restored.transcriptRemovedRows, [0, 1]);
-  assert.deepEqual(playerRuntimeTranscript(session.events).entries, session.transcriptEntries);
+  assert.deepEqual(
+    playerRuntimeTranscript(session.events, session.state.temporalPresentation).entries,
+    session.transcriptEntries,
+  );
   assert.deepEqual(restorePlayerRuntimeSession(restorePoint).transcriptRemovedRows, []);
 });
 

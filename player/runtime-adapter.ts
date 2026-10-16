@@ -2291,16 +2291,20 @@ export function playerRuntimeTranscriptEventSequence(entryId: string): number | 
 }
 
 /**
- * The transcript that `events` present, from the start of a session: its entries and the speakers they name. Debug's
- * rewind shows with it the messages of a state the shown one has not reached yet.
+ * The transcript that `events` present, from the start of a session: its entries and the speakers they name, with a
+ * form's answers in `presentation`, as a session restored with these events shows them in the presentation of its
+ * state. Debug's rewind shows with it the messages of a state the shown one has not reached yet.
  */
-export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
+export function playerRuntimeTranscript(
+  events: readonly InterpreterEvent[],
+  presentation: PresentationSettings,
+): {
   readonly entries: readonly PlayerTranscriptEntryPresentation[];
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, new Map(), [], speakers, events, DEFAULT_TEMPORAL_CONTEXT.presentation);
+  appendTranscript(entries, new Map(), [], speakers, events, presentation);
   return { entries, speakers };
 }
 

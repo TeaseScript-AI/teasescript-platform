@@ -15,6 +15,7 @@ import {
   type SerializableRuntimeValue,
 } from "../../../src/index.js";
 import { CheckpointError, serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
+import { storageNotation } from "../../storage-preview.js";
 import type { PlayerSessionHost, SavedDataEditResult } from "./usePlayerSession";
 
 // Debug's editor for one saved value (DEBUGGER.md "Player Debug"): change it with its type, add a key, or delete one.
@@ -164,8 +165,8 @@ const title = computed(() =>
   props.edit?.kind === "add"
     ? "Add a saved value"
     : props.edit?.kind === "delete"
-      ? `Delete ${JSON.stringify(props.edit.key)}?`
-      : `Edit ${JSON.stringify(props.edit?.key ?? "")}`,
+      ? `Delete ${storageNotation(props.edit.key)}?`
+      : `Edit ${storageNotation(props.edit?.key ?? "")}`,
 );
 
 async function submit() {
