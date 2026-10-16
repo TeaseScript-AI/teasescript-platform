@@ -3469,6 +3469,7 @@ class Parser {
   }
 
   *#parseComparison(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     const left = yield* parseChild(this.#parseOtherwise());
     if (left === null) return null;
     let expression: Expression;
@@ -3477,7 +3478,8 @@ class Parser {
     } else if (isComparisonKind(this.#peek().kind)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseComparedValue(left, operator));
+      const leftQuotable = this.#diagnostics.length === diagnosticCount;
+      const right = yield* parseChild(this.#parseComparedValue(left, operator, leftQuotable));
       if (right === null) return null;
       expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
@@ -3507,9 +3509,14 @@ class Parser {
   /**
    * The right operand of a comparison. `not` binds more loosely than a comparison (V30 §5), so `x == not a` has no
    * operand after the `==`: one error names the readings, and the rest is read as `x == (not a)`, so that nothing after
-   * it reports another error.
+   * it reports another error. An operand with an error of its own, as the `{` of `if x == not {` or the `??` of
+   * `x ?? false == not a`, is not quoted.
    */
-  *#parseComparedValue(left: Expression, operator: Token): ParseTask<Expression | null> {
+  *#parseComparedValue(
+    left: Expression,
+    operator: Token,
+    leftQuotable: boolean,
+  ): ParseTask<Expression | null> {
     const operators: Token[] = [];
     while (this.#matchNot()) {
       operators.push(this.#previous());
@@ -3527,8 +3534,7 @@ class Parser {
       return null;
     }
     if (operators.length === 0) return value;
-    // A value with an error of its own, as the `{` of `if x == not {`, is not quoted.
-    const quotable = this.#diagnostics.length === diagnosticCount;
+    const quotable = leftQuotable && this.#diagnostics.length === diagnosticCount;
     this.#reportNotAfterComparison(left, operator, operators, value, quotable);
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       value = this.#unary(operators[index]!, value, "not");

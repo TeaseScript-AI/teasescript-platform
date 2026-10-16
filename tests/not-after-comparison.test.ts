@@ -125,7 +125,7 @@ test("after 'not' right after a comparison operator, the statement and the scrip
   ]);
 });
 
-test("a comparison too long to quote, or a value with an error of its own, is named by an example", () => {
+test("a comparison too long to quote, or an operand with an error of its own, is named by an example", () => {
   const long =
     "let firstLongVariableName = 1\nlet secondLongVariableName = 2\nlet thirdLongName = false\n" +
     'if firstLongVariableName + secondLongVariableName < not thirdLongName {\n    say "yes", instant\n}\nexit\n';
@@ -136,6 +136,22 @@ test("a comparison too long to quote, or a value with an error of its own, is na
       "not",
     ],
   ]);
+  // `??` has its own error and is read as `otherwise`, so the left operand would be quoted with it.
+  assert.deepEqual(
+    diagnostics("let x = true\nlet a = false\nsay x ?? false == not a, instant\nexit\n"),
+    [
+      [
+        "TSP037",
+        "TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise \"pet\"",
+        "??",
+      ],
+      [
+        "TSP012",
+        "'not' cannot follow '==' directly. Write it as in 'x != a', or 'x == (not a)'.",
+        "not",
+      ],
+    ],
+  );
   // The `{` of an unfinished condition starts an object literal, as after `==` alone.
   assert.ok(
     diagnostics('let x = true\nif x == not {\n    say "yes", instant\n}\nexit\n').some(
