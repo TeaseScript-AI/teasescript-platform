@@ -5067,10 +5067,14 @@ class Parser {
     const next = this.tokens[after]!.kind;
     // The block of a head on the next line, as in `if box == {}` and then `{` on a line of its own.
     if (after > closer + 1) return next !== TokenKind.LeftBrace;
+    // A block ends its statement, or a button inside a grouping, as in `[showPermanentButton "Stop" { ... }]`. A comma
+    // could also go on with the options of a compact `askChoice` in the head.
     return (
       next === TokenKind.EndOfFile ||
       next === TokenKind.RightBrace ||
-      next === TokenKind.KeywordElse
+      next === TokenKind.KeywordElse ||
+      next === TokenKind.RightParenthesis ||
+      next === TokenKind.RightBracket
     );
   }
 

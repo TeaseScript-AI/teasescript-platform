@@ -145,4 +145,10 @@ test("a permanent button's text or a cue position that stops at its block is one
     "TSP012",
     missing("+"),
   );
+  // A button inside a list or a call ends at the grouping's closer.
+  for (const form of [
+    'let buttons = [showPermanentButton "Stop" + { say "x", instant }]',
+    'function keep(id) {\n    return id\n}\nlet button = keep(showPermanentButton "Stop" + { say "x", instant })',
+  ])
+    assertOneError(form, '"Stop" + {', "TSP012", missing("+"));
 });
