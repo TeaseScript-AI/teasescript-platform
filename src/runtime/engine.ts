@@ -44,12 +44,14 @@ import {
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   type Evaluator,
+  acceptedDefault,
   assertIntegerRange,
   findBinding,
   notBoolean,
   planLabel,
   RuntimeExecutionContext,
   type RuntimeCapabilities,
+  USE_DEFAULT,
 } from "./evaluator.js";
 export type {
   RuntimeBuiltinFunction,
@@ -57,6 +59,7 @@ export type {
   RuntimeCapabilityCall,
 } from "./evaluator.js";
 import { internalFault, RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import { collectionTooLarge, exceedsHostCollectionSize } from "./collection-size.js";
 import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
@@ -419,11 +422,14 @@ function executeInstructionBoundary(
       control.abortUnit(error, snapshot, context.events, context.trace);
       throw error;
     }
-    // A text too long that no check foresaw still fails as one, on V8, which says so with this message.
+    // A text too long that no check foresaw still fails as one, on V8, which says so with this message, and so does a
+    // list, set, or dict larger than V8 holds.
     const failure =
       error instanceof RangeError && error.message === "Invalid string length"
         ? textTooLong("this line", instruction.span, null)
-        : error;
+        : exceedsHostCollectionSize(error)
+          ? collectionTooLarge("this line", instruction.span)
+          : error;
     if (!(failure instanceof RuntimeFault)) {
       if (unit) control.discardUnit(context.trace);
       throw error;
@@ -1071,7 +1077,22 @@ function executePlannedInstruction(
       executeLoopControl(instruction, snapshot);
       return;
     case "storeTemporary": {
-      const value = evaluator.evaluate(instruction.value);
+      if (instruction.defaultTemporary !== undefined) {
+        // The call or load without its default: the instructions after it run the default only when it is needed.
+        const probed = evaluator.evaluateWithoutDefault(instruction.value);
+        const needed = probed === USE_DEFAULT;
+        const value = needed ? null : probed;
+        setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
+        setCapturedTemporary(snapshot.temporaries, instruction.defaultTemporary, needed);
+        if (evaluator.trace !== null) {
+          const frame = evaluator.callFrameId();
+          evaluator.trace.writeTemporary(frame, instruction.temporaryId, value);
+          evaluator.trace.writeTemporary(frame, instruction.defaultTemporary, needed);
+        }
+        advance(snapshot);
+        return;
+      }
+      let value = evaluator.evaluate(instruction.value);
       if (instruction.expectBoolean && typeof value !== "boolean") {
         // Only the operands of a lowered 'and' or 'or' expect true or false.
         throw notBoolean(
@@ -1081,7 +1102,14 @@ function executePlannedInstruction(
           instruction.value.span,
         );
       }
-      if (instruction.typeCheck !== undefined)
+      if (instruction.defaultOf !== undefined)
+        value = acceptedDefault(
+          instruction.defaultOf,
+          value,
+          instruction.typeCheck,
+          instruction.value.span,
+        );
+      else if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       if (evaluator.trace !== null) {

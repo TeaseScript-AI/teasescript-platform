@@ -10,6 +10,7 @@ import {
   validateSpan,
   validInstructionBoundary,
 } from "./validation-support.js";
+import { lazyDefaultArgumentIndex } from "./expression-children.js";
 import type { Instruction } from "./model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./temporary-uses.js";
@@ -524,11 +525,11 @@ function validateCanonicalPreparedSays(
     ) {
       hasPreparedSay = true;
     }
-    const temporaryId = producedTemporaryId(instruction);
-    if (temporaryId === null) return;
-    const entries = producers.get(temporaryId) ?? [];
-    entries.push(instructionIndex);
-    producers.set(temporaryId, entries);
+    for (const temporaryId of producedTemporaryIds(instruction)) {
+      const entries = producers.get(temporaryId) ?? [];
+      entries.push(instructionIndex);
+      producers.set(temporaryId, entries);
+    }
   });
   // Built for the first prepared say that reaches the clear and bypass checks.
   let rangesCache: PreparedSayRanges | null = null;
@@ -1176,8 +1177,7 @@ function validateCanonicalInteractionResultHandoffs(
   const explicitTargets = new Set<number>();
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
-    const produced = producedTemporaryId(instruction);
-    if (produced !== null) {
+    for (const produced of producedTemporaryIds(instruction)) {
       const indices = producers.get(produced) ?? [];
       indices.push(instructionIndex);
       producers.set(produced, indices);
@@ -1306,7 +1306,8 @@ function validateCanonicalInteractionResultHandoffs(
   });
 }
 
-function producedTemporaryId(instruction: Record<string, unknown>): number | null {
+/** The temporaries an instruction sets: its result's, and the one that says whether a call needs its default. */
+function producedTemporaryIds(instruction: Record<string, unknown>): readonly number[] {
   let value: unknown = null;
   if (instruction.kind === "storeTemporary") {
     value = instruction.temporaryId;
@@ -1331,8 +1332,10 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   ) {
     value = instruction.destinationTemporary;
   }
-  // EVIDENCE: validation: Number.isSafeInteger proves the returned numeric value.
-  return Number.isSafeInteger(value) ? (value as number) : null;
+  // EVIDENCE: validation: Number.isSafeInteger proves the returned numeric values.
+  return [value, instruction.defaultTemporary].filter((id): id is number =>
+    Number.isSafeInteger(id),
+  );
 }
 
 function explicitInstructionTargets(instruction: Record<string, unknown>): readonly unknown[] {
@@ -1446,10 +1449,16 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
         isRecord(value.callee) &&
         value.callee.kind === "property" &&
         expressionGuaranteesTemporaryEvaluation(value.callee.object, temporaryId);
+      // A `default:` that runs only when the call needs it may not run.
+      const lazy =
+        isRecord(value.callee) && Array.isArray(value.arguments) && value.arguments.every(isRecord)
+          ? lazyDefaultArgumentIndex({ callee: value.callee, arguments: value.arguments })
+          : -1;
       const argumentConsumes =
         Array.isArray(value.arguments) &&
         value.arguments.some(
-          (argument) =>
+          (argument, index) =>
+            index !== lazy &&
             isRecord(argument) &&
             expressionGuaranteesTemporaryEvaluation(argument.value, temporaryId),
         );

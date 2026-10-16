@@ -22,6 +22,8 @@ import {
   packagePathProblem,
 } from "../project-paths.js";
 import { isCanonicalTagList, normalizeTagName } from "../tags.js";
+import { isLazyDefaultOperation } from "../lazy-defaults.js";
+import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression-children.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -581,7 +583,15 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["jump", "target"],
   ["loopStart", "loopKind", "loopId", "expression", "continueTarget", "target"],
   ["loopControl", "action", "loopId", "target"],
-  ["storeTemporary", "temporaryId", "value", "expectBoolean", "typeCheck"],
+  [
+    "storeTemporary",
+    "temporaryId",
+    "value",
+    "expectBoolean",
+    "defaultTemporary",
+    "defaultOf",
+    "typeCheck",
+  ],
   ["clearTemporary", "temporaryId"],
   ["clearTemporaries", "temporaryIds"],
   ["callFunction", "functionId", "arguments", "destinationTemporary", "returnInstruction"],
@@ -786,6 +796,32 @@ function validateInstruction(
         );
       }
       validateOptionalTypeCheck(value, path, errors);
+      if ("defaultTemporary" in value) {
+        validateDefaultTemporary(
+          value.defaultTemporary,
+          value.temporaryId,
+          path,
+          temporaryCount,
+          errors,
+        );
+        if (
+          !isDefaultProbe(value.value) ||
+          value.expectBoolean !== false ||
+          "typeCheck" in value ||
+          "defaultOf" in value
+        )
+          errors.push(
+            planError(
+              "TSC002",
+              "Only a call or load without its default: tells whether it needs the default.",
+              `${path}.defaultTemporary`,
+            ),
+          );
+      }
+      if ("defaultOf" in value && !isLazyDefaultOperation(value.defaultOf))
+        errors.push(
+          planError("TSC002", "The call that takes a default: is invalid.", `${path}.defaultOf`),
+        );
       return;
     case "prepareSaySpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
@@ -1204,7 +1240,7 @@ function validateFileStoreInstruction(
       "kind",
       "call",
       "value",
-      "default",
+      "defaultTemporary",
       "files",
       "destinationTemporary",
       "span",
@@ -1226,11 +1262,21 @@ function validateFileStoreInstruction(
   }
   const takesDefault = call === "fileFromBase64" || call === "fromJson";
   const takesFiles = call === "toJson" || call === "fromJson";
-  if (takesDefault !== (value.default !== null))
-    errors.push(planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.default`));
+  if (takesDefault !== (value.defaultTemporary !== null))
+    errors.push(
+      planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
+    );
+  else if (takesDefault)
+    validateDefaultTemporary(
+      value.defaultTemporary,
+      value.destinationTemporary,
+      path,
+      temporaryCount,
+      errors,
+    );
   if (!takesFiles && value.files !== null)
     errors.push(planError("TSC002", `${call}(...) takes no files:.`, `${path}.files`));
-  for (const name of ["value", "default", "files"] as const) {
+  for (const name of ["value", "files"] as const) {
     const operand = value[name];
     if (operand === null && name !== "value") continue;
     if (!isRecord(operand) || (operand.kind !== "temporary" && operand.kind !== "literal"))
@@ -2144,6 +2190,44 @@ function validateExpression(
       pending,
     );
   }
+}
+
+/** The temporary that says whether a call or `load` needs its `default:`, apart from the one of its result. */
+function validateDefaultTemporary(
+  value: unknown,
+  result: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  validateTemporaryId(value, `${path}.defaultTemporary`, temporaryCount, errors);
+  if (value === result)
+    errors.push(
+      planError(
+        "TSC002",
+        "Whether the default is needed and the result need two temporaries.",
+        `${path}.defaultTemporary`,
+      ),
+    );
+}
+
+/** Whether a value is a call or `load` without its `default:`, which then runs as the instructions after it. */
+function isDefaultProbe(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === "storageLoad") return value.default === null;
+  if (
+    value.kind !== "call" ||
+    !isRecord(value.callee) ||
+    !Array.isArray(value.arguments) ||
+    !value.arguments.every(isRecord)
+  )
+    return false;
+  const call = { callee: value.callee, arguments: value.arguments };
+  return (
+    lazyDefaultCallOperation(call) !== null &&
+    lazyDefaultArgumentIndex(call) === -1 &&
+    !("typeCheck" in value)
+  );
 }
 
 /** Validates the optional `typeCheck` of a receiving instruction, call argument, or `add` call. */

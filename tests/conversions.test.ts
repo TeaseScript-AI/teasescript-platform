@@ -261,12 +261,6 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       `toNumber(...) cannot convert text (string) "1e400" to a number. The text must be a number such as 2.5 or -3. Give a fallback with 'default:' if the value may not convert.`,
     ],
     [
-      "say toNumber(value, default: backup)\nexit",
-      { value: "1", backup: "0" },
-      "TSR058",
-      "toNumber(...) needs a number as its default:, not text (string).",
-    ],
-    [
       "say round(value)\nexit",
       { value: "2.5" },
       "TSR059",
@@ -287,6 +281,20 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       source,
     );
   }
+  // A default is checked when it is used, at the default (owner decision, 2026-10-16).
+  const source = "say toNumber(value, default: backup)\nexit";
+  const unused = runWithGlobals(source, { value: "1", backup: "0" });
+  assert.equal(unused.snapshot.failure, null);
+  assert.deepEqual(sayTexts(unused), ["1"]);
+  const used = runWithGlobals(source, { value: "x", backup: "0" });
+  assert.deepEqual(
+    [used.snapshot.failure?.code, used.snapshot.failure?.message],
+    ["TSR058", "toNumber(...) needs a number as its default:, not text (string)."],
+  );
+  assert.deepEqual(
+    [used.snapshot.failure?.span.start.offset, used.snapshot.failure?.span.end.offset],
+    [source.indexOf("backup"), source.indexOf("backup") + "backup".length],
+  );
   const list = runValidSource(
     "function dynamic(value) { return value }\nsay toString(dynamic([1]))\nexit",
   );

@@ -266,7 +266,7 @@ test("evaluates a property-call receiver before its arguments", () => {
       "let values = []",
       'function receiver { order.add("receiver")\nreturn values }',
       'function argument { order.add("argument")\nreturn 7 }',
-      "receiver().add(argument())",
+      "receiver().contains(argument())",
       'say "${order[0]}:${order[1]}"',
       "exit",
     ].join("\n"),

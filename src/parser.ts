@@ -288,6 +288,15 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
     ["boolean", ["yesText", "noText", "prefill", "message"]],
     ["booleans", ["texts", "prefill", "cancel", "message"]],
   ]);
+/** The one named argument of `askChoice`, written once after its options. */
+const CHOICE_OPTIONS: readonly string[] = ["prefill"];
+/** The named options of `showButton` after its label. */
+export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
+
+/** The named arguments of an ask, such as `prefill:` and `hint:` of `askText`, as the parser accepts them. */
+export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
+  return kind === "choice" ? CHOICE_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
+}
 /**
  * The earlier name of an ask's `prefill:`, which is a compile error that names the fix (owner decision on #512,
  * 2026-10-08): `default:`, or `defaults:` for `askBooleans`.
@@ -366,7 +375,7 @@ class Parser {
   #recoveredAtStatementBoundary = false;
   /**
    * Inside a media cue position, a permanent button's text, or the head of a block statement such as `if` or `switch`,
-   * where the following block `{` ends a compact interaction.
+   * where the following block `{` ends a compact interaction, and a value that is still expected (see `#atHeadBlock`).
    */
   #blockEndsCompactInteraction = false;
   /**
@@ -741,7 +750,7 @@ class Parser {
       const name = this.#peek(offset);
       const option =
         name.kind === TokenKind.Identifier &&
-        (name.lexeme === "background" || name.lexeme === "timeout") &&
+        SHOW_BUTTON_OPTIONS.includes(name.lexeme) &&
         this.#peek(offset + 1).kind === TokenKind.Colon
           ? name.lexeme
           : null;
@@ -1594,16 +1603,21 @@ class Parser {
     const enclosing = this.#blockEndsCompactInteraction;
     this.#blockEndsCompactInteraction = true;
     const textStart = this.#current;
+    const diagnosticCount = this.#diagnostics.length;
     const text = yield* parseChild(this.#parseOr());
     const textEnd = this.#current;
     const options = text === null ? null : yield* parseChild(this.#parsePermanentButtonOptions());
     this.#blockEndsCompactInteraction = enclosing;
     if (text === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedInteractionText,
-        "Expected button text after 'showPermanentButton'.",
-      );
-      this.#synchronizeStatement();
+      // Text that reported its own error, as `"Stop" + {`, needs no second one.
+      if (this.#diagnostics.length === diagnosticCount)
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedInteractionText,
+          "Expected button text after 'showPermanentButton'.",
+        );
+      // The block belongs to the button.
+      if (this.#check(TokenKind.LeftBrace)) this.#skipMalformedBlock();
+      else this.#synchronizeStatement();
       return null;
     }
     if (!this.#check(TokenKind.LeftBrace)) {
@@ -2517,14 +2531,18 @@ class Parser {
     if (kind !== "finish") {
       const enclosing = this.#blockEndsCompactInteraction;
       this.#blockEndsCompactInteraction = true;
+      const diagnosticCount = this.#diagnostics.length;
       offset = yield* parseChild(this.#parseOr());
       this.#blockEndsCompactInteraction = enclosing;
       if (offset === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          `Expected a cue position such as '30 s' after '${keyword.lexeme}'.`,
-        );
-        this.#synchronizeStatement(true);
+        // A position that reported its own error, as `2 s + {`, needs no second one, and its block still parses.
+        if (this.#diagnostics.length === diagnosticCount)
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedExpression,
+            `Expected a cue position such as '30 s' after '${keyword.lexeme}'.`,
+          );
+        if (this.#check(TokenKind.LeftBrace)) yield* parseChild(this.#parseBlock());
+        else this.#synchronizeStatement(true);
         return null;
       }
     }
@@ -2795,7 +2813,9 @@ class Parser {
   *#parseIfStatement(): ParseTask<IfStatement | null> {
     const keyword = this.#advance();
     const condition = this.#parseBlockHead();
-    if (condition === null) {
+    // A condition that failed at the `{` of its block, as `if x == {`, still has the block, which parses as usual, so
+    // that its `}` and an `else` after it report nothing more.
+    if (condition === null && !this.#check(TokenKind.LeftBrace)) {
       this.#synchronizeStatement();
       return null;
     }
@@ -2815,6 +2835,7 @@ class Parser {
     } else {
       this.#current = beforePotentialElse;
     }
+    if (condition === null) return null;
     return Object.freeze({
       kind: "ifStatement",
       condition,
@@ -2835,7 +2856,8 @@ class Parser {
       return null;
     }
     const subject = this.#parseBlockHead();
-    if (subject === null) {
+    // The cases after a subject that failed at their `{` still parse (see `#parseIfStatement`).
+    if (subject === null && !this.#check(TokenKind.LeftBrace)) {
       this.#synchronizeStatement();
       return null;
     }
@@ -2930,6 +2952,7 @@ class Parser {
       );
       return null;
     }
+    if (subject === null) return null;
     return Object.freeze({
       kind: "switchStatement",
       subject,
@@ -3008,13 +3031,14 @@ class Parser {
   *#parseRepeatStatement(): ParseTask<RepeatStatement | null> {
     const keyword = this.#advance();
     const count = this.#parseBlockHead();
-    if (count === null) {
+    // The body after a count that failed at its `{` still parses (see `#parseIfStatement`).
+    if (count === null && !this.#check(TokenKind.LeftBrace)) {
       this.#synchronizeStatement();
       return null;
     }
     this.#skipContinuationNewlines();
     const body = yield* parseChild(this.#parseBlock());
-    if (body === null) return null;
+    if (body === null || count === null) return null;
     return Object.freeze({
       kind: "repeatStatement",
       count,
@@ -3067,13 +3091,14 @@ class Parser {
       return null;
     }
     const iterable = this.#parseBlockHead();
-    if (iterable === null) {
+    // The body after a value that failed at its `{` still parses (see `#parseIfStatement`).
+    if (iterable === null && !this.#check(TokenKind.LeftBrace)) {
       this.#synchronizeStatement();
       return null;
     }
     this.#skipContinuationNewlines();
     const body = yield* parseChild(this.#parseBlock());
-    if (body === null) return null;
+    if (body === null || iterable === null) return null;
     return Object.freeze({
       kind: "forStatement",
       variable,
@@ -3087,13 +3112,14 @@ class Parser {
   *#parseWhileStatement(): ParseTask<WhileStatement | null> {
     const keyword = this.#advance();
     const condition = this.#parseBlockHead();
-    if (condition === null) {
+    // The body after a condition that failed at its `{` still parses (see `#parseIfStatement`).
+    if (condition === null && !this.#check(TokenKind.LeftBrace)) {
       this.#synchronizeStatement();
       return null;
     }
     this.#skipContinuationNewlines();
     const body = yield* parseChild(this.#parseBlock());
-    if (body === null) return null;
+    if (body === null || condition === null) return null;
     return Object.freeze({
       kind: "whileStatement",
       condition,
@@ -3412,12 +3438,10 @@ class Parser {
       const operator = this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbolicOr();
       if (operator === null) break;
       this.#skipContinuationNewlines();
+      const diagnosticCount = this.#diagnostics.length;
       const right = yield* parseChild(this.#parseAnd());
       if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected an expression after 'or'.",
-        );
+        this.#reportMissingOperand("or", "Expected an expression after 'or'.", diagnosticCount);
         return null;
       }
       expression = this.#binary(expression, right, "or", operator);
@@ -3433,12 +3457,10 @@ class Parser {
         this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo", "and", "if a and b { ... }");
       if (operator === null) break;
       this.#skipContinuationNewlines();
+      const diagnosticCount = this.#diagnostics.length;
       const right = yield* parseChild(this.#parseNot());
       if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected an expression after 'and'.",
-        );
+        this.#reportMissingOperand("and", "Expected an expression after 'and'.", diagnosticCount);
         return null;
       }
       expression = this.#binary(expression, right, "and", operator);
@@ -3452,14 +3474,11 @@ class Parser {
       operators.push(this.#previous());
       this.#skipContinuationNewlines();
     }
+    const diagnosticCount = this.#diagnostics.length;
     let expression = yield* parseChild(this.#parseComparison());
     if (expression === null) {
-      for (let index = 0; index < operators.length; index += 1) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected an expression after 'not'.",
-        );
-      }
+      if (operators.length > 0)
+        this.#reportMissingOperand("not", "Expected an expression after 'not'.", diagnosticCount);
       return null;
     }
     for (let index = operators.length - 1; index >= 0; index -= 1) {
@@ -3469,6 +3488,7 @@ class Parser {
   }
 
   *#parseComparison(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     const left = yield* parseChild(this.#parseOtherwise());
     if (left === null) return null;
     let expression: Expression;
@@ -3477,14 +3497,23 @@ class Parser {
     } else if (isComparisonKind(this.#peek().kind)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseOtherwise());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const leftQuotable = this.#diagnostics.length === diagnosticCount;
+      const right = yield* parseChild(
+        this.#parseOperand(
+          operator.lexeme,
+          () => this.#parseOtherwise(),
           "Expected an expression after the comparison operator.",
-        );
-        return null;
-      }
+          (operators, value, quotable) =>
+            this.#reportNotAfterComparison(
+              left,
+              operator,
+              operators,
+              value,
+              leftQuotable && quotable,
+            ),
+        ),
+      );
+      if (right === null) return null;
       expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
       return left;
@@ -3502,10 +3531,132 @@ class Parser {
         }
         this.#advance();
         this.#skipContinuationNewlines();
+        // The chain has its error already, so a `not` here, as in `a == b == not c`, is read without another one.
+        while (this.#matchNot()) this.#skipContinuationNewlines();
         yield* parseChild(this.#parseOtherwise());
       }
     }
     return expression;
+  }
+
+  /**
+   * The operand after `symbol`, a comparison, `otherwise`, arithmetic, a range, or a sign, which `parse` reads, or
+   * `missing` without one. `not` binds more loosely than each of them (V30 §5), so `x == not a` has no operand after the
+   * `==`: `report` gives the one error for the `not`, and the rest is read as `x == (not a)`, so that nothing after it
+   * reports another error. `report` hears whether the operand is free of errors of its own, which the `??` of
+   * `x == not a ?? b` is not.
+   */
+  *#parseOperand(
+    symbol: string,
+    parse: () => ParseTask<Expression | null>,
+    missing: string,
+    report: (operators: readonly Token[], value: Expression, quotable: boolean) => void,
+  ): ParseTask<Expression | null> {
+    const operators: Token[] = [];
+    while (this.#matchNot()) {
+      operators.push(this.#previous());
+      this.#skipContinuationNewlines();
+    }
+    const diagnosticCount = this.#diagnostics.length;
+    let value = yield* parseChild(parse());
+    if (value === null) {
+      if (operators.length === 0) this.#reportMissingOperand(symbol, missing, diagnosticCount);
+      else
+        this.#reportMissingOperand("not", "Expected an expression after 'not'.", diagnosticCount);
+      return null;
+    }
+    if (operators.length === 0) return value;
+    report(operators, value, this.#diagnostics.length === diagnosticCount);
+    for (let index = operators.length - 1; index >= 0; index -= 1) {
+      value = this.#unary(operators[index]!, value, "not");
+    }
+    return value;
+  }
+
+  /**
+   * Reports the value missing after `symbol`, unless the operand reported its own error, as the `==` of `a and x ==`
+   * does. Before the `{` that ends a block head, as in `if x == {`, the message says that the `{` starts the block.
+   */
+  #reportMissingOperand(symbol: string, message: string, diagnosticCount: number): void {
+    if (this.#diagnostics.length !== diagnosticCount) return;
+    this.#reportInsertion(
+      parserDiagnosticCode.expectedExpression,
+      this.#atHeadBlock()
+        ? `Expected a value after '${symbol}': the '{' that follows starts the block. Write the value before the '{'.`
+        : message,
+    );
+  }
+
+  /**
+   * Reports `not` right after a comparison operator. The message quotes the code as written in two forms that compile:
+   * the opposite comparison, and the `not` in parentheses after `==` or `!=`, or before the whole comparison after `<`,
+   * `<=`, `>`, or `>=`, which do not compare true and false. Two `not`s cancel out. An operand with an error of its own,
+   * as the `??` of `x ?? false == not a`, is not quoted.
+   */
+  #reportNotAfterComparison(
+    left: Expression,
+    operator: Token,
+    operators: readonly Token[],
+    value: Expression,
+    quotable: boolean,
+  ): void {
+    const symbol = operator.lexeme;
+    this.#reportNotReadings(
+      symbol,
+      left,
+      operators,
+      value,
+      quotable,
+      ["x", "a"],
+      (compared, negated) => {
+        if (operators.length % 2 === 0) return [`${compared} ${symbol} ${negated}`];
+        const opposite = `${compared} ${OPPOSITE_COMPARISONS[symbol]!} ${negated}`;
+        return symbol === "==" || symbol === "!="
+          ? [opposite, `${compared} ${symbol} (not ${negated})`]
+          : [opposite, `not (${compared} ${symbol} ${negated})`];
+      },
+    );
+  }
+
+  /**
+   * Reports `not` right after `symbol`, quoting the code to write: `readings` of the source text of `left` and of the
+   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportMixedOtherwise`), and
+   * one without errors of its own; the readings of `example` stand in for it.
+   */
+  #reportNotReadings(
+    symbol: string,
+    left: Expression,
+    operators: readonly Token[],
+    value: Expression,
+    quotable: boolean,
+    example: readonly [string, string],
+    readings: (left: string, value: string) => string[],
+  ): void {
+    let written: string[] | undefined;
+    if (quotable && value.span.end.offset - left.span.start.offset <= 240) {
+      written = readings(this.#textOf(left.span, left.span), this.#textOf(value.span, value.span));
+      if (!written.every((reading) => reading.length <= 60 && !reading.includes("\n")))
+        written = undefined;
+    }
+    const quoted = (written ?? readings(...example)).map((reading) => `'${reading}'`).join(", or ");
+    this.#reportSpan(
+      parserDiagnosticCode.expectedExpression,
+      `'not' cannot follow '${symbol}' directly. Write ${written === undefined ? "it as in " : ""}${quoted}.`,
+      operators[0]!.span,
+    );
+  }
+
+  /**
+   * Reports `not` right after arithmetic, a sign, or a range operator, which cannot use the true or false it gives,
+   * also in parentheses, so the message names no grouping.
+   */
+  #reportNotAfterArithmetic(symbol: string, operators: readonly Token[]): void {
+    const user = symbol === ".." || symbol === "..=" ? "a range" : `'${symbol}'`;
+    this.#reportSpan(
+      parserDiagnosticCode.expectedExpression,
+      `'not' cannot follow '${symbol}': it gives true or false, which ${user} cannot use. Remove the 'not'.`,
+      operators[0]!.span,
+    );
   }
 
   /** `value is T` or `value is not T`; the right operand is a type, not a value (ADR 0021). */
@@ -3554,6 +3705,8 @@ class Parser {
       offset += 1;
     }
     const token = this.#peek(offset);
+    // The type is missing before the `{` of the block, as in `if x is {`.
+    if (offset === 0 && this.#atHeadBlock()) return false;
     // `set[1]` is a set value; `set` alone, or `set[]` for a list of sets, is a type.
     if (
       token.kind === TokenKind.KeywordSet &&
@@ -3569,6 +3722,7 @@ class Parser {
    * needs parentheses, because the fallback could be meant for its nearest value or for all of it (V30 §5, §18).
    */
   *#parseOtherwise(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     let expression = yield* parseChild(this.#parseRange());
     while (expression !== null) {
       const word = this.#matchOperator(TokenKind.KeywordOtherwise);
@@ -3582,16 +3736,39 @@ class Parser {
         );
       if (operator === null) break;
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseRange());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const left = expression;
+      // Arithmetic before `otherwise` needs parentheses too, which only its own message names (see below).
+      const leftQuotable =
+        this.#diagnostics.length === diagnosticCount && !isArithmetic(left) && !isSign(left);
+      const right = yield* parseChild(
+        this.#parseOperand(
+          "otherwise",
+          () => this.#parseRange(),
           "Expected a fallback value after 'otherwise'.",
-        );
-        return null;
-      }
-      // A `??` has its one error already (V30 §39); the parentheses follow once it is the word.
-      if (word !== null) this.#reportMixedOtherwise(expression, right, operator);
+          (operators, value, quotable) => {
+            // A `??` has its one error already (V30 §39).
+            if (word === null) return;
+            this.#reportNotReadings(
+              "otherwise",
+              left,
+              operators,
+              value,
+              leftQuotable && quotable,
+              ["a", "b"],
+              (fallen, fallback) => [
+                operators.length % 2 === 0
+                  ? `${fallen} otherwise ${fallback}`
+                  : `${fallen} otherwise (not ${fallback})`,
+              ],
+            );
+          },
+        ),
+      );
+      if (right === null) return null;
+      // A `??` has its one error already (V30 §39), and so has a `not` that starts the fallback, which only
+      // `#parseOperand` reads there: the parentheses follow once both are written as they should be.
+      if (word !== null && !(right.kind === "unaryExpression" && right.operator === "not"))
+        this.#reportMixedOtherwise(expression, right, operator);
       expression = this.#binary(expression, right, "otherwise", operator);
     }
     return expression;
@@ -3641,14 +3818,15 @@ class Parser {
     }
     const operator = this.#advance();
     this.#skipContinuationNewlines();
-    const right = yield* parseChild(this.#parseAdditive());
-    if (right === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedExpression,
+    const right = yield* parseChild(
+      this.#parseOperand(
+        operator.lexeme,
+        () => this.#parseAdditive(),
         "Expected an expression after the range operator.",
-      );
-      return null;
-    }
+        (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+      ),
+    );
+    if (right === null) return null;
     const expression: Expression = Object.freeze({
       kind: "rangeExpression",
       start: left,
@@ -3676,14 +3854,15 @@ class Parser {
     while (expression !== null && (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseMultiplicative());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const right = yield* parseChild(
+        this.#parseOperand(
+          operator.lexeme,
+          () => this.#parseMultiplicative(),
           "Expected an expression after the arithmetic operator.",
-        );
-        return null;
-      }
+          (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+        ),
+      );
+      if (right === null) return null;
       expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
@@ -3702,14 +3881,15 @@ class Parser {
         break;
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseUnaryArithmetic());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const right = yield* parseChild(
+        this.#parseOperand(
+          operator.lexeme,
+          () => this.#parseUnaryArithmetic(),
           "Expected an expression after the arithmetic operator.",
-        );
-        return null;
-      }
+          (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+        ),
+      );
+      if (right === null) return null;
       expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
@@ -3721,16 +3901,17 @@ class Parser {
       operators.push(this.#advance());
       this.#skipContinuationNewlines();
     }
-    let expression = yield* parseChild(this.#parsePostfix());
-    if (expression === null) {
-      for (let index = 0; index < operators.length; index += 1) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected an expression after the unary operator.",
-        );
-      }
-      return null;
-    }
+    const sign = operators.at(-1);
+    if (sign === undefined) return yield* parseChild(this.#parsePostfix());
+    let expression = yield* parseChild(
+      this.#parseOperand(
+        sign.lexeme,
+        () => this.#parseUnaryArithmetic(),
+        "Expected an expression after the unary operator.",
+        (nots) => this.#reportNotAfterArithmetic(sign.lexeme, nots),
+      ),
+    );
+    if (expression === null) return null;
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       const operator = operators[index]!;
       // EVIDENCE: invariant: operators contains only the plus/minus tokens collected by the loop above.
@@ -4172,7 +4353,9 @@ class Parser {
         this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
       );
     }
-    if (this.#match(TokenKind.LeftBrace)) {
+    // The `{` of a block head's block is no value (see `#atHeadBlock`).
+    if (this.#check(TokenKind.LeftBrace) && !this.#atHeadBlock()) {
+      this.#advance();
       return yield* parseChild(this.#withinDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
@@ -4249,7 +4432,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const names = NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS;
+      const names = askOptionNames(interactionKind);
       // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
       const removed = removedPrefillName(interactionKind);
       const recognized = removed === null ? names : [...names, removed];
@@ -4347,7 +4530,7 @@ class Parser {
     let missingChoiceOptionWasReported = false;
     while (!this.#isInteractionChoiceTerminator()) {
       // `prefill:` names the preselected button's value once, after the options, so no option is labelled `prefill`.
-      if (this.#checkIdentifier("prefill") && this.#peek(1).kind === TokenKind.Colon) {
+      if (this.#askOptionAt(0, askOptionNames("choice")) !== null) {
         const name = this.#advance();
         this.#advance();
         prefill = yield* parseChild(this.#parseColonValueTask(false));
@@ -4511,7 +4694,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS,
+      askOptionNames(interactionKind),
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
@@ -4872,6 +5055,36 @@ class Parser {
       }
     }
     return elements;
+  }
+
+  /**
+   * Whether the `{` next starts the block of a block head, such as the condition of an `if`, where the head expects a
+   * value, as in `if x == {`. It starts an object literal instead when a property and its `:` follow, as in
+   * `if door == { open: true } {`, or when the head goes on after its `}`, as in `if box == {} {`, where a block would
+   * end the statement.
+   */
+  #atHeadBlock(): boolean {
+    if (!this.#blockEndsCompactInteraction || !this.#check(TokenKind.LeftBrace)) return false;
+    const afterNewlines = this.#shared.newlineRuns.ends;
+    const first = afterNewlines[this.#current + 1]!;
+    if (isPropertyName(this.tokens[first]!) && this.tokens[first + 1]?.kind === TokenKind.Colon)
+      return false;
+    this.#shared.closers ??= delimiterClosers(this.tokens);
+    const closer = this.#shared.closers.get(this.#current);
+    if (closer === undefined) return true;
+    const after = afterNewlines[closer + 1]!;
+    const next = this.tokens[after]!.kind;
+    // The block of a head on the next line, as in `if box == {}` and then `{` on a line of its own.
+    if (after > closer + 1) return next !== TokenKind.LeftBrace;
+    // A block ends its statement, or a button inside a grouping, as in `[showPermanentButton "Stop" { ... }]`. A comma
+    // could also go on with the options of a compact `askChoice` in the head.
+    return (
+      next === TokenKind.EndOfFile ||
+      next === TokenKind.RightBrace ||
+      next === TokenKind.KeywordElse ||
+      next === TokenKind.RightParenthesis ||
+      next === TokenKind.RightBracket
+    );
   }
 
   *#parseObjectLiteral(start: Token): ParseTask<ObjectLiteral> {
@@ -5738,6 +5951,16 @@ function isBinaryOperatorKind(kind: TokenKind): boolean {
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** For each comparison operator, the one that holds exactly when it does not. */
+const OPPOSITE_COMPARISONS: Readonly<Record<string, string>> = {
+  "==": "!=",
+  "!=": "==",
+  "<": ">=",
+  "<=": ">",
+  ">": "<=",
+  ">=": "<",
+};
 
 /** Arithmetic or a range, which `otherwise` takes as an operand only in parentheses (owner decision on #850). */
 function isArithmetic(expression: Expression): expression is BinaryExpression | RangeExpression {

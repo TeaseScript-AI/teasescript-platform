@@ -1,5 +1,6 @@
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import {
+  invalidAnswerMessage,
   isBlankTextAnswer,
   isIntegerAnswerText,
   isNumberAnswerText,
@@ -107,9 +108,7 @@ export function resolveInteractionCompletion(
       };
     }
     const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (isBlankTextAnswer(normalized)) {
-      return { ok: false, message: "Text completion must contain a non-whitespace character." };
-    }
+    if (isBlankTextAnswer(normalized)) return { ok: false, message: invalidAnswerMessage("text") };
     return { ok: true, result: normalized, transcriptText: normalized };
   }
   // `askInteger` accepts only whole-number notation within the safe integer range, on one line like `askNumber`.
@@ -129,32 +128,26 @@ export function resolveInteractionCompletion(
       isIntegerAnswerText(submitted) &&
       Number.isSafeInteger(parsed)
       ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
-      : { ok: false, message: "That is wrong. I asked for a whole number." };
+      : { ok: false, message: invalidAnswerMessage("integer") };
   }
+  // `askNumber` accepts one line of decimal or scientific notation with a finite value.
   if (action.interactionKind === "number") {
     if (
       payload.kind !== "submittedText" ||
       typeof payload.submittedText !== "string" ||
-      !completionStringFits(payload.submittedText) ||
-      /[\r\n\u2028\u2029]/u.test(payload.submittedText)
-    ) {
+      !completionStringFits(payload.submittedText)
+    )
       return {
         ok: false,
-        message: "Number completion requires one line of text within the shared UTF-8 byte limit.",
+        message: "Number completion requires text within the shared UTF-8 byte limit.",
       };
-    }
     const submitted = payload.submittedText.trim();
-    if (!isNumberAnswerText(submitted)) {
-      return {
-        ok: false,
-        message: "Number completion is not an accepted decimal or scientific number.",
-      };
-    }
     const parsed = Number(submitted);
-    if (!Number.isFinite(parsed)) {
-      return { ok: false, message: "Number completion must be finite." };
-    }
-    return { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted };
+    return !/[\r\n\u2028\u2029]/u.test(payload.submittedText) &&
+      isNumberAnswerText(submitted) &&
+      Number.isFinite(parsed)
+      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
+      : { ok: false, message: invalidAnswerMessage("number") };
   }
   // A date or time control submits strict ISO text; the transcript shows the answer as `say` would.
   if (action.ui.kind === "temporal") {
@@ -169,16 +162,7 @@ export function resolveInteractionCompletion(
       };
     const answer = temporalAnswer(action.ui.temporalKind, payload.submittedText);
     if (answer === undefined)
-      return {
-        ok: false,
-        message: `That is wrong. I asked for ${
-          action.ui.temporalKind === "date"
-            ? "a date"
-            : action.ui.temporalKind === "time"
-              ? "a time"
-              : "a date and time"
-        }.`,
-      };
+      return { ok: false, message: invalidAnswerMessage(action.ui.temporalKind) };
     const transcriptText =
       answer.kind === "date"
         ? presentDate(context.presentation, answer)
@@ -218,15 +202,11 @@ export function resolveInteractionCompletion(
     completionStringFits(payload.submittedText)
   ) {
     const matches = options.filter((option) => option.text === payload.submittedText);
-    if (matches.length !== 1) {
+    if (matches.length !== 1)
       return {
         ok: false,
-        message:
-          matches.length === 0
-            ? "Choice text is not available."
-            : "More than one button has this text. Select one of the buttons instead.",
+        message: invalidAnswerMessage(matches.length === 0 ? "choice" : "ambiguousChoice"),
       };
-    }
     selected = matches[0]!;
   } else if (
     payload.kind === "selectedOption" &&

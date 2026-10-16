@@ -15,20 +15,27 @@ let preloadStagePhotos: (sources: readonly string[]) => () => void;
 
 // The page this module runs in: downloads, Cache Storage, object URLs, images that decode, a canvas whose pixels are one
 // green, and a worker that answers each photo with `page.worker`; by default it cannot measure it, as for SVG, so the
-// page does.
+// page does, after the answers it owes.
 type WorkerAnswer = (swatches: PhotoSwatches | null) => void;
 const cannotMeasure = (_request: unknown, answer: WorkerAnswer): void => {
-  setTimeout(() => answer(null));
+  page.answers++;
+  setTimeout(() => {
+    page.answers--;
+    answer(null);
+  });
 };
 const BASE = "https://player.example/";
 const absolute = (url: string) => new URL(url, BASE).href;
+// A download or cached file whose content reads as a promise reaction, where Node's own response reads it over later
+// turns of the event loop.
+const fileResponse = (file: Blob) => Object.assign(new Response(null), { blob: async () => file });
 // A write that is still going on after its download, as a large file's can, until `until` settles.
 let heldWrite: { readonly url: string; readonly until: Promise<unknown> } | null = null;
 class PageCache {
   readonly files = new Map<string, Blob>();
   async match(request: string) {
     const file = this.files.get(absolute(request));
-    return file && new Response(file);
+    return file && fileResponse(file);
   }
   async put(request: string, response: Response) {
     const file = await response.blob();
@@ -61,10 +68,19 @@ const page = {
   revoked: new Set<string>(),
   offline: false,
   worker: cannotMeasure,
+  /** The worker answers that `cannotMeasure` still owes. */
+  answers: 0,
 };
 const downloadsOf = (source: string) => page.downloads.filter((url) => url === source).length;
-/** Waits until the preloader has had time to download and measure what it was given. */
-const preloaded = () => new Promise((resolve) => setTimeout(resolve, 20));
+/**
+ * Waits until the photos have done what they can, such as the preloader's downloads and measuring: turns of the event
+ * loop until no worker answer is due. Every other step of the page is a promise reaction, done within its turn however
+ * slowly the process runs; a write `heldWrite` holds stays held.
+ */
+const preloaded = async () => {
+  do await new Promise((resolve) => setImmediate(resolve));
+  while (page.answers > 0);
+};
 const saved = {
   fetch: globalThis.fetch,
   createObjectURL: URL.createObjectURL,
@@ -75,12 +91,12 @@ before(async () => {
     if (String(input).includes("unreachable") || page.offline)
       throw new TypeError("Failed to fetch");
     page.downloads.push(String(input));
-    return new Response(new Blob([new Uint8Array(16)], { type: "image/png" }));
+    return fileResponse(new Blob([new Uint8Array(16)], { type: "image/png" }));
   };
   // A file left from an earlier visit, which the Player's first use of its cache removes.
   await (
     await caches.open("teasescript-stage-photos")
-  ).put("/files/earlier.jpg", new Response(new Blob([new Uint8Array(4)])));
+  ).put("/files/earlier.jpg", fileResponse(new Blob([new Uint8Array(4)])));
   URL.createObjectURL = (blob) => {
     const url = saved.createObjectURL(blob);
     page.created.add(url);
@@ -300,7 +316,7 @@ test("a photo given up while the worker tries it gets no object URL", async () =
   await asked;
   release();
   answer();
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await preloaded();
   page.worker = cannotMeasure;
   assert.equal(page.created.size, created);
 });

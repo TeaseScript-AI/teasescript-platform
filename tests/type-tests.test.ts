@@ -600,7 +600,7 @@ test("a type test inside parentheses or brackets continues before '|', and 'is' 
   for (const source of [
     'function show(passed = 1 is integer\n    | string) {\n    say "${passed}"\n}\nshow()\nexit',
     'let m = playAudio(file: "a.mp3", async: true, repeat: 1 is integer\n    | string)\nexit',
-    'let m = (playAudio async "a.mp3" {\n    let passed = 1 is integer\n    [1].removeLast()\n})\nexit',
+    'let m = (playAudio async "a.mp3" {\n    let passed = 1 is integer\n    [1].contains(1)\n})\nexit',
   ])
     assert.deepEqual(errors(source), [], source);
   assert.notDeepEqual(errors('let t = (timer async 0 s """${1 is integer\n    | string}""")'), []);

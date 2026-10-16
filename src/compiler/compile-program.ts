@@ -25,6 +25,7 @@ import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import type { RuntimeCheckSite } from "../type-checker.js";
 import {
   InstructionCompiler,
+  type ControlOrigin,
   type LoweringCounters,
   type PendingDestination,
   type ProjectFunctions,
@@ -32,6 +33,7 @@ import {
 import { sessionDeclarations } from "../project-globals.js";
 
 export type { InstructionPlan } from "../plan/model.js";
+export type { ControlOrigin } from "./lowering/compiler.js";
 export { InstructionCompilationError } from "./errors.js";
 
 /** One validated file of a project, in plan order: `main.tease` first, then the others by path. */
@@ -59,7 +61,8 @@ export function compileStableProgram(
  * one block of the instruction stream: its root statements, then its functions and handlers. The root region of
  * `main.tease` starts with the start values of the globals and speakers of every file, in session-start order.
  * `typeChecks` are the runtime checks the type check recorded for values the compiler cannot know, and `images` is the
- * validated image catalog, in path order.
+ * validated image catalog, in path order. `origins` receives the source construct of each `jumpIfFalse` and
+ * `loopStart`, for an analysis of the plan that reads its ways back as source.
  */
 export function compileStableProject(
   projectFiles: readonly StableProjectFile[],
@@ -68,6 +71,7 @@ export function compileStableProject(
   images: readonly PlanImage[] = [],
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
   storageTypes: readonly StorageTypePlan[] = [],
+  origins: Map<number, ControlOrigin> | null = null,
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -96,6 +100,7 @@ export function compileStableProject(
       picks,
       captures,
       formShapes,
+      origins,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)

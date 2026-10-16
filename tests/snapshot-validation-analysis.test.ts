@@ -413,15 +413,17 @@ test("rejected snapshots add nothing to the kept continuation requirements", () 
 });
 
 test("a wide list in a prepared reference is analysed without exhausting the native stack", () => {
-  // Wider than a native call can spread on this stack: as the root of a reference, and in one that extends another.
+  // Wider than a native call can spread on this stack: as the root of a reference, and in one that extends another. The
+  // store changes a speaker that the list holds, as a store into any other element of a literal is a compile error.
   const moduleUrl = new URL("../src/index.js", import.meta.url).href;
   const script = `
     import assert from 'node:assert/strict';
     import * as m from ${JSON.stringify(moduleUrl)};
     const width = 40000;
+    const vera = 'speaker vera {\\n    mood: "calm"\\n}\\n';
     for (const source of [
-      '[' + Array(width).fill('0').join(',') + '][0] = 7\\nexit',
-      'function k {\\n    return 0\\n}\\n[[0],' + Array(width - 1).fill('[]').join(',') + '][k()][0] = 7\\nexit',
+      vera + '[' + Array(width).fill('vera').join(',') + '][0].mood = "changed"\\nexit',
+      vera + 'function k {\\n    return 0\\n}\\n[[vera],' + Array(width - 1).fill('[]').join(',') + '][k()][0].mood = "changed"\\nexit',
     ]) {
       const compiled = m.compileSource(source);
       assert.deepEqual(compiled.diagnostics, []);

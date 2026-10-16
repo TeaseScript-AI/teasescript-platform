@@ -30,7 +30,12 @@ import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.j
 import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
-import { expressionPlanChildren } from "../plan/expression-children.js";
+import {
+  expressionPlanChildren,
+  lazyDefaultArgumentIndex,
+  lazyDefaultCallOperation,
+} from "../plan/expression-children.js";
+import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
@@ -57,6 +62,7 @@ import {
   linearRegression,
   listStatistic,
   listValues,
+  percentage,
   predict,
   weightedChoices,
   weightedIndex,
@@ -364,6 +370,9 @@ export class Evaluator {
   /** With controlled randomness, the generator state before the last draw: its ID. */
   #drawId = 0;
 
+  /** Whether the call or `load` of `evaluateWithoutDefault` needs its default. */
+  #defaultNeeded = false;
+
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
@@ -396,6 +405,18 @@ export class Evaluator {
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
     return this.#evaluateMachine(expression, false).value;
+  }
+
+  /**
+   * Evaluates a call or `load` whose `default:` runs as the instructions after it (see
+   * `StoreTemporaryInstruction.defaultTemporary`): its value, or `USE_DEFAULT` when it needs the default.
+   */
+  public evaluateWithoutDefault(
+    expression: ExpressionPlan,
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
+    this.#defaultNeeded = false;
+    const { value } = this.#evaluateMachine(expression, false, true);
+    return this.#defaultNeeded ? USE_DEFAULT : value;
   }
 
   /** Evaluates the start value of a global or a speaker property. */
@@ -612,12 +633,12 @@ export class Evaluator {
     else this.trace!.readTemporary(this.callFrameId(), temporaryId, value);
   }
 
-  #evaluateMachine(root: ExpressionPlan, reference: boolean): EvaluatedExpression {
+  #evaluateMachine(root: ExpressionPlan, reference: boolean, probe = false): EvaluatedExpression {
     const trace = this.trace;
-    if (trace === null) return this.#runMachine(evaluationFrame(root, reference), null);
+    if (trace === null) return this.#runMachine(evaluationFrame(root, reference, probe), null);
     // Traced evaluation collects causes per frame; the root's join the collector it started from.
     const outer = trace.acc;
-    const rootFrame = evaluationFrame(root, reference);
+    const rootFrame = evaluationFrame(root, reference, probe);
     try {
       return this.#runMachine(rootFrame, trace);
     } finally {
@@ -1233,13 +1254,43 @@ export class Evaluator {
                 );
               frame.named![argument.name] = captured;
             }
+          } else if (frame.stage === 3) {
+            const fallback = expression.arguments[frame.lazy]!.value;
+            value = acceptedDefault(
+              lazyDefaultCallOperation(expression)!,
+              cloneCapturedSerializableValue(result.value),
+              expression.typeCheck,
+              fallback.span,
+            );
+            break;
           }
+          // The default runs only when the call needs it, after the other arguments and the call's own work.
+          if (frame.index === frame.lazy) frame.index += 1;
           if (frame.index < expression.arguments.length) {
             frame.stage = 2;
             pending.push(evaluationFrame(expression.arguments[frame.index++]!.value));
             continue;
           }
-          value = this.#call(expression, frame.value, frame.positional!, frame.named!);
+          {
+            const called = this.#call(
+              expression,
+              frame.value,
+              frame.positional!,
+              frame.named!,
+              frame.lazy !== -1 || frame.probe,
+            );
+            if (called === USE_DEFAULT) {
+              if (frame.probe) {
+                this.#defaultNeeded = true;
+                value = null;
+                break;
+              }
+              frame.stage = 3;
+              pending.push(evaluationFrame(expression.arguments[frame.lazy]!.value));
+              continue;
+            }
+            value = called;
+          }
           if (
             trace !== null &&
             expression.callee.kind === "property" &&
@@ -1281,6 +1332,8 @@ export class Evaluator {
             }
             if (expression.default === null) {
               value = null;
+              // A probe's default runs as the instructions after it.
+              if (frame.probe) this.#defaultNeeded = true;
               trace?.load(key, false, false, value, expression.span);
               break;
             }
@@ -2222,12 +2275,16 @@ export class Evaluator {
     );
   }
 
+  /**
+   * `defaulted`: the call has a `default:`, which `named` leaves out; the call gives `USE_DEFAULT` when it needs it.
+   */
   #call(
     expression: Extract<ExpressionPlan, { kind: "call" }>,
     receiver: SerializableRuntimeValue,
     positional: SerializableRuntimeValue[],
     named: Record<string, SerializableRuntimeValue>,
-  ): SerializableRuntimeValue {
+    defaulted: boolean,
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
       if (isConversionName(name))
@@ -2235,12 +2292,14 @@ export class Evaluator {
           name,
           positional,
           named,
+          defaulted,
           expression.arguments[0]?.value,
           expression.span,
         );
       if (DATA_TEXT_FUNCTIONS.has(name))
-        return this.#dataTextFunction(name, positional, named, expression.span);
-      if (name === "toRegex") return regexFromText(positional, named, expression.span);
+        return this.#dataTextFunction(name, positional, named, defaulted, expression.span);
+      if (name === "toRegex")
+        return regexFromText(positional, named, defaulted, expression.span) ?? USE_DEFAULT;
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
@@ -2407,7 +2466,7 @@ export class Evaluator {
     }
     if (expression.callee.kind === "property" && isDict(receiver)) {
       this.#referenceEpoch++;
-      return this.#callDict(receiver, expression, positional, named);
+      return this.#callDict(receiver, expression, positional, named, defaulted);
     }
     if (
       expression.callee.kind === "property" &&
@@ -2430,11 +2489,12 @@ export class Evaluator {
         expression.callee.name,
         positional,
         named,
+        defaulted,
         expression.span,
-        expression.typeCheck === undefined
+        expression.typeCheck === undefined || expression.callee.name === "get"
           ? null
           : // Plan validation accepts a type check only on an `add` or `addAll` call with one argument, or a `get` call
-            // with a `default:`, here; it checks the last argument.
+            // with a `default:`, whose default checks it when it is used; it checks the last argument.
             { check: expression.typeCheck, span: expression.arguments.at(-1)!.value.span },
       );
     }
@@ -2446,19 +2506,17 @@ export class Evaluator {
     );
   }
 
-  /**
-   * `added` is the check of an element that `add` inserts, or of a `get` default that decided the element type of an
-   * empty list, from the compiler (ADR 0021 rule 1.7).
-   */
+  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
     receiverPlan: ExpressionPlan,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
+    defaulted: boolean,
     span: SourceSpan,
     added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
-  ): SerializableRuntimeValue {
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
@@ -2610,23 +2668,19 @@ export class Evaluator {
         // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
         // default (#844).
         case "get": {
-          const names = Object.keys(named);
-          if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
+          if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
             throw fault(
               "TSR028",
               "'list.get(index, default: value)' takes an index and a 'default:' value.",
               span,
             );
-          // A default that decided the element type, as the first element of an empty list, must fit it also in the
-          // parts the compiler could not know (ADR 0021 rule 1.7).
-          if (added !== null) assertValueType(named.default!, added.check, added.span);
           const index = positional[0]!;
           return typeof index === "number" &&
             Number.isInteger(index) &&
             index >= 0 &&
             index < receiver.items.length
             ? receiver.items[index]!
-            : named.default!;
+            : USE_DEFAULT;
         }
         case "toSet":
           expect(0);
@@ -2703,7 +2757,8 @@ export class Evaluator {
     expression: Extract<ExpressionPlan, { kind: "call" }>,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
-  ): SerializableRuntimeValue {
+    defaulted: boolean,
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
     // EVIDENCE: invariant: #call dispatches here only for a property callee.
     const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
     const name = callee.name;
@@ -2711,10 +2766,7 @@ export class Evaluator {
     if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
     const names = Object.keys(named);
     const expected = name === "clear" ? 0 : 1;
-    if (
-      positional.length !== expected ||
-      (name === "get" ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
-    )
+    if (positional.length !== expected || names.length !== 0 || (name === "get") !== defaulted)
       throw fault(
         "TSR028",
         name === "get"
@@ -2731,17 +2783,13 @@ export class Evaluator {
     }
     const keyPlan = expression.arguments[0]!.value;
     const key = this.#dictKey(positional[0]!, keyPlan.span);
-    // A default that decided the value type, as the first value of an empty dict, must fit it also in the parts the
-    // compiler could not know (ADR 0021 rule 1.7).
-    if (name === "get" && expression.typeCheck !== undefined)
-      assertValueType(named.default!, expression.typeCheck, expression.arguments[1]!.value.span);
     switch (name) {
       case "contains":
         return getSerializableDictEntry(receiver, key) !== undefined;
       case "get": {
         // A stored null is a value, so only a missing entry gives the default.
         const entry = getSerializableDictEntry(receiver, key);
-        return entry === undefined ? named.default! : entry.value;
+        return entry === undefined ? USE_DEFAULT : entry.value;
       }
       default: {
         if (getSerializableDictEntry(receiver, key) === undefined)
@@ -3392,14 +3440,7 @@ export class Evaluator {
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
     this.#expectBuiltinArguments("chance", call, 1);
-    const percent = call.positional[0]!;
-    if (typeof percent !== "number" || percent < 0 || percent > 100) {
-      throw fault(
-        "TSR039",
-        `chance(...) needs a percentage from 0 through 100, not ${describeShownValue(percent)}.`,
-        call.span,
-      );
-    }
+    const percent = percentage("chance", call.positional[0]!, call.span);
     let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
     if (this.control !== null)
       chosen = outcomeBoolean(
@@ -3461,10 +3502,11 @@ export class Evaluator {
     name: ConversionName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
+    defaulted: boolean,
     argument: ExpressionPlan | undefined,
     span: SourceSpan,
-  ): SerializableRuntimeValue {
-    const extra = Object.keys(named).find((key) => key !== "default");
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
+    const extra = Object.keys(named)[0];
     const result = CONVERSION_RESULTS.get(name)!;
     // A date and a time combine into one date and time (V30 §35).
     const parts = result === "datetime" && positional.length === 2;
@@ -3474,19 +3516,12 @@ export class Evaluator {
         `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
         span,
       );
-    const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
-    if (fallback !== undefined && !isConversionResult(result, fallback))
-      throw fault(
-        "TSR058",
-        `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(fallback)}.`,
-        span,
-      );
     const value = positional[0]!;
     const converted = parts
       ? combinedDateAndTime(value, positional[1]!)
       : this.#converted(result, value, span);
     if (converted !== undefined) return converted;
-    if (fallback !== undefined) return fallback;
+    if (defaulted) return USE_DEFAULT;
     if (parts)
       throw fault(
         "TSR058",
@@ -3533,8 +3568,9 @@ export class Evaluator {
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
+    defaulted: boolean,
     span: SourceSpan,
-  ): SerializableRuntimeValue {
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
     const reads = name === "fromJson" || name === "fromBase64";
     // Only a `toJson` or `fromJson` with a written `files: false` is an ordinary call; with files it is a file store.
     const takesFiles = name === "toJson" || name === "fromJson";
@@ -3545,10 +3581,7 @@ export class Evaluator {
         span,
       );
     const names = Object.keys(named).filter((key) => !takesFiles || key !== "files");
-    if (
-      positional.length !== 1 ||
-      (reads ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
-    )
+    if (positional.length !== 1 || names.length !== 0 || reads !== defaulted)
       throw fault(
         "TSR028",
         reads
@@ -3579,7 +3612,7 @@ export class Evaluator {
           ? valueFromJson(value)
           : textFromBase64(value);
     // JSON's null is a value; only text that does not read gives the default.
-    return read === undefined ? named.default! : read;
+    return read === undefined ? USE_DEFAULT : read;
   }
 
   /**
@@ -4873,6 +4906,10 @@ interface EvaluationFrame {
   key: string | null;
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
+  /** A call's `default:` that runs only when the call needs it, by its position, or -1. */
+  lazy: number;
+  /** The root of `evaluateWithoutDefault`, whose default runs as the instructions after it. */
+  probe: boolean;
   /** With a debug trace, the causes collected for this frame's value. */
   deps: DebugDependencies | null;
 }
@@ -4943,7 +4980,11 @@ function tagNames(
   });
 }
 
-function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
+function evaluationFrame(
+  expression: ExpressionPlan,
+  reference = false,
+  probe = false,
+): EvaluationFrame {
   return {
     expression,
     reference,
@@ -4962,8 +5003,46 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     key: null,
     positional: expression.kind === "call" ? [] : null,
     named: expression.kind === "call" ? Object.create(null) : null,
+    lazy: expression.kind === "call" ? lazyDefaultArgumentIndex(expression) : -1,
+    probe,
     deps: null,
   };
+}
+
+/**
+ * What a call gives when it needs its `default:`, which runs only then (owner decision, 2026-10-16), or a call or `load`
+ * of `evaluateWithoutDefault` that needs the default that the instructions after it run.
+ */
+export const USE_DEFAULT: unique symbol = Symbol("use the default");
+
+/**
+ * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
+ * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), a
+ * conversion's must be of its result type, and `toRegex`'s a regex or `null`. `fromJson`, `fromBase64`, and
+ * `fileFromBase64` take any default.
+ */
+export function acceptedDefault(
+  operation: LazyDefaultOperation,
+  value: SerializableRuntimeValue,
+  typeCheck: TypeCheckPlan | undefined,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  if (typeCheck !== undefined) assertValueType(value, typeCheck, span);
+  if (isConversionName(operation)) {
+    const result = CONVERSION_RESULTS.get(operation)!;
+    if (!isConversionResult(result, value))
+      throw fault(
+        "TSR058",
+        `${operation}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(value)}.`,
+        span,
+      );
+  } else if (operation === "toRegex" && value !== null && !isRegex(value))
+    throw fault(
+      "TSR058",
+      `toRegex(...) needs a regex or null as its default:, not ${describeRuntimeValue(value)}.`,
+      span,
+    );
+  return value;
 }
 
 /** What to write instead of `+` on text or a list and a value of another kind; the left operand names what was meant. */

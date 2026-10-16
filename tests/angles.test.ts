@@ -420,6 +420,88 @@ test("an angle is a type of its own in annotations, unions, type tests, and choi
   assert.deepEqual(sayTexts(run(plan, completed.snapshot)), ["[180°]"]);
 });
 
+test("the angles of a choice's buttons decide comparisons, cases, and type tests, as durations do", () => {
+  const warned = (source: string): [string, string, string][] => {
+    const result = compileSource(`${source}\nexit`);
+    assert.notEqual(result.plan, null, `${JSON.stringify(source)} must compile`);
+    return result.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      `${source}\nexit`.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+      diagnostic.message,
+    ]);
+  };
+  const choice = "let a = askChoice 90 deg, 180 deg\n";
+  const switched = (cases: string) => `${choice}switch a {\n${cases}}`;
+  const always = (subject: string, values: string, outcome: string) =>
+    `'${subject}' is always ${values} here, so this ${outcome}.`;
+  // A button angle is its size in degrees, which is never a number or another angle: shown with a degree sign.
+  const warnings: [string, string, string][] = [
+    [
+      `${choice}let same = a == 45 deg`,
+      "a == 45 deg",
+      always("a", "90° or 180°", "comparison is always false"),
+    ],
+    [
+      `${choice}let differ = a != 45 deg`,
+      "a != 45 deg",
+      always("a", "90° or 180°", "comparison is always true"),
+    ],
+    [
+      `${choice}let same = a == 90`,
+      "a == 90",
+      always("a", "90° or 180°", "comparison is always false"),
+    ],
+    [
+      "let n = askChoice 90, 180\nlet same = n == 90 deg",
+      "n == 90 deg",
+      always("n", "90 or 180", "comparison is always false"),
+    ],
+    [
+      `${choice}let whole = a is angle`,
+      "a is angle",
+      always("a", "90° or 180°", "test is always true"),
+    ],
+    [
+      `${choice}let b = -a\nlet same = b == 90 deg`,
+      "b == 90 deg",
+      always("b", "-90° or -180°", "comparison is always false"),
+    ],
+    [
+      "let a = askChoice 1.5 deg, null\nlet same = a == 2 deg",
+      "a == 2 deg",
+      always("a", "null or 1.5°", "comparison is always false"),
+    ],
+    [
+      "let value: angle | integer = askChoice 90 deg, 2\nlet same = value == 3 deg",
+      "value == 3 deg",
+      always("value", "90° or 2", "comparison is always false"),
+    ],
+    [
+      switched('  case 45 deg {\n    say "x"\n  }\n  case 90 deg {\n    say "y"\n  }\n'),
+      "45 deg",
+      always("a", "90° or 180°", "case never matches"),
+    ],
+    [
+      'let a: angle | string = askChoice 90 deg, "x"\nswitch a {\n  case is angle {\n    say "x"\n  }\n  case 90 deg {\n    say "y"\n  }\n  case "x" {\n    say "z"\n  }\n}',
+      "90 deg",
+      "'case is angle' on line 3 already takes 90 deg, so this case never matches.",
+    ],
+  ];
+  for (const [source, written, message] of warnings)
+    assert.deepEqual(warned(source), [["TSV046", written, message]], source);
+  // A value a button gives, also in other units, may match; so may any angle once another one is stored.
+  for (const source of [
+    `${choice}let same = a == 90 deg`,
+    "let a = askChoice 90 deg, pi rad\nlet same = a == 180 deg",
+    "let a = askChoice 1 rad, 2 rad\nlet same = a == 1 rad",
+    `${choice}let b = -a\nlet same = b == -90 deg`,
+    `${choice}a = 45 deg\nlet same = a == 45 deg`,
+    "let value: angle | integer = askChoice 90 deg, 2\nlet same = value == 2",
+    switched('  case pi rad {\n    say "x"\n  }\n'),
+  ])
+    assert.deepEqual(warned(source), [], source);
+});
+
 test("angles in variables, lists, and objects resume from every checkpoint, and malformed angles are rejected", () => {
   const source = [
     "let heading = 30 deg",

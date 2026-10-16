@@ -67,9 +67,35 @@ test("completion exposes optional speaker and current say modifiers", () => {
   assert.ok(say.includes("as"));
   assert.ok(say.includes("skippable"));
   assert.ok(say.includes("unskippable"));
-  const pacing = labels('say "Hi",');
-  assert.ok(pacing.includes("instant"));
-  assert.ok(pacing.includes("0"));
+});
+
+test("the pacing values offered after a say's comma compile there", () => {
+  // `|` marks the cursor, and the rest is written after the completion.
+  const cases: readonly (readonly [marked: string, rest: string])[] = [
+    ['say "Hi",|\nexit', ""],
+    ['say "Hi", |\nexit', ""],
+    ['say("Hi", |)\nexit', ""],
+    ['say("Hi", |', ")\nexit"],
+    ['let line = say "Hi", |\nexit', ""],
+    ['let lines = [say("Hi", |)]\nexit', ""],
+    ['speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit', ""],
+  ];
+  for (const [marked, rest] of cases) {
+    const offset = marked.indexOf("|");
+    const source = marked.replace("|", "");
+    const document = createLanguageDocument("file:///main.tease", source);
+    const values = languageCompletions(document, languagePositionAt(document, offset)).filter(
+      (item) => item.kind === "value",
+    );
+    assert.ok(
+      values.some((item) => item.label === "instant"),
+      marked,
+    );
+    for (const item of values) {
+      const completed = source.slice(0, offset) + item.insertText + source.slice(offset) + rest;
+      assert.deepEqual(compileSource(completed).diagnostics, [], completed);
+    }
+  }
 });
 
 test("context, hover, and signature help select the compact command and its slots", () => {
@@ -87,6 +113,24 @@ test("context, hover, and signature help select the compact command and its slot
   const signature = languageSignatureHelp(document, position);
   assert.deepEqual(signature?.parameters, ["speaker", "question", "prefill", "hint"]);
   assert.equal(signature?.activeParameter, 1);
+});
+
+test("askChoice help names set options and the prefill after the options (V30 §19)", () => {
+  const source = 'let pick = askChoice hint: "Hint", set["a", "b"], prefill: "b"\nexit';
+  assert.deepEqual(compileSource(source).diagnostics, []);
+  const document = createLanguageDocument("file:///main.tease", source);
+  const at = (text: string) => languagePositionAt(document, source.indexOf(text) + text.length);
+  const hover = languageHover(document, at("askC"));
+  assert.ok(hover?.contents.some((line) => /\bset\b/u.test(line)));
+  assert.ok(hover?.contents.some((line) => line.includes("[, prefill: value]")));
+  const slot = (text: string) => {
+    const help = languageSignatureHelp(document, at(text));
+    return help === null ? null : help.parameters[help.activeParameter];
+  };
+  // An option's value written before ':' is no named option.
+  assert.equal(slot('hint: "Hi'), "options");
+  assert.equal(slot('set["a'), "options");
+  assert.equal(slot("prefill: "), "prefill");
 });
 
 test("formatting reaches a command inside a computed call target", () => {

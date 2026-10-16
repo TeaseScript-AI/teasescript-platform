@@ -7,6 +7,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
+  CheckpointError,
   compileSource,
   createFreshRuntimeSnapshot,
   run,
@@ -14,16 +17,21 @@ import {
   serializeCheckpoint,
   deserializeCheckpoint,
   recordContinueCapture,
+  restoreCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
   activatePlayerRuntimeButton,
   activePlayerRuntimeCapture,
+  adoptPlayerRuntimeCatchUp,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
+  beginPlayerRuntimeCatchUp,
+  beginPlayerRuntimeRecording,
   compilePlayerProject,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
@@ -42,6 +50,7 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  stepPlayerRuntimeCatchUp,
   stepPlayerRuntimeFormField,
   skipPlayerRuntimeImage,
   submitPlayerRuntimeComposer,
@@ -52,6 +61,7 @@ import {
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
+  playerRuntimeSnapshotJson,
   playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
@@ -530,6 +540,117 @@ test("runtime checkpoint restore handles retained event histories above the nati
   assert.equal(restored.transcriptEntries[0]?.text, "x");
   assert.equal(restored.transcriptEntries.at(-1)?.text, "x");
   assert.deepEqual(playerRuntimeSnapshot(restored), result.snapshot);
+});
+
+test("the Player keeps its own state, for a save or a recording's anchor, as the checked JSON without capturing it", () => {
+  const source =
+    'let numbers = [1, 2.5]\nlet person = {name: "Kiara", tags: ["a"]}\nwait 1 s\nwait 1 s\nexit';
+  const session = createPlayerRuntimeSession(source);
+  const checked = JSON.stringify(playerRuntimeSnapshot(session));
+  withValidationTestStatistics((statistics) => {
+    // The JSON the kept session and Debug's rewind history keep, which a restore checks as external data.
+    assert.equal(playerRuntimeSnapshotJson(session), checked);
+    beginPlayerRuntimeRecording(session, new DebugRecorder());
+    assert.equal(statistics().counts.externalCaptureVisits ?? 0, 0);
+  });
+  // A recording that starts again before a call takes its anchor without capturing the state either, also before a call
+  // of a copy that catches up: the same calls capture only their arguments.
+  const captureVisits = (recorder: DebugRecorder) => {
+    let played = createPlayerRuntimeSession(source, { recorder });
+    return withValidationTestStatistics((statistics) => {
+      played = observePlayerRuntimeTime(played, 1_000).session;
+      const catchUp = beginPlayerRuntimeCatchUp(played, 2_000);
+      assert.equal(
+        stepPlayerRuntimeCatchUp(catchUp, () => true),
+        "done",
+      );
+      played = adoptPlayerRuntimeCatchUp(played, catchUp)!;
+      assert.equal(played.state.status, "halted");
+      return statistics().counts.externalCaptureVisits ?? 0;
+    });
+  };
+  const restarting = new DebugRecorder({ operations: 2 });
+  assert.equal(captureVisits(restarting), captureVisits(new DebugRecorder()));
+  assert.notEqual(restarting.recording()!.anchorSnapshot.observedSessionTimeMs, 0, "no new anchor");
+  const restored = restorePlayerRuntimeSessionAt(
+    session.plan,
+    playerRuntimeSnapshotJson(session),
+    [],
+  );
+  assert.equal(JSON.stringify(playerRuntimeSnapshot(restored)), checked);
+});
+
+test("Continue, a rewind, and a restore point check the kept state once and refuse what the engine's restore refuses", () => {
+  const session = createPlayerRuntimeSession(
+    'let numbers = [1, 2.5]\nlet person = {name: "Kiara", tags: ["a"]}\nsay "Hello", instant\nwait 1 s\nexit',
+  );
+  const json = playerRuntimeSnapshotJson(session);
+  const point = createPlayerRuntimeRestorePoint(session);
+  const checkpointOf = (snapshotJson: string) => ({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan: session.plan,
+    snapshot: JSON.parse(snapshotJson),
+  });
+  const captured = <T>(restore: () => T) =>
+    withValidationTestStatistics((statistics) => {
+      const result = restore();
+      return { result, visits: statistics().counts.externalCaptureVisits ?? 0 };
+    });
+  // Continue and a rewind capture the kept JSON as one checkpoint restore does; a restore point's JSON is validated as
+  // parsed, as `deserializeCheckpoint` does, so nothing is captured.
+  const once = captured(() => restoreCheckpoint(checkpointOf(json))).visits;
+  assert.ok(once > 0);
+  const continued = captured(() =>
+    restorePlayerRuntimeSessionAt(session.plan, json, session.events, new DebugRecorder()),
+  );
+  assert.equal(continued.visits, once);
+  assert.equal(captured(() => deserializeCheckpoint(point.checkpointJson)).visits, 0);
+  assert.equal(captured(() => restorePlayerRuntimeSession(point, new DebugRecorder())).visits, 0);
+  // The restored session runs the state it checked, and its own events follow the restored ones.
+  assert.equal(playerRuntimeSnapshotJson(continued.result), json);
+  assert.deepEqual(continued.result.events, session.events);
+  assert.equal(continued.result.liveEventSequence, JSON.parse(json).nextEventSequence);
+
+  // Each invalid state is refused with the error the engine's own restore gives for it.
+  const changed = (change: (snapshot: Record<string, unknown>) => void) => {
+    const snapshot = JSON.parse(json);
+    change(snapshot);
+    return JSON.stringify(snapshot);
+  };
+  const refusal = (restore: () => void) => {
+    try {
+      restore();
+    } catch (error) {
+      assert.ok(error instanceof CheckpointError, String(error));
+      return error.info;
+    }
+    assert.fail("The restore accepted an invalid state.");
+  };
+  for (const invalid of [
+    changed((snapshot) => (snapshot["nextEventSequence"] = 0)),
+    changed((snapshot) => (snapshot["version"] = 0)),
+    changed((snapshot) => (snapshot["nextInstruction"] = session.plan.instructions.length + 1)),
+    changed((snapshot) => (snapshot["unknown"] = true)),
+  ]) {
+    const expected = refusal(() => restoreCheckpoint(checkpointOf(invalid)));
+    assert.deepEqual(
+      refusal(() => restorePlayerRuntimeSessionAt(session.plan, invalid, session.events)),
+      expected,
+    );
+    const checkpointJson = JSON.stringify({
+      ...JSON.parse(point.checkpointJson),
+      snapshot: JSON.parse(invalid),
+    });
+    assert.deepEqual(
+      refusal(() => restorePlayerRuntimeSession({ checkpointJson, events: point.events })),
+      refusal(() => deserializeCheckpoint(checkpointJson)),
+    );
+  }
+  assert.equal(
+    refusal(() => restorePlayerRuntimeSession({ checkpointJson: "{", events: [] })).code,
+    "TSK003",
+  );
 });
 
 test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {

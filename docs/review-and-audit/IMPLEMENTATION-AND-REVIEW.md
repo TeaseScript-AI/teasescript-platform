@@ -79,6 +79,27 @@ authority and unjustified duplicated moving facts. Prefer targeted correction or
 append-only amendments when existing wording should carry the meaning. Preserve authority, conditions,
 order, exceptions, executable detail, and resistance to misinterpretation.
 
+### One home for each language rule
+
+Each TeaseScript rule (evaluation order, which code runs, protected names, keyword and unit lists,
+built-in signatures, type rules, diagnostic texts) is defined in one place that every component uses, so
+the parser, type checker, lowering, plan, runtime and editor cannot drift apart.
+
+- Before encoding a language rule, find where it is already defined and use that definition. If a second
+  component needs it, move it to a shared module instead of copying it. A copy is acceptable only where a
+  trust boundary must validate independently (checkpoint and host data); then a test compares the copy
+  with the original.
+- An analysis that predicts runtime behavior (a warning, a compile check, a flow fact) takes the order
+  and the reachable code from the compiled plan or the shared helpers, not from its own model of the
+  runtime. Reuse the plan's control flow (`src/plan/control-flow.ts`) and the forward dataflow solver
+  (`src/plan/dataflow.ts`) where they fit; `src/speaker-flow.ts` shows a client.
+- Such an analysis is tested against the runtime: for representative variants of every construct it
+  covers (branches, loops, short-circuit operators, defaults supplied and left out, the parts of an ask,
+  gotos, calls), a reported problem must occur when the script runs, and an accepted script must not fail
+  that way.
+- When a second fix for the same kind of case is needed in one area, look for the shared cause before
+  patching again (see Convergence).
+
 ## Self-review and assigned review
 
 Before handoff, the implementer reviews the exact final diff. For each assigned review or re-review,
@@ -95,7 +116,8 @@ to support the landing decision without audit-only ceremony or unrelated cleanup
 lenses below; not every lens applies equally, and preference alone is not a blocker. On changed scalable
 paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
 green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
-native failure. Escalate uncertainty that cannot be bounded through a separately assigned
+native failure. On changes that encode a language rule or predict runtime behavior, apply the one-home
+lens above. Escalate uncertainty that cannot be bounded through a separately assigned
 [`AUDIT.md`](AUDIT.md).
 
 - **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
@@ -147,6 +169,8 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Scope, authority, criteria, risks, and affected paths established.
 - [ ] Simplest complete solution; DRY keeps or lowers total complexity.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
+- [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
+  the plan or shared helpers and are tested against the runtime.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.

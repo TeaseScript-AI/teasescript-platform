@@ -144,7 +144,7 @@ test("nothing a session publishes or exports shares an object with its state", (
   // A trusted export is the checked export's JSON, copied without checking, and it is the host's own data too.
   const trusted = withValidationTestStatistics((statistics) => {
     const copy = session.exportTrustedSnapshot();
-    assert.equal(statistics().counts.snapshotValidationAnalyses ?? 0, 0);
+    assert.equal(statistics().counts.externalCaptureVisits ?? 0, 0);
     return copy;
   });
   assert.equal(JSON.stringify(trusted), JSON.stringify(session.exportSnapshot()));
@@ -201,7 +201,7 @@ test("a tagged snapshot restores without capture or validation to the checked re
   const atExport = serializeCheckpoint(source.exportCheckpoint());
   const tagged = withValidationTestStatistics((statistics) => {
     const exported = source.exportTaggedSnapshot();
-    assert.equal(statistics().counts.snapshotValidationAnalyses ?? 0, 0);
+    assert.equal(statistics().counts.externalCaptureVisits ?? 0, 0);
     return exported;
   });
   assert.equal(tagged.json, JSON.stringify(source.exportSnapshot()));
@@ -212,7 +212,6 @@ test("a tagged snapshot restores without capture or validation to the checked re
       const restored = createTaggedRuntimeSession(source.plan, tagged);
       const { counts } = statistics();
       assert.equal(counts.externalCaptureVisits ?? 0, 0);
-      assert.equal(counts.snapshotValidationAnalyses ?? 0, 0);
       return restored;
     });
   const restored = restore();

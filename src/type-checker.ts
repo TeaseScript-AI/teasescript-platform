@@ -44,12 +44,14 @@ import { compileChild, runCompileTask, type CompileTask } from "./compiler/conti
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   askOperands,
+  askParts,
   expressionChildren,
   namedAskArguments,
   sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
+  timerOperands,
 } from "./expression-children.js";
 import {
   isBlankTextAnswer,
@@ -73,6 +75,7 @@ import {
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
+import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
   emptyImageFilterMessage,
@@ -93,6 +96,7 @@ import {
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
+  HANDLE_KINDS,
   LIST_REORDERS,
   LIST_SEARCHES,
   mayBeMessage,
@@ -102,11 +106,13 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
+import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
   anglePropertyMessage,
+  angleValue,
+  formatAngle,
   type StoredAngle,
 } from "./angle.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
@@ -146,6 +152,12 @@ import {
   misspelledPropertyHint,
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
+import {
+  placeKey,
+  type SpeakerFlowInput,
+  type SpeakerFlowRead,
+  type SpeakerFlowStore,
+} from "./speaker-flow.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -292,6 +304,8 @@ export interface TypeCheckResult {
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
   readonly flow: StatementFlow;
+  /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
+  readonly speakerFlow: SpeakerFlowInput;
   /**
    * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
@@ -321,6 +335,7 @@ export type RuntimeCheckSite =
   | LoadExpression;
 
 const typeCode = {
+  invalidAssignment: "TSV004",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
@@ -467,6 +482,7 @@ export function checkTypes(
             Object.freeze([...diagnostics, ...closedLoops[file]!]),
           ),
         ),
+        speakerFlow: checker.speakerFlowInput(),
         runtimeChecks: checker.runtimeChecks(),
         formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
@@ -1417,6 +1433,20 @@ class TypeChecker {
   /** The calls `player.copyFrom(account)` that are statements of their own, the only place the copy may stand. */
   readonly #copyStatements = new WeakSet<Expression>();
 
+  // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
+  // speaker's name or `speaker` under `as`, the stores through a speaker's name, and which ways through each branch,
+  // loop, and lazy operand are possible (see `SpeakerFlowInput`).
+  readonly #flowReads = new Map<
+    PropertyAccessExpression,
+    Omit<SpeakerFlowRead, "sources"> & { readonly file: number }
+  >();
+  readonly #flowStores = new Map<
+    AssignmentStatement,
+    SpeakerFlowStore & { readonly file: number }
+  >();
+  readonly #pathFacts = new Map<Statement, boolean[]>();
+  readonly #operandFacts = new Map<string, boolean[]>();
+
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
     readonly node: Expression | AssignmentStatement;
@@ -1912,6 +1942,14 @@ class TypeChecker {
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
+    if (speaker !== undefined)
+      this.#flowReads.set(read, {
+        speaker,
+        name,
+        field: false,
+        file: this.#file,
+        span: read.property.span,
+      });
     const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
@@ -1986,14 +2024,55 @@ class TypeChecker {
   #noteSpeakerField(read: PropertyAccessExpression, scope: Scope): void {
     if (this.#fieldReads.has(read)) return;
     this.#fieldReads.add(read);
+    const speaker = this.#speakerName(read.object, scope);
+    if (speaker !== undefined)
+      this.#flowReads.set(read, {
+        speaker,
+        name: read.property.name,
+        field: true,
+        file: this.#file,
+        span: read.property.span,
+      });
     this.#deferred.push({
       kind: "speakerField",
       file: this.#file,
       at: this.diagnostics.length,
-      speaker: this.#speakerName(read.object, scope) ?? null,
+      speaker: speaker ?? null,
       name: read.property.name,
       span: read.property.span,
     });
+  }
+
+  /** Notes which ways through a branch or loop are possible; a body checked again adds the ways it finds then. */
+  #notePaths(statement: Statement, paths: boolean[]): void {
+    this.#pathFacts.set(statement, joinedWays(this.#pathFacts.get(statement), paths));
+  }
+
+  /** Notes whether the right side of `and`, `or`, or `otherwise` may run, and whether it may be skipped. */
+  #noteOperand(expression: Expression, ways: boolean[]): void {
+    const key = placeKey(this.#file, expression.span);
+    this.#operandFacts.set(key, joinedWays(this.#operandFacts.get(key), ways));
+  }
+
+  /**
+   * What the flow check of speaker properties needs from the last check (V30 §37). It follows the reads through a
+   * speaker's name of a property that a declaration or a store in the package gives the speaker, since the end of the
+   * check reports the others, and that no store reaches unchecked, since such a store may give it to any speaker.
+   */
+  public speakerFlowInput(): SpeakerFlowInput {
+    const reads = new Map<string, SpeakerFlowRead>();
+    for (const [read, { file, ...flow }] of this.#flowReads) {
+      const sources = flow.field ? fieldSources(flow.name) : [flow.name];
+      if (sources.some((source) => this.#unchecked.has(source))) continue;
+      const given = flow.field
+        ? sources.some((source) => this.#speakerGets.get(flow.speaker)?.has(source) === true)
+        : this.#speakerProperties.get(flow.speaker)?.has(flow.name) === true;
+      if (given) reads.set(placeKey(file, read.span), { ...flow, sources });
+    }
+    const stores = new Map<string, SpeakerFlowStore>();
+    for (const [statement, { file, ...store }] of this.#flowStores)
+      stores.set(placeKey(file, statement.target.span), store);
+    return { reads, stores, paths: this.#pathFacts, operands: this.#operandFacts };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2198,6 +2277,7 @@ class TypeChecker {
       case "expressionStatement":
         if (copiesAccount(statement.expression)) this.#copyStatements.add(statement.expression);
         yield* compileChild(this.#expressionTask(statement.expression, scope));
+        this.#reportCopyChangedInPlace(statement.expression);
         return true;
       case "speakerDeclaration":
         // Its properties are start values, checked before the files.
@@ -2280,6 +2360,7 @@ class TypeChecker {
         return true;
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
@@ -2319,6 +2400,9 @@ class TypeChecker {
         const typeCases: { readonly typeTest: SwitchTypeTest; readonly test: StaticType }[] = [];
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
+        const casePaths: boolean[] = [];
+        // The literal values that the value cases list, to tell whether they take every value the subject can hold.
+        const literals: PossibleValue[] = [];
         for (const switchCase of statement.cases) {
           // What the block may assume about the value, or `null` when the case does not narrow it.
           let taken: StaticType | null = null;
@@ -2368,8 +2452,11 @@ class TypeChecker {
                 value,
                 valueType,
               );
-              if (never === undefined) matchable = true;
-              else
+              if (never === undefined) {
+                matchable = true;
+                if (literalRange(value) === undefined)
+                  literals.push(...(comparedLiteral(value) ?? []));
+              } else
                 this.diagnostics.push(
                   createDiagnostic(
                     DiagnosticSeverity.Warning,
@@ -2392,12 +2479,18 @@ class TypeChecker {
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
             this.#flow.apply(this.#flow.since(start, new Map([[variable, taken]])));
+          casePaths.push(reached);
           if ((yield* compileChild(this.#pathTask(switchCase.body, scope, reached))) && reached)
             ends.push(this.#flow.mark());
         }
         // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
         this.#flow.restore(start);
         const restReached = remaining.kind !== "never";
+        // The flow of speaker properties also knows that no value is left when the cases list every value it can be.
+        this.#notePaths(statement, [
+          ...casePaths,
+          restReached && !takesEveryValue(remaining, literals),
+        ]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -2417,6 +2510,7 @@ class TypeChecker {
         // The condition is tested anew on each iteration, after whatever the body changed (rule 5.5).
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
@@ -2444,6 +2538,10 @@ class TypeChecker {
             "A repeat count is a whole number (integer)",
           );
         const times = staticNumber(statement.count);
+        this.#notePaths(statement, [
+          times === undefined || times >= 1,
+          times === undefined || times < 1,
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(statement.body, scope, [], times === undefined || times >= 1),
         );
@@ -2475,6 +2573,10 @@ class TypeChecker {
           declaration: statement,
         };
         this.#declared.set(statement, variable);
+        this.#notePaths(statement, [
+          !isEmptyLiteral(statement.iterable),
+          !isNonEmptyLiteral(statement.iterable),
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(
             statement.body,
@@ -2594,6 +2696,10 @@ class TypeChecker {
     };
     this.#declared.set(statement, key);
     this.#declared.set(valueName, value);
+    this.#notePaths(statement, [
+      !isEmptyLiteral(statement.iterable),
+      !isNonEmptyLiteral(statement.iterable),
+    ]);
     const ends = yield* compileChild(
       this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
     );
@@ -2801,6 +2907,7 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
+      this.#reportChangedCopy(target, target.object);
       this.#noteUncheckedStore(target, scope);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
@@ -2861,7 +2968,10 @@ class TypeChecker {
         else {
           // A store through a speaker's name gives it the property; any other store into a speaker is unchecked.
           const speaker = this.#speakerName(target.object, scope);
-          if (speaker !== undefined) this.#speakerGets.get(speaker)?.add(name);
+          if (speaker !== undefined) {
+            this.#speakerGets.get(speaker)?.add(name);
+            this.#flowStores.set(statement, { speaker, name, file: this.#file });
+          }
         }
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
@@ -2977,9 +3087,8 @@ class TypeChecker {
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
-    const kept = resolved(
-      read ?? (variable === undefined ? place.type : this.#currentType(variable)),
-    );
+    // `+=` and `-=` read the variable before the value runs (V30 §14).
+    const kept = resolved(read ?? before ?? place.type);
     if (variable !== undefined) this.#flow.set(variable, undefined);
     const reported = this.diagnostics.length;
     const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
@@ -4373,7 +4482,7 @@ class TypeChecker {
         const custom = this.#customProperties(expression.object, object, name, scope);
         if (custom === undefined) return this.#propertyType(object, expression);
         // A custom property that no store gave the speaker yet is of unknown type.
-        return placeRead(memberPropertyType(custom, name) ?? UNKNOWN_TYPE);
+        return memberPropertyType(custom, name) ?? placeRead(UNKNOWN_TYPE);
       }
       case "indexExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
@@ -4487,11 +4596,8 @@ class TypeChecker {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         let fallback: StaticType = UNKNOWN_TYPE;
         if (expression.defaultValue !== null) {
-          // The default runs only for a missing key, so what it changes may or may not have happened afterwards.
-          const start = this.#flow.mark();
-          fallback = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-          const changes = this.#flow.undo(start);
-          this.#flow.apply(this.#flow.join([new Map(), changes]));
+          // The default runs only for a missing key.
+          fallback = yield* compileChild(this.#mayRunTask(expression.defaultValue, scope));
           if (holdsSessionValue(fallback)) {
             const given = unwrap(expression.defaultValue);
             const fix = !containsType(fallback, (part) => part.kind === "messageHandle")
@@ -5366,6 +5472,10 @@ class TypeChecker {
           // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
           // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
+          this.#noteOperand(node, [
+            runsRight !== null,
+            (node.operator === "and" ? left.whenFalse : left.whenTrue) !== null,
+          ]);
           this.#flow.apply(
             runsRight ??
               (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
@@ -5528,9 +5638,9 @@ class TypeChecker {
     // A range matches a number within its bounds, so no button value may fall in it.
     const range = literalRange(value);
     if (range !== undefined) {
-      const within = ({ value, duration }: PossibleValue) =>
+      const within = ({ value, measure }: PossibleValue) =>
         typeof value === "number" &&
-        !duration &&
+        measure === null &&
         value >= range.start &&
         (range.inclusive ? value <= range.end : value < range.end);
       return possible.some(within)
@@ -5601,6 +5711,7 @@ class TypeChecker {
       // The result may be the value or the fallback itself, so it is a copy that later stores to either cannot share.
       const left = this.#capture(node.left);
       if (unused === null && neverNull(left)) unused = index;
+      this.#noteOperand(node, [unused === null, true]);
       // A fallback runs only when every value before it is null, so what it changes may or may not have happened
       // afterwards, and after a value that is never null, it never runs, but is still checked.
       const start = this.#flow.mark();
@@ -6302,6 +6413,40 @@ class TypeChecker {
     return { failed };
   }
 
+  /**
+   * The arguments of a call of a built-in function or a method, each as it was evaluated, before later arguments run; a
+   * `default:` that runs only when the call needs it comes last (owner decision, 2026-10-16). A call that `waits` for the
+   * Player waits after its other arguments, so a block may run before its result or its default.
+   */
+  *#callArgumentsTask(
+    expression: CallExpression,
+    scope: Scope,
+    waits = false,
+  ): CompileTask<readonly StaticType[]> {
+    const lazy = lazyDefaultArgument(expression)?.argument;
+    const values: StaticType[] = [];
+    for (const [index, argument] of expression.arguments.entries()) {
+      if (argument === lazy) continue;
+      yield* compileChild(this.#expressionTask(argument.value, scope));
+      values[index] = this.#capture(argument.value);
+    }
+    if (waits) this.#suspend();
+    if (lazy !== undefined) {
+      yield* compileChild(this.#mayRunTask(lazy.value, scope));
+      values[expression.arguments.indexOf(lazy)] = this.#capture(lazy.value);
+    }
+    return values;
+  }
+
+  /** An operand that runs only on some ways, such as a default: what it changes may or may not have happened after it. */
+  *#mayRunTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
+    const start = this.#flow.mark();
+    const type = yield* compileChild(this.#expressionTask(expression, scope));
+    const changes = this.#flow.undo(start);
+    this.#flow.apply(this.#flow.join([new Map(), changes]));
+    return type;
+  }
+
   *#callTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     let callee = expression.callee;
     while (callee.kind === "parenthesizedExpression") callee = callee.expression;
@@ -6333,18 +6478,12 @@ class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      const values: StaticType[] = [];
-      for (const argument of expression.arguments) {
-        yield* compileChild(this.#expressionTask(argument.value, scope));
-        // A built-in takes each argument as it was evaluated, before later arguments run.
-        values.push(this.#capture(argument.value));
-      }
-      if (entry === undefined && this.#builtins.has(callee.name)) {
-        const type = this.#builtinType(callee.name, expression, values);
-        // A file store call may wait for the Player, and a block may run before it gives its result.
-        if (isFileStoreCall(expression)) this.#suspend();
-        return type;
-      }
+      // A file store call may wait for the Player.
+      const values = yield* compileChild(
+        this.#callArgumentsTask(expression, scope, isFileStoreCall(expression)),
+      );
+      if (entry === undefined && this.#builtins.has(callee.name))
+        return this.#builtinType(callee.name, expression, values);
       return UNKNOWN_TYPE;
     }
     if (callee.kind !== "propertyAccessExpression") {
@@ -6410,11 +6549,7 @@ class TypeChecker {
         return NULL_TYPE;
       }
     }
-    const values: StaticType[] = [];
-    for (const argument of expression.arguments) {
-      yield* compileChild(this.#expressionTask(argument.value, scope));
-      values.push(this.#capture(argument.value));
-    }
+    const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();
@@ -6949,13 +7084,19 @@ class TypeChecker {
       case "random":
         return NUMBER_TYPE;
       case "chance":
-        if (argument !== undefined && value !== undefined)
+        if (argument !== undefined && value !== undefined) {
           this.#reportUnless(
             value,
             isNumeric,
             argument.value,
             "chance(...) takes a percentage number",
           );
+          // A percentage the compiler can see is checked as the runtime checks it.
+          const known = this.#known(argument.value);
+          const failure = typeof known === "number" ? percentageFailure(name, known) : undefined;
+          if (failure !== undefined)
+            this.#report(typeCode.invalidOperand, failure, argument.value.span);
+        }
         return BOOLEAN_TYPE;
       case "randomInteger":
         if (argument !== undefined && value !== undefined) {
@@ -7172,18 +7313,17 @@ class TypeChecker {
   ): StaticType | PlaceRead {
     const name = expression.property.name;
     const all = members(object);
-    const types = all.map((member) => memberPropertyType(member, name));
-    const passing = all.filter((_, index) => types[index] !== undefined);
+    const reads = all.map((member) => memberPropertyType(member, name));
+    const passing = all.filter((_, index) => reads[index] !== undefined);
     if (passing.length === all.length) {
       this.#noteMissingAccess(expression, object);
-      const type = all.length === 1 ? types[0]! : union(types.map((type) => type!));
-      // A set member is read as a copy (ADR 0014), so what changes the copy decides or widens nothing in the set.
-      if (LIST_ELEMENT_READS.has(name) && all.some((member) => resolved(member).kind === "set"))
-        return copyType(type);
-      // A property or an element is read from the place that keeps it.
-      return placeRead(type);
+      const types = reads.map((read) => (read!.kind === "placeRead" ? read!.type : read!));
+      const type = all.length === 1 ? types[0]! : union(types);
+      // A property or an element is read from the place that keeps it. Any other property gives a new value, such as a
+      // copy of a set member (ADR 0014), so what changes it decides or widens nothing in the value it was read from.
+      return reads.every((read) => read!.kind === "placeRead") ? placeRead(type) : copyType(type);
     }
-    const failing = all.find((_, index) => types[index] === undefined)!;
+    const failing = all.find((_, index) => reads[index] === undefined)!;
     if (passing.length > 0) {
       this.#reportMayBe(expression.object, failing, passing);
       return UNKNOWN_TYPE;
@@ -7997,30 +8137,33 @@ class TypeChecker {
   }
 
   *#timerTask(timer: TimerParts, scope: Scope): CompileTask<void> {
-    if (typeof timer.display === "object" && timer.display !== null)
-      yield* compileChild(
-        this.#requireTask(
-          timer.display,
-          scope,
-          (type) => isScalar(type, "string"),
-          "A timer display is text (string)",
-        ),
-      );
-    // With a unit, a timer also takes a range of whole units, written directly or held in a variable.
-    this.#timeOperands.set(timer.duration, timer.form === "short" ? "timer" : "duration:");
-    const duration = yield* compileChild(this.#expressionTask(timer.duration, scope));
-    this.#reportTime(
-      timer.duration,
-      duration,
-      timer.form === "short" ? "timer" : "named timer",
-      timer.unit !== null,
-    );
-    if (timer.label !== null)
-      this.#checkShownText(
-        timer.label,
-        yield* compileChild(this.#expressionTask(timer.label, scope)),
-        "a timer label",
-      );
+    for (const operand of timerOperands(timer)) {
+      if (operand === timer.duration) {
+        // With a unit, a timer also takes a range of whole units, written directly or held in a variable.
+        this.#timeOperands.set(operand, timer.form === "short" ? "timer" : "duration:");
+        const duration = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportTime(
+          operand,
+          duration,
+          timer.form === "short" ? "timer" : "named timer",
+          timer.unit !== null,
+        );
+      } else if (operand === timer.label)
+        this.#checkShownText(
+          operand,
+          yield* compileChild(this.#expressionTask(operand, scope)),
+          "a timer label",
+        );
+      else
+        yield* compileChild(
+          this.#requireTask(
+            operand,
+            scope,
+            (type) => isScalar(type, "string"),
+            "A timer display is text (string)",
+          ),
+        );
+    }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
   }
 
@@ -8323,6 +8466,79 @@ class TypeChecker {
         node = node.object;
       else return;
     }
+  }
+
+  /**
+   * Reports a change of `changed` that lands in a value no variable holds, such as `obj()` in `obj().n = 5`, so the
+   * change is lost with it (owner decision O3, 2026-10-16). `start` is the value changed: the object of an assigned
+   * property or element, or the receiver of an in-place method. Of it and the values it is part of, the first that may
+   * be a speaker or a handle takes the change, as every copy of it names the same one; so does a variable. A list, set,
+   * dict, or object that a property computes when it is read, such as a dict's `values`, is a copy no variable holds as
+   * well: the nearest such property is reported unless the value it is read from is itself such a copy. A value the
+   * compiler cannot know may be a speaker, so it is not reported, nor is a value that can only be null, which has
+   * nothing to change and its own message.
+   */
+  #reportChangedCopy(changed: Expression, start: Expression): void {
+    let computed: Extract<Expression, { kind: "propertyAccessExpression" }> | undefined;
+    for (let node = start; ;) {
+      const type = this.#typeOf(node);
+      const reference = members(type).some(
+        (member) => !isKnown(member) || HANDLE_KINDS.has(resolved(member).kind),
+      );
+      if (nonNullType(type).kind === "never") return;
+      if (reference) break;
+      if (node.kind === "parenthesizedExpression") node = node.expression;
+      else if (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
+        if (node.kind === "propertyAccessExpression" && this.#computedCopy(node, type))
+          computed ??= node;
+        node = node.object;
+      } else {
+        if (node.kind !== "identifier") {
+          this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
+          return;
+        }
+        break;
+      }
+    }
+    if (computed === undefined) return;
+    const owner = resolved(members(nonNullType(this.#typeOf(computed.object)))[0]!).kind;
+    this.#report(typeCode.invalidAssignment, computedCopyMessage(computed, owner), changed.span);
+  }
+
+  /**
+   * Whether `read`, of type `type`, is a list, set, dict, or object that its property computes when it is read, such as
+   * a dict's `values` or a set's `first`, rather than a part its object keeps, so that a change of it changes a copy.
+   */
+  #computedCopy(
+    read: Extract<Expression, { kind: "propertyAccessExpression" }>,
+    type: StaticType,
+  ): boolean {
+    const changeable = members(type).some((member) => {
+      const value = resolved(member);
+      return isCollection(value) || value.kind === "object";
+    });
+    return (
+      changeable &&
+      members(nonNullType(this.#typeOf(read.object))).every((owner) => {
+        const value = memberPropertyType(owner, read.property.name);
+        return value !== undefined && value.kind !== "placeRead";
+      })
+    );
+  }
+
+  /** Reports an in-place change in statement position, such as `things().sort()`, of a value no variable holds. */
+  #reportCopyChangedInPlace(expression: Expression): void {
+    if (expression.kind !== "callExpression") return;
+    const callee = unwrap(expression.callee);
+    if (callee.kind !== "propertyAccessExpression") return;
+    const method = callee.property.name;
+    if (!COLLECTION_CHANGES.has(method) && !LIST_REORDERS.has(method)) return;
+    // Only a list, set, or dict that has the method changes: text `reverse` gives a new text, and a method that a value
+    // does not have is reported as such.
+    const changes = members(this.#typeOf(callee.object)).some(
+      (member) => isCollection(resolved(member)) && memberMethodType(member, method) !== undefined,
+    );
+    if (changes) this.#reportChangedCopy(callee.object, callee.object);
   }
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
@@ -9227,8 +9443,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
 
 /** The direct subexpressions of an expression, including interaction operands. */
 function expressionParts(expression: Expression): readonly Expression[] {
-  if (expression.kind === "interactionExpression")
-    return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
+  if (expression.kind === "interactionExpression") return askParts(expression);
   if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
   if (expression.kind === "sayExpression") return sayOperands(expression);
   return expressionChildren(expression);
@@ -9236,14 +9451,6 @@ function expressionParts(expression: Expression): readonly Expression[] {
 
 function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
   return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
-}
-
-function timerOperands(timer: TimerParts): readonly Expression[] {
-  return [
-    ...(typeof timer.display === "object" && timer.display !== null ? [timer.display] : []),
-    timer.duration,
-    ...(timer.label === null ? [] : [timer.label]),
-  ];
 }
 
 /**
@@ -9553,21 +9760,27 @@ function nonNullTypeForUse(type: StaticType): StaticType {
   return value.kind === "never" ? resolved(type) : value;
 }
 
-/** The type of a property read on one known member type, or `undefined` when that type has no such property. */
-function memberPropertyType(type: StaticType, name: string): StaticType | undefined {
+/**
+ * What a property read gives on one known member type, or `undefined` when that type has no such property: a place read
+ * for a property or an element that the value keeps, which a change through it reaches, and the type of a new value for
+ * a property computed when it is read, so that a change through it changes a copy.
+ */
+function memberPropertyType(type: StaticType, name: string): StaticType | PlaceRead | undefined {
   const value = resolved(type);
   switch (value.kind) {
     case "list":
     case "set":
       if (name === "length") return INTEGER_TYPE;
-      return name === "first" || name === "last" || name === "random" ? value.element : undefined;
+      if (!LIST_ELEMENT_READS.has(name)) return undefined;
+      // A set member is read as a copy (ADR 0014).
+      return value.kind === "list" ? placeRead(value.element) : value.element;
     case "dict":
       // `keys` and `values` are new lists, in entry order.
       if (name === "length") return INTEGER_TYPE;
       if (name === "keys") return { kind: "list", element: STRING_TYPE };
       return name === "values" ? { kind: "list", element: copyType(value.element) } : undefined;
     case "object":
-      return value.properties?.get(name) ?? UNKNOWN_TYPE;
+      return placeRead(value.properties?.get(name) ?? UNKNOWN_TYPE);
     case "timer":
     case "media":
     case "camera":
@@ -9589,7 +9802,8 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "permanentButton":
       return undefined;
     default:
-      return UNKNOWN_TYPE;
+      // A speaker keeps its properties, and a value of unknown type may.
+      return placeRead(UNKNOWN_TYPE);
   }
 }
 
@@ -9981,13 +10195,14 @@ function buttonLiteral(entry: Expression): ScalarValue | null | undefined {
   return property === undefined ? undefined : literalValue(property.value);
 }
 
-/** The text, number, true, false, or null that an expression certainly is, or `undefined`. */
+/** The text, number, true, false, null, exact duration, or angle that an expression certainly is, or `undefined`. */
 function literalValue(expression: Expression): ScalarValue | null | undefined {
   const known = staticChoiceValue(expression)?.value;
-  // An exact duration is compared by its length, so it stands for its milliseconds in a duration type. A calendar
-  // duration has no fixed length, and an angle is not tracked.
+  // An exact duration is compared by its length and an angle by its size, so in its type each stands for its
+  // milliseconds or its degrees. A calendar duration has no fixed length.
   if (known === null || typeof known !== "object") return known;
-  return known.kind === "angle" || isCalendar(known) ? undefined : known.milliseconds;
+  if (known.kind === "angle") return known.degrees;
+  return isCalendar(known) ? undefined : known.milliseconds;
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
@@ -10018,13 +10233,38 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
   const value = known.value;
-  if (value !== null && typeof value === "object" && (value.kind === "angle" || isCalendar(value)))
-    return undefined;
-  return [
-    value !== null && typeof value === "object"
-      ? { value: value.milliseconds, duration: true }
-      : { value, duration: false },
-  ];
+  if (value === null || typeof value !== "object") return [{ value, measure: null }];
+  if (value.kind === "angle") return [{ value: value.degrees, measure: "angle" }];
+  return isCalendar(value) ? undefined : [{ value: value.milliseconds, measure: "duration" }];
+}
+
+/** The ways that a check finds possible, with those an earlier check of the same code found. */
+function joinedWays(known: readonly boolean[] | undefined, ways: boolean[]): boolean[] {
+  return known === undefined ? ways : ways.map((way, index) => way || known[index] === true);
+}
+
+/**
+ * Whether the literal values of `taken` include every value that a value of `type` can hold: both booleans, or each
+ * button value of an `askChoice` with literal values, and `null` when it may be null.
+ */
+function takesEveryValue(type: StaticType, taken: readonly PossibleValue[]): boolean {
+  const possible: PossibleValue[] = [];
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "scalar" && value.name === "boolean" && value.values === undefined)
+      possible.push({ value: true, measure: null }, { value: false, measure: null });
+    else {
+      const restricted = possibleValues(value);
+      if (restricted === undefined) return false;
+      for (const each of restricted) possible.push(each);
+    }
+  }
+  return (
+    possible.length > 0 &&
+    possible.every(({ value, measure }) =>
+      taken.some((literal) => literal.value === value && literal.measure === measure),
+    )
+  );
 }
 
 /** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */
@@ -10032,32 +10272,39 @@ function takingTypeCase<
   Case extends { readonly typeTest: SwitchTypeTest; readonly test: StaticType },
 >(typeCases: readonly Case[], value: Expression, valueType: StaticType): Case | undefined {
   if (caseValueText(value) === undefined) return undefined;
-  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length.
-  const duration = isScalar(valueType, "duration");
-  const literal = duration ? undefined : comparedLiteral(value)?.[0];
-  if (!duration && literal === undefined) return undefined;
+  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length,
+  // and every angle literal an angle.
+  const measure = isScalar(valueType, "duration")
+    ? "duration"
+    : isScalar(valueType, "angle")
+      ? "angle"
+      : null;
+  const literal = measure === null ? comparedLiteral(value)?.[0] : undefined;
+  if (measure === null && literal === undefined) return undefined;
   const scalar = literal?.value;
   // Like the runtime type test: a whole number such as `5.0` is an integer.
   const passes = (member: StaticType): boolean =>
     member.kind === "null"
       ? scalar === null
       : member.kind === "scalar" &&
-        (duration
-          ? member.name === "duration"
+        (measure !== null
+          ? member.name === measure
           : typeof scalar === "number"
             ? member.name === "number" || (member.name === "integer" && Number.isInteger(scalar))
             : member.name === typeof scalar);
   return typeCases.find(({ typeTest, test }) => members(test).some(passes) !== typeTest.negated);
 }
 
-/** Literal values as an author writes them, as in `"spank" or "lines"`. */
+/** Literal values as an author writes them, as in `"spank" or "lines"`, `2 seconds`, or `90°`. */
 function describeLiterals(values: readonly PossibleValue[]): string {
-  const written = values.map(({ value, duration }) =>
+  const written = values.map(({ value, measure }) =>
     typeof value === "string"
       ? JSON.stringify(value)
-      : duration && typeof value === "number"
+      : measure === "duration" && typeof value === "number"
         ? formatDuration(value)
-        : String(value),
+        : measure === "angle" && typeof value === "number"
+          ? formatAngle(angleValue(value))
+          : String(value),
   );
   return written.length <= 1
     ? (written[0] ?? "")
@@ -10923,6 +11170,59 @@ function sourceText(expression: Expression): string | null {
   if (literal.kind === "numberLiteral") return literal.raw;
   if (literal.kind === "booleanLiteral") return String(literal.value);
   return null;
+}
+
+/**
+ * The message for a change of `changed` that lands in `copy`, a value no variable holds. For a call, such as `obj()`,
+ * it shows how to keep the value in a variable named by the call's first letter and change it there, as in `o.n`.
+ */
+function changedCopyMessage(changed: Expression, copy: Expression): string {
+  const callee = copy.kind === "callExpression" ? expressionLabel(copy.callee) : null;
+  if (copy.kind !== "callExpression" || callee === null)
+    return "This changes a copy that no variable holds, so the change is lost. Store the value in a variable first, then change the variable.";
+  const call = `${callee}(${copy.arguments.length > 0 ? "..." : ""})`;
+  const initial = callee
+    .slice(callee.lastIndexOf(".") + 1)
+    .charAt(0)
+    .toLowerCase();
+  const name = /^[a-z]$/.test(initial) && initial !== callee ? initial : "value";
+  const steps: string[] = [];
+  for (let node = changed; node !== copy;) {
+    if (node.kind === "parenthesizedExpression") node = node.expression;
+    else if (node.kind === "propertyAccessExpression") {
+      steps.push(`.${node.property.name}`);
+      node = node.object;
+    } else if (node.kind === "indexExpression") {
+      const index = unwrap(node.index);
+      steps.push(
+        `[${index.kind === "numberLiteral" ? index.raw : index.kind === "identifier" ? index.name : "..."}]`,
+      );
+      node = node.object;
+    } else break;
+  }
+  return `This changes a copy that no variable holds: '${call}' gives a new value each time, so the change is lost. Store it in a variable first, as in 'let ${name} = ${call}', then change '${name}${steps.reverse().join("")}'.`;
+}
+
+/**
+ * The message for a change of the value that `read`, a property of a value of kind `owner`, computes when it is read,
+ * such as `d.values`: it names where to make the change instead.
+ */
+function computedCopyMessage(
+  read: Extract<Expression, { kind: "propertyAccessExpression" }>,
+  owner: StaticType["kind"],
+): string {
+  const name = read.property.name;
+  const receiver =
+    expressionLabel(read.object) ?? (owner === "dict" || owner === "set" ? owner : "value");
+  const property = `'${receiver}.${name}'`;
+  const lost = `This changes a copy that no variable holds: ${property}`;
+  if (owner === "set")
+    return `${lost} gives a copy of the member, so the change is lost. To change the set, replace the member: 'let member = ${receiver}.${name}', '${receiver}.remove(member)', then change 'member' and '${receiver}.add(member)'.`;
+  if (owner === "dict" && name === "keys")
+    return `${lost} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`;
+  if (owner === "dict" && name === "values")
+    return `${lost} gives a new list each time, so the change is lost. Change the dict through its keys, as in '${receiver}[key]'.`;
+  return `${lost} gives a new value each time, so the change is lost. Store it in a variable first, as in 'let value = ${receiver}.${name}', then change the variable.`;
 }
 
 /**

@@ -6,6 +6,7 @@ import type {
   SayParts,
   ShowButtonParts,
   TagQueryExpression,
+  TimerParts,
 } from "./ast.js";
 
 /** Whether an ask keeps all its named arguments in written order: `askForm`, `askBoolean`, and `askBooleans`. */
@@ -52,6 +53,11 @@ export function askOperands(expression: InteractionExpression): readonly Express
     ...(expression.question === null ? [] : [expression.question]),
     ...named,
   ];
+}
+
+/** Every operand of an ask in evaluation order: the options of `askChoice` as written, then {@link askOperands}. */
+export function askParts(expression: InteractionExpression): readonly Expression[] {
+  return [...expression.options.map((option) => option.expression), ...askOperands(expression)];
 }
 
 /**
@@ -125,13 +131,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "tagQueryExpression":
       return tagQueryOperands(expression);
     case "timerExpression":
-      return [
-        ...(typeof expression.display === "object" && expression.display !== null
-          ? [expression.display]
-          : []),
-        expression.duration,
-        ...(expression.label === null ? [] : [expression.label]),
-      ];
+      return timerOperands(expression);
     case "showPermanentButtonExpression":
       return [expression.text];
   }
@@ -163,6 +163,16 @@ export function mediaOperands(parts: MediaParts): readonly Expression[] {
       ? parts.handlers.cues.flatMap((cue) => (cue.offset === null ? [] : [cue.offset]))
       : [];
   return [...argumentsInSourceOrder, ...cueOffsets];
+}
+
+/**
+ * The operands of a timer in source evaluation order: the named form's `display:`, `duration:`, and `label:` as written,
+ * or the short form's duration and label.
+ */
+export function timerOperands(timer: TimerParts): readonly Expression[] {
+  return [typeof timer.display === "object" ? timer.display : null, timer.duration, timer.label]
+    .filter((operand): operand is Expression => operand !== null)
+    .sort((left, right) => left.span.start.offset - right.span.start.offset);
 }
 
 /** The handler blocks of a play command, in source order. */

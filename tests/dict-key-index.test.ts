@@ -157,7 +157,7 @@ test("dict keys keep source order, replacement in place, stored nulls, and their
   );
 });
 
-test("a lookup evaluates the default first and fails for a missing key or a key that is not text", () => {
+test("a lookup evaluates the default only for a missing key and fails for a key that is not text", () => {
   const prefix = [
     DYNAMIC,
     "function note(text) {",
@@ -170,7 +170,7 @@ test("a lookup evaluates the default first and fails for a missing key or a key 
     says(
       `${prefix}\nsay d.get("a", default: note("one"))\nsay d.get("b", default: note("two"))\nexit`,
     ),
-    ["default one", "kept", "default two", "two"],
+    ["kept", "default two", "two"],
   );
   const missing = (key: string) =>
     `Dictionary has no key "${key}". Check d.contains("${key}") first.`;
@@ -188,7 +188,7 @@ test("a lookup evaluates the default first and fails for a missing key or a key 
     'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".';
   assert.deepEqual(failure(`${prefix}\nsay d[dynamic(2)]\nexit`), [[], "TSR062", notText]);
   assert.deepEqual(failure(`${prefix}\nsay d.get(dynamic(2), default: note("three"))\nexit`), [
-    ["default three"],
+    [],
     "TSR062",
     notText,
   ]);

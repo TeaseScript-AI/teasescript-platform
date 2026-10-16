@@ -1215,8 +1215,11 @@ function getProblems(
   ];
 }
 
-/** The kinds of handles to what a script started or showed, which no literal can write. */
-const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+/**
+ * The kinds of speakers and of handles to what a script started or showed, which no literal can write. Every copy of
+ * one names the same speaker or handle, so a change through any copy reaches it.
+ */
+export const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "timer",
   "media",
   "camera",

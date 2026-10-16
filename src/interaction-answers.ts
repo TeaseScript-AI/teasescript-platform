@@ -36,11 +36,34 @@ export function numberAnswerText(value: number): string {
   return String(Object.is(value, -0) ? 0 : value);
 }
 
+/** What a typed ask or a typed form field asks for. */
+export type TypedAnswerKind = "text" | "number" | "integer" | TemporalAnswerKind;
+
+/**
+ * What the player is told about a wrong answer, V30 §20's default `invalidMessage`: an answer that is not of the kind a
+ * typed ask or form field asks for, or typed text that matches no button of a choice (`choice`) or more than one
+ * (`ambiguousChoice`). A malformed host payload gets a protocol message instead.
+ */
+const INVALID_ANSWER_MESSAGES: Readonly<
+  Record<TypedAnswerKind | "choice" | "ambiguousChoice", string>
+> = {
+  text: "That is wrong. I asked for some text.",
+  number: "That is wrong. I asked for a number.",
+  integer: "That is wrong. I asked for a whole number.",
+  date: "That is wrong. I asked for a date.",
+  time: "That is wrong. I asked for a time.",
+  datetime: "That is wrong. I asked for a date and time.",
+  choice: "That is wrong. Type the exact text of one button, or use the buttons above.",
+  ambiguousChoice: "More than one button has this text. Use the buttons above.",
+};
+
+/** The message for a wrong answer to a typed ask, a typed form field, or a choice. */
+export function invalidAnswerMessage(kind: keyof typeof INVALID_ANSWER_MESSAGES): string {
+  return INVALID_ANSWER_MESSAGES[kind];
+}
+
 /** Whether prefill text is an answer the field accepts unchanged. */
-export function isValidInteractionPrefill(
-  kind: "text" | "number" | "integer" | TemporalAnswerKind,
-  prefill: string,
-): boolean {
+export function isValidInteractionPrefill(kind: TypedAnswerKind, prefill: string): boolean {
   if (kind === "text") return !isBlankTextAnswer(prefill);
   if (kind === "date" || kind === "time" || kind === "datetime")
     return temporalAnswer(kind, prefill) !== undefined;
