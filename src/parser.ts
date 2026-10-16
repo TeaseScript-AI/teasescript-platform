@@ -3477,14 +3477,8 @@ class Parser {
     } else if (isComparisonKind(this.#peek().kind)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseOtherwise());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          "Expected an expression after the comparison operator.",
-        );
-        return null;
-      }
+      const right = yield* parseChild(this.#parseComparedValue(left, operator));
+      if (right === null) return null;
       expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
       return left;
@@ -3502,10 +3496,79 @@ class Parser {
         }
         this.#advance();
         this.#skipContinuationNewlines();
+        // The chain has its error already, so a `not` here, as in `a == b == not c`, is read without another one.
+        while (this.#matchNot()) this.#skipContinuationNewlines();
         yield* parseChild(this.#parseOtherwise());
       }
     }
     return expression;
+  }
+
+  /**
+   * The right operand of a comparison. `not` binds more loosely than a comparison (V30 §5), so `x == not a` has no
+   * operand after the `==`: one error names the readings, and the rest is read as `x == (not a)`, so that nothing after
+   * it reports another error.
+   */
+  *#parseComparedValue(left: Expression, operator: Token): ParseTask<Expression | null> {
+    const operators: Token[] = [];
+    while (this.#matchNot()) {
+      operators.push(this.#previous());
+      this.#skipContinuationNewlines();
+    }
+    const diagnosticCount = this.#diagnostics.length;
+    let value = yield* parseChild(this.#parseOtherwise());
+    if (value === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        operators.length === 0
+          ? "Expected an expression after the comparison operator."
+          : "Expected an expression after 'not'.",
+      );
+      return null;
+    }
+    if (operators.length === 0) return value;
+    // A value with an error of its own, as the `{` of `if x == not {`, is not quoted.
+    const quotable = this.#diagnostics.length === diagnosticCount;
+    this.#reportNotAfterComparison(left, operator, operators, value, quotable);
+    for (let index = operators.length - 1; index >= 0; index -= 1) {
+      value = this.#unary(operators[index]!, value, "not");
+    }
+    return value;
+  }
+
+  /**
+   * Reports `not` right after a comparison operator. The message quotes the code as written in two forms that compile:
+   * the opposite comparison, and the `not` in parentheses after `==` or `!=`, or before the whole comparison after `<`,
+   * `<=`, `>`, or `>=`, which do not compare true and false. Two `not`s cancel out.
+   */
+  #reportNotAfterComparison(
+    left: Expression,
+    operator: Token,
+    operators: readonly Token[],
+    value: Expression,
+    quotable: boolean,
+  ): void {
+    const symbol = operator.lexeme;
+    const readings = (compared: string, negated: string): string[] => {
+      if (operators.length % 2 === 0) return [`${compared} ${symbol} ${negated}`];
+      const opposite = `${compared} ${OPPOSITE_COMPARISONS[symbol]!} ${negated}`;
+      return symbol === "==" || symbol === "!="
+        ? [opposite, `${compared} ${symbol} (not ${negated})`]
+        : [opposite, `not (${compared} ${symbol} ${negated})`];
+    };
+    // Only a short expression is quoted, as for `otherwise` (see `#reportMixedOtherwise`); an example stands in for it.
+    let written: string[] | undefined;
+    if (quotable && value.span.end.offset - left.span.start.offset <= 240) {
+      written = readings(this.#textOf(left.span, left.span), this.#textOf(value.span, value.span));
+      if (!written.every((reading) => reading.length <= 60 && !reading.includes("\n")))
+        written = undefined;
+    }
+    const quoted = (written ?? readings("x", "a")).map((reading) => `'${reading}'`).join(", or ");
+    this.#reportSpan(
+      parserDiagnosticCode.expectedExpression,
+      `'not' cannot follow '${symbol}' directly. Write ${written === undefined ? "it as in " : ""}${quoted}.`,
+      operators[0]!.span,
+    );
   }
 
   /** `value is T` or `value is not T`; the right operand is a type, not a value (ADR 0021). */
@@ -5738,6 +5801,16 @@ function isBinaryOperatorKind(kind: TokenKind): boolean {
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** For each comparison operator, the one that holds exactly when it does not. */
+const OPPOSITE_COMPARISONS: Readonly<Record<string, string>> = {
+  "==": "!=",
+  "!=": "==",
+  "<": ">=",
+  "<=": ">",
+  ">": "<=",
+  ">=": "<",
+};
 
 /** Arithmetic or a range, which `otherwise` takes as an operand only in parentheses (owner decision on #850). */
 function isArithmetic(expression: Expression): expression is BinaryExpression | RangeExpression {
