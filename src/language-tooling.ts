@@ -22,7 +22,13 @@ import {
 import type { Diagnostic } from "./diagnostics.js";
 import type { ProjectImageFile } from "./image-catalog.js";
 import { lex } from "./lexer.js";
-import { parse, type ParseResult, type StatementRange } from "./parser.js";
+import {
+  askOptionNames,
+  parse,
+  SHOW_BUTTON_OPTIONS,
+  type ParseResult,
+  type StatementRange,
+} from "./parser.js";
 import { compareProjectPaths } from "./project-paths.js";
 import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
@@ -94,61 +100,76 @@ export interface LanguageFormatResult {
   readonly text: string;
 }
 
+type CompactCommand = "showButton" | keyof typeof ASK_KINDS | "say";
+
+/** The asks that have editor help, with the kind of answer the parser gives each. */
+const ASK_KINDS = {
+  askText: "text",
+  askNumber: "number",
+  askInteger: "integer",
+  askDate: "date",
+  askTime: "time",
+  askDateTime: "datetime",
+  askChoice: "choice",
+} as const satisfies Record<string, InteractionExpression["interactionKind"]>;
+
+/** What a named option takes, for a syntax line; a prefill is written per ask, as the answer it gives. */
+const OPTION_VALUES: Readonly<Record<string, string>> = {
+  hint: "text",
+  background: "colour",
+  timeout: "duration",
+};
+
+const ASK_HEAD = "[as speaker] [bubble(options)|prose(options)] [question]";
+
 const HELP = Object.freeze({
-  showButton: Object.freeze({
-    command: "showButton" as const,
-    summary:
-      "Shows one foreground button and waits for activation. An optional timeout, such as 5 s or 500 ms, removes the button without a chat message when it runs out. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
-    syntax: "showButton [as speaker] label [, background: colour] [, timeout: duration]",
-  }),
-  askText: Object.freeze({
-    command: "askText" as const,
-    summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The asking speaker says the optional question in the chat before the field opens. An optional hint is shown in the field, not in the chat. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
-    syntax:
-      "askText [as speaker] [bubble(options)|prose(options)] [question] [, prefill: answer] [, hint: text]",
-  }),
-  askNumber: Object.freeze({
-    command: "askNumber" as const,
-    summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
-    syntax:
-      "askNumber [as speaker] [bubble(options)|prose(options)] [question] [, prefill: number] [, hint: text]",
-  }),
-  askInteger: Object.freeze({
-    command: "askInteger" as const,
-    summary:
-      "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
-    syntax:
-      "askInteger [as speaker] [bubble(options)|prose(options)] [question] [, prefill: integer] [, hint: text]",
-  }),
-  askDate: Object.freeze({
-    command: "askDate" as const,
-    summary:
-      "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
-    syntax:
-      "askDate [as speaker] [bubble(options)|prose(options)] [question] [, prefill: date] [, hint: text]",
-  }),
-  askTime: Object.freeze({
-    command: "askTime" as const,
-    summary:
-      "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
-    syntax:
-      "askTime [as speaker] [bubble(options)|prose(options)] [question] [, prefill: time] [, hint: text]",
-  }),
-  askDateTime: Object.freeze({
-    command: "askDateTime" as const,
-    summary:
-      "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
-    syntax:
-      "askDateTime [as speaker] [bubble(options)|prose(options)] [question] [, prefill: datetime] [, hint: text]",
-  }),
-  askChoice: Object.freeze({
-    command: "askChoice" as const,
-    summary:
-      "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element; an element may be a { value?, text, background? } object.",
-    syntax: "askChoice [as speaker] [value:] option, [value:] option, ...",
-  }),
+  showButton: help(
+    "showButton",
+    "Shows one foreground button and waits for activation. An optional timeout, such as 5 s or 500 ms, removes the button without a chat message when it runs out. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
+    "[as speaker] label",
+  ),
+  askText: help(
+    "askText",
+    "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The asking speaker says the optional question in the chat before the field opens. An optional hint is shown in the field, not in the chat. An optional prefill answer fills the field at first; submitting it unchanged returns it.",
+    ASK_HEAD,
+    "answer",
+  ),
+  askNumber: help(
+    "askNumber",
+    "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional prefill number fills the field at first.",
+    ASK_HEAD,
+    "number",
+  ),
+  askInteger: help(
+    "askInteger",
+    "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional prefill whole number fills the field at first.",
+    ASK_HEAD,
+    "integer",
+  ),
+  askDate: help(
+    "askDate",
+    "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
+    ASK_HEAD,
+    "date",
+  ),
+  askTime: help(
+    "askTime",
+    "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
+    ASK_HEAD,
+    "time",
+  ),
+  askDateTime: help(
+    "askDateTime",
+    "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
+    ASK_HEAD,
+    "datetime",
+  ),
+  askChoice: help(
+    "askChoice",
+    "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element, and a set one per member; an element may be a { value?, text, background? } object. An optional prefill after the options preselects the button that returns its value.",
+    "[as speaker] [value:] option, [value:] option, ...",
+    "value",
+  ),
   say: Object.freeze({
     command: "say" as const,
     summary:
@@ -435,27 +456,7 @@ function isExpressionCompletionContext(
   );
 }
 
-type CompactCommand =
-  | "showButton"
-  | "askText"
-  | "askNumber"
-  | "askInteger"
-  | "askDate"
-  | "askTime"
-  | "askDateTime"
-  | "askChoice"
-  | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
-
-const INTERACTION_COMMANDS = {
-  text: "askText",
-  number: "askNumber",
-  integer: "askInteger",
-  date: "askDate",
-  time: "askTime",
-  datetime: "askDateTime",
-  choice: "askChoice",
-} as const satisfies Record<string, CompactCommand>;
 
 function compactCommandContext(
   tokens: readonly Token[],
@@ -477,18 +478,18 @@ function compactCommandContext(
 function tokenToCompactCommand(token: Token): CompactCommand | null {
   if (token.kind === TokenKind.KeywordSay) return "say";
   if (token.kind !== TokenKind.Identifier) return null;
-  if (
-    token.lexeme === "showButton" ||
-    token.lexeme === "askText" ||
-    token.lexeme === "askNumber" ||
-    token.lexeme === "askInteger" ||
-    token.lexeme === "askDate" ||
-    token.lexeme === "askTime" ||
-    token.lexeme === "askDateTime" ||
-    token.lexeme === "askChoice"
-  ) {
-    return token.lexeme;
-  }
+  if (token.lexeme === "showButton" || isAskCommand(token.lexeme)) return token.lexeme;
+  return null;
+}
+
+function isAskCommand(name: string): name is keyof typeof ASK_KINDS {
+  return Object.hasOwn(ASK_KINDS, name);
+}
+
+/** The ask command of an interaction kind, or `null` for an ask without editor help, such as `askForm`. */
+function askCommand(kind: InteractionExpression["interactionKind"]): CompactCommand | null {
+  for (const command of Object.keys(ASK_KINDS))
+    if (isAskCommand(command) && ASK_KINDS[command] === kind) return command;
   return null;
 }
 
@@ -519,14 +520,8 @@ function locateCompactCommand(
     },
     interaction(node) {
       if (!containsOffset(node.span, offset)) return;
-      if (
-        node.interactionKind === "form" ||
-        node.interactionKind === "boolean" ||
-        node.interactionKind === "booleans"
-      )
-        return;
-      const command = INTERACTION_COMMANDS[node.interactionKind];
-      best = { command, range: node.commandSpan };
+      const command = askCommand(node.interactionKind);
+      if (command !== null) best = { command, range: node.commandSpan };
     },
     say(node) {
       if (!containsOffset(node.span, offset)) return;
@@ -665,22 +660,30 @@ function containsOffset(span: SourceSpan, offset: number): boolean {
   return offset >= span.start.offset && offset <= span.end.offset;
 }
 
+/** The named options of a command after its label, question, or options, as the parser accepts them. */
+function namedOptions(command: CompactCommand): readonly string[] {
+  if (command === "say") return [];
+  return command === "showButton" ? SHOW_BUTTON_OPTIONS : askOptionNames(ASK_KINDS[command]);
+}
+
+/** The help of a command whose syntax line ends with its named options; `prefill` names what an ask's prefill is. */
+function help(
+  command: Exclude<CompactCommand, "say">,
+  summary: string,
+  head: string,
+  prefill = "value",
+): LanguageContextHelp {
+  const options = namedOptions(command).map(
+    (name) => ` [, ${name}: ${name === "prefill" ? prefill : (OPTION_VALUES[name] ?? "value")}]`,
+  );
+  return Object.freeze({ command, summary, syntax: `${command} ${head}${options.join("")}` });
+}
+
 function signatureParameters(command: CompactCommand): readonly string[] {
-  switch (command) {
-    case "showButton":
-      return Object.freeze(["speaker", "label", "background", "timeout"]);
-    case "askText":
-    case "askNumber":
-    case "askInteger":
-    case "askDate":
-    case "askTime":
-    case "askDateTime":
-      return Object.freeze(["speaker", "question", "prefill", "hint"]);
-    case "askChoice":
-      return Object.freeze(["speaker", "options"]);
-    case "say":
-      return Object.freeze(["speaker", "skip policy", "text", "pacing"]);
-  }
+  if (command === "say") return Object.freeze(["speaker", "skip policy", "text", "pacing"]);
+  const first =
+    command === "showButton" ? "label" : command === "askChoice" ? "options" : "question";
+  return Object.freeze(["speaker", first, ...namedOptions(command)]);
 }
 
 const OPENING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
@@ -720,15 +723,7 @@ function activeParameterFor(
     (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
   )
     return 0;
-  if (
-    command === "askText" ||
-    command === "askNumber" ||
-    command === "askInteger" ||
-    command === "askDate" ||
-    command === "askTime" ||
-    command === "askDateTime" ||
-    command === "showButton"
-  ) {
+  if (command !== "say") {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
     // command ends the command, so later options belong to the enclosing construct. The `)` of an ask's own
     // parentheses ends the ask.
@@ -750,7 +745,6 @@ function activeParameterFor(
     }
     return active;
   }
-  if (command !== "say") return 1;
 
   let depth = 0;
   for (const token of tail) {
@@ -767,8 +761,8 @@ function activeParameterFor(
 
 /** The signature parameter of a named compact option, such as `timeout:` of `showButton`. */
 function namedOptionParameter(command: CompactCommand, name: string): number | null {
-  if (command === "showButton") return name === "background" ? 2 : name === "timeout" ? 3 : null;
-  return name === "prefill" ? 2 : name === "hint" ? 3 : null;
+  const index = namedOptions(command).indexOf(name);
+  return index < 0 ? null : 2 + index;
 }
 
 function lineStarts(source: string): readonly number[] {
