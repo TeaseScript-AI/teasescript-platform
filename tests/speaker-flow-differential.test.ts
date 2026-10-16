@@ -508,6 +508,47 @@ const TEMPLATES: readonly Template[] = [
     others: (k) => ({ "setup.tease": [k.set, "end"] }),
   },
   {
+    name: "a file that calls itself once more before the store",
+    main: (k) => ["global visited = false", 'call "setup.tease"', `say ${k.expr} // READ`],
+    others: (k) => ({
+      "setup.tease": [
+        "if not visited {",
+        "    visited = true",
+        '    call "setup.tease"',
+        "}",
+        k.set,
+        "end",
+      ],
+    }),
+  },
+  {
+    name: "a called file that goes on to a computed file which stores",
+    main: (k) => ['global target = "inner.tease"', 'call "hall.tease"', `say ${k.expr} // READ`],
+    others: (k) => ({ "hall.tease": ["goto script(target)"], "inner.tease": [k.set, "end"] }),
+  },
+  {
+    name: "a function that calls a file whose store follows a call that never returns",
+    knobs: [undefined],
+    main: (k) => [
+      "function start {",
+      '    call "setup.tease"',
+      "}",
+      "start()",
+      `say ${k.expr} // READ`,
+    ],
+    others: (k) => ({
+      "setup.tease": [
+        "function stop { exit }",
+        KNOB(1),
+        "if k1 {",
+        "    stop()",
+        k.set,
+        "}",
+        "end",
+      ],
+    }),
+  },
+  {
     name: "a global function of another file",
     main: (k) => ["greet()", `say ${k.expr} // READ`],
     others: (k) => ({ "room.tease": ["global function greet {", k.set, "}"] }),

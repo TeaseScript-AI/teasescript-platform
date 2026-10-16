@@ -595,59 +595,45 @@ class SpeakerFlow {
   }
 
   /**
-   * The state that `state`, entering `node`, passes along `edge`, or `null` when the way ends or the type check rules
-   * the edge out. `must` follows only ways the compiler is sure of: it skips computed targets and fallbacks, takes from
-   * a call what every way through the function assigns, and ends at a call that never returns. `may` follows every way.
+   * Whether the way along `edge` from `node` is one the check follows in `mode`, apart from what it carries: not a
+   * branch or loop way the type check rules out, not a default of a parameter the call supplies, not the continuation
+   * of a call of a function that never returns, and for `must` not a computed target or a fallback.
    */
-  #transfer(mode: Mode, node: number, edge: Edge, state: bigint): bigint | null {
-    if (node >= this.#anywhere) return mode === "may" ? state : null;
+  #possible(mode: Mode, node: number, edge: Edge): boolean {
+    if (node >= this.#anywhere) return mode === "may";
     const { index, clone } = this.#decode(node);
-    const out = this.#effect(index, state);
     const flags = this.#impossible.get(index) ?? 0;
     switch (edge.kind) {
       case "true":
-        return (flags & TRUE_IMPOSSIBLE) === 0 ? out : null;
+        return (flags & TRUE_IMPOSSIBLE) === 0;
       case "false":
-        return (flags & FALSE_IMPOSSIBLE) === 0 ? out : null;
+        return (flags & FALSE_IMPOSSIBLE) === 0;
       case "iterate":
-        return (flags & ITERATE_IMPOSSIBLE) === 0 ? out : null;
+        return (flags & ITERATE_IMPOSSIBLE) === 0;
       case "exhausted":
-        return this.#plan.instructions[index]!.kind !== "loopStart" ||
+        return (
+          this.#plan.instructions[index]!.kind !== "loopStart" ||
           (flags & EXHAUSTED_IMPOSSIBLE) === 0
-          ? out
-          : null;
+        );
       case "supplied":
       case "omitted": {
-        if (clone === null) return out;
+        if (clone === null) return true;
         const instruction = this.#plan.instructions[index]!;
         const parameter =
           instruction.kind === "prepareParameterDefault" ? instruction.parameterIndex : 0;
         const supplied = (clone.mask & (1n << BigInt(parameter))) !== 0n;
-        return supplied === (edge.kind === "supplied") ? out : null;
+        return supplied === (edge.kind === "supplied");
       }
       case "resume": {
-        const instruction = this.#plan.instructions[index]!;
-        if (instruction.kind === "callFunction") {
-          const summary = this.#summaryOfCall(index);
-          if (summary === null || !summary.returns) return null;
-          return out | (mode === "must" ? summary.must : summary.may);
-        }
-        // A file `call` returns once that file, or one it went on to, ends: what any of them may assign counts.
-        if (instruction.kind !== "transfer") return out;
-        if ("value" in instruction.destination) return out | this.#allStores;
-        const { destination } = instruction;
-        let stores = out;
-        for (const option of "pick" in destination ? destination.pick : [destination])
-          stores |= this.#storesFrom(option.target);
-        return stores;
+        if (this.#plan.instructions[index]!.kind !== "callFunction") return true;
+        const summary = this.#summaryOfCall(index);
+        return summary !== null && summary.returns;
       }
       case "computed":
       case "end":
-        return mode === "may" ? out : null;
-      case "return":
-        return out;
+        return mode === "may";
       case "exit":
-        return null;
+        return false;
       case "next":
       case "jump":
       case "continue":
@@ -655,10 +641,36 @@ class SpeakerFlow {
       case "call":
       case "goto":
       case "transfer":
+      case "return":
       case "anywhere":
       case "fallback":
-        return out;
+        return true;
     }
+  }
+
+  /**
+   * The state that `state`, entering `node`, passes along `edge`, or `null` when the way is not one the check follows
+   * (see {@link #possible}). `must` takes from a call what every way through the function assigns and `may` what some
+   * way may assign; a file `call` adds what the called file, or one it went on to, may assign before it ends.
+   */
+  #transfer(mode: Mode, node: number, edge: Edge, state: bigint): bigint | null {
+    if (!this.#possible(mode, node, edge)) return null;
+    if (node >= this.#anywhere) return state;
+    const { index } = this.#decode(node);
+    const out = this.#effect(index, state);
+    if (edge.kind !== "resume") return out;
+    const instruction = this.#plan.instructions[index]!;
+    if (instruction.kind === "callFunction") {
+      const summary = this.#summaryOfCall(index)!;
+      return out | (mode === "must" ? summary.must : summary.may);
+    }
+    if (instruction.kind !== "transfer") return out;
+    if ("value" in instruction.destination) return out | this.#allStores;
+    const { destination } = instruction;
+    let stores = out;
+    for (const option of "pick" in destination ? destination.pick : [destination])
+      stores |= this.#storesFrom(option.target);
+    return stores;
   }
 
   /** Every store that code starting at the instruction `entry` may make, in the files and blocks it reaches. */
@@ -681,10 +693,8 @@ class SpeakerFlow {
           }
         }
       }
-      // Only the ways the check follows: not a branch the type check rules out, a default the call supplies, or the
-      // continuation of a call that never returns.
       for (const { node: next, edge } of this.#successors(node))
-        if (seen[next] === 0 && this.#transfer("may", node, edge, 0n) !== null) {
+        if (seen[next] === 0 && this.#possible("may", node, edge)) {
           seen[next] = 1;
           work.push(next);
         }
@@ -792,9 +802,20 @@ class SpeakerFlow {
     return dependents;
   }
 
-  /** Settles every routine's summary, from the optimistic start that each returns and assigns everything. */
+  /**
+   * Settles every routine's summary, from the optimistic start that each returns and assigns everything. What a called
+   * file may assign depends on which calls return, so it is searched again, in every routine that calls a file, once
+   * that changes.
+   */
   #summarize(): void {
     const dependents = this.#dependents();
+    const fileCallers = this.#routines.filter((routine) => {
+      for (let node = routine.start; node < routine.end; node += 1) {
+        const instruction = this.#plan.instructions[this.#decode(node).index]!;
+        if (instruction.kind === "transfer" && instruction.mode === "call") return true;
+      }
+      return false;
+    });
     const work = new Set(this.#routines);
     for (const routine of work) {
       work.delete(routine);
@@ -810,6 +831,10 @@ class SpeakerFlow {
         may.any === routine.any
       )
         continue;
+      if (returns !== routine.returns) {
+        this.#fileStoreCache.clear();
+        for (const caller of fileCallers) work.add(caller);
+      }
       routine.returns = returns;
       routine.must = mustGains;
       routine.may = mayGains;
