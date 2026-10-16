@@ -84,13 +84,14 @@ which appears when the host persists script storage.
   value set, or a message shown, inside an `if`, `switch`, `while`, or similar branch lists the **Branch condition**
   that took that branch after its other causes, with the condition's value and statement; it opens to the condition's
   own causes.
-- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a
-  short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
-  stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser
-  saved under it, read only once it is in view, or says No saved photo. Each such reference also appears once under
-  Photo references with the keys whose values contain it. The tab reads the saved values freshly when it opens, after
-  this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
-  Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
+- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type, and the
+  value in the notation Variables shows, which keys and dict keys use too, and, once expanded, a list, set, object, or
+  dict's members, 20 at a time, as one flat outline. Text stays text: when it has the exact shape of a photo
+  reference, a thumbnail beside it shows the photo this browser saved under it, read only once it is in view, or says
+  No saved photo. Each such reference also appears once under Photo references with the keys whose values contain it.
+  The tab reads the saved values freshly when it opens, after this Player saved, cleared, or imported them, after
+  another tab of this browser changed this script's values, and on Refresh. The running session keeps the copy it
+  loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
     Advanced: the stored JSON form), checked before it is stored. An Advanced value whose stored form would be longer
     than a text can be opens with an empty field and says so; it can still be replaced or deleted. A draft that long
