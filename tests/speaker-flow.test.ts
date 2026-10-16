@@ -624,6 +624,26 @@ test("reads that every followed way prepares compile and run", () => {
     ),
     ["calm"],
   );
+  // A block that the base case of a recursion creates counts for the call.
+  assert.deepEqual(
+    runs(
+      [
+        VERA,
+        "function fill(n: number) {",
+        "    if n > 0 {",
+        "        fill(n - 1)",
+        "    } else {",
+        '        timer async 1 s { vera.mood = "calm" }',
+        "    }",
+        "}",
+        "fill(1)",
+        "wait 2 s",
+        "say vera.mood",
+        "exit",
+      ].join("\n"),
+    ),
+    ["calm"],
+  );
   // A file that calls itself once more before it assigns, and a called file that goes on to a computed file.
   assert.deepEqual(
     runs(

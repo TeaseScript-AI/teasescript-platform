@@ -595,6 +595,37 @@ const TEMPLATES: readonly Template[] = [
     ],
   },
   {
+    name: "a recursion whose base case creates a timer block that stores",
+    main: (k) => [
+      "function fill(n: number) {",
+      "    if n > 0 {",
+      "        fill(n - 1)",
+      "    } else {",
+      `        timer async 1 ms { ${k.set} }`,
+      "    }",
+      "}",
+      "fill(1)",
+      "wait 2 ms",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a recursion whose base case stores on some ways",
+    knobs: [undefined],
+    main: (k) => [
+      KNOB(1),
+      "function fill(n: number) {",
+      "    if n > 0 {",
+      "        fill(n - 1)",
+      "    } else {",
+      `        if k1 { ${k.set} }`,
+      "    }",
+      "}",
+      "fill(1)",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
     name: "a nested call that stores on some ways",
     knobs: [undefined],
     main: (k) => [

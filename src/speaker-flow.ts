@@ -803,10 +803,13 @@ class SpeakerFlow {
   }
 
   /**
-   * Settles every routine's summary. Which routines return depends only on the ways the check follows, so it is
-   * settled first, from the optimistic start that every routine returns. Then what the routines assign is solved
-   * from nothing, with the returns fixed, so that a store reaches a summary only along a way that exists, also
-   * through a recursion; what a called file may assign is searched with the settled returns.
+   * Settles every routine's summary in three steps, each a fixpoint over the routines and their dependents. Which
+   * routines return depends only on the ways the check follows, so it is settled first, from the optimistic start that
+   * every routine returns. Then, with the returns fixed, what a routine may assign and what it may assign at any time
+   * are solved from nothing: they grow only, and a store reaches them only along a way that exists, also through a
+   * recursion; what a called file may assign is searched with the settled returns. Last, with those fixed too, what
+   * every way through a routine assigns is solved from everything: it shrinks only, and keeps what a block created in a
+   * recursion may assign.
    */
   #summarize(): void {
     const dependents = this.#dependents();
@@ -826,19 +829,22 @@ class SpeakerFlow {
     });
     this.#fileStoreCache.clear();
     for (const routine of this.#routines) {
-      routine.must = this.#all;
       routine.may = 0n;
       routine.any = 0n;
     }
     settle((routine) => {
-      const must = this.#solveRoutine(routine, "must").exit ?? this.#all;
       const may = this.#solveRoutine(routine, "may");
-      const mayGains = may.exit ?? 0n;
-      if (must === routine.must && mayGains === routine.may && may.any === routine.any)
-        return false;
-      routine.must = must;
-      routine.may = mayGains;
+      const gains = may.exit ?? 0n;
+      if (gains === routine.may && may.any === routine.any) return false;
+      routine.may = gains;
       routine.any = may.any;
+      return true;
+    });
+    for (const routine of this.#routines) routine.must = this.#all;
+    settle((routine) => {
+      const must = this.#solveRoutine(routine, "must").exit ?? this.#all;
+      if (must === routine.must) return false;
+      routine.must = must;
       return true;
     });
   }
