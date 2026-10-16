@@ -1002,9 +1002,9 @@ operations stay as they are.
   inspection after capturing and validating the whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
   data that later operations do not change; importing it again crosses the external-data boundary. Data that crosses
-  it is captured and validated exactly once, by the factory it enters: the session runs the state that the factory
-  validated, so a host restores a checkpoint with `restoreRuntimeSession` or `deserializeRuntimeSession` rather than
-  `restoreCheckpoint` followed by `createRuntimeSession`, which would validate it twice. For trusted hosts
+  it is validated exactly once, by the factory it enters: the session runs the state that the factory validated, so a
+  host restores a checkpoint with `restoreRuntimeSession` or `deserializeRuntimeSession` rather than `restoreCheckpoint`
+  followed by `createRuntimeSession`, which would validate it twice. For trusted hosts
   only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or validation,
   which shares nothing with the session: for a host that keeps the snapshot itself, such as a search frontier. It is not
   a boundary; the snapshot is captured and validated wherever it crosses one later, such as `createRuntimeSession`.
