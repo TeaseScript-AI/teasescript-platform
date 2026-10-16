@@ -1947,7 +1947,9 @@ let copiedNames = originalNames
 copiedNames.add("new")
 ```
 
-`originalNames` remains unchanged.
+`originalNames` remains unchanged. Changing a value that no variable holds, such as `obj().n = 5` or `[1, 2][0] = 3`,
+is a compile error, because the change would be lost with the copy; a speaker returned by a call is changed itself
+(owner decision, 2026-10-16).
 
 Interpolation is deliberately not a general list-to-string conversion. Paths, storage keys, URLs, media references,
 resource references, ordinary type inference, and other program-control values never select from a list:
