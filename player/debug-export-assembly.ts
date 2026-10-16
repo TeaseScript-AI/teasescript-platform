@@ -455,6 +455,8 @@ function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) 
     case "scriptStorageEdited":
       return { kind, sequence, operation: event.operation, key: LEFT_OUT };
   }
+  // A new event kind must say what of it session text keeps.
+  event satisfies never;
 }
 
 /** The fields of a settlement that say how an action ended without what it carried. */

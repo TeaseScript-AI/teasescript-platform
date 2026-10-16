@@ -4,6 +4,7 @@ import {
   type ProjectSourceFile,
 } from "../../src/compiler.js";
 import type { RuntimeAccountInput } from "../../src/runtime/account.js";
+import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSession, type RuntimeSessionView } from "../../src/runtime/session.js";
 import type { RuntimeStatus } from "../../src/runtime/state.js";
 
@@ -99,22 +100,20 @@ export function compileAndRunVariants(
   return { diagnostics: compiled.diagnostics, runs };
 }
 
-/** The next moment the script waits for by time alone, or `null` when it waits for the player or the host. */
+/**
+ * The next moment the script waits for by time alone, or `null` when it waits for the player or the host: at an
+ * interaction, or at a foreground wait that nothing timed settles.
+ */
 function nextDueMs(view: RuntimeSessionView): number | null {
+  const due = runtimeTimedWork(view);
   const foreground = view.foregroundAction;
-  if (foreground !== null && foreground.kind !== "delay" && foreground.kind !== "chatPacingGate")
+  if (
+    foreground !== null &&
+    (foreground.kind === "interaction" ||
+      !due.some((work) => work.actionId === foreground.actionId))
+  )
     return null;
-  let earliest = foreground === null ? Infinity : foreground.deadlineMs;
-  for (const action of view.backgroundActions) {
-    const due =
-      action.kind === "timer"
-        ? action.timer.state === "running"
-          ? action.timer.deadlineMs
-          : null
-        : "deadlineMs" in action
-          ? action.deadlineMs
-          : null;
-    if (typeof due === "number" && due < earliest) earliest = due;
-  }
+  let earliest = Infinity;
+  for (const work of due) if (work.deadlineMs < earliest) earliest = work.deadlineMs;
   return Number.isFinite(earliest) ? Math.max(earliest, view.currentSessionTimeMs) : null;
 }
