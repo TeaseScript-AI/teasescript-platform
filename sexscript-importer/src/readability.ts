@@ -101,8 +101,8 @@ function isChanceHelper(statement: IrStatement & { kind: "function" }): boolean 
 
 /**
  * A loop that runs until a test at its top breaks it, `while true { if done { break } … }`, is a loop on the opposite
- * test, `while not done { … }`: the test runs before each pass as the loop's condition does, and `continue` comes back
- * to it either way.
+ * test, `while not done { … }`, or `while n < 3 { … }` for `if n >= 3 { break }`: the test runs before each pass as the
+ * loop's condition does, and `continue` comes back to it either way.
  */
 export function withLoopConditions(statements: IrStatement[]): IrStatement[] {
   return statements.map((item) => {
@@ -121,13 +121,27 @@ export function withLoopConditions(statements: IrStatement[]): IrStatement[] {
       first.then[0]!.kind !== "break"
     )
       return statement;
-    const test = first.condition;
-    const condition: IrExpression =
-      test.kind === "unary" && test.operator === "not"
-        ? test.value
-        : { kind: "unary", operator: "not", value: test };
-    return { ...statement, condition, body: rest };
+    return { ...statement, condition: opposite(first.condition), body: rest };
   });
+}
+
+/** Comparisons and their opposites; TeaseScript numbers are never NaN, so `not (a < b)` is `a >= b`. */
+const OPPOSITES: Readonly<Record<string, string>> = {
+  "==": "!=",
+  "!=": "==",
+  "<": ">=",
+  ">=": "<",
+  ">": "<=",
+  "<=": ">",
+};
+
+/** The opposite of a test: a negation's operand, a comparison with the opposite operator, or `not` the test. */
+function opposite(test: IrExpression): IrExpression {
+  if (test.kind === "unary" && test.operator === "not") return test.value;
+  const operator = test.kind === "binary" ? OPPOSITES[test.operator] : undefined;
+  return test.kind === "binary" && operator !== undefined
+    ? { ...test, operator }
+    : { kind: "unary", operator: "not", value: test };
 }
 
 /**
