@@ -451,6 +451,7 @@ function viewOf(snapshot: RuntimeSnapshot): RuntimeSessionView {
     status: snapshot.status,
     failure: snapshot.failure,
     nextInstruction: snapshot.nextInstruction,
+    nextEventSequence: snapshot.nextEventSequence,
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     observedSessionTimeMs: snapshot.observedSessionTimeMs,
     runnable: executionRunnable(snapshot) && snapshot.randomControl?.pending == null,

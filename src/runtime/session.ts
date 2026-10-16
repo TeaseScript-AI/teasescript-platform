@@ -132,6 +132,8 @@ export interface RuntimeSessionView {
   readonly status: RuntimeStatus;
   readonly failure: RuntimeFailureSnapshot | null;
   readonly nextInstruction: number;
+  /** The sequence the next event gets: a host that restored the session tells its history from its own events by it. */
+  readonly nextEventSequence: number;
   readonly currentSessionTimeMs: number;
   readonly observedSessionTimeMs: number;
   /** Whether `run` executes something now: the script, or a queued block that may start. */
@@ -454,6 +456,7 @@ export class RuntimeSession {
         status: state.status,
         failure: state.failure,
         nextInstruction: state.nextInstruction,
+        nextEventSequence: state.nextEventSequence,
         currentSessionTimeMs: state.currentSessionTimeMs,
         observedSessionTimeMs: state.observedSessionTimeMs,
         runnable: executionRunnable(state) && state.randomControl?.pending == null,
