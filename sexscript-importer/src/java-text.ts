@@ -631,7 +631,8 @@ export function textCall(
       const value = host.lower(receiver);
       if (value === null) return null;
       if (args.length === 0) {
-        noteOnce(host, "SX_ROUNDING_TIES", ROUNDING_NOTE, node.span);
+        // Counted in the conversion report, not noted at each call (report.ts, roundingTies).
+        noteOnce(host, "SX_ROUNDING_TIES", ROUNDING_NOTE, node.span, "info");
         return call("round", value);
       }
       // Groovy round(digits) of a double: floor(value * 10^digits + 0.5) / 10^digits.

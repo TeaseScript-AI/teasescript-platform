@@ -358,7 +358,6 @@ say prose "Given ${given.length}", instant
 function randomBetween(minValue, maxValue) {
   // NOTE SX_PLUS_OPERAND_TYPE line 207: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   let nr = sexscriptLegacyRandom(maxValue - minValue) + minValue
-  // NOTE SX_ROUNDING_TIES line 208: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
   nr = round(nr)
   return nr
 }

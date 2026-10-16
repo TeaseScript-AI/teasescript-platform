@@ -91,17 +91,21 @@ export interface JavaRuleHost {
   readonly state: JavaFileState;
 }
 
-/** A note that a line gives once, however many of its operations differ the same way. */
+/**
+ * A note that a line gives once, however many of its operations differ the same way. An `info` note goes only into the
+ * conversion report, not into the output.
+ */
 export function noteOnce(
   host: JavaRuleHost,
   code: string,
   message: string,
   span: SourceSpan | null,
+  severity: "info" | "warning" = "warning",
 ): void {
   const key = `${code}:${span?.line ?? ""}`;
   if (span !== null && host.state.data.noted.has(key)) return;
   host.state.data.noted.add(key);
-  host.diagnostic(code, "warning", message, span);
+  host.diagnostic(code, severity, message, span);
 }
 
 /** Reads a file of the legacy data folder by its name in `PackageOptions.files`; null when it cannot be read. */

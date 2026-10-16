@@ -41,7 +41,6 @@ while starttime + timewrite s > getAbsoluteDateTime() and rounds < 3 {
   if rounds == 1 {
     timewrite += round((getAbsoluteDateTime() - start) / 1 s)
   }
-  // NOTE SX_ROUNDING_TIES line 17: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
   say prose "Writing for ${round(timewrite / 60)} minutes", instant
 }
 let endTime = getAbsoluteDateTime() + 2 min

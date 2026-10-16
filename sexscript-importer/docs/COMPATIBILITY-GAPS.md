@@ -374,7 +374,9 @@ sign(n - 1) … }`, and one of two literals that counts down goes through the li
   or `removeLast()` (an error on an empty list). The corpus removes no list element by position: of its 6 `remove`
   calls, 5 act on Toy's maps and one removes a text value inside a Toy closure chain.
 - Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` rounds ties away from zero (V30 §13),
-  so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
+  so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`). The conversion report counts these roundings
+  (`roundingTies`, with the rule) instead of a note at each call (coordinator decision 2026-10-16): of the corpus's 444
+  roundings, none was found where a negative tie changes what the player sees.
 - Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
   (#513, #531). Where the seconds are only compared with numbers the duration stays and the numbers become seconds
   (owner decision 2026-10-07): a comparison of the button with a number literal, `(showButton "Done", timeout: 30) >=

@@ -15008,10 +15008,11 @@ function lowerObjectMethodCallExpression(
     if (name === "round" && argumentsNodes.length === 1) {
       const args = lowerArguments(argumentsNodes, context);
       if (args === null) return null;
+      // Counted in the conversion report, not noted at each call (report.ts, roundingTies).
       addDiagnostic(
         context,
         "SX_ROUNDING_TIES",
-        "warning",
+        "info",
         "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).",
         node.span,
       );

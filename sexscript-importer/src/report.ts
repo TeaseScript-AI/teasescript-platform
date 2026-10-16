@@ -28,6 +28,10 @@ import type {
   TeaseProjectRunner,
 } from "./runtime-check.ts";
 
+/** The difference `roundingTies` counts, as the conversion report states it. */
+const ROUNDING_TIES_RULE =
+  "Java Math.round() rounded .5 toward positive infinity (-1.5 became -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).";
+
 const SOURCE_STATEMENT_KINDS = new Set([
   "expressionStatement",
   "if",
@@ -177,6 +181,11 @@ export interface FeasibilityReport {
   missingMedia: number;
   /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
   blankTexts: number;
+  /**
+   * Roundings that may round a tie differently (`SX_ROUNDING_TIES`), counted here instead of noted at each call
+   * (coordinator decision 2026-10-16): no corpus call was found where a negative tie changes what the player sees.
+   */
+  roundingTies: { calls: number; rule: string };
   /**
    * Legacy settings flows asked as one `askForm`: runs of settings asks (`SX_SETTINGS_FORM`) and menus that toggle
    * settings until the player leaves (`SX_MENU_FORM`).
@@ -337,6 +346,7 @@ export function analyzeFeasibility(
     repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0, animation: 0 },
     missingMedia: 0,
     blankTexts: 0,
+    roundingTies: { calls: 0, rule: ROUNDING_TIES_RULE },
     forms: { sequences: 0, menus: 0 },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
@@ -466,6 +476,7 @@ export function analyzeFeasibility(
       else if (code === "SX_REPEATED_TEXT_ANIMATION") report.repeatedText.animation += 1;
       else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
       else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
+      else if (code === "SX_ROUNDING_TIES") report.roundingTies.calls += 1;
       else if (code === "SX_SETTINGS_FORM") report.forms.sequences += 1;
       else if (code === "SX_MENU_FORM") report.forms.menus += 1;
       else if (code === "SX_BUTTON_DURATION") report.buttonDurations.compared += 1;

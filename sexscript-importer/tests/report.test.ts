@@ -3,7 +3,7 @@ import test from "node:test";
 import { rootDiagnostics } from "../src/diagnostics.ts";
 import { analyzeFeasibility, lineOrderJumps } from "../src/report.ts";
 import type { MigrationDiagnostic } from "../src/ir.ts";
-import type { ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
+import type { AstNode, ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
 
 const child: SourceSpan = { line: 2, column: 5, endLine: 2, endColumn: 15 };
 const parent: SourceSpan = { line: 2, column: 1, endLine: 4, endColumn: 2 };
@@ -74,6 +74,61 @@ test("reports source and IR counts separately instead of inventing a conversion 
   assert.equal(report.rootMigrationErrors, 1);
   assert.deepEqual(report.rootDiagnosticsByCode, { SX_DYNAMIC_OR_OBJECT_CALL: 1 });
   assert.equal(report.unsupportedPlaceholders, 1);
+});
+
+test("counts roundings whose ties may differ in the report, with the rule, instead of noting each call", () => {
+  // show(Math.round(x)) twice on separate lines: two counted calls.
+  const round = (line: number): AstNode => {
+    const at: SourceSpan = { line, column: 1, endLine: line, endColumn: 20 };
+    return {
+      kind: "expressionStatement",
+      span: at,
+      expression: {
+        kind: "methodCall",
+        span: at,
+        object: { kind: "variable", span: at, name: "this", type: "java.lang.Object" },
+        method: { kind: "constant", span: at, value: "show" },
+        arguments: {
+          kind: "arguments",
+          span: at,
+          items: [
+            {
+              kind: "methodCall",
+              span: at,
+              object: { kind: "variable", span: at, name: "Math", type: "java.lang.Object" },
+              method: { kind: "constant", span: at, value: "round" },
+              arguments: {
+                kind: "arguments",
+                span: at,
+                items: [{ kind: "constant", span: at, value: 2.5 }],
+              },
+              implicitThis: false,
+              safe: false,
+              spreadSafe: false,
+            },
+          ],
+        },
+        implicitThis: true,
+        safe: false,
+        spreadSafe: false,
+      },
+    };
+  };
+  const file: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "rounding.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: { kind: "block", span: parent, statements: [round(1), round(2)] },
+    },
+  };
+  const report = analyzeFeasibility([file]);
+  assert.equal(report.roundingTies.calls, 2);
+  assert.match(report.roundingTies.rule, /-1\.5 became -1.*-1\.5 becomes -2/u);
 });
 
 test("keeps independent semantic parent diagnostics when a child also fails", () => {

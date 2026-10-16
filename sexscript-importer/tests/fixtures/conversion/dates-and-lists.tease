@@ -35,7 +35,6 @@ let hour = getDateTime().hour
 let dow = getDateTime().weekdayNumber % 7 + 1
 let dayOfYear = (getDate() - toDate("${getDate().year}-01-01")).days + 1
 let sameDay = (toDate(dateValue) - toDate("${toDate(dateValue).year}-01-01")).days + 1
-// NOTE SX_ROUNDING_TIES line 16: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
 let days = round(n / 2)
 // NOTE SX_SYSTEM_EXIT line 17: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
 if hour > 22 {

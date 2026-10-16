@@ -1188,11 +1188,13 @@ test("maps System.exit and Math.round with notes but keeps Java reflection manua
     program.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.severity]),
   );
   assert.equal(severities.get("SX_SYSTEM_EXIT"), "warning");
-  assert.equal(severities.get("SX_ROUNDING_TIES"), "warning");
+  // A rounding's possible tie difference is counted in the conversion report, not noted at the call.
+  assert.equal(severities.get("SX_ROUNDING_TIES"), "info");
   assert.equal(severities.get("SX_JAVA_REFLECTION"), "error");
   const output = emitTease(program);
   assert.match(output, /^exit$/m);
   assert.match(output, /round\(2\.5\)/);
+  assert.doesNotMatch(output, /SX_ROUNDING_TIES/);
 });
 
 test("lowers static Groovy maps and string-key access to TeaseScript objects", () => {
