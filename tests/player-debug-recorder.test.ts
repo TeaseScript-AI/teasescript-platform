@@ -380,6 +380,29 @@ test("a failure freezes the recording, from the first run on, and a too large ca
   assert.equal((await replay(small)).kind, "incomplete");
 });
 
+test("a failed state the session cannot export leaves the recording incomplete, and the failure still shows", (context) => {
+  // V8 cannot enumerate the keys of a list of about 134 million elements, so a snapshot that holds one cannot be
+  // exported; a list of 1,500 stands for it.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const recorder = new DebugRecorder();
+  const failed = createPlayerRuntimeSession(
+    "let xs = (1..=1500).toList()\nlet zero = 0\nlet result = 1 / zero\nexit",
+    { recorder },
+  );
+  context.mock.restoreAll();
+  assert.equal(failed.state.status, "failed");
+  const recording = recorder.recording()!;
+  assert.deepEqual(
+    [recording.complete, recording.reason, recording.endSnapshot],
+    [false, "The state at the error could not be exported.", recording.anchorSnapshot],
+  );
+});
+
 test("a call the recorder cannot copy still runs exactly as without it", () => {
   const recorder = new DebugRecorder();
   const session = createPlayerRuntimeSession(
