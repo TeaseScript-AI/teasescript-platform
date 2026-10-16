@@ -48,6 +48,13 @@
       "category": "speakers",
       "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
       "diff": "ready-replies.diff"
+    },
+    {
+      "id": "late-hours",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the bed-time clock edge subtracts jewell.latehours, the late-hours setting of the jewell tease, which this package never saves. Legacy storage was shared between teases, so it failed only for a player who had never played jewell; with per-package storage it stops every time (TSR027). Take a missing setting as 0, jewell's own default, as Domme2's patch does.",
+      "diff": "late-hours.diff"
     }
   ],
   "heldStandAlone": {
