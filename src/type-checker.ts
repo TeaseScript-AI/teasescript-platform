@@ -8501,17 +8501,13 @@ class TypeChecker {
     const callee = unwrap(expression.callee);
     if (callee.kind !== "propertyAccessExpression") return;
     const method = callee.property.name;
-    // Text `reverse` gives a new text, and a method that the receiver does not have is reported as such.
-    const changes = COLLECTION_CHANGES.has(method)
-      ? isCollection
-      : LIST_REORDERS.has(method)
-        ? isList
-        : null;
-    if (
-      changes !== null &&
-      members(this.#typeOf(callee.object)).some((member) => changes(resolved(member)))
-    )
-      this.#reportChangedCopy(callee.object, callee.object);
+    if (!COLLECTION_CHANGES.has(method) && !LIST_REORDERS.has(method)) return;
+    // Only a list, set, or dict that has the method changes: text `reverse` gives a new text, and a method that a value
+    // does not have is reported as such.
+    const changes = members(this.#typeOf(callee.object)).some(
+      (member) => isCollection(resolved(member)) && memberMethodType(member, method) !== undefined,
+    );
+    if (changes) this.#reportChangedCopy(callee.object, callee.object);
   }
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */

@@ -56,6 +56,16 @@ test("a change of a value no variable holds, through members and elements, is a 
     ["TSV004", UNNAMED_ERROR, "(xs + [4])[0]"],
     ["TSV004", UNNAMED_ERROR, 'load("k", default: [1])'],
   ]);
+  // A method that the value does not have is no change of it, and text `reverse` gives a new text.
+  assert.deepEqual(
+    diagnostics('dict{ a: 1 }.add(3)\nset[1, 2].removeAt(0)\n"abc".reverse()\nexit').map(
+      ([code, , span]) => [code, span],
+    ),
+    [
+      ["TSV043", "add"],
+      ["TSV043", "removeAt"],
+    ],
+  );
 });
 
 test("a speaker or a handle on the way from the change to the call takes the change", () => {
