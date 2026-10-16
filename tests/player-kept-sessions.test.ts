@@ -16,11 +16,13 @@ import {
 } from "../player/kept-sessions.js";
 import {
   activatePlayerRuntimeButton,
+  applyPlayerRuntimeStorageEdit,
   createPlayerRuntimeSession,
   playerRuntimeSnapshotJson,
+  pressPlayerRuntimePermanentButton,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { InterpreterEvent } from "../src/index.js";
+import { interpreterEventProblem, type InterpreterEvent } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 // The session the Player keeps for a script (PLAYER-UI "Session start and user activation"): what is read back from
@@ -93,6 +95,65 @@ test("a kept session read back from storage is used only when its events have th
     const events: Record<string, unknown>[] = JSON.parse(JSON.stringify(removal));
     change(events.find((event) => event["kind"] === "messageRemoved")!);
     assert.equal(keptSession(stored({ events })), null);
+  }
+});
+
+test("a kept session keeps every kind of event, and the engine says why it refuses a malformed one", () => {
+  // Every kind of event, so that a new kind does not compile here until a session below produces it.
+  const everyKind: Record<InterpreterEvent["kind"], true> = {
+    say: true,
+    messageUpdated: true,
+    messageRemoved: true,
+    exit: true,
+    actionRequested: true,
+    actionCompleted: true,
+    playerTranscript: true,
+    permanentButtonPressed: true,
+    developerWarning: true,
+    runtimeFailure: true,
+    scriptStorageEdited: true,
+  };
+  let ended = createPlayerRuntimeSession(
+    [
+      'let line = say "Hello", instant',
+      'line.text = "Hello again"',
+      'showPermanentButton "Add one" {\n    say "added", instant\n}',
+      "let t = timer(duration: 1 s, async: true)",
+      "t.stop()",
+      "t.pause()",
+      'showButton "Next"',
+      "line.remove()",
+      "exit",
+    ].join("\n"),
+  );
+  ended = pressPlayerRuntimePermanentButton(ended, 1).session;
+  ended = applyPlayerRuntimeStorageEdit(ended, { key: "edited", value: 1 }).session;
+  ended = activatePlayerRuntimeButton(ended)!.session;
+  const failed = createPlayerRuntimeSession(
+    'let parts = "x,abc".split(",")\nsay "${toInteger(parts[1])}"\nexit',
+  );
+  assert.deepEqual(
+    new Set([...ended.events, ...failed.events].map((event) => event.kind)),
+    new Set(Object.keys(everyKind)),
+  );
+  for (const session of [ended, failed]) {
+    const events: unknown[] = JSON.parse(JSON.stringify(session.events));
+    assert.deepEqual(keptSession(stored({ events }))?.events, events);
+  }
+
+  const say = JSON.parse(JSON.stringify(ended.events[0]));
+  for (const [event, problem] of [
+    [null, "An event must be a record."],
+    [{ ...say, kind: "notAnEvent" }, "'notAnEvent' is not a kind of event."],
+    [{ ...say, sequence: -1 }, "The sequence of the 'say' event must be a whole number from 0."],
+    [
+      { ...say, content: { broken: true } },
+      "The content of the 'say' event must be message markup.",
+    ],
+    [{ ...say, span: undefined }, "The span of the 'say' event must be a source span."],
+  ] as const) {
+    assert.equal(interpreterEventProblem(event), problem);
+    assert.equal(keptSession(stored({ events: [event] })), null);
   }
 });
 

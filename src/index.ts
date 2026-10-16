@@ -134,6 +134,7 @@ export type {
   SayEvent,
   ScriptStorageEditedEvent,
 } from "./runtime/events.js";
+export { interpreterEventProblem } from "./runtime/event-validation.js";
 export {
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
