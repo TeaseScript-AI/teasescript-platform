@@ -97,12 +97,13 @@ function checkpointWithSnapshot(
 }
 
 test("explicit exit after a reading time keeps no pacing work, and forged pacing work is rejected", () => {
-  for (const source of [
-    'say "first", 5 s\nexit',
-    'say "first", 5 s\nif true { exit }\nsay "never", instant',
-    'say "first", 5 s\nif true { if true { exit } }\nsay "never", instant',
-  ]) {
-    const compiled = plan(source);
+  for (const [source, warnings] of [
+    ['say "first", 5 s\nexit', []],
+    // The last message never runs.
+    ['say "first", 5 s\nif true { exit }\nsay "never", instant', ["TSV065"]],
+    ['say "first", 5 s\nif true { if true { exit } }\nsay "never", instant', ["TSV065"]],
+  ] as const) {
+    const compiled = plan(source, {}, warnings);
     const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
     const gate = waiting.snapshot.foregroundAction;
     assert.equal(gate?.kind, "chatPacingGate", source);

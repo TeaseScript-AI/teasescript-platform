@@ -53,6 +53,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
       name: "root exit",
       source: 'say "before"\nexit\nsay "after"',
       expectedKinds: ["say", "exit"],
+      warnings: ["TSV065"],
     },
     {
       name: "function exit",
@@ -79,7 +80,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
   ] as const;
 
   for (const scenario of scenarios) {
-    const compiled = plan(scenario.source);
+    const compiled = plan(scenario.source, {}, "warnings" in scenario ? scenario.warnings : []);
     const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "halted", scenario.name);
     assert.deepEqual(

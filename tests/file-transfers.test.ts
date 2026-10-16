@@ -647,7 +647,12 @@ test("a transfer that cannot run enters no label", () => {
         "b.tease": "let x = 1\nlabel start\nsay x\nend",
       }),
     );
-    assert.deepEqual(result.diagnostics, [], transfer);
+    // The branch is reported as code that never runs, and the label needs no value of x.
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSV065"],
+      transfer,
+    );
   }
 });
 
@@ -678,13 +683,14 @@ test("a transfer in a function never called or a block never started enters no l
     compileProject(
       project(main, { "b.tease": "let x = 1\nlabel start\nsay x\nend" }),
     ).diagnostics.map((diagnostic) => diagnostic.code);
-  for (const main of [
-    'if false { timer async 1 s { goto "b.tease" start } }\nexit',
-    'function never { goto "b.tease" start }\nexit',
-    'function f { call "b.tease" start }\nif false { f() }\nexit',
-    'function f { fallback "b.tease" start }\nfunction g { f() }\nexit',
-  ]) {
-    assert.deepEqual(codes(main), [], main);
+  // A branch that never runs is reported as such; a function that nothing calls is not.
+  for (const [main, expected] of [
+    ['if false { timer async 1 s { goto "b.tease" start } }\nexit', ["TSV065"]],
+    ['function never { goto "b.tease" start }\nexit', []],
+    ['function f { call "b.tease" start }\nif false { f() }\nexit', ["TSV065"]],
+    ['function f { fallback "b.tease" start }\nfunction g { f() }\nexit', []],
+  ] as const) {
+    assert.deepEqual(codes(main), expected, main);
   }
   // One that can run still enters its label afresh.
   assert.deepEqual(codes('function f { goto "b.tease" start }\nf()\nexit'), ["TSV054"]);

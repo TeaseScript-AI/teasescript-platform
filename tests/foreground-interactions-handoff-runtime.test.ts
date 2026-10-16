@@ -200,21 +200,30 @@ interface InjectedInteractionPlan {
   readonly clearInstruction: number;
 }
 
-function injectTextInteraction(source: string): InjectedInteractionPlan {
-  return injectInteraction(source, "text", {
-    kind: "text",
-    hint: null,
-    accessibleName: defaults.text,
-  });
+/** `warnings` are the codes of the warnings that the source gives, in compiler order. */
+function injectTextInteraction(
+  source: string,
+  warnings: readonly string[] = [],
+): InjectedInteractionPlan {
+  return injectInteraction(
+    source,
+    "text",
+    { kind: "text", hint: null, accessibleName: defaults.text },
+    warnings,
+  );
 }
 
 function injectInteraction(
   source: string,
   interactionKind: "text" | "number" | "choice",
   ui: InteractionUiPayload,
+  warnings: readonly string[] = [],
 ): InjectedInteractionPlan {
   const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    warnings.map((code) => `warning ${code}`),
+  );
   assert.notEqual(compiled.plan, null);
   const base = structuredClone(compiled.plan!);
   const marker = "__interaction_result__";
@@ -1346,6 +1355,7 @@ test("handoff shapes that would reach invalid runtime states are rejected", () =
       "say answer",
       "exit",
     ].join("\n"),
+    ["TSV065"],
   );
   const jumpIndex = targetInjected.plan.instructions.findIndex(
     (instruction) => instruction.kind === "jump",

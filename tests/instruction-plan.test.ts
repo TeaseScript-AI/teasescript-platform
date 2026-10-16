@@ -14,7 +14,8 @@ test("compiles if and else so that only the selected branch runs", () => {
     ["true", ["yes"]],
     ["false", ["no"]],
   ] as const) {
-    const branchPlan = plan(branchSource(condition));
+    // The branch that the literal rules out is reported as code that never runs.
+    const branchPlan = plan(branchSource(condition), {}, ["TSV065"]);
     const result = run(branchPlan, createFreshRuntimeSnapshot(branchPlan));
     assert.deepEqual(
       result.events.filter((event) => event.kind === "say").map((event) => event.text),

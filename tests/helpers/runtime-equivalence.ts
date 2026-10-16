@@ -39,6 +39,8 @@ const DEFAULT_INSTRUCTION_GUARD = 2_000;
 
 export interface RuntimeResumeEquivalenceOptions {
   readonly scenarioName?: string;
+  /** The codes of the warnings that the source gives, in compiler order; it gives no other diagnostic. */
+  readonly warnings?: readonly string[];
   readonly seed?: number;
   readonly instructionGuard?: number;
   /**
@@ -114,9 +116,9 @@ export function assertRuntimeResumeEquivalent(
       ? compileSource(source, compileOptions)
       : compileProject(source, compileOptions);
   assert.deepEqual(
-    compiled.diagnostics,
-    [],
-    `${scenario}: source must compile without diagnostics`,
+    compiled.diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    (options.warnings ?? []).map((code) => `warning ${code}`),
+    `${scenario}: source must compile without diagnostics but its warnings`,
   );
   assert.notEqual(compiled.plan, null, `${scenario}: compilation must produce a plan`);
   const plan = options.transformPlan?.(compiled.plan!) ?? compiled.plan!;

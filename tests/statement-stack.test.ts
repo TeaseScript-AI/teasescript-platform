@@ -111,7 +111,8 @@ test("statement continuations preserve branches, bindings, loop control, returns
       "say value",
       "exit",
     ].join("\n"),
-    { scenarioName: "statement continuations", seed: 42 },
+    // The branch of `if false` never runs.
+    { scenarioName: "statement continuations", seed: 42, warnings: ["TSV065"] },
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),

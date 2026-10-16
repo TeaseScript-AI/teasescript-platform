@@ -5,6 +5,7 @@ import type {
   MediaParts,
   SayParts,
   ShowButtonParts,
+  Statement,
   TagQueryExpression,
   TimerParts,
 } from "./ast.js";
@@ -196,4 +197,113 @@ export function showButtonOptions(
   return options.sort(
     (left, right) => left.value.span.start.offset - right.value.span.start.offset,
   );
+}
+
+/**
+ * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
+ * `global` with `default:` assigns where it stands.
+ */
+export function nestedStatements(statement: Statement): readonly Statement[] {
+  switch (statement.kind) {
+    case "globalStatement":
+      return statement.assignment === null ? [] : [statement.assignment];
+    case "ifStatement":
+      return [
+        ...statement.thenBlock.statements,
+        ...(statement.elseBlock === null
+          ? []
+          : statement.elseBlock.kind === "ifStatement"
+            ? [statement.elseBlock]
+            : statement.elseBlock.statements),
+      ];
+    case "whileStatement":
+    case "repeatStatement":
+    case "forStatement":
+      return statement.body.statements;
+    case "switchStatement":
+      return [
+        ...statement.cases.flatMap((switchCase) => switchCase.body.statements),
+        ...(statement.defaultBlock?.statements ?? []),
+      ];
+    default:
+      return [];
+  }
+}
+
+/** The timer, media, or permanent button blocks that a statement or expression registers. */
+export function handlerBlocks(node: Statement | Expression): readonly Block[] {
+  if (node.kind === "timerStatement" || node.kind === "timerExpression")
+    return node.handler === null ? [] : [node.handler];
+  if (node.kind === "showPermanentButtonStatement" || node.kind === "showPermanentButtonExpression")
+    return [node.handler];
+  if (node.kind === "playMediaStatement" || node.kind === "playMediaExpression")
+    return mediaHandlerBlocks(node);
+  return [];
+}
+
+/** The expressions a statement evaluates itself, outside its nested blocks. */
+export function statementExpressions(statement: Statement): readonly Expression[] {
+  switch (statement.kind) {
+    case "letStatement":
+      return [statement.initializer];
+    case "assignmentStatement":
+      return statement.target.kind === "identifier"
+        ? [statement.value]
+        : [...expressionChildren(statement.target), statement.value];
+    case "expressionStatement":
+      return [statement.expression];
+    case "switchStatement":
+      return [statement.subject, ...statement.cases.flatMap((switchCase) => switchCase.values)];
+    case "speakerDeclaration":
+      return statement.properties.map((property) => property.value);
+    case "sayStatement":
+      return sayOperands(statement);
+    case "showButtonStatement":
+      return showButtonOperands(statement);
+    case "waitStatement":
+      return [statement.duration];
+    case "timerStatement":
+      return timerOperands(statement);
+    case "showPermanentButtonStatement":
+      return [statement.text];
+    case "playMediaStatement":
+      return mediaOperands(statement);
+    case "showImageStatement":
+      return [statement.image];
+    case "showPopupStatement":
+    case "openUrlStatement":
+    case "exportTextStatement":
+      return statement.arguments.map((argument) => argument.value);
+    case "saveStatement":
+      return [statement.value, statement.key];
+    case "deleteStatement":
+      return [statement.key];
+    case "ifStatement":
+    case "whileStatement":
+      return [statement.condition];
+    case "repeatStatement":
+      return [statement.count];
+    case "forStatement":
+      return [statement.iterable];
+    case "returnStatement":
+      return statement.value === null ? [] : [statement.value];
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
+    default:
+      return [];
+  }
+}
+
+/** The direct subexpressions of an expression, including interaction operands. */
+export function expressionParts(expression: Expression): readonly Expression[] {
+  if (expression.kind === "interactionExpression") return askParts(expression);
+  if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
+  if (expression.kind === "sayExpression") return sayOperands(expression);
+  return expressionChildren(expression);
+}
+
+export function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
+  return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
 }

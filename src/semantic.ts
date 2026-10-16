@@ -78,7 +78,7 @@ import {
   packageGlobProblem,
   packagePathProblem,
 } from "./project-paths.js";
-import type { StatementFlow } from "./type-checker.js";
+import type { StatementFlow } from "./reachability.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
 import {
   PLAYER_DECLARATION,

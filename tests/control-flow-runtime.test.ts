@@ -56,7 +56,8 @@ test("a range that contains no numbers runs its loop no time, with a warning whe
       "after",
     ]);
   }
-  // A computed bound, a variable, or a global stays silent, even where the compiler knows its value.
+  // A computed bound, a variable, or a global gets no range warning, even where the compiler knows its value. A loop
+  // over a constant expression such as `(2 + 2)..=1` still never runs its body, which is reported as code that never runs.
   assert.deepEqual(
     sayTexts(
       runSource(
@@ -73,6 +74,8 @@ test("a range that contains no numbers runs its loop no time, with a warning whe
           "for value in 2..=2 { say value }",
           "exit",
         ].join("\n"),
+        1,
+        ["TSV065"],
       ),
     ),
     ["2"],
@@ -87,6 +90,8 @@ test("iterates lists and sets in order and performs zero iterations", () => {
       'repeat 0 { say "never" }',
       "exit",
     ].join("\n"),
+    1,
+    ["TSV065"],
   );
 
   assert.deepEqual(sayTexts(result), ["a", "b", "b", "a"]);
@@ -557,8 +562,8 @@ test("loop variables deep-copy composite list elements", () => {
   assert.deepEqual(sayTexts(result), ["1"]);
 });
 
-function runSource(source: string, seed = 1) {
-  const result = runValidSource(source, seed);
+function runSource(source: string, seed = 1, warnings: readonly string[] = []) {
+  const result = runValidSource(source, seed, warnings);
   // An empty or partial say list is only evidence when the run completed instead of failing early.
   assert.equal(result.snapshot.status, "halted", source);
   return result;

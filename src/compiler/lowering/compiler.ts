@@ -91,11 +91,20 @@ import {
   timerOperands,
 } from "../../expression-children.js";
 
-/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+/**
+ * What the lowering tells an analysis that reads the plan back as source; not part of the plan. `origins` holds the
+ * source construct of each `jumpIfFalse` and `loopStart`, by instruction, and `statements` the instructions of each
+ * statement: from `start` up to `end` in the region where it stands, none for a declaration that runs nothing there.
+ */
+export interface LoweringTrace {
+  readonly origins: Map<number, ControlOrigin>;
+  readonly statements: Map<Statement, { readonly start: number; readonly end: number }>;
+}
+
 /**
  * The source construct that a `jumpIfFalse` or `loopStart` decides, for an analysis that reads the plan's ways back
  * as source: an `if`, one `case` of a `switch`, a loop, the right side of `and`, `or`, or `otherwise` that runs as
- * instructions, or a `default:` of a `load` or a call that runs as instructions. Not part of the plan.
+ * instructions, or a `default:` of a `load` or a call that runs as instructions.
  */
 export type ControlOrigin =
   | { readonly kind: "if"; readonly statement: IfStatement }
@@ -115,6 +124,7 @@ export type LoopStatement = Extract<
   { kind: "repeatStatement" | "forStatement" | "whileStatement" }
 >;
 
+/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
 export interface PendingDestination {
   readonly instruction: number;
   /** The file, or for a glob the files to pick from. */
@@ -244,8 +254,8 @@ export class InstructionCompiler {
     private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
     /** The result shape of each `askForm`, from the type check. */
     private readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
-    /** Receives the source construct of each `jumpIfFalse` and `loopStart`, when an analysis asks for it. */
-    private readonly origins: Map<number, ControlOrigin> | null = null,
+    /** Receives the trace of the lowering, when an analysis asks for it. */
+    private readonly trace: LoweringTrace | null = null,
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -262,7 +272,7 @@ export class InstructionCompiler {
   }
 
   #originate(instruction: number, origin: ControlOrigin): void {
-    this.origins?.set(instruction, origin);
+    this.trace?.origins.set(instruction, origin);
   }
 
   /** The ID of one of this file's functions. */
@@ -340,6 +350,12 @@ export class InstructionCompiler {
   }
 
   *#compileStatement(statement: Statement): CompileTask<void> {
+    const start = this.instructions.length;
+    yield* compileChild(this.#compileStatementKind(statement));
+    this.trace?.statements.set(statement, { start, end: this.instructions.length });
+  }
+
+  *#compileStatementKind(statement: Statement): CompileTask<void> {
     switch (statement.kind) {
       case "speakerDeclaration":
         // A speaker is set up before the story runs, by the start of main.tease.
@@ -676,7 +692,7 @@ export class InstructionCompiler {
     this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     if (statement.elseBlock.kind === "ifStatement") {
-      yield* compileChild(this.#compileIf(statement.elseBlock));
+      yield* compileChild(this.#compileStatement(statement.elseBlock));
     } else {
       yield* compileChild(this.#compileBlock(statement.elseBlock));
     }

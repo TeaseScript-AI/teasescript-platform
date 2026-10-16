@@ -81,10 +81,13 @@ test("rejects control-flow targets that leave the instruction's execution region
     forbidden: (compiled: InstructionPlan) => number;
     // A loop or call-return rule also reports at this path, so only the message isolates the region rule.
     sharedPath?: true;
+    /** The warnings of the source: an `else` after `if true` never runs. */
+    warnings?: readonly string[];
   }> = [
     {
       name: "root jump into a function prologue",
       source: rootBranchWithTwoFunctions(),
+      warnings: ["TSV065"],
       instruction: (compiled) => rootInstructionIndex(compiled, "jump"),
       field: "target",
       forbidden: (compiled) => compiled.functions[1]!.entryInstruction,
@@ -92,6 +95,7 @@ test("rejects control-flow targets that leave the instruction's execution region
     {
       name: "root conditional jump into a function body",
       source: rootBranchWithTwoFunctions(),
+      warnings: ["TSV065"],
       instruction: (compiled) => rootInstructionIndex(compiled, "jumpIfFalse"),
       field: "target",
       forbidden: (compiled) => compiled.functions[1]!.bodyEntryInstruction,
@@ -99,6 +103,7 @@ test("rejects control-flow targets that leave the instruction's execution region
     {
       name: "function jump into root execution",
       source: functionBranches(),
+      warnings: ["TSV065", "TSV065"],
       instruction: (compiled) =>
         functionInstructionIndex(compiled, firstFunction(compiled), "jump"),
       field: "target",
@@ -107,6 +112,7 @@ test("rejects control-flow targets that leave the instruction's execution region
     {
       name: "function A jump into function B",
       source: functionBranches(),
+      warnings: ["TSV065", "TSV065"],
       instruction: (compiled) =>
         functionInstructionIndex(compiled, firstFunction(compiled), "jump"),
       field: "target",
@@ -158,7 +164,7 @@ test("rejects control-flow targets that leave the instruction's execution region
   ];
 
   for (const row of rows) {
-    const compiled = plan(row.source);
+    const compiled = plan(row.source, {}, row.warnings);
     assert.equal(validateInstructionPlan(compiled).valid, true, row.name);
     const index = row.instruction(compiled);
     const malformed = mutateTarget(compiled, index, row.field, row.forbidden(compiled));
@@ -223,6 +229,8 @@ test("preserves a compiler-generated target at the root's closing end", () => {
 test("preserves a compiler-generated owning-function implicit-return target", () => {
   const compiled = plan(
     ["function boundary {", '  if false { say "never" }', "}", "boundary()", "exit"].join("\n"),
+    {},
+    ["TSV065"],
   );
   const definition = compiled.functions[0]!;
   const jumpIndex = functionInstructionIndex(compiled, definition.id, "jumpIfFalse");
@@ -234,6 +242,8 @@ test("preserves a compiler-generated owning-function implicit-return target", ()
 test("prevents the poisoned-snapshot path before execution", () => {
   const original = plan(
     ['function hidden { say "inside function" }', "if false { exit }", "exit"].join("\n"),
+    {},
+    ["TSV066"],
   );
   const jumpIndex = rootInstructionIndex(original, "jumpIfFalse");
   const malformed = mutateTarget(
@@ -258,6 +268,8 @@ test("prevents the poisoned-snapshot path before execution", () => {
 test("rejects malformed cross-region plans during checkpoint restoration", () => {
   const original = plan(
     ['function hidden { say "inside function" }', "if false { exit }", "exit"].join("\n"),
+    {},
+    ["TSV066"],
   );
   const jumpIndex = rootInstructionIndex(original, "jumpIfFalse");
   const malformed = mutateTarget(
@@ -287,6 +299,8 @@ test("rejects malformed cross-region plans during checkpoint restoration", () =>
 test("keeps snapshots valid after accepted root control flow reaches its boundary", () => {
   const compiled = plan(
     ['function hidden { say "hidden" }', 'if false { say "never" }', "exit"].join("\n"),
+    {},
+    ["TSV065"],
   );
   const initial = createFreshRuntimeSnapshot(compiled);
   const first = executeInstruction(compiled, initial);
