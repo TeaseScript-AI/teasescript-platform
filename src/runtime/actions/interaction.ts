@@ -202,15 +202,11 @@ export function resolveInteractionCompletion(
     completionStringFits(payload.submittedText)
   ) {
     const matches = options.filter((option) => option.text === payload.submittedText);
-    if (matches.length !== 1) {
+    if (matches.length !== 1)
       return {
         ok: false,
-        message:
-          matches.length === 0
-            ? "Choice text is not available."
-            : "More than one button has this text. Select one of the buttons instead.",
+        message: invalidAnswerMessage(matches.length === 0 ? "choice" : "ambiguousChoice"),
       };
-    }
     selected = matches[0]!;
   } else if (
     payload.kind === "selectedOption" &&
