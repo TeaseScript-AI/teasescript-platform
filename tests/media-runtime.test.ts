@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
+  compileSource,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
@@ -743,6 +744,69 @@ test("dynamic media options are validated when supplied, including null and inde
     );
     assert.equal(snapshot.nextMediaId, 1, `${source}: no media was created`);
   }
+});
+
+test("a media position or repeat duration the compiler can compute is checked like the literal it equals", () => {
+  const negative = (name: string) => `${name} must not be negative.`;
+  const later = "endAt must be later than startAt.";
+  const zero = "A repeat duration must be greater than zero.";
+  const hidden = "function dynamic(value) {\n    return value\n}\n";
+  // [the source with $ for the value, the value, the compile error]
+  for (const [template, value, expected] of [
+    ['playAudio(file: "a", startAt: $)', "-1 s", negative("startAt")],
+    ['playAudio(file: "a", startAt: $)', "(1 - 2) s", negative("startAt")],
+    ['playVideo(file: "a", startAt: $)', "500 ms - 1 s", negative("startAt")],
+    ['playAudio(file: "a", startAt: 2 s, endAt: $)', "1 s", later],
+    ['playAudio(file: "a", startAt: (1 + 1) s, endAt: $)', "1 s", later],
+    ['playAudio(file: "a", endAt: $)', "1 s - 1 s", later],
+    ['playAudio(file: "a", repeat: $)', "0 s", zero],
+    ['playAudio(file: "a", repeat: $)', "(1 - 1) s", zero],
+    ['playAudio "a" {\n  at $ {\n  }\n}', "1 s - 2 s", negative("at")],
+    ['playAudio "a" {\n  beforeEnd $ {\n  }\n}', "(1 - 2) s", negative("beforeEnd")],
+  ] as const) {
+    const at = template.indexOf("$");
+    const source = `${template.replace("$", value)}\nexit`;
+    assert.deepEqual(
+      compileSource(source).diagnostics.map(({ code, message, span }) => [
+        code,
+        message,
+        span.start.offset,
+        span.end.offset,
+      ]),
+      [["TSV036", expected, at, at + value.length]],
+      source,
+    );
+    // The same value, when the compiler cannot know it, fails when the media starts.
+    const operand = `dynamic(${value})`;
+    const unknown = `${hidden}${template.replace("$", operand)}\nexit`;
+    const compiled = plan(unknown);
+    const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    const start = hidden.length + at;
+    assert.deepEqual(
+      [
+        snapshot.failure?.code,
+        snapshot.failure?.span.start.offset,
+        snapshot.failure?.span.end.offset,
+      ],
+      ["TSR050", start, start + operand.length],
+      unknown,
+    );
+  }
+
+  // Valid values from constant arithmetic play as the literals they equal.
+  const media = new Session(
+    [
+      'playAudio(file: "a", startAt: (1 + 1) s, endAt: 1 s + 2 s, repeat: (30 + 30) s) {',
+      "  at 1 min - 59 s {",
+      "  }",
+      "}",
+      "exit",
+    ].join("\n"),
+  ).activeMedia(1);
+  assert.deepEqual(
+    [media?.startAtMs, media?.endAtMs, media?.repeat, media?.cues.map((cue) => cue.offsetMs)],
+    [2_000, 3_000, { kind: "budget", milliseconds: 60_000 }, [1_000]],
+  );
 });
 
 test("media controls on any receiver wait for pacing and evaluate the receiver once", () => {

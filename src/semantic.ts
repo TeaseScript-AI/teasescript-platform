@@ -62,7 +62,7 @@ import {
   showButtonOptions,
   tagQueryOperands,
 } from "./expression-children.js";
-import { DURATION_UNIT_MILLISECONDS, durationLiteralValue, isCalendar } from "./duration.js";
+import { DURATION_UNIT_MILLISECONDS, isCalendar } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import {
   COLLECTION_CHANGES,
@@ -967,7 +967,7 @@ class SemanticValidator {
     this.#pendHandler(button.handler, "button", null, scope);
   }
 
-  /** Static checks of a play command; runtime validates the values that are not literals. */
+  /** Static checks of a play command; runtime validates the values the compiler cannot know. */
   *#validateMediaTask(
     media: MediaParts,
     scope: SemanticScope,
@@ -1006,22 +1006,20 @@ class SemanticValidator {
       }
     } else if (repeat?.kind === "value") {
       const kind = literalKind(repeat.value);
+      // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
+      const milliseconds = knownMilliseconds(repeat.value, null);
       if (kind === "numberLiteral") {
         this.#report(
           semanticCode.invalidMedia,
           "Write a repeat count with 'times', such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.",
           repeat.value.span,
         );
-      } else if (kind === "durationLiteral") {
-        // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
-        const milliseconds = staticDurationMs(repeat.value);
-        if (milliseconds !== undefined && !(milliseconds > 0)) {
-          this.#report(
-            semanticCode.invalidMedia,
-            "A repeat duration must be greater than zero.",
-            repeat.value.span,
-          );
-        }
+      } else if (milliseconds !== undefined && !(milliseconds > 0)) {
+        this.#report(
+          semanticCode.invalidMedia,
+          "A repeat duration must be greater than zero.",
+          repeat.value.span,
+        );
       } else if (kind !== "booleanLiteral" && isDefinitelyNonDuration(repeat.value)) {
         this.#report(
           semanticCode.invalidMedia,
@@ -1096,10 +1094,10 @@ class SemanticValidator {
       this.#pendHandler(block, "media", media.async ? selfHandle : null, captures);
   }
 
-  /** A media position is a duration that is not negative. Returns its static value in milliseconds when known. */
+  /** A media position is a duration that is not negative. Returns its value in milliseconds when known. */
   #validateMediaPosition(expression: Expression | null, name: string): number | undefined {
     if (expression === null) return undefined;
-    const known = staticDurationMs(expression);
+    const known = knownMilliseconds(expression, null);
     if (known !== undefined && known < 0) {
       this.#report(semanticCode.invalidMedia, `${name} must not be negative.`, expression.span);
     } else if (
@@ -3273,20 +3271,6 @@ function isIndefiniteRepeatValue(repeat: MediaParts["repeat"]): boolean {
   return repeat?.kind === "value" && isTrueLiteral(repeat.value);
 }
 
-/** A statically known media position or repeat duration in milliseconds, from a duration literal. */
-function staticDurationMs(expression: Expression): number | undefined {
-  let current = unwrapParentheses(expression);
-  let sign = 1;
-  while (current.kind === "unaryExpression" && current.operator !== "not") {
-    if (current.operator === "-") sign = -sign;
-    current = unwrapParentheses(current.operand);
-  }
-  if (current.kind !== "durationLiteral") return undefined;
-  // A calendar duration has no fixed length, so it gives no media position.
-  const value = durationLiteralValue(current);
-  return typeof value === "string" || isCalendar(value) ? undefined : sign * value.milliseconds;
-}
-
 /** A statically evident wrong value for an assignable timer handle property. */
 function invalidTimerAssignment(name: string, value: Expression): string | null {
   if (name === "display") {
@@ -3353,9 +3337,9 @@ function isDefinitelyNonText(expression: Expression): boolean {
 }
 
 /**
- * The milliseconds of a known wait, timer, timeout, or pacing duration: a number of a timer's `unit`, or a duration
- * without one. `undefined` when the value is not known or not a finite quantity, and for a number without a unit, which
- * the type check reports.
+ * The milliseconds of a known wait, timer, timeout, pacing, media position, or media repeat duration: a number of a
+ * timer's `unit`, or a duration without one. `undefined` when the value is not known or not a finite quantity, and for
+ * a number without a unit, which the type check reports.
  */
 function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
   const known = staticQuantity(expression);
