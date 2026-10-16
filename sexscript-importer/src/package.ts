@@ -48,6 +48,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
+import { withProfileKeys } from "./profile-keys.ts";
 import { withNullDefaults } from "./null-defaults.ts";
 import { withNativeTime } from "./native-time.ts";
 import {
@@ -1038,31 +1039,34 @@ export function lowerPackage(
       ? undefined
       : packageResources(files, options.files, options.readFile ?? null);
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
-  const lowered = files.map((file, index) =>
-    lowerParsedFile(file, {
-      mapUses: mapUses[index]!,
-      functionResults: functionResults[index]!,
-      helperRegistry,
-      mixinModules: moduleInfos.flatMap((info, other) =>
-        info !== null && visible(index, other) ? [info] : [],
-      ),
-      packageFunctions: packageFunctionNames(groups[index]!),
-      patchedAssignments: patchedAssignments(file.sourceName, options.sourcePatches ?? []),
-      stableNames,
-      storageLiterals,
-      nonTextKeys,
-      nonBooleanKeys,
-      copiedImages,
-      globalTypes: packageGlobalTypes(groups[index]!),
-      resultUses,
-      directoryFiles: directoryFiles[index]!,
-      ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
-      renameIdentifiers: false,
-      ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
-      ...(options.media === undefined ? {} : { media: options.media }),
-      ...(options.files === undefined ? {} : { files: options.files }),
-      ...(javaResources === undefined ? {} : { javaResources }),
-    }),
+  // Player settings read under a legacy key take the profile's key (profile-keys.ts).
+  const lowered = withProfileKeys(
+    files.map((file, index) =>
+      lowerParsedFile(file, {
+        mapUses: mapUses[index]!,
+        functionResults: functionResults[index]!,
+        helperRegistry,
+        mixinModules: moduleInfos.flatMap((info, other) =>
+          info !== null && visible(index, other) ? [info] : [],
+        ),
+        packageFunctions: packageFunctionNames(groups[index]!),
+        patchedAssignments: patchedAssignments(file.sourceName, options.sourcePatches ?? []),
+        stableNames,
+        storageLiterals,
+        nonTextKeys,
+        nonBooleanKeys,
+        copiedImages,
+        globalTypes: packageGlobalTypes(groups[index]!),
+        resultUses,
+        directoryFiles: directoryFiles[index]!,
+        ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
+        renameIdentifiers: false,
+        ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
+        ...(options.media === undefined ? {} : { media: options.media }),
+        ...(options.files === undefined ? {} : { files: options.files }),
+        ...(javaResources === undefined ? {} : { javaResources }),
+      }),
+    ),
   );
   // Who speaks: switches, name updates, and labelled messages in each file, before composition moves code around.
   const spoken =
