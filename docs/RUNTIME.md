@@ -140,9 +140,12 @@ and control-flow targets onto the cleanup, are provisional POC policy, not langu
 Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
-- `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
+- `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, rejects anything else with "That is wrong. I asked for a number.", canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
 - `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts one line with only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
 - `askDate`, `askTime`, and `askDateTime` are a `temporal` interaction whose UI carries `temporalKind` (`date`, `time`, or `datetime`): the answer is trimmed strict ISO text ([V30 §35](specifications/accepted-syntaxes-v30.md#35-date-time-and-durations)), a local time that the player's zone skips is valid, and anything else is rejected with "That is wrong. I asked for a date." (a time, a date and time). The result is the `date`, `time`, or `datetime` value; the transcript shows it in the presentation in force at completion, as `say` would, and a prefill fills in its ISO text;
+- a wrong answer to one of these asks or to a typed form field is `invalidPayload` with a message the Player shows the
+  player, such as those above ([V30 §20](specifications/accepted-syntaxes-v30.md#invalid-input-handling)); a payload of
+  the wrong shape or over the byte limit gets a message for the host instead;
 - `askImage(...)` is an `image` interaction whose answer is an image the trusted host stored; see
   [Image input](#image-input);
 - a form is a `form` interaction whose fields the player edits before submitting; see [Forms](#forms);

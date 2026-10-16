@@ -2,6 +2,7 @@ import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../../color.js";
 import { isInteractionChoiceValue } from "../../choice-values.js";
 import {
   formValueText,
+  invalidAnswerMessage,
   isBlankTextAnswer,
   isIntegerAnswerText,
   isNumberAnswerText,
@@ -793,22 +794,14 @@ function parseFormText(
       (field.kind === "integer"
         ? isIntegerAnswerText(trimmed) && Number.isSafeInteger(parsed)
         : isNumberAnswerText(trimmed) && Number.isFinite(parsed));
-    if (!valid)
-      return refused(
-        field.kind === "integer"
-          ? "That is wrong. I asked for a whole number."
-          : "That is wrong. I asked for a number.",
-      );
+    if (!valid) return refused(invalidAnswerMessage(field.kind));
     const value = Object.is(parsed, -0) ? 0 : parsed;
     if (!withinBounds(field, value))
       return refused(`That is wrong. ${field.text} must be ${boundsText(field)}.`);
     return { ok: true, value };
   }
   const answer = temporalAnswer(field.kind, trimmed);
-  if (answer === undefined)
-    return refused(
-      `That is wrong. I asked for ${field.kind === "date" ? "a date" : field.kind === "time" ? "a time" : "a date and time"}.`,
-    );
+  if (answer === undefined) return refused(invalidAnswerMessage(field.kind));
   return { ok: true, value: answer };
 }
 
