@@ -11,7 +11,8 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * - other menu distributions kept the player's own settings under `user.*`: gender, attractions and first name.
  *
  * A package that saves none of a group's old keys itself reads the profile's keys instead, so the profile asks them.
- * A package with its own `user.*` setup, such as SexScriptsEnhancedMenu, keeps its keys.
+ * A package with its own `user.*` setup, such as SexScriptsEnhancedMenu, keeps its keys. Only literal saves count: the
+ * corpus's computed toy saves (`toys.${it}` in Domme3 and DW_intro) go over lists without an old key.
  */
 const GROUPS: ReadonlyArray<ReadonlyMap<string, string>> = [
   new Map([["toys.clothpins", "toys.clothespins"]]),
