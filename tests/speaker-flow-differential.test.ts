@@ -11,10 +11,12 @@ import { compileAndRunVariants, type FlowKnob, type FlowRun } from "./helpers/fl
  * gives it", so where the check accepts its read, some run must read it, unless a case says that only a way it cannot
  * tell apart from the failing one gives it.
  *
- * Every construct that orders what runs has a case here: branches and switches, loops, labels and gotos, functions
- * and their defaults, the lazy operators and the `load` default, the parts of an ask, a say, and a timer, compound
- * assignment, exits, and other files. A construct whose order the check gets wrong fails here before a reviewer finds
- * it.
+ * The cases cover the constructs that order what runs: branches and switches, loops, labels and gotos, functions and
+ * their defaults, the lazy operators and the `load` default, the parts of an ask, a say, a named timer, timer blocks
+ * and the helpers they call, permanent buttons, waits and other statements between a store and a read, compound
+ * assignment, exits, a fallback, and other files. A construct whose order the check gets wrong fails here. An
+ * instruction kind without a case here is caught only by the type check of the plan helpers (`satisfies never`), so a
+ * new kind that can stand between a store and a read needs a case.
  */
 
 /** What a case stores and reads: a custom property, which every way must assign, or a built-in field. */
@@ -421,6 +423,68 @@ const TEMPLATES: readonly Template[] = [
     kinds: ["custom"],
     custom: { set: "vera.count = 1", expr: "vera.count" },
     main: (k) => [...k.give("1"), `${k.expr} += give() // READ`],
+  },
+  {
+    name: "a timer block that stores before a wait",
+    main: (k) => [`timer async 1 ms { ${k.set} }`, "wait 2 ms", `say ${k.expr} // READ`],
+  },
+  {
+    name: "a timer block that calls a helper which stores and ends the session",
+    main: (k) => [
+      "function give {",
+      k.set,
+      "    exit",
+      "}",
+      "timer async 1 ms { give() }",
+      "wait 2 ms",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a timer block that calls a helper which stores and goes to a label",
+    main: (k) => [
+      "function give {",
+      k.set,
+      "    goto ready",
+      "}",
+      "timer async 1 ms { give() }",
+      "wait 2 ms",
+      "label ready",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a permanent button between the store and the read",
+    main: (k) => [
+      k.set,
+      'showPermanentButton "Go" {',
+      '    say "pressed"',
+      "}",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a permanent button before a read that comes too early",
+    main: (k) => [
+      'showPermanentButton "Go" {',
+      '    say "pressed"',
+      "}",
+      `say ${k.expr} // READ`,
+      k.set,
+    ],
+  },
+  {
+    name: "statements between the store and the read",
+    main: (k) => [k.set, "stopAudio", "wait 1 ms", `say ${k.expr} // READ`],
+  },
+  {
+    name: "a wait before a read that comes too early",
+    main: (k) => ["wait 1 ms", `say ${k.expr} // READ`, k.set],
+  },
+  {
+    name: "a fallback that an end continues at after the store",
+    main: (k) => ['fallback "room.tease"', k.set, "end"],
+    others: (k) => ({ "room.tease": [`say ${k.expr} // READ`] }),
   },
   {
     name: "an exit on a branch",
