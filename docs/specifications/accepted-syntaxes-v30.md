@@ -1601,8 +1601,8 @@ round(pi * 2 * 2, decimals: 2)   // 12.57
 | `toDeg(angle)`, `toRad(angle)` | the size of an angle as a number of degrees or of radians |
 
 An angle is a value of type `angle`: a number with the unit `deg` (`degree`, `degrees`) or `rad` (`radian`,
-`radians`), such as `90 deg`, `pi rad`, or `heading deg`. A space before the unit is required: `90deg` is an error.
-The unit follows a number, a name, a member, a call, or
+`radians`), such as `90 deg`, `pi rad`, or `heading deg`. The unit may not touch the number: `90deg` is an error;
+write `90 deg`. The unit follows a number, a name, a member, a call, or
 parentheses and binds as a duration unit does ([§35](#durations)). `sin`, `cos`, and `tan` take an angle and return
 a `number`, `asin`, `acos`, `atan`, and `atan2` return an angle, and `toDeg` and `toRad` return a `number`. `asin`
 gives -90° through 90°, `acos` 0° through 180°, and `atan2(0, 0)` is 0°. A plain number where an angle is needed,
