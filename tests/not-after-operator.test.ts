@@ -152,14 +152,6 @@ test("a comparison too long to quote, or an operand with an error of its own, is
       ],
     ],
   );
-  // The `{` of an unfinished condition starts an object literal, as after `==` alone.
-  assert.ok(
-    diagnostics('let x = true\nif x == not {\n    say "yes", instant\n}\nexit\n').some(
-      ([, message]) =>
-        message ===
-        "'not' cannot follow '==' directly. Write it as in 'x != a', or 'x == (not a)'.",
-    ),
-  );
 });
 
 const OTHERWISE_NOT = "'not' cannot follow 'otherwise' directly. Write 'a otherwise (not b)'.";
