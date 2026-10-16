@@ -2151,9 +2151,10 @@ a new revision moves the reason it replaces to the top of its format's list.
   computed.
 - Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and
   `storageWrite` instructions (`save`; `delete` when the value is `null`).
-- Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions
-  `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`.
-  Revision 21 added the timer instructions.
+- Revision 24: message preparation accepts authored position and alignment only for prose.
+- Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`)
+  and `selfHandle`.
+- Revision 21 added the timer instructions.
 
 #### Runtime snapshot history
 
@@ -2296,10 +2297,10 @@ a new revision moves the reason it replaces to the top of its format's list.
   prepared temporaries, which a later run of the same instruction may fill anew.
 - Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground
   `storageWrite` actions and settlements.
-- Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media
-  state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and
-  settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22
-  added timer state.
+- Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned.
+- Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits
+  and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles.
+- Revision 22 added timer state.
 
 #### Checkpoint history
 
