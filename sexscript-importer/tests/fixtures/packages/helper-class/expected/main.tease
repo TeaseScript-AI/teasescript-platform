@@ -2,7 +2,7 @@ showWait("Kneel")
 rounds(3, "Stroke")
 say prose "Twice ${twice(2)}", instant
 say prose "Turns ${turns(2)}", instant
-if percentChance(40) {
+if chance(40) {
   say prose "Lucky", instant
 }
 start()

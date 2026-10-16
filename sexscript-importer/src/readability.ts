@@ -129,3 +129,72 @@ export function withLoopConditions(statements: IrStatement[]): IrStatement[] {
     return { ...statement, condition, body: rest };
   });
 }
+
+/**
+ * Groovy truth of a value that may be null, written as two tests of one variable, reads as one test with a fallback:
+ * `x == null or x == 0` is `(x otherwise 0) == 0`, `x != null and x != ""` is `(x otherwise "") != ""`, and
+ * `x != null and x == true` is `x == true`, which a null never equals (V30 §18 "Fallback with otherwise"). The
+ * variable, or a member of one, is read twice either way, so it has no effect. The null test of a condition whose
+ * blocks read the variable stays: it narrows the variable there, which a fallback does not.
+ */
+export function withPlainNullTests(statements: IrStatement[]): IrStatement[] {
+  let guarded = "";
+  const plain = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, plain);
+    if (next.kind !== "binary" || (next.operator !== "or" && next.operator !== "and")) return next;
+    const { left, right } = next;
+    const nullTest = next.operator === "or" ? "==" : "!=";
+    if (
+      left.kind !== "binary" ||
+      right.kind !== "binary" ||
+      left.operator !== nullTest ||
+      left.right.kind !== "literal" ||
+      left.right.value !== null ||
+      right.right.kind !== "literal" ||
+      right.right.value === null ||
+      !isPlainRead(left.left) ||
+      JSON.stringify(left.left) !== JSON.stringify(right.left) ||
+      guarded.includes(JSON.stringify(rootName(left.left)))
+    )
+      return next;
+    // A null never equals a value, so the null test before an equality adds nothing.
+    if (next.operator === "and" && right.operator === "==") return right;
+    if (right.operator !== nullTest) return next;
+    return {
+      kind: "binary",
+      operator: right.operator,
+      left: { kind: "binary", operator: "otherwise", left: right.left, right: right.right },
+      right: right.right,
+    };
+  };
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => {
+      const nested = withNestedBlocks(item, block);
+      // The text of the blocks a condition governs, where a variable it tests may be narrowed.
+      guarded =
+        nested.kind === "if"
+          ? JSON.stringify([nested.then, nested.else])
+          : nested.kind === "while"
+            ? JSON.stringify(nested.body)
+            : "";
+      const result = mapOwnExpressions(nested, plain);
+      guarded = "";
+      return result;
+    });
+  return block(statements);
+}
+
+/** The name of the variable a read starts from. */
+function rootName(value: IrExpression): string {
+  return value.kind === "property"
+    ? rootName(value.target)
+    : value.kind === "variable"
+      ? value.name
+      : "";
+}
+
+/** A variable, or a member of one, which reading again gives again. */
+function isPlainRead(value: IrExpression): boolean {
+  if (value.kind === "variable") return true;
+  return value.kind === "property" && value.dict !== true && isPlainRead(value.target);
+}

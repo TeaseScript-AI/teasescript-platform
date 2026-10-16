@@ -28,8 +28,3 @@ global function check(n) {
 global function start {
   check(1.5)
 }
-// Domme3Class.percentChance: true or false in each branch, so a test of it needs no Groovy truth.
-global function percentChance(percent) {
-  let switchValue1 = randomInteger(0..99) + 1
-  return (switchValue1 >= 0 and switchValue1 <= percent) or (switchValue1 <= 0 and switchValue1 >= percent)
-}
