@@ -4482,7 +4482,7 @@ class TypeChecker {
         const custom = this.#customProperties(expression.object, object, name, scope);
         if (custom === undefined) return this.#propertyType(object, expression);
         // A custom property that no store gave the speaker yet is of unknown type.
-        return placeRead(memberPropertyType(custom, name) ?? UNKNOWN_TYPE);
+        return memberPropertyType(custom, name) ?? placeRead(UNKNOWN_TYPE);
       }
       case "indexExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
@@ -7313,18 +7313,17 @@ class TypeChecker {
   ): StaticType | PlaceRead {
     const name = expression.property.name;
     const all = members(object);
-    const types = all.map((member) => memberPropertyType(member, name));
-    const passing = all.filter((_, index) => types[index] !== undefined);
+    const reads = all.map((member) => memberPropertyType(member, name));
+    const passing = all.filter((_, index) => reads[index] !== undefined);
     if (passing.length === all.length) {
       this.#noteMissingAccess(expression, object);
-      const type = all.length === 1 ? types[0]! : union(types.map((type) => type!));
-      // A set member is read as a copy (ADR 0014), so what changes the copy decides or widens nothing in the set.
-      if (LIST_ELEMENT_READS.has(name) && all.some((member) => resolved(member).kind === "set"))
-        return copyType(type);
-      // A property or an element is read from the place that keeps it.
-      return placeRead(type);
+      const types = reads.map((read) => (read!.kind === "placeRead" ? read!.type : read!));
+      const type = all.length === 1 ? types[0]! : union(types);
+      // A property or an element is read from the place that keeps it. Any other property gives a new value, such as a
+      // copy of a set member (ADR 0014), so what changes it decides or widens nothing in the value it was read from.
+      return reads.every((read) => read!.kind === "placeRead") ? placeRead(type) : copyType(type);
     }
-    const failing = all.find((_, index) => types[index] === undefined)!;
+    const failing = all.find((_, index) => reads[index] === undefined)!;
     if (passing.length > 0) {
       this.#reportMayBe(expression.object, failing, passing);
       return UNKNOWN_TYPE;
@@ -8473,26 +8472,58 @@ class TypeChecker {
    * Reports a change of `changed` that lands in a value no variable holds, such as `obj()` in `obj().n = 5`, so the
    * change is lost with it (owner decision O3, 2026-10-16). `start` is the value changed: the object of an assigned
    * property or element, or the receiver of an in-place method. Of it and the values it is part of, the first that may
-   * be a speaker or a handle takes the change, as every copy of it names the same one; so does a variable. A value the
+   * be a speaker or a handle takes the change, as every copy of it names the same one; so does a variable. A list, set,
+   * dict, or object that a property computes when it is read, such as a dict's `values`, is a copy no variable holds as
+   * well: the nearest such property is reported unless the value it is read from is itself such a copy. A value the
    * compiler cannot know may be a speaker, so it is not reported, nor is a value that can only be null, which has
    * nothing to change and its own message.
    */
   #reportChangedCopy(changed: Expression, start: Expression): void {
+    let computed: Extract<Expression, { kind: "propertyAccessExpression" }> | undefined;
     for (let node = start; ;) {
       const type = this.#typeOf(node);
       const reference = members(type).some(
         (member) => !isKnown(member) || HANDLE_KINDS.has(resolved(member).kind),
       );
-      if (reference || nonNullType(type).kind === "never") return;
+      if (nonNullType(type).kind === "never") return;
+      if (reference) break;
       if (node.kind === "parenthesizedExpression") node = node.expression;
-      else if (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
+      else if (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
+        if (node.kind === "propertyAccessExpression" && this.#computedCopy(node, type))
+          computed ??= node;
         node = node.object;
-      else {
-        if (node.kind !== "identifier")
+      } else {
+        if (node.kind !== "identifier") {
           this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
-        return;
+          return;
+        }
+        break;
       }
     }
+    if (computed === undefined) return;
+    const owner = resolved(members(nonNullType(this.#typeOf(computed.object)))[0]!).kind;
+    this.#report(typeCode.invalidAssignment, computedCopyMessage(computed, owner), changed.span);
+  }
+
+  /**
+   * Whether `read`, of type `type`, is a list, set, dict, or object that its property computes when it is read, such as
+   * a dict's `values` or a set's `first`, rather than a part its object keeps, so that a change of it changes a copy.
+   */
+  #computedCopy(
+    read: Extract<Expression, { kind: "propertyAccessExpression" }>,
+    type: StaticType,
+  ): boolean {
+    const changeable = members(type).some((member) => {
+      const value = resolved(member);
+      return isCollection(value) || value.kind === "object";
+    });
+    return (
+      changeable &&
+      members(nonNullType(this.#typeOf(read.object))).every((owner) => {
+        const value = memberPropertyType(owner, read.property.name);
+        return value !== undefined && value.kind !== "placeRead";
+      })
+    );
   }
 
   /** Reports an in-place change in statement position, such as `things().sort()`, of a value no variable holds. */
@@ -9729,21 +9760,27 @@ function nonNullTypeForUse(type: StaticType): StaticType {
   return value.kind === "never" ? resolved(type) : value;
 }
 
-/** The type of a property read on one known member type, or `undefined` when that type has no such property. */
-function memberPropertyType(type: StaticType, name: string): StaticType | undefined {
+/**
+ * What a property read gives on one known member type, or `undefined` when that type has no such property: a place read
+ * for a property or an element that the value keeps, which a change through it reaches, and the type of a new value for
+ * a property computed when it is read, so that a change through it changes a copy.
+ */
+function memberPropertyType(type: StaticType, name: string): StaticType | PlaceRead | undefined {
   const value = resolved(type);
   switch (value.kind) {
     case "list":
     case "set":
       if (name === "length") return INTEGER_TYPE;
-      return name === "first" || name === "last" || name === "random" ? value.element : undefined;
+      if (!LIST_ELEMENT_READS.has(name)) return undefined;
+      // A set member is read as a copy (ADR 0014).
+      return value.kind === "list" ? placeRead(value.element) : value.element;
     case "dict":
       // `keys` and `values` are new lists, in entry order.
       if (name === "length") return INTEGER_TYPE;
       if (name === "keys") return { kind: "list", element: STRING_TYPE };
       return name === "values" ? { kind: "list", element: copyType(value.element) } : undefined;
     case "object":
-      return value.properties?.get(name) ?? UNKNOWN_TYPE;
+      return placeRead(value.properties?.get(name) ?? UNKNOWN_TYPE);
     case "timer":
     case "media":
     case "camera":
@@ -9765,7 +9802,8 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "permanentButton":
       return undefined;
     default:
-      return UNKNOWN_TYPE;
+      // A speaker keeps its properties, and a value of unknown type may.
+      return placeRead(UNKNOWN_TYPE);
   }
 }
 
@@ -11163,6 +11201,28 @@ function changedCopyMessage(changed: Expression, copy: Expression): string {
     } else break;
   }
   return `This changes a copy that no variable holds: '${call}' gives a new value each time, so the change is lost. Store it in a variable first, as in 'let ${name} = ${call}', then change '${name}${steps.reverse().join("")}'.`;
+}
+
+/**
+ * The message for a change of the value that `read`, a property of a value of kind `owner`, computes when it is read,
+ * such as `d.values`: it names where to make the change instead.
+ */
+function computedCopyMessage(
+  read: Extract<Expression, { kind: "propertyAccessExpression" }>,
+  owner: StaticType["kind"],
+): string {
+  const name = read.property.name;
+  const receiver =
+    expressionLabel(read.object) ?? (owner === "dict" || owner === "set" ? owner : "value");
+  const property = `'${receiver}.${name}'`;
+  const lost = `This changes a copy that no variable holds: ${property}`;
+  if (owner === "set")
+    return `${lost} gives a copy of the member, so the change is lost. To change the set, replace the member: 'let member = ${receiver}.${name}', '${receiver}.remove(member)', then change 'member' and '${receiver}.add(member)'.`;
+  if (owner === "dict" && name === "keys")
+    return `${lost} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`;
+  if (owner === "dict" && name === "values")
+    return `${lost} gives a new list each time, so the change is lost. Change the dict through its keys, as in '${receiver}[key]'.`;
+  return `${lost} gives a new value each time, so the change is lost. Store it in a variable first, as in 'let value = ${receiver}.${name}', then change the variable.`;
 }
 
 /**

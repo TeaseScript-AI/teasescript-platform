@@ -877,12 +877,13 @@ test("is dict and is T dict test the values, and typed parameters take dicts", (
 test("a change through a dict's values list keeps the list it read when a call then empties the dict", () => {
   // `values` is a new list each time it is read: the prepared target `d.values[0]` keeps the one it read, and the
   // change goes to that copy, also when the call clears, removes from, or replaces the dict. Each state, also the one
-  // right after the dict was emptied, resumes from a checkpoint.
+  // right after the dict was emptied, resumes from a checkpoint. The compiler rejects such a change where it knows the
+  // type of the dict's values (owner decision O3), so `d` holds values of any type.
   for (const emptying of ["d.clear()", 'd.remove("x")', "d.clear()\n    d = dict{}"]) {
     for (const change of ["d.values[0][0] = f()", "d.values[0].add(f())"]) {
       const scenarioName = `${emptying} / ${change}`;
       const result = assertRuntimeResumeEquivalent(
-        `let d = dict{ "x": [0] }\nfunction f {\n    ${emptying}\n    return 7\n}\n${change}\nsay d\nexit`,
+        `let d: dict = dict{ "x": [0] }\nfunction f {\n    ${emptying}\n    return 7\n}\n${change}\nsay d\nexit`,
         { scenarioName },
       );
       assert.deepEqual(said(result.events), ["dict{}"], scenarioName);
@@ -896,7 +897,7 @@ test("a change through a dict's values list keeps the list it read when a call t
   // A preparation that extends `d.values` without a call or a `values` of its own keeps the copy too, also in callers.
   const extended = assertRuntimeResumeEquivalent(
     [
-      'let d = dict{ "x": [[[0]]] }',
+      'let d: dict = dict{ "x": [[[0]]] }',
       "function pick {\n    return 0\n}",
       "function f {\n    d.clear()\n    d = dict{}\n    return 7\n}",
       "function outer {\n    return f()\n}",
