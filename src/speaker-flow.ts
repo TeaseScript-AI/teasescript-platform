@@ -54,6 +54,8 @@ export interface SpeakerFlowInput {
    * `for` its body and no run of it.
    */
   readonly paths: ReadonlyMap<Statement, readonly boolean[]>;
+  /** For `and`, `or`, and `otherwise`: whether the right side may run, and whether it may be skipped. */
+  readonly operands: ReadonlyMap<Expression, readonly boolean[]>;
 }
 
 /** How a way enters a node, to name the way that misses a store. */
@@ -62,6 +64,12 @@ type Way =
   | { readonly kind: "case" | "default" | "noCase"; readonly at: SourceSpan; readonly file: number }
   | { readonly kind: "loopFirst" | "loopNever"; readonly loop: SourceSpan; readonly file: number }
   | { readonly kind: "labelFall"; readonly label: string }
+  | {
+      readonly kind: "operand";
+      readonly operator: "and" | "or" | "otherwise" | "default";
+      readonly at: SourceSpan;
+      readonly file: number;
+    }
   | { readonly kind: "goto" | "call"; readonly at: SourceSpan; readonly file: number }
   | {
       readonly kind: "functionCall" | "partialCall";
@@ -87,8 +95,16 @@ type FlowEvent =
       readonly reported: boolean;
     }
   | { readonly kind: "store"; readonly bits: bigint }
-  | { readonly kind: "call"; readonly fn: FunctionUnit; readonly site: CallExpression }
+  | {
+      readonly kind: "call";
+      readonly fn: FunctionUnit;
+      readonly site: CallExpression;
+      /** The parameter defaults that the call runs: those of the arguments it leaves out. */
+      readonly defaults: readonly Unit[];
+    }
   | { readonly kind: "block"; readonly unit: Unit }
+  /** A parameter default, which runs only for a call that leaves its argument out. */
+  | { readonly kind: "default"; readonly unit: Unit }
   | {
       readonly kind: "transfer";
       readonly call: boolean;
@@ -130,6 +146,10 @@ interface FunctionUnit extends Unit {
   returns: boolean;
   /** What every way through the function to its end or a `return` assigns, once known. */
   gains: bigint;
+  /** What some way through the function to its end or a `return` may assign, once known. */
+  mayGains: bigint;
+  /** The unit of each parameter's default, or `null` for a parameter without one. */
+  readonly defaults: readonly (Unit | null)[];
 }
 
 interface FileUnit extends Unit {
@@ -144,19 +164,32 @@ interface Loop {
   readonly continueTo: FlowNode;
 }
 
-/** What the messages of one check share: the `must` states, and the way found to miss a bit for each node. */
+/**
+ * What the messages of one check share: the `must` states, the way found to miss a bit for each node, and the store
+ * that a message names for a property.
+ */
 interface Known {
   readonly must: readonly (bigint | null)[];
   readonly ways: Map<bigint, Map<FlowNode, Way | null>>;
+  readonly named: Map<string, NamedStore | null>;
   /** For a node, its `must` state before each event and after the last. */
   readonly states: Map<FlowNode, (bigint | null)[]>;
 }
 
-/** A store's place in the source, to name in a message, and the node it runs in. */
+/** The store that a message names, with the source it assigns (`null` for a copy) and where it can come from. */
+interface NamedStore {
+  readonly source: string | null;
+  readonly place: Place;
+  readonly runs: boolean;
+  readonly reaching: ReadonlySet<FlowNode>;
+}
+
+/** A store's place in the source, to name in a message, and the node and event it runs as. */
 interface Place {
   readonly file: number;
   readonly span: SourceSpan;
   readonly node: FlowNode;
+  readonly event: number;
 }
 
 /**
@@ -196,9 +229,18 @@ class SpeakerFlow {
   readonly #filesByPath = new Map<string, FileUnit>();
   readonly #functions = new Map<FunctionDeclaration, FunctionUnit>();
   readonly #blocks: Unit[] = [];
-  /** The blocks still to build, each with the file it stands in. */
-  readonly #pendingBlocks: { readonly unit: Unit; readonly block: Block; readonly file: number }[] =
-    [];
+  /** The blocks and parameter defaults still to build, each with the file it stands in. */
+  readonly #pending: {
+    readonly unit: Unit;
+    readonly code: Block | Expression;
+    readonly file: number;
+  }[] = [];
+  /** For the entry of a block or a parameter default, the nodes that start it; for a hub, the nodes that enter it. */
+  readonly #startedBy = new Map<FlowNode, FlowNode[]>();
+  /** For each file, the nodes with an `end` in its code, which return to the file's caller. */
+  readonly #ends: FlowNode[][] = [];
+  /** For each parameter default, the node where its value is done, which returns to the call. */
+  readonly #lastOf = new Map<Unit, FlowNode>();
   /** Where the session starts: the first start value, or main.tease's top. */
   readonly #start: FlowNode;
   /** Where a target the compiler cannot know leads: on to every file's top and label. Only `may` enters it. */
@@ -254,19 +296,33 @@ class SpeakerFlow {
       };
       this.#fileUnits.push(unit);
       this.#filesByPath.set(path, unit);
-      for (const declaration of functionDeclarations(program))
-        this.#functions.set(declaration, {
+      for (const declaration of functionDeclarations(program)) {
+        const defaults = declaration.parameters.map((parameter) => {
+          if (parameter.defaultValue === null) return null;
+          const unit = this.#newUnit();
+          this.#blocks.push(unit);
+          this.#pending.push({ unit, code: parameter.defaultValue, file });
+          return unit;
+        });
+        const fn: FunctionUnit = {
           ...this.#newUnit(),
           declaration,
           exit: this.#node(),
           returns: false,
           gains: 0n,
-        });
+          mayGains: 0n,
+          defaults,
+        };
+        for (const unit of defaults) if (unit !== null) fn.runs.add(unit);
+        this.#functions.set(declaration, fn);
+      }
     }
     this.#file = 0;
     this.#start = this.#node();
     this.#anywhere = this.#node();
     this.#fallback = this.#node();
+    this.#startedBy.set(this.#anywhere, []);
+    this.#startedBy.set(this.#fallback, []);
     for (const file of this.#fileUnits)
       for (const entry of [file.entry, ...file.labels.values()]) this.#edge(this.#anywhere, entry);
     this.#build();
@@ -291,26 +347,22 @@ class SpeakerFlow {
   report(result: Diagnostic[][]): void {
     this.#summarize();
     this.#findReturns();
-    this.#findGains();
+    this.#findGains("must");
+    this.#findGains("may");
     const must = this.#solve("must");
     const may = this.#solve("may");
     this.#may = may;
-    const ways = new Map<bigint, Map<FlowNode, Way | null>>();
-    const states = new Map<FlowNode, (bigint | null)[]>();
+    const known: Known = { must, ways: new Map(), named: new Map(), states: new Map() };
     for (const node of this.#nodes) {
       let mustState = must[node.id] ?? null;
       let mayState = may[node.id] ?? null;
       // The calls so far in the node of functions that assign something on only some of their ways.
       const partial: Extract<FlowEvent, { kind: "call" }>[] = [];
       for (const event of node.events) {
-        if (event.kind === "call" && (event.fn.summary & ~event.fn.gains) !== 0n)
+        if (event.kind === "call" && (event.fn.mayGains & ~event.fn.gains) !== 0n)
           partial.push(event);
         if (event.kind === "read" && event.reported && mustState !== null && mayState !== null) {
-          const message = this.#message(event, node, partial, mustState, mayState, {
-            must,
-            ways,
-            states,
-          });
+          const message = this.#message(event, node, partial, mustState, mayState, known);
           if (message !== null)
             result[node.file]!.push(
               createDiagnostic(
@@ -353,7 +405,7 @@ class SpeakerFlow {
   }
 
   /** Takes the steps in order, before the steps planned earlier; a step may plan steps of its own. */
-  #sequence(...steps: (() => void)[]): void {
+  #sequence(steps: readonly (() => void)[]): void {
     for (let index = steps.length - 1; index >= 0; index -= 1) this.#work.push(steps[index]!);
   }
 
@@ -368,7 +420,13 @@ class SpeakerFlow {
     for (const { file, declaration } of sessionDeclarations(
       this.#files.map((entry) => entry.program),
     )) {
+      // Each start value runs in the node of its own file, so a message names its line there.
       this.#file = file;
+      if (this.#current!.file !== file) {
+        const next = this.#node();
+        this.#edge(this.#current, next);
+        this.#current = next;
+      }
       if (declaration.kind === "globalStatement") this.#expression(declaration.initial);
       else for (const property of declaration.properties) this.#expression(property.value);
     }
@@ -382,40 +440,33 @@ class SpeakerFlow {
     for (const fn of this.#functions.values()) {
       this.#enter(fn, fn.entry.file);
       this.#function = fn;
-      // A parameter default runs only when a call leaves its argument out, so its reads are not reported.
-      this.#quiet += 1;
-      for (const parameter of fn.declaration.parameters)
-        if (parameter.defaultValue !== null) this.#expression(parameter.defaultValue);
-      this.#quiet -= 1;
-      this.#sequence(
+      // A parameter default runs first, but only for a call that leaves its argument out.
+      for (const unit of fn.defaults) if (unit !== null) this.#event({ kind: "default", unit });
+      this.#sequence([
         () => this.#statements(fn.declaration.body.statements),
         () => this.#edge(this.#current, fn.exit),
-      );
+      ]);
       this.#runWork();
     }
-    for (
-      let pending = this.#pendingBlocks.pop();
-      pending !== undefined;
-      pending = this.#pendingBlocks.pop()
-    ) {
+    for (let pending = this.#pending.pop(); pending !== undefined; pending = this.#pending.pop()) {
       this.#enter(pending.unit, pending.file);
-      this.#statements(pending.block.statements);
+      if (pending.code.kind === "block") this.#statements(pending.code.statements);
+      else this.#expression(pending.code);
       this.#runWork();
+      if (pending.code.kind !== "block") this.#lastOf.set(pending.unit, this.#current!);
     }
     for (const from of this.#nodes)
       for (const [at, event] of from.events.entries()) {
-        if (event.kind === "call")
-          this.#enteredBy(event.fn.entry, {
-            from,
-            at,
-            way: {
-              kind: "functionCall",
-              name: event.fn.declaration.name.name,
-              at: event.site.span,
-              file: from.file,
-            },
-          });
-        else if (event.kind === "transfer" && event.targets !== null)
+        if (event.kind === "call") {
+          const way: Way = {
+            kind: "functionCall",
+            name: event.fn.declaration.name.name,
+            at: event.site.span,
+            file: from.file,
+          };
+          this.#enteredBy(event.fn.entry, { from, at, way });
+          for (const unit of event.defaults) this.#enteredBy(unit.entry, { from, at, way });
+        } else if (event.kind === "transfer" && event.targets !== null)
           for (const target of event.targets) this.#enteredBy(target, { from, at, way: event.way });
       }
   }
@@ -435,17 +486,24 @@ class SpeakerFlow {
     else known.push(incoming);
   }
 
-  /** A block that runs later, built as a unit of its own after the code that creates it. */
+  /**
+   * A timer, media, or button block, which runs at a time that the code around it cannot tell: a unit of its own, built
+   * after the code that creates it, which starts with everything.
+   */
   #block(block: Block): void {
     const unit = this.#newUnit();
     this.#blocks.push(unit);
-    this.#pendingBlocks.push({ unit, block, file: this.#file });
+    this.#pending.push({ unit, code: block, file: this.#file });
     this.#unit!.runs.add(unit);
     this.#event({ kind: "block", unit });
+    this.#startedBy.set(unit.entry, [this.#current!]);
   }
 
   #statements(statements: readonly Statement[]): void {
-    this.#sequence(...statements.map((statement) => () => this.#statement(statement)));
+    for (let index = statements.length - 1; index >= 0; index -= 1) {
+      const statement = statements[index]!;
+      this.#work.push(() => this.#statement(statement));
+    }
   }
 
   #body(block: Block | IfStatement): void {
@@ -468,12 +526,12 @@ class SpeakerFlow {
       return;
     }
     this.#quiet += 1;
-    this.#sequence(
+    this.#sequence([
       () => this.#statementKind(statement),
       () => {
         this.#quiet -= 1;
       },
-    );
+    ]);
   }
 
   #statementKind(statement: Exclude<Statement, { kind: "labelStatement" }>): void {
@@ -578,6 +636,8 @@ class SpeakerFlow {
         return;
       case "endStatement":
         this.#event({ kind: "end" });
+        this.#startedBy.get(this.#fallback)!.push(this.#current!);
+        (this.#ends[this.#file] ??= []).push(this.#current!);
         this.#current = null;
         return;
       case "gotoStatement":
@@ -632,7 +692,12 @@ class SpeakerFlow {
   #store(bits: bigint, span: SourceSpan): Place {
     this.#unit!.own |= bits;
     this.#event({ kind: "store", bits });
-    return { file: this.#file, span, node: this.#current! };
+    return {
+      file: this.#file,
+      span,
+      node: this.#current!,
+      event: this.#current!.events.length - 1,
+    };
   }
 
   #read(read: PropertyAccessExpression): void {
@@ -648,7 +713,7 @@ class SpeakerFlow {
     const at = statement.span;
     const file = this.#file;
     const elseBlock = statement.elseBlock;
-    this.#sequence(
+    this.#sequence([
       () => {
         this.#current = thenWay === true ? this.#branch(start) : this.#node();
         this.#body(statement.thenBlock);
@@ -667,7 +732,7 @@ class SpeakerFlow {
           this.#edge(this.#current, join, { kind: "else", at, file });
         this.#current = join.into.length > 0 ? join : null;
       },
-    );
+    ]);
   }
 
   #branch(start: FlowNode): FlowNode {
@@ -685,7 +750,7 @@ class SpeakerFlow {
     const file = this.#file;
     const rest = paths?.[statement.cases.length] ?? true;
     const defaultBlock = statement.defaultBlock;
-    this.#sequence(
+    this.#sequence([
       ...statement.cases.flatMap((switchCase, index) => {
         const taken = paths?.[index] ?? true;
         return [
@@ -711,7 +776,7 @@ class SpeakerFlow {
           this.#edge(this.#current, join, { kind: "default", at: defaultBlock.span, file });
         this.#current = join.into.length > 0 ? join : null;
       },
-    );
+    ]);
   }
 
   /** A `while` loop: its condition runs before each run of the body, and once more before it ends. */
@@ -725,7 +790,7 @@ class SpeakerFlow {
     const after = this.#node();
     this.#loops.push({ breakTo: after, continueTo: head });
     this.#current = bodyWay === true ? this.#branch(tested) : this.#node();
-    this.#sequence(
+    this.#sequence([
       () => this.#statements(statement.body.statements),
       () => {
         this.#edge(this.#current, head);
@@ -733,7 +798,7 @@ class SpeakerFlow {
         if (endWay === true) this.#edge(tested, after);
         this.#current = after.into.length > 0 ? after : null;
       },
-    );
+    ]);
   }
 
   /** A `repeat` or `for` loop, whose body runs any number of times unless the type check found otherwise. */
@@ -750,7 +815,7 @@ class SpeakerFlow {
       this.#edge(again, first);
       this.#current = first;
     } else this.#current = this.#node();
-    this.#sequence(
+    this.#sequence([
       () => this.#statements(body.statements),
       () => {
         this.#edge(this.#current, again);
@@ -760,7 +825,7 @@ class SpeakerFlow {
         if (again.into.length > 0) this.#edge(again, after);
         this.#current = after.into.length > 0 ? after : null;
       },
-    );
+    ]);
   }
 
   /** A `goto` or file `call`: a transfer to the entries its target may enter. */
@@ -768,6 +833,8 @@ class SpeakerFlow {
     if (target.kind === "scriptTarget") this.#expression(target.expression);
     const { entries, files } = this.#targets(target);
     if (call && entries === null) this.#unit!.callsAnyFile = true;
+    if (entries === null)
+      this.#startedBy.get(this.#anywhere)!.push((this.#current ??= this.#node()));
     for (const file of files) this.#unit!.runs.add(file);
     this.#event({
       kind: "transfer",
@@ -817,21 +884,63 @@ class SpeakerFlow {
     for (const expression of expressions) this.#expression(expression);
   }
 
-  /** The events of an expression in evaluation order, walked with a stack of its own. */
+  /**
+   * The events of an expression in evaluation order, walked with a stack of its own. The right side of `and`, `or`,
+   * and `otherwise`, and the `default:` of a `load`, run only on some ways: a branch that the type check found possible
+   * runs them, and another goes past them.
+   */
   #expression(root: Expression): void {
-    const stack: { readonly expression: Expression; readonly done: boolean }[] = [
-      { expression: root, done: false },
-    ];
+    type Frame =
+      | { readonly expression: Expression; readonly step: "operands" | "after" | "optional" }
+      | {
+          readonly step: "joined";
+          readonly operand: Way;
+          readonly start: FlowNode;
+          readonly skips: boolean;
+        }
+      | { readonly step: "skipped"; readonly start: FlowNode };
+    const stack: Frame[] = [{ expression: root, step: "operands" }];
     for (let frame = stack.pop(); frame !== undefined; frame = stack.pop()) {
+      if (frame.step === "joined") {
+        const join = this.#node();
+        this.#edge(this.#current, join);
+        if (frame.skips) this.#edge(frame.start, join, frame.operand);
+        this.#current = join;
+        continue;
+      }
+      if (frame.step === "skipped") {
+        this.#current = frame.start;
+        continue;
+      }
       const { expression } = frame;
-      if (frame.done) {
+      if (frame.step === "after") {
         this.#after(expression);
         continue;
       }
-      stack.push({ expression, done: true });
-      const operands = expressionOperands(expression);
+      const optional = optionalOperand(expression);
+      if (frame.step === "optional" && optional !== null) {
+        const [runs, skips] = this.#input.operands.get(expression) ?? [true, true];
+        const start = (this.#current ??= this.#node());
+        const operand: Way = {
+          kind: "operand",
+          operator: optional.operator,
+          at: optional.at,
+          file: this.#file,
+        };
+        // A side that never runs is still built, but no way enters it.
+        stack.push(
+          runs === true
+            ? { step: "joined", operand, start, skips: skips === true }
+            : { step: "skipped", start },
+        );
+        this.#current = runs === true ? this.#branch(start) : this.#node();
+        stack.push({ expression: optional.operand, step: "operands" });
+        continue;
+      }
+      stack.push({ expression, step: optional === null ? "after" : "optional" });
+      const operands = optional === null ? expressionOperands(expression) : optional.first;
       for (let index = operands.length - 1; index >= 0; index -= 1)
-        stack.push({ expression: operands[index]!, done: false });
+        stack.push({ expression: operands[index]!, step: "operands" });
     }
   }
 
@@ -847,7 +956,12 @@ class SpeakerFlow {
         if (fn === undefined) return;
         this.#unit!.runs.add(fn);
         this.#unit!.calls.add(fn);
-        this.#event({ kind: "call", fn, site: expression });
+        this.#event({
+          kind: "call",
+          fn,
+          site: expression,
+          defaults: omittedDefaults(fn, expression),
+        });
         return;
       }
       case "timerExpression":
@@ -937,14 +1051,19 @@ class SpeakerFlow {
   }
 
   /**
-   * What each function that returns assigns on every way to its end or a `return`: a call in it gives what the called
-   * function gains, a block or a file `call` whatever it may store. A way ends at an `end`, a `goto`, or a call that
-   * never returns. Starting from everything and only shrinking, recursion keeps what its other ways assign.
+   * What each function that returns assigns on every way to its end or a `return` (`must`), or on some way (`may`): a
+   * call in it gives what the called function gains, a block or a file `call` whatever it may store, and a parameter
+   * default its stores only for `may`. A way ends at an `end`, a `goto`, or for `must` a call that never returns.
+   * `must` starts from everything and only shrinks, so recursion keeps what its other ways assign; `may` starts from
+   * nothing and only grows.
    */
-  #findGains(): void {
+  #findGains(mode: "must" | "may"): void {
     const callers = this.#callers();
     const returning = [...this.#functions.values()].filter((fn) => fn.returns);
-    for (const fn of returning) fn.gains = this.#all;
+    for (const fn of returning) {
+      if (mode === "must") fn.gains = this.#all;
+      else fn.mayGains = 0n;
+    }
     const work = new Set(returning);
     for (const fn of work) {
       work.delete(fn);
@@ -953,21 +1072,29 @@ class SpeakerFlow {
       for (let node = nodes.pop(); node !== undefined; node = nodes.pop()) {
         let state: bigint | null = states.get(node)!;
         for (const event of node.events) {
-          state = this.#apply("must", event, state, noJoin);
+          state = this.#apply(mode, event, state, noJoin);
           if (state === null) break;
         }
         if (state === null) continue;
         for (const next of node.next) {
           const known = states.get(next);
-          const joined = known === undefined ? state : known & state;
+          const joined =
+            known === undefined ? state : mode === "must" ? known & state : known | state;
           if (joined === known) continue;
           states.set(next, joined);
           nodes.push(next);
         }
       }
-      const gains = states.get(fn.exit) ?? this.#all;
-      if (gains === fn.gains) continue;
-      fn.gains = gains;
+      const exit = states.get(fn.exit);
+      if (mode === "must") {
+        const gains = exit ?? this.#all;
+        if (gains === fn.gains) continue;
+        fn.gains = gains;
+      } else {
+        const gains = exit ?? 0n;
+        if (gains === fn.mayGains) continue;
+        fn.mayGains = gains;
+      }
       for (const caller of callers.get(fn) ?? []) if (caller.returns) work.add(caller);
     }
   }
@@ -1028,11 +1155,14 @@ class SpeakerFlow {
         return state | event.bits;
       case "call":
         join(event.fn.entry, state);
-        if (mode === "may") return state | event.fn.summary;
+        for (const unit of event.defaults) join(unit.entry, state);
+        if (mode === "may") return state | event.fn.mayGains;
         return event.fn.returns ? state | event.fn.gains : null;
       case "block":
         join(event.unit.entry, this.#all);
         return state | event.unit.summary;
+      case "default":
+        return mode === "may" ? state | event.unit.summary : state;
       case "transfer":
         if (event.targets !== null) for (const target of event.targets) join(target, state);
         else if (mode === "may") join(this.#anywhere, state);
@@ -1060,7 +1190,7 @@ class SpeakerFlow {
     const { speaker, name, field, sources } = event.info;
     let some = 0n;
     for (const source of field ? sources : [name]) some |= this.#bit(speaker, source);
-    if ((mayState & some) === 0n) return this.#tooEarly(event.info, node.file);
+    if ((mayState & some) === 0n) return this.#tooEarly(event.info, node, known);
     const bit = this.#bit(speaker, name);
     if (field || (mustState & bit) !== 0n) return null;
     // The nearest call before the read that may leave it out, or else a way into the read's node.
@@ -1145,48 +1275,100 @@ class SpeakerFlow {
 
   /** A call of a function that may assign `bit` but does not on every way, as a way that misses it. */
   #partialCall(event: FlowEvent, bit: bigint, file: number): Way | null {
-    if (event.kind !== "call" || (event.fn.summary & bit) === 0n || (event.fn.gains & bit) !== 0n)
+    if (event.kind !== "call" || (event.fn.mayGains & bit) === 0n || (event.fn.gains & bit) !== 0n)
       return null;
     return { kind: "partialCall", name: event.fn.declaration.name.name, at: event.site.span, file };
   }
 
   /**
-   * The message for a read that no way to it gives a source of the property first. It names the store that comes later,
-   * or, when no way runs any, one that never runs: for the player's field a copy of the account, else an assignment.
+   * The message for a read that no way to it gives a source of the property first. It names one store: for the
+   * player's field a copy of the account, else an assignment of a source, preferring one that runs, and says whether
+   * it comes later, runs only on a way that does not reach the read, or never runs.
    */
-  #tooEarly(read: SpeakerFlowRead, from: number): string {
+  #tooEarly(read: SpeakerFlowRead, node: FlowNode, known: Known): string {
     const { speaker, name, field, sources } = read;
-    const quoted = alternatives(sources);
-    const runs = (place: Place): boolean => (this.#may[place.node.id] ?? null) !== null;
-    const first = <T extends { readonly place: Place }>(stores: readonly T[]): T | undefined =>
-      [...stores]
-        .sort((left, right) => comparePlaces(left.place, right.place))
-        .sort((left, right) => Number(runs(right.place)) - Number(runs(left.place)))[0];
-    const copy =
-      speaker === PLAYER && field ? first(this.#copies.map((place) => ({ place }))) : undefined;
-    const store = first(
-      sources.flatMap((source) =>
-        (this.#stores.get(`${speaker}.${source}`) ?? []).map((place) => ({ source, place })),
-      ),
-    );
-    let later = "";
-    if (copy !== undefined)
-      later = ` The copy on ${this.#line(copy.place, from)} ${runs(copy.place) ? "comes only later" : "never runs"}.`;
-    else if (store !== undefined)
-      later = ` ${capitalize(this.#line(store.place, from))} assigns ${sources.length === 1 ? "it" : `'${store.source}'`}, but ${runs(store.place) ? "only later" : "that line never runs"}.`;
+    const copy = speaker === PLAYER && field && this.#copies.length > 0;
+    const key = `${speaker}.${copy ? "copy" : sources.join(".")}`;
+    let store = known.named.get(key);
+    if (store === undefined) {
+      const stores = copy
+        ? this.#copies.map((place) => ({ source: null, place }))
+        : sources.flatMap((source) =>
+            (this.#stores.get(`${speaker}.${source}`) ?? []).map((place) => ({ source, place })),
+          );
+      const runs = (place: Place): boolean => (this.#may[place.node.id] ?? null) !== null;
+      stores.sort(
+        (left, right) =>
+          Number(runs(right.place)) - Number(runs(left.place)) ||
+          comparePlaces(left.place, right.place),
+      );
+      const first = stores[0];
+      store =
+        first === undefined
+          ? null
+          : { ...first, runs: runs(first.place), reaching: this.#reaching(first.place) };
+      known.named.set(key, store);
+    }
+    let named = "";
+    if (store !== null) {
+      const when = !store.runs
+        ? "never"
+        : store.place.node === node || store.reaching.has(node)
+          ? "later"
+          : "elsewhere";
+      const line = this.#line(store.place, node.file);
+      named =
+        store.source === null
+          ? ` The copy on ${line} ${when === "never" ? "never runs" : when === "later" ? "comes only later" : "runs only on a way that does not reach this line"}.`
+          : ` ${capitalize(line)} assigns ${sources.length === 1 ? "it" : `'${store.source}'`}, but ${when === "never" ? "that line never runs" : when === "later" ? "only later" : "only on a way that does not reach this line"}.`;
+    }
     if (!field)
-      return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns it before this line runs.${later} ${
+      return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns it before this line runs.${named} ${
         speaker === PLAYER
           ? `Assign it before this line, as in 'player.${name} = ...'.`
           : `Give it a start value, as in 'speaker ${speaker} { ${name}: ... }', or assign it before this line.`
       }`;
+    const quoted = alternatives(sources);
     if (speaker === PLAYER)
-      return `Speaker 'player' has no '${name}' yet here: nothing copies the account or assigns ${quoted} before this line runs.${later} Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
-    return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns ${quoted} before this line runs.${later} ${
+      return `Speaker 'player' has no '${name}' yet here: nothing copies the account or assigns ${quoted} before this line runs.${named} Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
+    return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns ${quoted} before this line runs.${named} ${
       sources.includes("gender")
         ? `Give it a gender, as in 'speaker ${speaker} { gender: "female" }', or assign it before this line.`
         : `Give it a start value, as in 'speaker ${speaker} { ${name}: ... }', or assign it before this line.`
     }`;
+  }
+
+  /**
+   * The nodes from which some way leads to the store at `target`: back through edges, calls and transfers into an
+   * entry, the code that starts a block or a parameter default, and the code that enters a hub, and from a call before
+   * it, back from the end of the function or the `end`s of the files it runs.
+   */
+  #reaching(target: Place): ReadonlySet<FlowNode> {
+    // For each node, how many of its events lead on to the store.
+    const upTo = new Map<FlowNode, number>([[target.node, target.event]]);
+    const work = [target.node];
+    const visit = (node: FlowNode, events: number): void => {
+      if ((upTo.get(node) ?? -1) >= events) return;
+      upTo.set(node, events);
+      work.push(node);
+    };
+    for (let node = work.pop(); node !== undefined; node = work.pop()) {
+      const events = upTo.get(node)!;
+      for (const event of node.events.slice(0, events))
+        if (event.kind === "call") {
+          visit(event.fn.exit, 0);
+          for (const unit of event.defaults) {
+            const last = this.#lastOf.get(unit)!;
+            visit(last, last.events.length);
+          }
+        } else if (event.kind === "transfer" && event.call)
+          for (const file of event.files)
+            for (const end of this.#ends[file.entry.file] ?? []) visit(end, end.events.length);
+      for (const incoming of [...node.into, ...(this.#entered.get(node) ?? [])])
+        visit(incoming.from, incoming.at ?? incoming.from.events.length);
+      for (const from of this.#startedBy.get(node) ?? []) visit(from, from.events.length);
+    }
+    return new Set(upTo.keys());
   }
 
   #line(place: Pick<Place, "file" | "span">, from: number): string {
@@ -1268,6 +1450,17 @@ class SpeakerFlow {
           fix: `on every way through '${way.name}'`,
           complete: true,
         };
+      case "operand":
+        return {
+          phrase: `when ${
+            way.operator === "otherwise"
+              ? "the fallback after 'otherwise'"
+              : way.operator === "default"
+                ? "the 'default:' of the 'load'"
+                : `the right side of the '${way.operator}'`
+          } on ${line(way.at, way.file)} does not run`,
+          fix: null,
+        };
       case "start":
         return { phrase: "from the start of the session", fix: null };
     }
@@ -1288,6 +1481,54 @@ function expressionOperands(expression: Expression): readonly Expression[] {
     default:
       return expressionChildren(expression);
   }
+}
+
+/** The default units of the parameters whose argument a call leaves out. */
+function omittedDefaults(fn: FunctionUnit, call: CallExpression): Unit[] {
+  const positional = call.arguments.filter(
+    (argument) => argument.kind === "positionalArgument",
+  ).length;
+  const named = new Set(
+    call.arguments.flatMap((argument) =>
+      argument.kind === "namedArgument" ? [argument.name.name] : [],
+    ),
+  );
+  return fn.defaults.flatMap((unit, index) =>
+    unit === null || index < positional || named.has(fn.declaration.parameters[index]!.name.name)
+      ? []
+      : [unit],
+  );
+}
+
+/** The part of an expression that runs only on some ways, the operands before it, and where to name it. */
+function optionalOperand(
+  expression: Expression,
+): {
+  readonly first: readonly Expression[];
+  readonly operand: Expression;
+  readonly operator: "and" | "or" | "otherwise" | "default";
+  readonly at: SourceSpan;
+} | null {
+  if (
+    expression.kind === "binaryExpression" &&
+    (expression.operator === "and" ||
+      expression.operator === "or" ||
+      expression.operator === "otherwise")
+  )
+    return {
+      first: [expression.left],
+      operand: expression.right,
+      operator: expression.operator,
+      at: expression.operatorSpan,
+    };
+  if (expression.kind === "loadExpression" && expression.defaultValue !== null)
+    return {
+      first: [expression.key],
+      operand: expression.defaultValue,
+      operator: "default",
+      at: expression.defaultValue.span,
+    };
+  return null;
 }
 
 /** The file and label of `script(path)` or `script(path, label: name)` with literal text, or `null`. */

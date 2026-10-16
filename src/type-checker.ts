@@ -1437,6 +1437,7 @@ class TypeChecker {
   readonly #flowStores = new Map<AssignmentStatement, SpeakerFlowStore>();
   readonly #calledFunctions = new Map<CallExpression, FunctionDeclaration>();
   readonly #pathFacts = new Map<Statement, boolean[]>();
+  readonly #operandFacts = new Map<Expression, boolean[]>();
 
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
@@ -2023,11 +2024,12 @@ class TypeChecker {
 
   /** Notes which ways through a branch or loop are possible; a body checked again adds the ways it finds then. */
   #notePaths(statement: Statement, paths: boolean[]): void {
-    const known = this.#pathFacts.get(statement);
-    this.#pathFacts.set(
-      statement,
-      known === undefined ? paths : paths.map((path, index) => path || known[index] === true),
-    );
+    this.#pathFacts.set(statement, joinedWays(this.#pathFacts.get(statement), paths));
+  }
+
+  /** Notes whether the right side of `and`, `or`, or `otherwise` may run, and whether it may be skipped. */
+  #noteOperand(expression: Expression, ways: boolean[]): void {
+    this.#operandFacts.set(expression, joinedWays(this.#operandFacts.get(expression), ways));
   }
 
   /**
@@ -2050,6 +2052,7 @@ class TypeChecker {
       stores: this.#flowStores,
       calls: this.#calledFunctions,
       paths: this.#pathFacts,
+      operands: this.#operandFacts,
     };
   }
 
@@ -5452,6 +5455,10 @@ class TypeChecker {
           // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
           // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
+          this.#noteOperand(node, [
+            runsRight !== null,
+            (node.operator === "and" ? left.whenFalse : left.whenTrue) !== null,
+          ]);
           this.#flow.apply(
             runsRight ??
               (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
@@ -5687,6 +5694,7 @@ class TypeChecker {
       // The result may be the value or the fallback itself, so it is a copy that later stores to either cannot share.
       const left = this.#capture(node.left);
       if (unused === null && neverNull(left)) unused = index;
+      this.#noteOperand(node, [unused === null, true]);
       // A fallback runs only when every value before it is null, so what it changes may or may not have happened
       // afterwards, and after a value that is never null, it never runs, but is still checked.
       const start = this.#flow.mark();
@@ -10116,6 +10124,11 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   if (value === null || typeof value !== "object") return [{ value, measure: null }];
   if (value.kind === "angle") return [{ value: value.degrees, measure: "angle" }];
   return isCalendar(value) ? undefined : [{ value: value.milliseconds, measure: "duration" }];
+}
+
+/** The ways that a check finds possible, with those an earlier check of the same code found. */
+function joinedWays(known: readonly boolean[] | undefined, ways: boolean[]): boolean[] {
+  return known === undefined ? ways : ways.map((way, index) => way || known[index] === true);
 }
 
 /**

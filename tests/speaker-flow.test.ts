@@ -68,6 +68,25 @@ test("reading a custom property before anything assigns it is a compile error", 
     diagnostics(`${VERA}\nglobal greeting = vera.mood\nvera.mood = "calm"\nsay greeting\nexit`),
     [["TSV043", "main.tease:4", early("Line 5")]],
   );
+  // A start value of another file runs before main.tease, and a `load` default runs when the key is missing.
+  assert.deepEqual(
+    diagnostics(`${VERA}\nvera.mood = "calm"\nexit`, {
+      "room.tease": "global greeting = vera.mood",
+    }),
+    [
+      [
+        "TSV043",
+        "room.tease:1",
+        "Speaker 'vera' has no 'mood' yet here: nothing assigns it before this line runs. Line 4 of 'main.tease' assigns it, but only later. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    diagnostics(
+      `${VERA}\nlet name = load "name", default: vera.mood\nvera.mood = "calm"\nsay name\nexit`,
+    ),
+    [["TSV043", "main.tease:4", early("Line 5")]],
+  );
   // A file that a later `call` runs assigns it too late.
   assert.deepEqual(
     diagnostics(`${VERA}\nsay vera.mood\ncall "setup.tease"\nexit`, {
@@ -235,6 +254,19 @@ test("a custom property that only some ways assign is a compile error that names
       ],
     ],
   );
+  // The right side of `and` runs only on some ways.
+  assert.deepEqual(
+    diagnostics(
+      `${VERA}\nfunction give {\n    vera.mood = "calm"\n    return true\n}\nlet given = chance(0.5) and give()\nsay vera.mood\nexit`,
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:9",
+        `Speaker 'vera' may have no 'mood' here: when the right side of the 'and' on line 8 does not run, nothing assigns it before this line. Assign it on every way to this line, or ${START("mood")}.`,
+      ],
+    ],
+  );
   assert.deepEqual(diagnostics("if chance(0.5) { player.points = 1 }\nsay player.points\nexit"), [
     [
       "TSV043",
@@ -274,6 +306,31 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       `Speaker 'player' has no 'heShe' yet here: nothing copies the account or assigns 'heShe' or 'gender' before this line runs. Line 2 assigns 'gender', but only later. ${copyFix("'player.gender' or 'player.heShe'")}`,
     ],
   ]);
+  // An assignment on a way that ends before the read, or one that no way runs, gives nothing there.
+  assert.deepEqual(
+    diagnostics(
+      'if chance(0.5) {\n    player.firstName = "Sam"\n    exit\n}\nsay player.firstName\nexit',
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:5",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 2 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
+  assert.deepEqual(
+    diagnostics(
+      'function give {\n    return\n    player.firstName = "Sam"\n}\ngive()\nsay player.firstName\nexit',
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:6",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 3 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
   // A declared speaker: `gender` counts for a term, the titles for each other, and the parts of the name for
   // `displayName`.
   const speaker = 'speaker vera {\n    color: "white"\n}';
@@ -369,6 +426,28 @@ test("reads that every followed way prepares compile and run", () => {
       choice,
     );
   }
+  // A side of `and` or `or` that never runs, and a parameter default that a call does not use.
+  assert.deepEqual(
+    runs(
+      [
+        VERA,
+        'let early = false and vera.mood == "calm"',
+        'let other = true or vera.mood == "calm"',
+        "function show {",
+        "    say vera.mood",
+        "    return 1",
+        "}",
+        "function optional(value = show()) {",
+        "    say value",
+        "}",
+        "optional(0)",
+        'vera.mood = "calm"',
+        "say vera.mood",
+        "exit",
+      ].join("\n"),
+    ),
+    ["0", "calm"],
+  );
   // A function read after the assignment, a label reached only once it is assigned, a block that may have run, a store
   // through an alias or a parameter, and the player's fields after a copy.
   assert.deepEqual(
@@ -458,7 +537,7 @@ test("what the compiler cannot follow stays a runtime error", () => {
     assert.deepEqual(fails(main, others), ["failure TSR017"], name);
 });
 
-test("the check follows deep nesting without native recursion", () => {
+test("the check follows deep and wide sources without native recursion", () => {
   const api = new URL("../src/index.js", import.meta.url).href;
   const script = String.raw`
     import assert from 'node:assert/strict';
@@ -476,6 +555,7 @@ test("the check follows deep nesting without native recursion", () => {
     assert.deepEqual(lines(head+'if false {} else '.repeat(1024)+'{\nsay vera.mood\n}\nvera.mood = "x"\nexit'),['TSV043:5']);
     assert.deepEqual(lines(head+'let value = '+'('.repeat(2000)+'vera.mood'+')'.repeat(2000)+'\nvera.mood = "x"\nexit'),['TSV043:4']);
     assert.deepEqual(lines(head+'vera.mood = "x"\nlet value = '+'not '.repeat(10000)+'(vera.mood == "x")\nexit'),[]);
+    assert.deepEqual(lines(head+'vera.mood = "x"\n'+'say "a"\n'.repeat(40000)+'say vera.mood\nexit'),[]);
     console.log('deep speaker reads checked');
   `;
   const child = spawnSync(
