@@ -58,11 +58,7 @@ export function instructionExpressions(instruction: Instruction): readonly Expre
     case "capture":
       return instruction.tags === null ? [] : [instruction.tags];
     case "fileStore":
-      return [
-        instruction.value,
-        ...(instruction.default === null ? [] : [instruction.default]),
-        ...(instruction.files === null ? [] : [instruction.files]),
-      ];
+      return [instruction.value, ...(instruction.files === null ? [] : [instruction.files])];
     case "storageWrite":
       return [...(instruction.value === null ? [] : [instruction.value]), instruction.key];
     case "playMedia":

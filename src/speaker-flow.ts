@@ -1,5 +1,6 @@
 import type { Statement } from "./ast.js";
 import type { ControlOrigin } from "./compiler/compile-program.js";
+import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward, type ForwardAnalysis } from "./plan/dataflow.js";
@@ -156,7 +157,15 @@ type Way =
     }
   | {
       readonly kind: "operand";
-      readonly operator: "and" | "or" | "otherwise" | "default";
+      readonly operator: "and" | "or" | "otherwise";
+      readonly line: number;
+      readonly file: number;
+    }
+  | {
+      readonly kind: "operand";
+      readonly operator: "default";
+      /** What the `default:` belongs to: `load`, or the function or method called. */
+      readonly of: string;
       readonly line: number;
       readonly file: number;
     };
@@ -365,7 +374,7 @@ class SpeakerFlow {
           if (!fact[1]) flags |= skip;
           break;
         }
-        case "load":
+        case "default":
           break;
       }
       if (flags !== 0) this.#impossible.set(index, flags);
@@ -1167,12 +1176,13 @@ class SpeakerFlow {
               file,
             };
           }
-          case "load":
+          case "default":
             return held
               ? null
               : {
                   kind: "operand",
                   operator: "default",
+                  of: defaultOwner(origin.expression),
                   line: origin.expression.span.start.line,
                   file,
                 };
@@ -1387,13 +1397,22 @@ class SpeakerFlow {
             way.operator === "otherwise"
               ? "the fallback after 'otherwise'"
               : way.operator === "default"
-                ? "the 'default:' of the 'load'"
+                ? `the 'default:' of the '${way.of}'`
                 : `the right side of the '${way.operator}'`
           } on ${this.#lineAt(way.line, way.file, from)} does not run`,
           fix: null,
         };
     }
   }
+}
+
+/** The name of what a `default:` belongs to: `load`, or the function or method called. */
+function defaultOwner(
+  expression: Extract<ControlOrigin, { kind: "default" }>["expression"],
+): string {
+  return expression.kind === "loadExpression"
+    ? "load"
+    : (lazyDefaultArgument(expression)?.operation ?? "call");
 }
 
 function someWaysMessage(speaker: string, name: string, way: WayText | null): string {

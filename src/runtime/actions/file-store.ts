@@ -1,6 +1,6 @@
 import type { FileStoreInstruction } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import type { Evaluator } from "../evaluator.js";
+import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import { jsonText, valueFromJson } from "../json-base64.js";
 import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
@@ -41,7 +41,7 @@ import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model
 // The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files
 // to store, read, or hash. Without any it gives the result at once; otherwise it asks the Player and waits, and runs
 // again with the Player's answer, which the completion hands off, to give the result. Both runs read the same operands,
-// so they find the same files in the same order.
+// so they find the same files in the same order. A `default:` runs only when it is used, as the instructions after it.
 
 /**
  * The Player's answer as the instruction reads it: the stored files' references, the read files' Base64, or the hashed
@@ -49,16 +49,15 @@ import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model
  */
 type FileStoreAnswer = readonly string[] | null;
 
-/** What the first run found: the result, or the files to store, read, or hash. */
+/** What the first run found: the result, the files to store, read, or hash, or that the call needs its default. */
 type FileStoreRequest =
-  | { readonly result: SerializableRuntimeValue }
+  | { readonly result: SerializableRuntimeValue | typeof USE_DEFAULT }
   | { readonly store: readonly RuntimeFileToStore[] }
   | { readonly read: readonly string[] }
   | { readonly hash: readonly string[] };
 
 interface FileStoreOperands {
   readonly value: SerializableRuntimeValue;
-  readonly fallback: SerializableRuntimeValue;
   readonly files: boolean;
 }
 
@@ -78,14 +77,13 @@ export function executeFileStore(
     );
   const operands: FileStoreOperands = {
     value: evaluator.evaluate(instruction.value),
-    fallback: instruction.default === null ? null : evaluator.evaluate(instruction.default),
     files:
       instruction.files === null
         ? true
         : filesOperand(instruction.call, evaluator.evaluate(instruction.files), span),
   };
   const handoff = snapshot.interactionResultHandoff;
-  let result: SerializableRuntimeValue;
+  let result: SerializableRuntimeValue | typeof USE_DEFAULT;
   if (
     handoff?.actionKind === "fileStore" &&
     handoff.owningInstruction === snapshot.nextInstruction
@@ -106,12 +104,14 @@ export function executeFileStore(
     }
     result = request.result;
   }
-  setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, result);
-  evaluator.trace?.writeTemporary(
-    evaluator.callFrameId(),
-    instruction.destinationTemporary,
-    result,
-  );
+  const needed = result === USE_DEFAULT;
+  const value = result === USE_DEFAULT ? null : result;
+  setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, value);
+  evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.destinationTemporary, value);
+  if (instruction.defaultTemporary !== null) {
+    setCapturedTemporary(snapshot.temporaries, instruction.defaultTemporary, needed);
+    evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.defaultTemporary, needed);
+  }
   snapshot.nextInstruction += 1;
 }
 
@@ -136,16 +136,16 @@ function fileStoreAnswer(
 /** The files a call needs stored, read, or hashed, or its result when it needs none. */
 function startFileStore(
   instruction: FileStoreInstruction,
-  { value, fallback, files }: FileStoreOperands,
+  { value, files }: FileStoreOperands,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
 ): FileStoreRequest {
   const span = instruction.span;
   switch (instruction.call) {
     case "fileFromBase64": {
-      if (typeof value !== "string") return { result: fallback };
+      if (typeof value !== "string") return { result: USE_DEFAULT };
       const binary = binaryFromDataUrl(value) ?? binaryFromBase64(value);
-      if (binary === undefined) return { result: fallback };
+      if (binary === undefined) return { result: USE_DEFAULT };
       checkTextLength(base64Length(binary.length), "fileFromBase64(...)", span);
       return { store: [{ type: fileType(binary), base64: base64FromBinary(binary) }] };
     }
@@ -174,7 +174,7 @@ function startFileStore(
     }
     case "fromJson": {
       const read = typeof value === "string" ? valueFromJson(value) : undefined;
-      if (read === undefined) return { result: fallback };
+      if (read === undefined) return { result: USE_DEFAULT };
       if (!files) return { result: read };
       const store: RuntimeFileToStore[] = [];
       const found = new Set<string>();
@@ -193,12 +193,12 @@ function startFileStore(
 /** The result of a call once the Player stored, read, or hashed its files, or could not. */
 function finishFileStore(
   instruction: FileStoreInstruction,
-  { value, fallback }: FileStoreOperands,
+  { value }: FileStoreOperands,
   answer: FileStoreAnswer,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
-): SerializableRuntimeValue {
+): SerializableRuntimeValue | typeof USE_DEFAULT {
   const span = instruction.span;
   const call = instruction.call;
   if (answer === null) {
@@ -215,7 +215,7 @@ function finishFileStore(
       `The Player could not keep the ${call === "fromJson" ? "files of this JSON" : "file"}, so ${call}(...) gave its default.`,
       span,
     );
-    return fallback;
+    return USE_DEFAULT;
   }
   const malformed = () =>
     new RuntimeFault(

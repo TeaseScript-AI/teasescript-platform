@@ -1,9 +1,10 @@
 import type { StoredAngle } from "../angle.js";
 import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
+import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 96;
+export const INSTRUCTION_PLAN_VERSION = 97;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -301,12 +302,29 @@ export interface LoopControlInstruction extends InstructionBase {
   readonly target: number;
 }
 
+/**
+ * A `default:` that runs instructions runs only when it is used (owner decision, 2026-10-16), in three steps: a
+ * `storeTemporary` with `defaultTemporary` runs the call or `load` without it, then a `jumpIfFalse` on that temporary
+ * skips the default's instructions and a last `storeTemporary`, which puts the default in the result's place, checked
+ * as the call checks a default (`defaultOf`) or as the load's result (`typeCheck`).
+ */
 export interface StoreTemporaryInstruction extends InstructionBase {
   readonly kind: "storeTemporary";
   readonly temporaryId: number;
   readonly value: ExpressionPlan;
   readonly expectBoolean: boolean;
-  /** For the default of a `load` that runs instructions: the type the default must fit, as the load's result. */
+  /**
+   * For a call with a `default:` (see `lazyDefaultArgumentIndex`) or a `load` whose default runs as the instructions
+   * after this one: `value` is the call without its `default:`, or the load with none, and this temporary receives
+   * whether it needs the default, when `temporaryId` receives `null`.
+   */
+  readonly defaultTemporary?: number;
+  /** For the `default:` of a call that runs instructions: the call, which checks the default as its own. */
+  readonly defaultOf?: LazyDefaultOperation;
+  /**
+   * For the default of a `load` that runs instructions: the type the default must fit, as the load's result; for the
+   * default of a `get`, the check of a default that decided the element or value type.
+   */
   readonly typeCheck?: TypeCheckPlan;
 }
 
@@ -957,8 +975,12 @@ export interface FileStoreInstruction extends InstructionBase {
   readonly call: FileStoreCall;
   /** The text, file, or value. */
   readonly value: ExpressionPlan;
-  /** The `default:` of `fileFromBase64` and `fromJson`; `null` for the others. */
-  readonly default: ExpressionPlan | null;
+  /**
+   * For `fileFromBase64` and `fromJson`, whose `default:` runs as the instructions after this one, as for a
+   * `storeTemporary` with `defaultTemporary`: the temporary that receives whether the call needs it; `null` for the
+   * others.
+   */
+  readonly defaultTemporary: number | null;
   /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
   readonly files: ExpressionPlan | null;
   readonly destinationTemporary: number;
@@ -1276,8 +1298,15 @@ export type ArgumentPlan =
 export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly kind: "call";
   readonly callee: ExpressionPlan;
+  /**
+   * The arguments, which run in written order before the call, except a `default:` that runs only when the call needs
+   * it (see `lazyDefaultArgumentIndex`).
+   */
   readonly arguments: readonly ArgumentPlan[];
-  /** For a list or set `add`, the check of the added element; for a dict `get`, the check of its `default:`. */
+  /**
+   * For a list or set `add`, the check of the added element; for a list or dict `get`, the check of its `default:`
+   * when it is used.
+   */
   readonly typeCheck?: TypeCheckPlan;
 }
 

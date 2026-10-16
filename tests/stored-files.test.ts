@@ -580,6 +580,42 @@ test("fileToBase64 and hashFile need a stored file this session knows", () => {
   }
 });
 
+test("a file store's default runs only when it is used, after the Player's answer, and resumes when it waits", () => {
+  const helpers = [
+    "function same(value) {",
+    "    return value",
+    "}",
+    "function slow(value) {",
+    "    wait 1 s",
+    '    say "default ${value}"',
+    "    return value",
+    "}",
+  ];
+  const json = JSON.stringify(JSON.stringify([`data:image/png;base64,${base64("png")}`]));
+  const source = [
+    ...helpers,
+    `let picture = fileFromBase64("${base64("png")}", default: slow("none"))`,
+    `let read = fromJson(${json}, default: slow("nothing"))`,
+    'let bad = fileFromBase64(same("!!"), default: slow("bad"))',
+    "exit",
+  ].join("\n");
+  const kept = play(source);
+  assert.deepEqual(
+    kept.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["default bad"],
+  );
+  assert.equal(variables(kept).bad, "bad");
+  const store = new FakeFileStore();
+  store.failing = true;
+  const failed = play(source, store);
+  assert.deepEqual(
+    failed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["default none", "default nothing", "default bad"],
+  );
+  const { picture, read, bad } = variables(failed);
+  assert.deepEqual([picture, read, bad], ["none", "nothing", "bad"]);
+});
+
 test("when the Player cannot keep a file the call gives its default with a warning, and a file it cannot read fails", () => {
   const store = new FakeFileStore();
   store.failing = true;

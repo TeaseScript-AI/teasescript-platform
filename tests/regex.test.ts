@@ -176,22 +176,23 @@ test("toRegex makes a regex of pattern text, or gives its default for text that 
   // A pattern whose repeats nest far beyond the limits gives the default as well.
   const deep = "(?:".repeat(103) + "a" + "){1000}".repeat(103);
   assert.deepEqual(said(`say toRegex("${deep}", default: null)`), ["null"]);
-  // The pattern is evaluated before the default, and the default also when it is not needed.
+  // The default is evaluated after the pattern, and only when it is used (owner decision, 2026-10-16).
   assert.deepEqual(
     said(
       "let order: string[] = []",
-      'function pattern {\n  order.add("pattern")\n  return "a"\n}',
+      "function pattern(text) {\n  order.add(text)\n  return text\n}",
       'function backup {\n  order.add("default")\n  return /b/\n}',
-      "let r = toRegex(pattern(), default: backup())",
-      'say "${r} ${order.join()}"',
+      'let r = toRegex(pattern("a"), default: backup())',
+      'let s = toRegex(pattern("("), default: backup())',
+      'say "${r} ${s} ${order.join()}"',
     ),
-    ["/a/ pattern, default"],
+    ["/a/ /b/ a, (, default"],
   );
   // Text that is not text, which only the runtime can know, gives the default too.
   const unknown = runWithGlobals("say toRegex(value, default: /d/)\nexit", { value: 4 });
   assert.equal(unknown.snapshot.failure, null);
   assert.deepEqual(sayTexts(unknown), ["/d/"]);
-  const wrongDefault = runWithGlobals('say toRegex("a", default: value)\nexit', { value: "x" });
+  const wrongDefault = runWithGlobals('say toRegex("(", default: value)\nexit', { value: "x" });
   assert.equal(wrongDefault.snapshot.failure?.code, "TSR058");
   assert.equal(
     wrongDefault.snapshot.failure?.message,
