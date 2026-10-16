@@ -55,6 +55,7 @@ import {
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
   askOperands,
+  askParts,
   expressionChildren,
   mediaHandlerBlocks,
   mediaOperands,
@@ -3524,11 +3525,7 @@ function visitExpression(
       current.kind === "sayExpression"
         ? [...(current.speaker === null ? [] : [current.speaker]), ...sayOperands(current)]
         : current.kind === "interactionExpression"
-          ? [
-              ...(current.speaker === null ? [] : [current.speaker]),
-              ...askOperands(current),
-              ...current.options.map((option) => option.expression),
-            ]
+          ? [...(current.speaker === null ? [] : [current.speaker]), ...askParts(current)]
           : current.kind === "showButtonExpression"
             ? [
                 ...(current.speaker === null ? [] : [current.speaker]),

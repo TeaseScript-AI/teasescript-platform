@@ -80,6 +80,7 @@ import {
   mediaOperands,
   showButtonOptions,
   tagQueryOperands,
+  timerOperands,
 } from "../../expression-children.js";
 
 /** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
@@ -987,12 +988,11 @@ export class InstructionCompiler {
 
   *#lowerTimerTask(timer: TimerParts, value: boolean): CompileTask<LoweredExpression | null> {
     const dynamicDisplay = typeof timer.display === "object" ? timer.display : null;
+    // The instruction's evaluation order; `timerOperands` gives the source order.
     const operands = [timer.duration, dynamicDisplay, timer.label].filter(
       (operand): operand is Expression => operand !== null,
     );
-    const sourceOrder = [...operands].sort(
-      (left, right) => left.span.start.offset - right.span.start.offset,
-    );
+    const sourceOrder = timerOperands(timer);
     const reordered = sourceOrder.some((operand, index) => operand !== operands[index]);
     const lowered = yield* compileChild(this.#lowerOrderedExpressionsTask(sourceOrder));
     const planOf = (operand: Expression): LoweredExpression => {
@@ -1006,7 +1006,6 @@ export class InstructionCompiler {
     const plan = (operand: Expression): ExpressionPlan =>
       loweredBySource[sourceOrder.indexOf(operand)]!.plan;
     const temporaryIds = loweredBySource.flatMap((item) => item.temporaryIds);
-    // A display expression in the named form is evaluated after the duration, for blocking and async timers alike.
     const staticDisplay: DelayDisplay =
       typeof timer.display === "string" ? timer.display : "visible";
     const display = dynamicDisplay === null ? staticDisplay : plan(dynamicDisplay);
