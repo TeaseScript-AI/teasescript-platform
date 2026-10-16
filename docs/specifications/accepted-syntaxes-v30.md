@@ -1396,7 +1396,8 @@ fits when every element or value fits, and an object fits when each known proper
   Other text, such as `"2,5"`, `"ten"`, or a number too large to represent, cannot be converted.
 - No other value can be converted: `toNumber(true)` and `toBoolean(1)` are errors, and a list is combined into text with
   [`join`](#16-lists).
-- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`.
+- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`. The default
+  is evaluated only when the value cannot be converted.
 
 `toInteger` discards the fractional part toward zero:
 
@@ -2080,9 +2081,9 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type other
 than `null`, as from a first stored value ([§40](#40-dictionaries)): after `let scores = []`,
 `scores.add(scores.get(0, default: 0) + 1)` makes `scores` an `integer[]`, and a later `scores.add("x")` is an error.
-Like any argument, the default is evaluated before the lookup. The compiler checks the index as for `items[index]`,
-except that a negative index gives the default: an index that it can see is not a whole number, such as `0.5`, or may
-be `null`, is an error.
+The default is evaluated only when it is used, when the list has no such position (owner decision, 2026-10-16). The
+compiler checks the index as for `items[index]`, except that a negative index gives the default: an index that it can
+see is not a whole number, such as `0.5`, or may be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]
@@ -5831,8 +5832,8 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A list or dict
   whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type
   other than `null`, as from a first stored value, so after `let counts = dict{}`,
-  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. Like any argument, the default is
-  evaluated before the lookup.
+  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. The default is evaluated only when
+  it is used, for a missing key.
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
