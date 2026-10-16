@@ -108,6 +108,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return expression.arguments.map((argument) => argument.value);
     case "unaryExpression":
     case "unitExpression":
+    case "angleExpression":
       return [expression.operand];
     case "binaryExpression":
       return [expression.left, expression.right];

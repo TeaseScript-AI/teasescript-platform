@@ -1,3 +1,10 @@
+import {
+  angleArithmetic,
+  angleDegrees,
+  angleValue,
+  formatAngle,
+  type StoredAngle,
+} from "./angle.js";
 import type { Expression, Program } from "./ast.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
@@ -76,24 +83,30 @@ function* staticNumberTask(expression: Expression): CompileTask<number | undefin
   return negate ? -value : value;
 }
 
-/** A scalar known at compile time: text, a finite number, a boolean, `null`, or an exact or calendar duration. */
-export type StaticScalar = string | number | boolean | null | AnyDuration;
+/**
+ * A scalar known at compile time: text, a finite number, a boolean, `null`, an exact or calendar duration, or an angle.
+ */
+export type StaticScalar = string | number | boolean | null | AnyDuration | StoredAngle;
 
 /**
- * The value of a literal, of interpolated text whose parts are known, or of number and duration arithmetic on known
- * operands, with the runtime's operations. Anything else is `undefined`.
+ * The value of a literal, of interpolated text whose parts are known, or of number, duration, and angle arithmetic on
+ * known operands, with the runtime's operations. Anything else is `undefined`.
  */
 function staticScalar(expression: Expression): { readonly value: StaticScalar } | undefined {
   return runCompileTask(staticScalarTask(expression));
 }
 
 /**
- * A known finite number or duration, with the runtime's operations; anything else is `undefined`. A step that overflows
- * is reported by `findVisibleOverflows`, so callers check only the finite result.
+ * A known finite number, duration, or angle, with the runtime's operations; anything else is `undefined`. A step that
+ * overflows is reported by `findVisibleOverflows`, so callers check only the finite result.
  */
-export function staticQuantity(expression: Expression): number | AnyDuration | undefined {
+export function staticQuantity(
+  expression: Expression,
+): number | AnyDuration | StoredAngle | undefined {
   const known = staticScalar(expression)?.value;
-  return typeof known === "number" || isStaticDuration(known) ? known : undefined;
+  return typeof known === "number" || isStaticDuration(known) || isStaticAngle(known)
+    ? known
+    : undefined;
 }
 
 /** Scalar visible text, as the runtime converts the value. */
@@ -102,7 +115,7 @@ function scalarText(value: StaticScalar): string {
   if (typeof value === "number") return String(Object.is(value, -0) ? 0 : value);
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
-  return formatDuration(value);
+  return isStaticAngle(value) ? formatAngle(value) : formatDuration(value);
 }
 
 function* staticScalarTask(
@@ -140,11 +153,19 @@ function* staticScalarTask(
       const value = unitValue(known.value, expression);
       return typeof value === "string" ? undefined : finite(value);
     }
+    case "angleExpression": {
+      const known = yield* compileChild(staticScalarTask(expression.operand));
+      if (typeof known?.value !== "number") return undefined;
+      const degrees = angleDegrees(known.value, expression.unit);
+      return degrees === undefined ? undefined : { value: angleValue(degrees) };
+    }
     case "unaryExpression": {
       if (expression.operator !== "+" && expression.operator !== "-") return undefined;
       const known = yield* compileChild(staticScalarTask(expression.operand));
       const value = known?.value;
       if (typeof value === "number") return { value: expression.operator === "+" ? value : -value };
+      if (isStaticAngle(value))
+        return { value: expression.operator === "+" ? value : angleValue(-value.degrees) };
       if (!isStaticDuration(value)) return undefined;
       return expression.operator === "+" ? { value } : { value: negateDuration(value) };
     }
@@ -161,8 +182,8 @@ function* staticScalarTask(
 }
 
 /**
- * Number and duration arithmetic as the runtime performs it, before its finite-result check, so an overflow or a zero
- * divisor gives a non-finite result; `undefined` for other operands.
+ * Number, duration, and angle arithmetic as the runtime performs it, before its finite-result check, so an overflow or
+ * a zero divisor gives a non-finite result; `undefined` for other operands.
  */
 function arithmetic(
   operator: string,
@@ -185,6 +206,11 @@ function arithmetic(
         return undefined;
     }
   }
+  if (isStaticAngle(left) || isStaticAngle(right))
+    return (typeof left === "number" || isStaticAngle(left)) &&
+      (typeof right === "number" || isStaticAngle(right))
+      ? angleArithmetic(operator, left, right)
+      : undefined;
   const known = (duration: AnyDuration | string) =>
     typeof duration === "string" ? undefined : duration;
   if (isStaticDuration(left) && isStaticDuration(right)) {
@@ -206,13 +232,18 @@ function arithmetic(
   return undefined;
 }
 
-function isStaticDuration(value: StaticScalar | undefined): value is AnyDuration {
-  return typeof value === "object" && value !== null;
+export function isStaticDuration(value: StaticScalar | undefined): value is AnyDuration {
+  return typeof value === "object" && value !== null && value.kind !== "angle";
+}
+
+function isStaticAngle(value: StaticScalar | undefined): value is StoredAngle {
+  return typeof value === "object" && value !== null && value.kind === "angle";
 }
 
 function finite(value: StaticScalar | undefined): { readonly value: StaticScalar } | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
+  if (isStaticAngle(value)) return Number.isFinite(value.degrees) ? { value } : undefined;
   // Calendar parts stay whole numbers of days and months that a value can store.
   if (isStaticDuration(value)) {
     const parts = durationParts(value);
@@ -242,7 +273,7 @@ export function staticChoiceValue(
 export interface VisibleOverflow {
   readonly span: SourceSpan;
   /** `zero` for a division or remainder by zero, otherwise the kind of value that grew too large. */
-  readonly cause: "zero" | "number" | "duration";
+  readonly cause: "zero" | "number" | "duration" | "angle";
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
@@ -284,7 +315,10 @@ export function findVisibleOverflows(program: Program): readonly VisibleOverflow
     if (value === undefined) continue;
     if (finite(value) !== undefined) known.set(expression, value);
     else
-      found.push({ span: expression.span, cause: isStaticDuration(value) ? "duration" : "number" });
+      found.push({
+        span: expression.span,
+        cause: isStaticDuration(value) ? "duration" : isStaticAngle(value) ? "angle" : "number",
+      });
   }
   return found.sort((left, right) => left.span.start.offset - right.span.start.offset);
 }
@@ -299,6 +333,7 @@ export function knownOperands(expression: Expression): readonly Expression[] {
       return [expression.expression];
     case "unaryExpression":
     case "unitExpression":
+    case "angleExpression":
       return [expression.operand];
     case "binaryExpression":
       return ARITHMETIC_OPERATORS.has(expression.operator)
@@ -310,8 +345,8 @@ export function knownOperands(expression: Expression): readonly Expression[] {
 }
 
 /**
- * The finite number or duration a literal, grouping, sign, or arithmetic step is known to have, from its operands'
- * known values, or `undefined`. Callers that keep each expression's result fold any expression in linear time.
+ * The finite number, duration, or angle a literal, grouping, sign, unit, or arithmetic step is known to have, from its
+ * operands' known values, or `undefined`. Callers that keep each expression's result fold any expression in linear time.
  */
 export function knownStep(
   expression: Expression,
@@ -343,10 +378,18 @@ function knownValue(
       const duration = unitValue(value, expression);
       return typeof duration === "string" ? undefined : duration;
     }
+    case "angleExpression": {
+      const value = known.get(expression.operand);
+      // An angle too large to represent stays known, so that its overflow is reported.
+      return typeof value === "number"
+        ? angleValue(angleDegrees(value, expression.unit) ?? Infinity)
+        : undefined;
+    }
     case "unaryExpression": {
       const value = known.get(expression.operand);
       if (expression.operator === "-" && typeof value === "number") return -value;
       if (expression.operator === "-" && isStaticDuration(value)) return negateDuration(value);
+      if (expression.operator === "-" && isStaticAngle(value)) return angleValue(-value.degrees);
       return expression.operator === "+" ? value : undefined;
     }
     case "binaryExpression": {
@@ -375,6 +418,7 @@ function dividesByKnownZero(
   const divisor = known.get(expression.right);
   return (
     divisor === 0 ||
-    (isStaticDuration(divisor) && durationFamily(durationParts(divisor)) === "zero")
+    (isStaticDuration(divisor) && durationFamily(durationParts(divisor)) === "zero") ||
+    (isStaticAngle(divisor) && divisor.degrees === 0)
   );
 }

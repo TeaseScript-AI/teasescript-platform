@@ -1,3 +1,4 @@
+import { isStoredAngleRecord, type StoredAngle } from "../angle.js";
 import {
   isStoredCalendarDurationRecord,
   isStoredDurationRecord,
@@ -62,6 +63,9 @@ export type SerializableRuntimeDuration = StoredDuration;
 
 /** A calendar duration: whole calendar months and days, and an exact offset in milliseconds (ADR 0026). */
 export type SerializableRuntimeCalendarDuration = StoredCalendarDuration;
+
+/** An angle, as its size in degrees (V30 §13). */
+export type SerializableRuntimeAngle = StoredAngle;
 
 /** A local calendar date without a zone (V30 §35). */
 export interface SerializableRuntimeDate extends DateFields {
@@ -157,6 +161,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeRange
   | SerializableRuntimeDuration
   | SerializableRuntimeCalendarDuration
+  | SerializableRuntimeAngle
   | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
@@ -377,6 +382,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "speakerReference":
     case "duration":
     case "calendarDuration":
+    case "angle":
     case "date":
     case "time":
     case "datetime":
@@ -687,6 +693,8 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return `u${numberText(value.milliseconds)};`;
     case "calendarDuration":
       return `U${numberText(value.months)}:${numberText(value.days)}:${numberText(value.milliseconds)};`;
+    case "angle":
+      return `a${numberText(value.degrees)};`;
     case "date":
       return `d${value.year}-${value.month}-${value.day};`;
     case "time":
@@ -837,6 +845,8 @@ function equalsOrDefer(
         right.months === left.months &&
         right.days === left.days
       );
+    case "angle":
+      return right.kind === "angle" && right.degrees === left.degrees;
     case "date":
     case "time":
     case "datetime":
@@ -1028,6 +1038,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     if (
       current.kind === "duration" ||
       current.kind === "calendarDuration" ||
+      current.kind === "angle" ||
       TEMPORAL_KEYS.has(current.kind)
     ) {
       const problem = timeRecordProblem(current);
@@ -1168,12 +1179,13 @@ const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
 ]);
 
 /**
- * Why a duration, calendar duration, date, time, datetime, or absolute date and time record is malformed, as a phrase such as "a malformed
- * date", or `null` when it is valid.
+ * Why a duration, calendar duration, angle, date, time, datetime, or absolute date and time record is malformed, as a
+ * phrase such as "a malformed date", or `null` when it is valid.
  */
 function timeRecordProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "duration")
     return isStoredDurationRecord(value) ? null : "a malformed duration";
+  if (value.kind === "angle") return isStoredAngleRecord(value) ? null : "a malformed angle";
   if (value.kind === "calendarDuration")
     return isStoredCalendarDurationRecord(value) ? null : "a malformed calendar duration";
   const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;

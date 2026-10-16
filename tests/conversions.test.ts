@@ -172,7 +172,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say toString(1..3)\nexit",
       "TSV043",
-      "toString(...) converts text, numbers, true or false, null, durations, date and time values, script references, and regexes, not a range.",
+      "toString(...) converts text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not a range.",
       "1..3",
     ],
     [

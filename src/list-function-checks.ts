@@ -1,3 +1,4 @@
+import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
 import { staticVisibleText } from "./static-evaluation.js";
@@ -59,6 +60,7 @@ type ValueKind =
   | "number"
   | "duration"
   | "calendarDuration"
+  | "angle"
   | "date"
   | "time"
   | "datetime"
@@ -171,8 +173,10 @@ function listFunctionType(
         context,
         valuesType(context, list, named(call, "by"), "by"),
         minMax
-          ? ["number", "duration", "calendarDuration", ...TEMPORAL_KINDS]
-          : ["number", "duration"],
+          ? ["number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS]
+          : name === "sum"
+            ? ["number", "duration", "angle"]
+            : ["number", "duration"],
         list,
       );
       if (kind === "integer" && name !== "sum" && !minMax) return NUMBER_TYPE;
@@ -308,12 +312,15 @@ function valueKind(
   const kinds = new Set<ValueKind>();
   for (const part of parts) {
     const kind = (
-      ["integer", "number", "duration", "calendarDuration", ...TEMPORAL_KINDS] as const
+      ["integer", "number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS] as const
     ).find((one) => isScalar(part, one));
     if (kind === undefined || !allowed.includes(kind === "integer" ? "number" : kind)) {
+      // An angle wraps around at 360°, so only `sum`, `min`, and `max` take angles.
       problem(
         context,
-        `${context.name}(...) needs ${describeKinds(allowed)}, not ${describeValue(part)}.`,
+        kind === "angle"
+          ? angleStatisticMessage(context.name)
+          : `${context.name}(...) needs ${describeKinds(allowed)}, not ${describeValue(part)}.`,
         at,
       );
       return undefined;
@@ -371,7 +378,9 @@ function predictType(context: Context): StaticType {
   if (other !== undefined) {
     problem(
       context,
-      `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeValue(other)}.`,
+      isScalar(other, "angle")
+        ? angleStatisticMessage(name)
+        : `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeValue(other)}.`,
       x,
     );
     return UNKNOWN_TYPE;

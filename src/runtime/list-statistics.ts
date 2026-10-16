@@ -1,3 +1,4 @@
+import { angleStatisticMessage, angleValue } from "../angle.js";
 import { exactDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -26,6 +27,7 @@ import {
 } from "./serializable-values.js";
 import {
   describeRuntimeValue,
+  isAngle,
   isDict,
   isCalendarDuration,
   isDuration,
@@ -100,14 +102,15 @@ function propertyValue(
   return found.value;
 }
 
-/** Numbers, or exact durations as their milliseconds. */
+/** Numbers, exact durations as their milliseconds, or angles as their degrees. */
 type Amounts =
   | { readonly kind: "numbers"; readonly values: readonly number[] }
-  | { readonly kind: "durations"; readonly values: readonly number[] };
+  | { readonly kind: "durations"; readonly values: readonly number[] }
+  | { readonly kind: "angles"; readonly values: readonly number[] };
 
 /**
- * `values` as numbers or as exact durations. A calendar duration has no fixed length to add, average, or interpolate
- * (ADR 0026).
+ * `values` as numbers, as exact durations, or for `sum` as angles. A calendar duration has no fixed length to add,
+ * average, or interpolate (ADR 0026), and an angle wraps around at 360°, so only `sum` takes angles.
  */
 function amountsOf(
   name: string,
@@ -116,17 +119,23 @@ function amountsOf(
 ): Amounts {
   const numbers = values.filter((value) => typeof value === "number");
   if (numbers.length === values.length) return { kind: "numbers", values: numbers };
-  const other = values.find((value) => typeof value !== "number" && !isDuration(value));
+  const angles = name === "sum";
+  if (!angles && values.some(isAngle)) throw fault("TSR060", angleStatisticMessage(name), span);
+  const other = values.find(
+    (value) => typeof value !== "number" && !isDuration(value) && !isAngle(value),
+  );
   if (other !== undefined)
     throw fault(
       "TSR060",
-      `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.${isCalendarDuration(other) ? " A calendar day or month has no fixed length." : ""}`,
+      `${name}(...) needs numbers${angles ? ", durations, or angles" : " or durations"}, not ${describeRuntimeValue(other)}.${isCalendarDuration(other) ? " A calendar day or month has no fixed length." : ""}`,
       span,
     );
+  if (values.every(isAngle))
+    return { kind: "angles", values: values.filter(isAngle).map((value) => value.degrees) };
   if (!values.every(isDuration))
     throw fault(
       "TSR060",
-      `${name}(...) needs values of one kind: all numbers or all durations.`,
+      `${name}(...) needs values of one kind: all numbers${angles ? ", all durations, or all angles" : " or all durations"}.`,
       span,
     );
   return {
@@ -135,7 +144,10 @@ function amountsOf(
   };
 }
 
-/** `sum`, `average`, `median`, `percentile`, or `stddev` of a list of numbers or durations (V30 §16). */
+/**
+ * `sum`, `average`, `median`, `percentile`, or `stddev` of a list of numbers or durations, or the `sum` of angles
+ * (V30 §16).
+ */
 export function listStatistic(
   name: string,
   positional: readonly SerializableRuntimeValue[],
@@ -171,6 +183,17 @@ export function listStatistic(
         span,
       );
     return exactDuration(milliseconds);
+  }
+  if (amounts.kind === "angles") {
+    // Exact like the sum of numbers: degrees rounded once.
+    const degrees = quotient(sum(amounts.values.map((value) => exact(value))), ONE);
+    if (!Number.isFinite(degrees))
+      throw fault(
+        "TSR036",
+        `${name}(...) gives an angle too large to represent. Use smaller angles.`,
+        span,
+      );
+    return angleValue(degrees);
   }
   const numbers = amounts.values;
   const result = statistic(name, numbers, share);
@@ -388,6 +411,8 @@ function positionsOf(
     const other =
       xs.find((x) => typeof x !== "number" && !isTemporal(x)) ??
       xs.find((x) => isTemporal(x) && x.kind === "time");
+    if (other !== undefined && isAngle(other))
+      throw fault("TSR060", angleStatisticMessage("linearRegression"), span);
     throw fault(
       "TSR060",
       other === undefined
@@ -470,7 +495,9 @@ export function predict(
   if (offset === undefined)
     throw fault(
       "TSR059",
-      `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
+      isAngle(x)
+        ? angleStatisticMessage("predict")
+        : `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
       span,
     );
   const value = quotient(

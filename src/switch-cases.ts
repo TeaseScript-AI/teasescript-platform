@@ -1,3 +1,4 @@
+import { angleDegrees } from "./angle.js";
 import type { Expression, SwitchStatement } from "./ast.js";
 import { durationLiteralValue, durationParts, isCalendar, negateDuration } from "./duration.js";
 import type { SourceSpan } from "./source.js";
@@ -163,6 +164,18 @@ function literalValue(
     const parts = durationParts(value);
     return {
       key: `${isCalendar(value) ? "calendarDuration" : "duration"}:${parts.months}:${parts.days}:${parts.milliseconds}`,
+      number: undefined,
+      text,
+    };
+  }
+  // `==` compares angles by size, so `180 deg` and `pi rad` are the same case.
+  if (operand.kind === "angleExpression" && operand.operand.kind === "numberLiteral") {
+    const amount = operand.operand.value;
+    const degrees = angleDegrees(negative ? -amount : amount, operand.unit);
+    const text = `${negative ? "-" : ""}${operand.operand.raw} ${operand.unit}`;
+    // An angle too large to represent is reported where the literal is checked.
+    return {
+      key: degrees === undefined ? `angle:${text}` : `angle:${degrees === 0 ? 0 : degrees}`,
       number: undefined,
       text,
     };

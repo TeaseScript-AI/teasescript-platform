@@ -479,7 +479,7 @@ test("an operation of unknown result stored in a global that another file decide
     { path: "b.tease", source: `global function decide {\n  ${decide}\n}` },
   ];
   assert.deepEqual(messages(files("g = x / 4", 'g = "a"')), [
-    "'g' holds text (string) or null since line 2 of b.tease, so it cannot be set to the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+    "'g' holds text (string) or null since line 2 of b.tease, so it cannot be set to the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
   ]);
   for (const [store, decide] of [
     ["gs.add(x / 4)", 'gs.add("a")'],

@@ -638,6 +638,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["call", "callee", "arguments", "typeCheck"],
   ["unary", "operator", "operand"],
   ["unit", "operand", "calendar", "unit"],
+  ["angleUnit", "operand", "unit"],
   ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
@@ -2245,6 +2246,7 @@ const TYPE_PLAN_NAMES = [
   "number",
   "duration",
   "calendarDuration",
+  "angle",
   "date",
   "time",
   "datetime",
@@ -2475,6 +2477,11 @@ function validateExpressionNode(
           : value.calendar !== false || !isOneOf(value.unit, DURATION_UNITS)
       )
         errors.push(planError("TSC002", "Duration unit is invalid.", `${path}.unit`));
+      pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
+      return;
+    case "angleUnit":
+      if (!isOneOf(value.unit, ["deg", "rad"]))
+        errors.push(planError("TSC002", "Angle unit is invalid.", `${path}.unit`));
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "binary":

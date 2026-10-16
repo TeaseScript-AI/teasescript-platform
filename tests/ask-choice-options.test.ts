@@ -267,6 +267,8 @@ test("an option returns its value with its own type", () => {
     ["let n = askChoice [5, 10, 15]", 1, "10", "[10]"],
     ["let n = askChoice 5, 10", 1, "10", "[10]"],
     ["let n = askChoice [1 min, 90 seconds]", 1, "1 minute 30 seconds", "[1 minute 30 seconds]"],
+    ["let n = askChoice [90 deg, pi rad]", 1, "180°", "[180°]"],
+    ["let n = askChoice 90 deg, pi rad", 1, "180°", "[180°]"],
     ["let n = askChoice true, false", 1, "false", "[false]"],
     ["let n = askChoice null", 0, "null", "[null]"],
     ['let n = askChoice [{ text: 5, background: "gold" }]', 0, "5", "[5]"],
@@ -405,7 +407,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = askChoice [{ text: "A", value: ["b"] }]\nexit',
       "TSV029",
-      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
+      "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value.",
     ],
     [
       'let x = askChoice [{ text: "A", color: "red" }]',
@@ -420,7 +422,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = askChoice [{ text: "A", value: 1..2 }]\nexit',
       "TSV029",
-      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
+      "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value.",
     ],
     [
       "let x = askChoice [{ text: {} }]\nexit",

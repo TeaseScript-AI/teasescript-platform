@@ -944,6 +944,7 @@ function collectExpressionTemporaryReferences(value: unknown, output: Set<number
         break;
       case "unary":
       case "unit":
+      case "angleUnit":
         pending.push(current.operand);
         break;
       case "typeTest":
@@ -1456,6 +1457,7 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     }
     case "unary":
     case "unit":
+    case "angleUnit":
       return expressionGuaranteesTemporaryEvaluation(value.operand, temporaryId);
     case "typeTest":
       return expressionGuaranteesTemporaryEvaluation(value.value, temporaryId);

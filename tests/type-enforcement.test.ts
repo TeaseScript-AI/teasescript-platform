@@ -815,7 +815,7 @@ test("an operation on a value the compiler cannot know is rejected where no resu
   assert.deepEqual(mismatches(inFunction("let y: string = x / 4", "say y")), [
     [
       "TSV041",
-      "'y' is declared as string, so it cannot start as the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+      "'y' is declared as string, so it cannot start as the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
       "x / 4",
     ],
   ]);
@@ -849,7 +849,7 @@ test("an operation on a value the compiler cannot know is rejected where no resu
   );
   assert.equal(
     mismatches("function f(x): string {\n    return x / 4\n}\nsay f(8)\nexit")[0]?.[1],
-    "'f' returns string, so it cannot return the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+    "'f' returns string, so it cannot return the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
   );
   // A result that may fit is checked when the script runs: a number may be whole, and '+' joins texts or lists.
   assert.deepEqual(
@@ -885,7 +885,7 @@ test("an operation of unknown result is rejected where a later value decides a t
     [
       [
         "TSV041",
-        "'ys' holds string values (string[]) since line 4, so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+        "'ys' holds string values (string[]) since line 4, so it cannot contain the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
         "x / 4",
       ],
     ],
@@ -986,7 +986,7 @@ test("an operation of unknown result keeps the types it can give, also inside an
   assert.deepEqual(mismatches(inFunction("let y: string = (x / 4) + z", "say y")), [
     [
       "TSV041",
-      "'y' is declared as string, so it cannot start as the result of '+', which is a number or a duration or a calendar duration. To show it as text, put the whole calculation inside \"${\" and \"}\".",
+      "'y' is declared as string, so it cannot start as the result of '+', which is a number or a duration or a calendar duration or an angle. To show it as text, put the whole calculation inside \"${\" and \"}\".",
       "(x / 4) + z",
     ],
   ]);
@@ -996,7 +996,7 @@ test("an operation of unknown result keeps the types it can give, also inside an
       [
         [
           "TSV041",
-          "'y' holds text (string), so the result of '/', which is a number or a duration or a calendar duration, cannot be added to it. Put the result in the text instead, as in 'y += \"${x / 4}\"'.",
+          "'y' holds text (string), so the result of '/', which is a number or a duration or a calendar duration or an angle, cannot be added to it. Put the result in the text instead, as in 'y += \"${x / 4}\"'.",
           "x / 4",
         ],
       ],
@@ -1006,7 +1006,7 @@ test("an operation of unknown result keeps the types it can give, also inside an
   assert.deepEqual(mismatches(inFunction("let ys: string[] | boolean[] = [x / 4]", "say ys")), [
     [
       "TSV041",
-      "'ys' is declared as string[] | boolean[], so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+      "'ys' is declared as string[] | boolean[], so it cannot contain the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
       "x / 4",
     ],
   ]);
@@ -1018,12 +1018,16 @@ test("an operation of unknown result keeps the types it can give, also inside an
   assert.deepEqual(mismatches(inFunction('say (x / 4) + "!"')), [
     [
       "TSV043",
-      "'+' joins text only with other text, not with a number or a duration or a calendar duration. Put the value in the text instead, as in \"${value}!\".",
+      "'+' joins text only with other text, not with a number or a duration or a calendar duration or an angle. Put the value in the text instead, as in \"${value}!\".",
       '(x / 4) + "!"',
     ],
   ]);
   assert.deepEqual(mismatches(inFunction('say -(x + "a")')), [
-    ["TSV043", "'-' needs a number or a duration, but this is text (string).", '-(x + "a")'],
+    [
+      "TSV043",
+      "'-' needs a number, a duration, or an angle, but this is text (string).",
+      '-(x + "a")',
+    ],
   ]);
   // An operand that already failed has its own message, and the operations, stores, and compound assignments around
   // it add none.
@@ -1046,7 +1050,7 @@ test("an operation of unknown result keeps the types it can give, also inside an
     [
       [
         "TSV041",
-        "'ys' is declared as string[][] | boolean[][], so it cannot contain the result of '/', which is a number or a duration or a calendar duration. To show it as text, write \"${x / 4}\".",
+        "'ys' is declared as string[][] | boolean[][], so it cannot contain the result of '/', which is a number or a duration or a calendar duration or an angle. To show it as text, write \"${x / 4}\".",
         "x / 4",
       ],
     ],

@@ -393,10 +393,10 @@ Implemented value operations include the V30 §8 text operations and regexes, jo
 `toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
 `hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
 numeric functions `round` (also with
-`decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials,
-logarithms, and angles in degrees `exp`, `ln`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, and `atan2`, `min`
-and `max`, the §16 statistics and trends `sum`, `average`, `median`, `percentile`, `stddev`, `linearRegression`, and
-`predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`, `randomBeta`, and `randomPert`, and
+`decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials
+and logarithms `exp`, `ln`, and `log10`, angles with a unit such as `90 deg` or `pi rad` and the angle functions `sin`,
+`cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `toDeg`, and `toRad`, `min` and `max`, the §16 statistics and trends
+`sum`, `average`, `median`, `percentile`, `stddev`, `linearRegression`, and `predict`, the §4 weighted choice `randomWeighted` and distributions `randomNormal`, `randomBeta`, and `randomPert`, and
 the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
 with that method takes them; a method that no value has is `TSV043` also on a receiver of unknown type, as is any method

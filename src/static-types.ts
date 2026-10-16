@@ -357,6 +357,7 @@ export const INTEGER_TYPE = scalar("integer");
 export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
 export const CALENDAR_DURATION_TYPE = scalar("calendarDuration");
+export const ANGLE_TYPE = scalar("angle");
 export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
@@ -2046,6 +2047,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   boolean: "true or false (boolean)",
   duration: "a duration",
   calendarDuration: "a calendar duration",
+  angle: "an angle",
   date: "a date",
   time: "a time",
   datetime: "a date and time",
@@ -2136,6 +2138,14 @@ export function arithmeticType(
   if (duration(left.name) && numeric(right.name) && (operator === "*" || operator === "/"))
     return scalar(left.name);
   if (numeric(left.name) && duration(right.name) && operator === "*") return scalar(right.name);
+  // Two angles add, subtract, and divide into a number; an angle multiplies or divides by a number (V30 §13).
+  if (left.name === "angle" && right.name === "angle") {
+    if (operator === "+" || operator === "-") return ANGLE_TYPE;
+    return operator === "/" ? NUMBER_TYPE : undefined;
+  }
+  if (left.name === "angle" && numeric(right.name) && (operator === "*" || operator === "/"))
+    return ANGLE_TYPE;
+  if (numeric(left.name) && right.name === "angle" && operator === "*") return ANGLE_TYPE;
   // No operator reads a zone (ADR 0026): an absolute date and time moves by a duration, and a date or a date and time
   // by a calendar duration. Two dates differ by a calendar duration, two absolute dates and times by a duration.
   if (operator === "+" || operator === "-") {

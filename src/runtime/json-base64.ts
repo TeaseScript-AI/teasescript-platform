@@ -36,7 +36,7 @@ type JsonWork =
 /**
  * The compact JSON text of `value`: text, numbers, `true`, `false`, and `null` as they are; a list or set as an array, a
  * set in its order; a dict, an object, and a speaker's properties as an object in key order; a date or time as its ISO
- * text, an absolute one in UTC; and a duration as its milliseconds. Any other value fails with `TSR059`, and a text
+ * text, an absolute one in UTC; a duration as its milliseconds; and an angle as its degrees. Any other value fails with `TSR059`, and a text
  * longer than a text can be with `TSR084`. `storedFile` may give the JSON to write in place of a text, in the order the
  * texts are written; keys are never given to it.
  */
@@ -131,6 +131,9 @@ export function jsonText(
         continue;
       case "duration":
         write(String(current.milliseconds));
+        continue;
+      case "angle":
+        write(String(current.degrees));
         continue;
       default:
         throw fault("TSR059", unwritableMessage(current, item.nested), span);

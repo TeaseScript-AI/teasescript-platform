@@ -1,8 +1,9 @@
+import type { StoredAngle } from "../angle.js";
 import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 95;
+export const INSTRUCTION_PLAN_VERSION = 96;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -588,7 +589,7 @@ export type InteractionAccessibleName =
       readonly kind: "localizedDefault";
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
-/** A value a choice option can show and return: a scalar, a duration, or a date or time value. */
+/** A value a choice option can show and return: a scalar, a duration, an angle, or a date or time value. */
 export type InteractionChoiceValue =
   | string
   | number
@@ -596,6 +597,7 @@ export type InteractionChoiceValue =
   | null
   | StoredDuration
   | StoredCalendarDuration
+  | StoredAngle
   | ({ readonly kind: "date" } & DateFields)
   | ({ readonly kind: "time" } & TimeFields)
   | ({ readonly kind: "datetime" } & DateTimeFields)
@@ -1048,6 +1050,7 @@ export type ExpressionPlan =
   | CallExpressionPlan
   | UnaryExpressionPlan
   | UnitExpressionPlan
+  | AngleUnitExpressionPlan
   | BinaryExpressionPlan
   | RangeExpressionPlan
   | TemporaryExpressionPlan
@@ -1173,6 +1176,7 @@ export type TypePlanName =
   | "number"
   | "duration"
   | "calendarDuration"
+  | "angle"
   | "date"
   | "time"
   | "datetime"
@@ -1303,6 +1307,13 @@ export type UnitExpressionPlan = ExpressionPlanBase & {
 export type UnitPlan =
   | { readonly calendar: false; readonly unit: DurationUnitPlan }
   | { readonly calendar: true; readonly unit: "d" | "w" | "mo" | "y" };
+
+/** An angle unit after a number, `pi`, a name, a member, a call, or parentheses: the number its operand gives as an angle. */
+export interface AngleUnitExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "angleUnit";
+  readonly operand: ExpressionPlan;
+  readonly unit: "deg" | "rad";
+}
 
 /**
  * `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it.
