@@ -549,6 +549,33 @@ const TEMPLATES: readonly Template[] = [
     }),
   },
   {
+    name: "a recursive function that calls a file whose store follows a call that never returns",
+    knobs: [undefined, undefined],
+    main: (k) => [
+      KNOB(1),
+      "function start {",
+      "    if k1 {",
+      "        k1 = false",
+      "        start()",
+      "    }",
+      '    call "setup.tease"',
+      "}",
+      "start()",
+      `say ${k.expr} // READ`,
+    ],
+    others: (k) => ({
+      "setup.tease": [
+        "function stop { exit }",
+        KNOB(2),
+        "if k2 {",
+        "    stop()",
+        k.set,
+        "}",
+        "end",
+      ],
+    }),
+  },
+  {
     name: "a global function of another file",
     main: (k) => ["greet()", `say ${k.expr} // READ`],
     others: (k) => ({ "room.tease": ["global function greet {", k.set, "}"] }),

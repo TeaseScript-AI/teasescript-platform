@@ -387,6 +387,23 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       ],
     ],
   );
+  // Also when the function that runs the call calls itself first: a store is a summary's only along a way that exists.
+  assert.deepEqual(
+    diagnostics(
+      'function start {\n    if load "r", default: false { start() }\n    call "setup.tease"\n}\nstart()\nsay player.firstName\nexit',
+      {
+        "setup.tease":
+          'function stop { exit }\nif load "k", default: false {\n    stop()\n    player.firstName = "Sam"\n}\nend',
+      },
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:6",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 4 of 'setup.tease' assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
   // A custom property named `copy` is not the copy of the account.
   assert.deepEqual(
     diagnostics(

@@ -803,44 +803,44 @@ class SpeakerFlow {
   }
 
   /**
-   * Settles every routine's summary, from the optimistic start that each returns and assigns everything. What a called
-   * file may assign depends on which calls return, so it is searched again, in every routine that calls a file, once
-   * that changes.
+   * Settles every routine's summary. Which routines return depends only on the ways the check follows, so it is
+   * settled first, from the optimistic start that every routine returns. Then what the routines assign is solved
+   * from nothing, with the returns fixed, so that a store reaches a summary only along a way that exists, also
+   * through a recursion; what a called file may assign is searched with the settled returns.
    */
   #summarize(): void {
     const dependents = this.#dependents();
-    const fileCallers = this.#routines.filter((routine) => {
-      for (let node = routine.start; node < routine.end; node += 1) {
-        const instruction = this.#plan.instructions[this.#decode(node).index]!;
-        if (instruction.kind === "transfer" && instruction.mode === "call") return true;
+    const settle = (changed: (routine: Routine) => boolean): void => {
+      const work = new Set(this.#routines);
+      for (const routine of work) {
+        work.delete(routine);
+        if (!changed(routine)) continue;
+        for (const dependent of dependents.get(routine) ?? []) work.add(dependent);
       }
-      return false;
-    });
-    const work = new Set(this.#routines);
-    for (const routine of work) {
-      work.delete(routine);
-      const must = this.#solveRoutine(routine, "must");
-      const may = this.#solveRoutine(routine, "may");
-      const returns = must.exit !== null;
-      const mustGains = must.exit ?? this.#all;
-      const mayGains = may.exit ?? 0n;
-      if (
-        returns === routine.returns &&
-        mustGains === routine.must &&
-        mayGains === routine.may &&
-        may.any === routine.any
-      )
-        continue;
-      if (returns !== routine.returns) {
-        this.#fileStoreCache.clear();
-        for (const caller of fileCallers) work.add(caller);
-      }
+    };
+    settle((routine) => {
+      const returns = this.#solveRoutine(routine, "must").exit !== null;
+      if (returns === routine.returns) return false;
       routine.returns = returns;
-      routine.must = mustGains;
+      return true;
+    });
+    this.#fileStoreCache.clear();
+    for (const routine of this.#routines) {
+      routine.must = this.#all;
+      routine.may = 0n;
+      routine.any = 0n;
+    }
+    settle((routine) => {
+      const must = this.#solveRoutine(routine, "must").exit ?? this.#all;
+      const may = this.#solveRoutine(routine, "may");
+      const mayGains = may.exit ?? 0n;
+      if (must === routine.must && mayGains === routine.may && may.any === routine.any)
+        return false;
+      routine.must = must;
       routine.may = mayGains;
       routine.any = may.any;
-      for (const dependent of dependents.get(routine) ?? []) work.add(dependent);
-    }
+      return true;
+    });
   }
 
   #solve(mode: Mode): (bigint | null)[] {
