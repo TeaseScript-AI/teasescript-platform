@@ -216,16 +216,8 @@ All four helpers support `as speaker` provenance. The speaker identifies who req
 
 `Say` remains compact official syntax, but ADR 0018 moves pacing policy into a fully lowered Standard Library/compiler composition above typed text output.
 
-Supported pacing is:
-
-```text
-omitted -> smart autoplay
-positive number -> exact seconds
-0 -> immediate
-instant -> alias for 0
-```
-
-Positive explicit durations may be fractional. Invalid, non-finite, unsupported-magnitude, or overflowing values fail before partial gate creation.
+Pacing values and their meanings are listed in
+[`say` pacing and skip modifiers](TEASESCRIPT.md#say-pacing-and-skip-modifiers).
 
 Supported per-message skip modifiers are:
 
@@ -236,18 +228,11 @@ unskippable
 
 Without a modifier, `say` uses the effective speaker's `defaultSaySkippable` presentation setting and otherwise platform default `true`.
 
-Smart autoplay captures non-negative safe-integer millisecond account values `baseDelayMs`, `delayPerWordMs`, and `delayPerCharacterMs` when the session starts. Defaults are `1500`, `300`, and `30`. Duration is:
+Smart autoplay computes the reading time from account settings captured when the session starts, as
+[Smart-autoplay session settings](RUNTIME.md#smart-autoplay-session-settings) defines.
 
-```text
-baseDelayMs + max(
-    wordCount * delayPerWordMs,
-    visibleCharacterCount * delayPerCharacterMs
-)
-```
-
-All arithmetic and deadline construction is checked. There is no extra product reading-time cap, but ADR 0016 numeric and deadline limits still apply. Account changes do not modify an active or restored session.
-
-A positive gate is an ADR 0016 `chatPacingGate` action: the message's reading time, which the script waits for as the foreground action, so the next statement runs after it (owner decision on #829, 2026-10-11). It uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
+A positive gate is an ADR 0016 `chatPacingGate` action, the message's [reading time](RUNTIME.md#message-reading-time).
+It uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
 
 A skippable gate may be completed by a primary click/tap on a message, its speaker avatar, Player background, or other unused Player space, or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
 
