@@ -278,14 +278,9 @@ Pacing meanings:
 
 With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySkippable` setting and otherwise the platform default `true`.
 
-A paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision
-on #829, 2026-10-11). Nothing after the `say` runs during its reading time: no other message, question, button, form,
-media or camera change, message or permanent-button change, `wait`, timer, or code the player cannot see. A question
-appears together with its controls, and a timeout counts from when it is visible. Permanent buttons already shown stay
-usable. A timer, media, or permanent-button block interrupts a reading time as it interrupts a `wait`, and the reading
-time continues with the time it had left once the block returns. For exact timing, write `instant`:
-`say "Hold the position.", instant` followed by `wait 30 s` takes exactly 30 seconds, and without `instant` the reading
-time comes first. `wait` remains separate and does not become a `say` option.
+A paced `say` lasts its reading time, and the next statement runs after it unless the player skips it, as
+[V30](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides) defines. `wait` remains
+separate and does not become a `say` option.
 
 Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
 pacing, and whose `remove()` takes the message out of the chat
