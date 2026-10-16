@@ -13,6 +13,13 @@
       "category": "speakers",
       "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
       "diff": "kit-replies.diff"
+    },
+    {
+      "id": "toy-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): a task list reads toys.nippleclamps; the toy chest saves nipple clamps as toys.nipple_clamps, and nothing saves the other spelling, so \"put on nipple clamps\" never joined the list. Read toys.nipple_clamps.",
+      "diff": "toy-keys.diff"
     }
   ]
 }

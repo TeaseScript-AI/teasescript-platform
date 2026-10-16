@@ -13,6 +13,13 @@
       "category": "e",
       "reason": "\"Spank fast and hard!\" waits for player, a name that is never assigned, so Groovy failed there; the spanking sound it plays (xatmspank.wav) is not in the package either, so its length cannot stand in. Let the player end the spanking with the script's own \"Done!\" button, as the preceding \"get into position\" step does. Judgment call: the author's intended duration is unknown.",
       "diff": "spanking-wait.diff"
+    },
+    {
+      "id": "toy-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the plug and gag punishments read toys.butt_plug and toys.ball_gag; the toy chest saves these toys as toys.buttplug and toys.ballgag, and nothing saves the spelled-out keys, so both punishments always fell back to the next one. Read the toy chest's keys.",
+      "diff": "toy-keys.diff"
     }
   ]
 }
