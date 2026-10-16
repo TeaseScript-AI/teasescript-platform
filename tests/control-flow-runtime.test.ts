@@ -179,7 +179,17 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
   for (const [source, call, code] of [
-    ["say chance(101)\nexit", "chance(101)", "TSR039"],
+    // A percentage the compiler cannot know reaches the runtime; a known one is rejected statically below.
+    [
+      "function draw(percent) {\n    return chance(percent)\n}\nsay draw(101)\nexit",
+      "chance(percent)",
+      "TSR039",
+    ],
+    [
+      'function draw(percent) {\n    return chance(percent)\n}\nsay draw("50")\nexit',
+      "chance(percent)",
+      "TSR059",
+    ],
     // A fractional bound the compiler cannot know reaches the runtime; a literal one is rejected statically below.
     [
       "function draw(low) {\n    return randomInteger(low..=3)\n}\nsay draw(1.5)\nexit",
@@ -238,6 +248,29 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     ]),
     [["TSV022", "randomInteger(...) takes no named arguments. Remove 'range:'."]],
   );
+
+  // A percentage the compiler can see, also one it computes, fails as the same value fails at runtime.
+  for (const [percent, value] of [
+    ["-1", "-1"],
+    ["101", "101"],
+    ["100 + 1", "101"],
+  ]) {
+    const expected = `chance(...) needs a percentage from 0 through 100, not ${value}.`;
+    const staticSource = `say chance(${percent})\nexit`;
+    assert.deepEqual(
+      compileSource(staticSource).diagnostics.map(({ code, message, span }) => [
+        code,
+        message,
+        staticSource.slice(span.start.offset, span.end.offset),
+      ]),
+      [["TSV043", expected, percent]],
+    );
+    const compiled = plan(
+      `function draw(percent) {\n    return chance(percent)\n}\nsay draw(${percent})\nexit`,
+    );
+    const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    assert.deepEqual([snapshot.failure?.code, snapshot.failure?.message], ["TSR039", expected]);
+  }
 });
 
 test("chance at both ends of the percentage range is certain", () => {

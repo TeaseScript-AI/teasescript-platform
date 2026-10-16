@@ -57,6 +57,7 @@ import {
   linearRegression,
   listStatistic,
   listValues,
+  percentage,
   predict,
   weightedChoices,
   weightedIndex,
@@ -3392,14 +3393,7 @@ export class Evaluator {
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
     this.#expectBuiltinArguments("chance", call, 1);
-    const percent = call.positional[0]!;
-    if (typeof percent !== "number" || percent < 0 || percent > 100) {
-      throw fault(
-        "TSR039",
-        `chance(...) needs a percentage from 0 through 100, not ${describeShownValue(percent)}.`,
-        call.span,
-      );
-    }
+    const percent = percentage("chance", call.positional[0]!, call.span);
     let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
     if (this.control !== null)
       chosen = outcomeBoolean(

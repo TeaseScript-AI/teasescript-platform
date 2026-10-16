@@ -250,7 +250,8 @@ test("an operation on the session during a catch-up drops the copy, and the sess
 });
 
 test("a script that fails during a catch-up fails as one late observation fails it, also in its recording", async (context) => {
-  const source = "wait 10 ms\nsay chance(101), instant\nexit";
+  const source =
+    "function draw(percent) {\n  return chance(percent)\n}\nwait 10 ms\nsay draw(101), instant\nexit";
   const { host, late } = await mount(context, source);
   late(1_000);
   await caughtUp(host, 1_000);

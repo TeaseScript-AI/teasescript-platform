@@ -45,6 +45,21 @@ export interface NumericFailure {
   readonly code: "TSR036" | "TSR039";
 }
 
+/** Whether `value` is a percentage from 0 through 100, as `chance` and `percentile` take it (V30 §4, §16). */
+export function isPercentage(value: number): boolean {
+  return value >= 0 && value <= 100;
+}
+
+/**
+ * Why `name` cannot take `value` as its percentage, or `undefined` when it can: a compile error when the compiler can
+ * see the value, and otherwise runtime error `TSR039`.
+ */
+export function percentageFailure(name: string, value: number): string | undefined {
+  return isPercentage(value)
+    ? undefined
+    : `${name}(...) needs a percentage from 0 through 100, not ${value}.`;
+}
+
 function rounding(name: string): NumericFunction {
   return {
     parameters: ["value"],
