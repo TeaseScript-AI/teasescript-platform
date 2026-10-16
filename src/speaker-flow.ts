@@ -423,7 +423,7 @@ class SpeakerFlow {
       return routine;
     };
     for (const fn of this.#plan.functions) {
-      const fresh = { returns: true, must: this.#all, may: 0n, any: 0n };
+      const fresh = { returns: true, must: this.#all, may: this.#all, any: this.#all };
       if (fn.handler !== null) {
         this.#handlers.set(
           fn.id,
@@ -773,16 +773,15 @@ class SpeakerFlow {
     return prologue.any | (prologue.returns ? body.any : 0n);
   }
 
-  /** The routines whose summaries each routine's own summary uses: the functions it calls and the blocks it creates. */
-  #dependents(): Map<Routine, Set<Routine>> {
-    const dependents = new Map<Routine, Set<Routine>>();
-    const depend = (user: Routine, used: Routine | undefined): void => {
-      if (used === undefined) return;
-      const known = dependents.get(used);
-      if (known === undefined) dependents.set(used, new Set([user]));
-      else known.add(user);
-    };
-    for (const routine of this.#routines)
+  /**
+   * The routines in the order their summaries are settled, those a routine uses (the prologue and body of each
+   * function it calls, each block it creates) before it, and which of them are in a cycle of such uses: a recursion,
+   * also through a default or a block. Tarjan's strongly connected components, with an explicit stack of frames.
+   */
+  #routineOrder(): { readonly sorted: readonly Routine[]; readonly cyclic: ReadonlySet<Routine> } {
+    const uses = new Map<Routine, Routine[]>();
+    for (const routine of this.#routines) {
+      const used: Routine[] = [];
       for (let node = routine.start; node < routine.end; node += 1) {
         const { index } = this.#decode(node);
         const instruction = this.#plan.instructions[index]!;
@@ -790,63 +789,105 @@ class SpeakerFlow {
           const fn = this.#flow.functionById(instruction.functionId);
           if (fn === undefined) continue;
           const clone = this.#calleeClone(index, fn);
-          depend(
-            routine,
-            this.#prologues.get(clone === null ? `${fn.id}` : `${fn.id}:${clone.mask}`),
+          const prologue = this.#prologues.get(
+            clone === null ? `${fn.id}` : `${fn.id}:${clone.mask}`,
           );
-          depend(routine, this.#bodies.get(fn.id));
+          const body = this.#bodies.get(fn.id);
+          if (prologue !== undefined) used.push(prologue);
+          if (body !== undefined) used.push(body);
         }
-        for (const handler of this.#flow.handlersOf(index))
-          depend(routine, this.#handlers.get(handler));
+        for (const handler of this.#flow.handlersOf(index)) {
+          const created = this.#handlers.get(handler);
+          if (created !== undefined) used.push(created);
+        }
       }
-    return dependents;
+      uses.set(routine, used);
+    }
+    const indices = new Map<Routine, number>();
+    const low = new Map<Routine, number>();
+    const onStack = new Set<Routine>();
+    const stack: Routine[] = [];
+    const sorted: Routine[] = [];
+    const cyclic = new Set<Routine>();
+    let next = 0;
+    for (const root of this.#routines) {
+      if (indices.has(root)) continue;
+      const frames: { readonly routine: Routine; edge: number }[] = [{ routine: root, edge: 0 }];
+      indices.set(root, next);
+      low.set(root, next);
+      next += 1;
+      stack.push(root);
+      onStack.add(root);
+      while (frames.length > 0) {
+        const frame = frames[frames.length - 1]!;
+        const used = uses.get(frame.routine)!;
+        if (frame.edge < used.length) {
+          const target = used[frame.edge]!;
+          frame.edge += 1;
+          if (!indices.has(target)) {
+            indices.set(target, next);
+            low.set(target, next);
+            next += 1;
+            stack.push(target);
+            onStack.add(target);
+            frames.push({ routine: target, edge: 0 });
+          } else if (onStack.has(target))
+            low.set(frame.routine, Math.min(low.get(frame.routine)!, indices.get(target)!));
+          continue;
+        }
+        frames.pop();
+        const parent = frames[frames.length - 1];
+        if (parent !== undefined)
+          low.set(parent.routine, Math.min(low.get(parent.routine)!, low.get(frame.routine)!));
+        if (low.get(frame.routine) !== indices.get(frame.routine)) continue;
+        // The component is complete: every routine it uses is sorted already.
+        const members: Routine[] = [];
+        for (let member = stack.pop()!; ; member = stack.pop()!) {
+          onStack.delete(member);
+          members.push(member);
+          if (member === frame.routine) break;
+        }
+        if (members.length > 1 || uses.get(frame.routine)!.includes(frame.routine))
+          for (const member of members) cyclic.add(member);
+        for (const member of members) sorted.push(member);
+      }
+    }
+    return { sorted, cyclic };
   }
 
   /**
-   * Settles every routine's summary in three steps, each a fixpoint over the routines and their dependents. Which
-   * routines return depends only on the ways the check follows, so it is settled first, from the optimistic start that
-   * every routine returns. Then, with the returns fixed, what a routine may assign and what it may assign at any time
-   * are solved from nothing: they grow only, and a store reaches them only along a way that exists, also through a
-   * recursion; what a called file may assign is searched with the settled returns. Last, with those fixed too, what
-   * every way through a routine assigns is solved from everything: it shrinks only, and keeps what a block created in a
-   * recursion may assign.
+   * Settles every routine's summary, those it uses first, so that each is solved once. A routine in a cycle of calls,
+   * and a function that creates a timer, media, or button block, get the conservative summary: they may assign
+   * everything, so a read after their call stays a runtime check. The others are summarized exactly: whether they
+   * return, which depends only on the ways the check follows and is settled for all of them first, then what every
+   * way through them assigns, what some way may assign, and what they may assign at any time.
    */
   #summarize(): void {
-    const dependents = this.#dependents();
-    const settle = (changed: (routine: Routine) => boolean): void => {
-      const work = new Set(this.#routines);
-      for (const routine of work) {
-        work.delete(routine);
-        if (!changed(routine)) continue;
-        for (const dependent of dependents.get(routine) ?? []) work.add(dependent);
-      }
-    };
-    settle((routine) => {
-      const returns = this.#solveRoutine(routine, "must").exit !== null;
-      if (returns === routine.returns) return false;
-      routine.returns = returns;
-      return true;
-    });
+    const { sorted, cyclic } = this.#routineOrder();
+    for (const routine of sorted)
+      routine.returns = cyclic.has(routine) || this.#solveRoutine(routine, "must").exit !== null;
+    // What a called file may assign depends on which calls return, which is settled now.
     this.#fileStoreCache.clear();
-    for (const routine of this.#routines) {
-      routine.may = 0n;
-      routine.any = 0n;
-    }
-    settle((routine) => {
+    for (const routine of sorted) {
+      if (cyclic.has(routine) || (routine.kind !== "handler" && this.#createsBlocks(routine))) {
+        routine.must = this.#all;
+        routine.may = this.#all;
+        routine.any = this.#all;
+        continue;
+      }
+      const must = this.#solveRoutine(routine, "must");
       const may = this.#solveRoutine(routine, "may");
-      const gains = may.exit ?? 0n;
-      if (gains === routine.may && may.any === routine.any) return false;
-      routine.may = gains;
+      routine.must = must.exit ?? this.#all;
+      routine.may = may.exit ?? 0n;
       routine.any = may.any;
-      return true;
-    });
-    for (const routine of this.#routines) routine.must = this.#all;
-    settle((routine) => {
-      const must = this.#solveRoutine(routine, "must").exit ?? this.#all;
-      if (must === routine.must) return false;
-      routine.must = must;
-      return true;
-    });
+    }
+  }
+
+  /** Whether an instruction of the routine creates a timer, media, or button block. */
+  #createsBlocks(routine: Routine): boolean {
+    for (let node = routine.start; node < routine.end; node += 1)
+      if (this.#flow.handlersOf(this.#decode(node).index).length > 0) return true;
+    return false;
   }
 
   #solve(mode: Mode): (bigint | null)[] {

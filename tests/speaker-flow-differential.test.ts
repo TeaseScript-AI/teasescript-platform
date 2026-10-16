@@ -9,7 +9,8 @@ import { compileAndRunVariants, type FlowKnob, type FlowRun } from "./helpers/fl
  * ways and read it once, every way is run. Where the check reports the read, a run must fail there with TSR017; where
  * it accepts a custom property's read, no run may fail there. A built-in field is checked by the weaker rule, "no way
  * gives it", so where the check accepts its read, some run must read it, unless a case says that only a way it cannot
- * tell apart from the failing one gives it.
+ * tell apart from the failing one gives it. A recursion counts as
+ * assigning everything, so the cases with one only check that the read is accepted.
  *
  * The cases cover the constructs that order what runs: branches and switches, loops, labels and gotos, functions and
  * their defaults, the lazy operators and the `load` default, the parts of an ask, a say, a named timer, timer blocks
@@ -42,6 +43,11 @@ interface Template {
   readonly fieldMayFail?: boolean;
   /** The read is the right side of a lazy operator: a run that skips it says "after" without reading. */
   readonly skips?: boolean;
+  /**
+   * The check accepts the read by policy, since a recursion counts as assigning everything, so a run may fail at the
+   * read: only the acceptance is checked.
+   */
+  readonly conservative?: boolean;
   /** The kinds the case fits; both by default. */
   readonly kinds?: readonly ("custom" | "field")[];
   /** A case about one property of its own, such as a duration or a number. */
@@ -551,6 +557,7 @@ const TEMPLATES: readonly Template[] = [
   {
     name: "a recursive function that calls a file whose store follows a call that never returns",
     knobs: [undefined, undefined],
+    conservative: true,
     main: (k) => [
       KNOB(1),
       "function start {",
@@ -612,6 +619,7 @@ const TEMPLATES: readonly Template[] = [
   {
     name: "a recursion whose base case stores on some ways",
     knobs: [undefined],
+    conservative: true,
     main: (k) => [
       KNOB(1),
       "function fill(n: number) {",
@@ -734,6 +742,10 @@ test("the flow check of speaker properties agrees with the runtime on every way 
         errors.length === 0 ? [] : [["TSV043", `${path}:${readLine}`]],
         label,
       );
+      if (template.conservative === true) {
+        assert.deepEqual(errors, [], label);
+        continue;
+      }
       if (errors.length > 0) {
         // The runtime takes the way the check names: some run fails at the read, and for a built-in field every run
         // that reaches it.
