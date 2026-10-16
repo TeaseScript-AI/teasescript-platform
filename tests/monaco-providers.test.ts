@@ -41,6 +41,7 @@ test("Monaco registers usable completion, hover, signature, formatting, and toke
       signature: (provider) => (registered.signature = provider),
       formatting: (provider) => (registered.formatting = provider),
       semanticTokens: (provider) => (registered.semanticTokens = provider),
+      lineTokens: (provider) => (registered.lineTokens = provider),
     },
     providers,
   );
@@ -48,6 +49,7 @@ test("Monaco registers usable completion, hover, signature, formatting, and toke
     "completion",
     "formatting",
     "hover",
+    "lineTokens",
     "semanticTokens",
     "signature",
   ]);
@@ -112,6 +114,43 @@ test("Monaco colours each token by the compiler's class, once for each line the 
     "2:16 r theme-name",
     "2:17 } theme-interpolation",
     '2:18 " theme-string',
+  ]);
+});
+
+test("Monaco's line tokens mark text, regexes, and comments as the lexer reads each line", () => {
+  // What a line's tokens mark, Monaco's bracket matching and quote closing skip.
+  const lines = [
+    // A regex whose class holds `/*`, which starts no comment, and one only the parse finds, after a message mode.
+    "let r = /[/*]/",
+    'say prose /"[(]/',
+    "let n = (1 + 2)",
+    // A block comment and a block string over several lines.
+    '/* a ( "b"',
+    'c */ say "Smile :)"',
+    'let s = """',
+    "  (${n})",
+    '"""',
+    "exit",
+  ];
+  let state = providers.lineTokens.getInitialState();
+  const shown = lines.map((line) => {
+    const { tokens, endState } = providers.lineTokens.tokenize(line, state);
+    state = endState;
+    return tokens.map(
+      ({ startIndex, scopes }, index) =>
+        `${line.slice(startIndex, tokens[index + 1]?.startIndex ?? line.length)}:${scopes}`,
+    );
+  });
+  assert.deepEqual(shown, [
+    ["let r = :", "/[/*]/:regexp"],
+    ["say prose :", '/"[(]/:regexp'],
+    ["let n = (1 + 2):"],
+    ['/* a ( "b":comment'],
+    ["c */:comment", " say :", '"Smile :)":string'],
+    ["let s = :", '""":string'],
+    ["  (:string", "${n}:", "):string"],
+    ['""":string'],
+    ["exit:"],
   ]);
 });
 

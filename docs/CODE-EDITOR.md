@@ -15,11 +15,11 @@ edits stay in the page. A file overview lists each
 file with the title, author, description, and tags of its header ([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags))
 and its diagnostic count; selecting a file opens it.
 It colours `.tease` by the compiler's token classes (`classifyTokens` in `src/language-tooling.ts`) in Monaco's own
-theme colours; its own tokenizer marks only strings and comments, which Monaco's bracket matching and quote closing
-read. The Player's palette (`player/theme/palette.ts`) holds the code colours as contrast-checked roles,
-`syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
-[random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
-(owner direction, #512) instead of keeping colours of its own.
+theme colours; its line tokens mark the text, regexes, and comments the compiler reads on each line, which Monaco's
+bracket matching and quote closing skip. The Player's palette (`player/theme/palette.ts`) holds the code colours as
+contrast-checked roles, `syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and
+`syntax-operator`, which the [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor
+should adopt these roles later (owner direction, #512) instead of keeping colours of its own.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC

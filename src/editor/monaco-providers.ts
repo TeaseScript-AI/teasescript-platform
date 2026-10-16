@@ -9,6 +9,10 @@ import {
   languageSignatureHelp,
   type LanguageTokenClass,
 } from "../language-tooling.js";
+import { isNativeStackExhaustion } from "../compiler.js";
+import { lex } from "../lexer.js";
+import { parse } from "../parser.js";
+import { TokenKind } from "../token.js";
 import {
   toMonacoCompletions,
   toMonacoHover,
@@ -31,6 +35,7 @@ export interface TeaseScriptProviderRegistration {
   completion(provider: TeaseScriptProviders["completion"]): void;
   formatting(provider: TeaseScriptProviders["formatting"]): void;
   hover(provider: TeaseScriptProviders["hover"]): void;
+  lineTokens(provider: TeaseScriptProviders["lineTokens"]): void;
   semanticTokens(provider: TeaseScriptProviders["semanticTokens"]): void;
   signature(provider: TeaseScriptProviders["signature"]): void;
 }
@@ -44,6 +49,7 @@ export function registerTeaseScriptProviders(
   registration.signature(providers.signature);
   registration.formatting(providers.formatting);
   registration.semanticTokens(providers.semanticTokens);
+  registration.lineTokens(providers.lineTokens);
 }
 
 export function createTeaseScriptProviders(
@@ -119,7 +125,99 @@ export function createTeaseScriptProviders(
       },
       releaseDocumentSemanticTokens() {},
     },
+    // Monaco's bracket matching, bracket colours, and quote closing skip what a line's tokens mark as text, a regex, or
+    // a comment, which semantic tokens cannot mark. The compiler reads each line for them, before the classes arrive
+    // as well.
+    lineTokens: {
+      getInitialState: () => LINE_STARTS.code,
+      tokenize(line: string, state: LineState) {
+        return tokenizeLine(line, state);
+      },
+    },
   };
+}
+
+/** Where a line starts: in code, or inside a block comment or a block string a line before left open. */
+class LineState {
+  public constructor(public readonly inside: "code" | "comment" | "string") {}
+
+  public clone(): LineState {
+    return this;
+  }
+
+  public equals(other: unknown): boolean {
+    return other instanceof LineState && other.inside === this.inside;
+  }
+}
+
+const LINE_STARTS = {
+  code: new LineState("code"),
+  comment: new LineState("comment"),
+  string: new LineState("string"),
+};
+
+/** What the lexer reads before a line that starts inside a block comment or a block string, so it continues it. */
+const OPENERS = { code: "", comment: "/*", string: '"""' } as const;
+
+const TEXT_TOKENS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.StringStart,
+  TokenKind.StringText,
+  TokenKind.StringEnd,
+]);
+
+/**
+ * A line's text, regexes, and comments as the compiler reads the line on its own, as Monaco's scopes, and where the
+ * next line starts. A line holds no single-line string or regex of a line before, as neither continues past its line.
+ */
+function tokenizeLine(
+  line: string,
+  state: LineState,
+): { readonly tokens: { startIndex: number; scopes: string }[]; readonly endState: LineState } {
+  const opener = OPENERS[state.inside];
+  const text = opener + line;
+  // The line is lexed as its parse reads it, so a regex where the parser expects a value is one (V30 §8).
+  let regexStarts: ReadonlySet<number> = new Set();
+  try {
+    regexStarts = parse(text).regexStarts;
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+  }
+  const { tokens, comments } = lex(text, regexStarts);
+  const marked = comments.map((span) => ({ span, scopes: "comment" }));
+  // The strings still open, innermost last.
+  const open: string[] = [];
+  for (const token of tokens) {
+    if (token.kind === TokenKind.StringStart) open.push(token.lexeme);
+    if (token.kind === TokenKind.StringEnd) open.pop();
+    if (TEXT_TOKENS.has(token.kind)) marked.push({ span: token.span, scopes: "string" });
+    if (token.kind === TokenKind.RegexLiteral) marked.push({ span: token.span, scopes: "regexp" });
+  }
+  marked.sort((left, right) => left.span.start.offset - right.span.start.offset);
+  const scopes: { startIndex: number; scopes: string }[] = [];
+  const mark = (startIndex: number, scope: string) => {
+    if (scopes.at(-1)?.startIndex === startIndex) scopes.pop();
+    if (scopes.at(-1)?.scopes !== scope) scopes.push({ startIndex, scopes: scope });
+  };
+  mark(0, "");
+  for (const { span, scopes: scope } of marked) {
+    const start = Math.max(span.start.offset - opener.length, 0);
+    const end = span.end.offset - opener.length;
+    if (end <= start) continue;
+    mark(start, scope);
+    if (end < line.length) mark(end, "");
+  }
+  const comment = comments.at(-1);
+  const closed = (written: string) => written.length >= 4 && written.endsWith("*/");
+  const inside =
+    comment !== undefined &&
+    comment.end.offset === text.length &&
+    text.startsWith("/*", comment.start.offset) &&
+    !closed(text.slice(comment.start.offset))
+      ? "comment"
+      : open[0] === '"""'
+        ? "string"
+        : "code";
+  return { tokens: scopes, endState: LINE_STARTS[inside] };
 }
 
 function languageDocument(model: MonacoProviderModel) {

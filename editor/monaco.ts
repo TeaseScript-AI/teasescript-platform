@@ -15,44 +15,6 @@ export function registerTeaseScriptLanguage(): void {
       extensions: [".tease"],
       aliases: ["TeaseScript"],
     });
-    // The colours come from the compiler's own token classes (`registerProviders`). This tokenizer only marks strings
-    // and comments, which Monaco itself reads: brackets and quotes in them are text for bracket matching, bracket
-    // colours, and auto-closing, which the compiler's classes cannot tell Monaco. It also colours them before the
-    // classes arrive.
-    monaco.languages.setMonarchTokensProvider(TEASE_LANGUAGE_ID, {
-      tokenizer: {
-        root: [
-          [/\/\/.*$/, "comment"],
-          [/\/\*/, "comment", "@blockComment"],
-          [/"""/, "string", "@blockString"],
-          [/"/, "string", "@string"],
-          [/[^/"{}]+|[/{}]/, ""],
-        ],
-        blockComment: [
-          [/\*\//, "comment", "@pop"],
-          [/[^*]+|\*/, "comment"],
-        ],
-        // A single-line string ends at the end of its line, also without its closing quote.
-        string: [
-          [/\$\{/, "delimiter.bracket", "@interpolation"],
-          [/"/, "string", "@pop"],
-          [
-            /[^\\"$]+|\\.?|\$/,
-            { cases: { "@eos": { token: "string", next: "@pop" }, "@default": "string" } },
-          ],
-        ],
-        blockString: [
-          [/\$\{/, "delimiter.bracket", "@interpolation"],
-          [/"""/, "string", "@pop"],
-          [/[^\\"$]+|\\.?|\$|"/, "string"],
-        ],
-        interpolation: [
-          [/\}/, "delimiter.bracket", "@pop"],
-          [/\{/, "delimiter.bracket", "@interpolation"],
-          { include: "@root" },
-        ],
-      },
-    });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
       comments: { lineComment: "//", blockComment: ["/*", "*/"] },
       brackets: [
@@ -115,6 +77,9 @@ function registerProviders(): void {
       },
       semanticTokens: (provider) => {
         monaco.languages.registerDocumentSemanticTokensProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      lineTokens: (provider) => {
+        monaco.languages.setTokensProvider(TEASE_LANGUAGE_ID, provider);
       },
     },
     providers,
