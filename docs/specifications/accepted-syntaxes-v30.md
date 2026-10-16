@@ -5139,7 +5139,8 @@ Custom-property rules:
 - The compiler follows a speaker through its name and through `speaker` under `as`. Reads through a variable, a
   parameter, an element, or `speaker` without `as`, reads in timer, media, and button blocks, and reads that only a
   computed target or a fallback reaches are checked when the script runs. A block or a called file counts as assigning
-  whatever it may assign.
+  whatever it may assign. A recursive function, and a function that creates a timer, media, or button block, count as
+  assigning every property.
 - The inferred or declared property type remains fixed.
 - Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
 
