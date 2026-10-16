@@ -50,6 +50,7 @@ import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./
 import { withStorageDefaults } from "./storage-keys.ts";
 import { withNullDefaults } from "./null-defaults.ts";
 import { withNativeTime } from "./native-time.ts";
+import { withChanceCalls } from "./readability.ts";
 import { withSpeakers, type SpeakerData, type SpokenPackage } from "./speakers.ts";
 import {
   expressionType,
@@ -1177,11 +1178,9 @@ export function lowerPackage(
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-      composed: programs
-        .map(withDefaults)
-        .map((program, index) =>
-          index === entryIndex ? withSpokenStart(program, spoken) : program,
-        ),
+      composed: withChanceCalls(programs.map(withDefaults)).map((program, index) =>
+        index === entryIndex ? withSpokenStart(program, spoken) : program,
+      ),
       main: null,
       paths: files.map(() => null),
       speakerProblems: spoken?.problems ?? [],
@@ -1261,11 +1260,12 @@ export function lowerPackage(
   const stored = withLegacyStorage(nullable, legacyMain === null ? 0 : legacyMain + 1);
   // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
   const chained = withoutRepeatedChainText(stored.slice(1), paths);
-  const [main, ...programs] = (
-    legacyMain === null
+  const [main, ...programs] = withChanceCalls(
+    (legacyMain === null
       ? withoutUnusedHelpers([stored[0]!, ...chained])
       : [stored[0]!, ...withoutUnusedHelpers(chained)]
-  ).map(withDefaults);
+    ).map(withDefaults),
+  );
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs.map((program, index) =>
