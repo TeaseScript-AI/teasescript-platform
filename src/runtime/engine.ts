@@ -57,6 +57,7 @@ export type {
   RuntimeCapabilityCall,
 } from "./evaluator.js";
 import { internalFault, RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import { collectionTooLarge, exceedsHostCollectionSize } from "./collection-size.js";
 import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
@@ -419,11 +420,14 @@ function executeInstructionBoundary(
       control.abortUnit(error, snapshot, context.events, context.trace);
       throw error;
     }
-    // A text too long that no check foresaw still fails as one, on V8, which says so with this message.
+    // A text too long that no check foresaw still fails as one, on V8, which says so with this message, and so does a
+    // list, set, or dict larger than V8 holds.
     const failure =
       error instanceof RangeError && error.message === "Invalid string length"
         ? textTooLong("this line", instruction.span, null)
-        : error;
+        : exceedsHostCollectionSize(error)
+          ? collectionTooLarge("this line", instruction.span)
+          : error;
     if (!(failure instanceof RuntimeFault)) {
       if (unit) control.discardUnit(context.trace);
       throw error;

@@ -386,7 +386,7 @@ export class DebugRecorder {
       randomChoices: [...paused.randomChoices, ...(result.randomChoices ?? [])],
       pausedAt: result.pausedAt,
     });
-    if (result.status === "failed" && this.#frozen === null) this.#freeze(this.#current!());
+    if (result.status === "failed") this.#freezeFailed();
   }
 
   /** The copied arguments to log, or `null` when this call is not logged. */
@@ -471,6 +471,22 @@ export class DebugRecorder {
     this.#frozen ??= { anchor: this.#anchor!, operations: [...this.#operations], end };
   }
 
+  /**
+   * Freezes, unless frozen, at the state of the session that failed. A state the session cannot export, such as one
+   * with a list too long for the host to enumerate, leaves the recording incomplete, ending where it starts.
+   */
+  #freezeFailed(): void {
+    if (this.#frozen !== null) return;
+    let end: RuntimeSnapshot;
+    try {
+      end = this.#current!();
+    } catch {
+      this.#problem ??= "The state at the error could not be exported.";
+      end = this.#anchor!;
+    }
+    this.#freeze(end);
+  }
+
   #add(
     kind: DebugOperationKind,
     prepared: { readonly args: unknown[] },
@@ -495,7 +511,7 @@ export class DebugRecorder {
     });
     // A failed session still holds its state, so the end is taken now; after a throw it is rebuilt when needed.
     if (thrown !== null) this.#freeze(null);
-    else if (status === "failed" && this.#frozen === null) this.#freeze(this.#current!());
+    else if (status === "failed") this.#freezeFailed();
   }
 
   /** The state at the call that froze the recording; after a throw, rebuilt from the calls before it. */
