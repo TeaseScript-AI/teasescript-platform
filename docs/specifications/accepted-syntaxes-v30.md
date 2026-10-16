@@ -924,7 +924,8 @@ A regex is a value of type `regex` ([§13](#13-explicit-types)), which holds its
 `toRegex(text, default: value)` makes a regex of pattern text. The text has no slashes, its flags go inside it, as in
 `"(?i)yes|no"`, and in a string a backslash is written twice, as in `"\\d+"`. The `default:` is required and is a
 regex or `null`; the result is a `regex`, or a `regex?` with `default: null`. Text that is not a valid pattern, or that
-is over the regex limits, gives the default.
+is over the regex limits, gives the default. The default is evaluated only when it is used (owner decision,
+2026-10-16).
 
 ## 9. Commands
 **Status:** Accepted
@@ -1485,7 +1486,7 @@ does not need the padding.
 
 `fromJson` and `fromBase64` need their `default:`, which may be any value, also `null`; a call without one is a compile
 error. Text that is not JSON, or that is not Base64 or whose bytes are not UTF-8, gives the default, never a runtime
-error.
+error. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
 
 ```text
 let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
@@ -4381,10 +4382,11 @@ fileToBase64(file)
 `fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
-`default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
-them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take
-a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a recorded result without asking
-the store again. The Base64 text may be as long as any text.
+`default:` is required; text that is not Base64 gives the default, which is evaluated last, and only when it is used
+(owner decision, 2026-10-16). `fileToBase64` reads a stored file's bytes and returns them as plain Base64 text, and
+`hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take a short wait, as a photo
+does. The result is recorded: a restore or a replay can reuse a recorded result without asking the store again. The
+Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
