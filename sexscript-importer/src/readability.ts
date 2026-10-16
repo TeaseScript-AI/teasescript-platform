@@ -198,6 +198,69 @@ export function withPlainNullTests(statements: IrStatement[]): IrStatement[] {
   return block(statements);
 }
 
+/**
+ * A test of a boolean variable against true or false is the variable or its negation, as for the booleans variable
+ * typing proves (variable-types.ts). A variable keeps the type it is declared with, `boolean` or the type of a first
+ * value `true` or `false`: the compiler refuses another value, and a value of unknown type, such as a read of a key
+ * built at run time, stops the script where it is stored (TSR058), so every read gives true or false. The storage
+ * defaults declare such variables after typing ran, as for a flag read from a key that holds only booleans. Only a name
+ * the file binds once, by that declaration (not a global, which other files may assign), and only after it in its
+ * block, so that every such read is that variable.
+ */
+export function withTypedBooleanTests(statements: IrStatement[]): IrStatement[] {
+  const bindings = new Map<string, number>();
+  const bind = (name: string): void => void bindings.set(name, (bindings.get(name) ?? 0) + 1);
+  const count = (items: IrStatement[]): IrStatement[] => {
+    for (const item of items) {
+      if (item.kind === "let") bind(item.name);
+      if (item.kind === "function") for (const parameter of item.parameters) bind(parameter.name);
+      if (item.kind === "for") {
+        bind(item.variable);
+        if (item.valueVariable !== undefined) bind(item.valueVariable);
+      }
+      withNestedBlocks(item, count);
+    }
+    return items;
+  };
+  count(statements);
+  const block = (items: IrStatement[], known: ReadonlySet<string>): IrStatement[] => {
+    const typed = new Set(known);
+    const plain = (value: IrExpression): IrExpression => {
+      const next = mapChildren(value, plain);
+      if (
+        next.kind !== "binary" ||
+        (next.operator !== "==" && next.operator !== "!=") ||
+        next.left.kind !== "variable" ||
+        !typed.has(next.left.name) ||
+        next.right.kind !== "literal" ||
+        typeof next.right.value !== "boolean"
+      )
+        return next;
+      return (next.operator === "==") === next.right.value
+        ? next.left
+        : { kind: "unary", operator: "not", value: next.left };
+    };
+    return items.map((item) => {
+      const result = mapOwnExpressions(
+        withNestedBlocks(item, (body) => block(body, typed)),
+        plain,
+      );
+      if (
+        item.kind === "let" &&
+        item.global !== true &&
+        bindings.get(item.name) === 1 &&
+        (item.type === "boolean" ||
+          (item.type === undefined &&
+            item.value.kind === "literal" &&
+            typeof item.value.value === "boolean"))
+      )
+        typed.add(item.name);
+      return result;
+    });
+  };
+  return block(statements, new Set());
+}
+
 /** The name of the variable a read starts from. */
 function rootName(value: IrExpression): string {
   return value.kind === "property"

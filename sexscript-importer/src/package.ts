@@ -50,7 +50,12 @@ import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./
 import { withStorageDefaults } from "./storage-keys.ts";
 import { withNullDefaults } from "./null-defaults.ts";
 import { withNativeTime } from "./native-time.ts";
-import { withChanceCalls, withLoopConditions, withPlainNullTests } from "./readability.ts";
+import {
+  withChanceCalls,
+  withLoopConditions,
+  withPlainNullTests,
+  withTypedBooleanTests,
+} from "./readability.ts";
 import { withSpeakers, type SpeakerData, type SpokenPackage } from "./speakers.ts";
 import {
   expressionType,
@@ -1366,9 +1371,14 @@ function withTimeModel(programs: readonly MigrationProgram[]): MigrationProgram[
 function withDefaults(program: MigrationProgram): MigrationProgram {
   return {
     ...program,
-    statements: withPlainNullTests(
-      withLoopConditions(
-        withNullDefaults(program.statements, (statement) => helperDefinitionOrder(statement) >= 0),
+    statements: withTypedBooleanTests(
+      withPlainNullTests(
+        withLoopConditions(
+          withNullDefaults(
+            program.statements,
+            (statement) => helperDefinitionOrder(statement) >= 0,
+          ),
+        ),
       ),
     ),
   };
