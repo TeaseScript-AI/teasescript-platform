@@ -40,11 +40,15 @@ export interface FlowVariants {
 
 const MAX_CLOCK_MOVES = 100;
 
-/** Compiles the project, and when it compiles, runs it once per subset of the knobs. */
+/**
+ * Compiles the project, and when it compiles, runs it once per subset of the knobs. A run types `answer` into each ask
+ * it waits for, such as `askInteger`, or stops there when it is `null`.
+ */
 export function compileAndRunVariants(
   files: readonly ProjectSourceFile[],
   knobs: readonly FlowKnob[],
   account: RuntimeAccountInput = {},
+  answer: string | null = null,
 ): FlowVariants {
   const compiled = compileProject(files);
   const runs: FlowRun[] = [];
@@ -63,7 +67,20 @@ export function compileAndRunVariants(
       for (let moves = 0; ; moves += 1) {
         for (const event of session.run().events) if (event.kind === "say") says.push(event.text);
         view = session.view();
-        const next = view.status === "waiting" && moves < MAX_CLOCK_MOVES ? nextDueMs(view) : null;
+        const waiting = view.status === "waiting" && moves < MAX_CLOCK_MOVES;
+        const action = view.foregroundAction;
+        if (waiting && action?.kind === "interaction" && answer !== null) {
+          const request = {
+            actionId: action.actionId,
+            actionKind: "interaction",
+            interactionKind: action.interactionKind,
+            payload: { kind: "submittedText", submittedText: answer },
+          };
+          for (const event of session.completeAction(request).events)
+            if (event.kind === "say") says.push(event.text);
+          continue;
+        }
+        const next = waiting ? nextDueMs(view) : null;
         if (next === null) break;
         for (const event of session.observeTime(next).events)
           if (event.kind === "say") says.push(event.text);

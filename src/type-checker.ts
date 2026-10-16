@@ -44,12 +44,14 @@ import { compileChild, runCompileTask, type CompileTask } from "./compiler/conti
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   askOperands,
+  askParts,
   expressionChildren,
   namedAskArguments,
   sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
+  timerOperands,
 } from "./expression-children.js";
 import {
   isBlankTextAnswer,
@@ -3080,9 +3082,8 @@ class TypeChecker {
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
-    const kept = resolved(
-      read ?? (variable === undefined ? place.type : this.#currentType(variable)),
-    );
+    // `+=` and `-=` read the variable before the value runs (V30 §14).
+    const kept = resolved(read ?? before ?? place.type);
     if (variable !== undefined) this.#flow.set(variable, undefined);
     const reported = this.diagnostics.length;
     const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
@@ -8111,30 +8112,33 @@ class TypeChecker {
   }
 
   *#timerTask(timer: TimerParts, scope: Scope): CompileTask<void> {
-    if (typeof timer.display === "object" && timer.display !== null)
-      yield* compileChild(
-        this.#requireTask(
-          timer.display,
-          scope,
-          (type) => isScalar(type, "string"),
-          "A timer display is text (string)",
-        ),
-      );
-    // With a unit, a timer also takes a range of whole units, written directly or held in a variable.
-    this.#timeOperands.set(timer.duration, timer.form === "short" ? "timer" : "duration:");
-    const duration = yield* compileChild(this.#expressionTask(timer.duration, scope));
-    this.#reportTime(
-      timer.duration,
-      duration,
-      timer.form === "short" ? "timer" : "named timer",
-      timer.unit !== null,
-    );
-    if (timer.label !== null)
-      this.#checkShownText(
-        timer.label,
-        yield* compileChild(this.#expressionTask(timer.label, scope)),
-        "a timer label",
-      );
+    for (const operand of timerOperands(timer)) {
+      if (operand === timer.duration) {
+        // With a unit, a timer also takes a range of whole units, written directly or held in a variable.
+        this.#timeOperands.set(operand, timer.form === "short" ? "timer" : "duration:");
+        const duration = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportTime(
+          operand,
+          duration,
+          timer.form === "short" ? "timer" : "named timer",
+          timer.unit !== null,
+        );
+      } else if (operand === timer.label)
+        this.#checkShownText(
+          operand,
+          yield* compileChild(this.#expressionTask(operand, scope)),
+          "a timer label",
+        );
+      else
+        yield* compileChild(
+          this.#requireTask(
+            operand,
+            scope,
+            (type) => isScalar(type, "string"),
+            "A timer display is text (string)",
+          ),
+        );
+    }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
   }
 
@@ -9341,8 +9345,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
 
 /** The direct subexpressions of an expression, including interaction operands. */
 function expressionParts(expression: Expression): readonly Expression[] {
-  if (expression.kind === "interactionExpression")
-    return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
+  if (expression.kind === "interactionExpression") return askParts(expression);
   if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
   if (expression.kind === "sayExpression") return sayOperands(expression);
   return expressionChildren(expression);
@@ -9350,14 +9353,6 @@ function expressionParts(expression: Expression): readonly Expression[] {
 
 function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
   return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
-}
-
-function timerOperands(timer: TimerParts): readonly Expression[] {
-  return [
-    ...(typeof timer.display === "object" && timer.display !== null ? [timer.display] : []),
-    timer.duration,
-    ...(timer.label === null ? [] : [timer.label]),
-  ];
 }
 
 /**
