@@ -90,7 +90,10 @@ Traversal work, observed depth, node or instruction counts, temporary counts, va
 sizes may be collected when they cheaply expose scaling or representation amplification. These measurements are
 engineering diagnostics only: they do not make otherwise valid source or structurally valid plan/snapshot/checkpoint
 data invalid. An observed JavaScript stack, allocation, array/index, or other host failure is an implementation or
-representation constraint to diagnose and repair where practical, not a replacement TeaseScript maximum.
+representation constraint to diagnose and repair where practical, not a replacement TeaseScript maximum. On V8, an
+`Invalid array length`, `Set maximum size exceeded`, or `Map maximum size exceeded` error of an instruction becomes
+runtime error `TSR088` for its line (`src/runtime/collection-size.ts`), so the session fails as on any runtime error.
+TeaseScript sets no general size limit for lists, sets, and dicts.
 
 ## Proven domains and state invariants
 

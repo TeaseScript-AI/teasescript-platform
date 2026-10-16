@@ -1785,6 +1785,7 @@ restart, and report the failure with its debug export.
 | `TSR084` | A text longer than the maximum text length. | Build a shorter text. |
 | `TSR085` | A stored file that `fileToBase64` or `toJson` needs, which the Player could not read. | Take, choose, or store the file again. |
 | `TSR087` | A text operation with a regex that needs more work than the regex work limit allows. | Use a simpler pattern or a shorter text. |
+| `TSR088` | A list, set, or dict larger than the host can hold: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`. | Build a smaller list, set, or dict. |
 | `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
 | `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |
 
