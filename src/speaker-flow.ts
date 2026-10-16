@@ -118,7 +118,7 @@ interface Routine {
   /** What every way to the exit assigns, and what some way to it may assign. */
   must: bigint;
   may: bigint;
-  /** For a handler, whatever it may assign at any time, also in what it creates and calls. */
+  /** Whatever it may assign at any time, also on a way that never returns, in what it creates, and in what it calls. */
   any: bigint;
 }
 
@@ -171,8 +171,8 @@ interface NamedStore {
   readonly source: string | null;
   readonly index: number;
   readonly runs: boolean;
-  /** The nodes from which some way leads to the store. */
-  readonly reaching: ReadonlySet<number>;
+  /** For each node, 1 when some way from it leads to the store. */
+  readonly reaching: Uint8Array;
 }
 
 const TRUE_IMPOSSIBLE = 1;
@@ -414,7 +414,7 @@ class SpeakerFlow {
         for (const option of "pick" in destination ? destination.pick : [destination])
           this.#fallbackTargets.push(option.target);
     }
-    if (anyFallback) this.#fallbackTargets.push(...this.#anywhereTargets);
+    if (anyFallback) for (const target of this.#anywhereTargets) this.#fallbackTargets.push(target);
   }
 
   #allocateRoutines(): void {
@@ -681,8 +681,10 @@ class SpeakerFlow {
           }
         }
       }
-      for (const { node: next } of this.#successors(node))
-        if (seen[next] === 0) {
+      // Only the ways the check follows: not a branch the type check rules out, a default the call supplies, or the
+      // continuation of a call that never returns.
+      for (const { node: next, edge } of this.#successors(node))
+        if (seen[next] === 0 && this.#transfer("may", node, edge, 0n) !== null) {
           seen[next] = 1;
           work.push(next);
         }
@@ -738,9 +740,27 @@ class SpeakerFlow {
     if (mode === "may")
       for (let local = 0; local < length; local += 1) {
         const state = states[local] ?? null;
-        if (state !== null) any |= this.#effect(this.#decode(start + local).index, state);
+        if (state === null) continue;
+        const { index } = this.#decode(start + local);
+        any |= this.#effect(index, state) | this.#calledAny(index);
       }
     return { exit: states[exitNode] ?? null, any };
+  }
+
+  /**
+   * Whatever a call at `index` may assign at any time, also on a way that never returns: its prologue's, and its body's
+   * when the prologue reaches it. For any other instruction, nothing.
+   */
+  #calledAny(index: number): bigint {
+    const instruction = this.#plan.instructions[index]!;
+    if (instruction.kind !== "callFunction") return 0n;
+    const fn = this.#flow.functionById(instruction.functionId);
+    if (fn === undefined) return 0n;
+    const clone = this.#calleeClone(index, fn);
+    const prologue = this.#prologues.get(clone === null ? `${fn.id}` : `${fn.id}:${clone.mask}`);
+    const body = this.#bodies.get(fn.id);
+    if (prologue === undefined || body === undefined) return 0n;
+    return prologue.any | (prologue.returns ? body.any : 0n);
   }
 
   /** The routines whose summaries each routine's own summary uses: the functions it calls and the blocks it creates. */
@@ -894,7 +914,7 @@ class SpeakerFlow {
     }
     let named = "";
     if (store !== null) {
-      const when = !store.runs ? "never" : store.reaching.has(node) ? "later" : "elsewhere";
+      const when = !store.runs ? "never" : store.reaching[node] === 1 ? "later" : "elsewhere";
       const line = this.#line(store.index, file);
       named =
         store.source === null
@@ -1150,12 +1170,13 @@ class SpeakerFlow {
    * continuation back to the returns of the function and from a file call's to every `end`, and from a block's start
    * to the code that creates it.
    */
-  #reaching(target: number): ReadonlySet<number> {
-    const reached = new Set<number>([target]);
+  #reaching(target: number): Uint8Array {
+    const reached = new Uint8Array(this.#nodeCount);
+    reached[target] = 1;
     const work = [target];
     const visit = (node: number): void => {
-      if (reached.has(node)) return;
-      reached.add(node);
+      if (reached[node] === 1) return;
+      reached[node] = 1;
       work.push(node);
     };
     for (let node = work.pop(); node !== undefined; node = work.pop()) {

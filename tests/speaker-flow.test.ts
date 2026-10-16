@@ -68,6 +68,19 @@ test("reading a custom property before anything assigns it is a compile error", 
     diagnostics(`${VERA}\nglobal greeting = vera.mood\nvera.mood = "calm"\nsay greeting\nexit`),
     [["TSV043", "main.tease:4", early("Line 5")]],
   );
+  // A called file counts for what it may assign, not for a store on a way the type check rules out.
+  assert.deepEqual(
+    diagnostics(`${VERA}\ncall "setup.tease"\nsay vera.mood\nexit`, {
+      "setup.tease": 'if false { vera.mood = "calm" }\nend',
+    }),
+    [
+      [
+        "TSV043",
+        "main.tease:5",
+        "Speaker 'vera' has no 'mood' yet here: nothing assigns it before this line runs. Line 1 of 'setup.tease' assigns it, but that line never runs. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.",
+      ],
+    ],
+  );
   // A start value of another file runs before main.tease, and a `load` default runs when the key is missing.
   assert.deepEqual(
     diagnostics(`${VERA}\nvera.mood = "calm"\nexit`, {
@@ -558,6 +571,24 @@ test("reads that every followed way prepares compile and run", () => {
     ),
     ["calm", "calm", "calm", "late", "V", "extra", "Sam he"],
   );
+  // A block counts for what the functions it calls may assign, also on a way that leaves them by a `goto`.
+  assert.deepEqual(
+    runs(
+      [
+        VERA,
+        "function give {",
+        '    vera.mood = "calm"',
+        "    goto ready",
+        "}",
+        "timer async 1 s { give() }",
+        "wait 2 s",
+        "label ready",
+        "say vera.mood",
+        "exit",
+      ].join("\n"),
+    ),
+    ["calm"],
+  );
   // Across files: a goto after the assignment, a file that a `call` runs, and a global function.
   assert.deepEqual(
     runs(
@@ -634,6 +665,7 @@ test("the check follows deep and wide sources without native recursion", () => {
     assert.deepEqual(lines(head+'let value = '+'('.repeat(2000)+'vera.mood'+')'.repeat(2000)+'\nvera.mood = "x"\nexit'),['TSV043:4']);
     assert.deepEqual(lines(head+'vera.mood = "x"\nlet value = '+'not '.repeat(10000)+'(vera.mood == "x")\nexit'),[]);
     assert.deepEqual(lines(head+'vera.mood = "x"\n'+'say "a"\n'.repeat(40000)+'say vera.mood\nexit'),[]);
+    assert.deepEqual(lines(head+'vera.mood = "x"\nsay vera.mood\nlet path = "main.tease"\nfallback script(path)\nexit\n'+Array.from({length:40000},(_,i)=>'label mark'+i+'\nexit\n').join('')),[]);
     console.log('deep speaker reads checked');
   `;
   const child = spawnSync(

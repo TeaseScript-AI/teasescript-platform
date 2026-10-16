@@ -138,13 +138,7 @@ function compileProjectFiles(
         origins,
       );
       // The flow of speaker properties follows the plan, which runs exactly as the session will (V30 §37).
-      if (plan !== null) {
-        const flow = speakerFlowDiagnostics(plan, origins, checked.speakerFlow);
-        if (flow.some((diagnostics) => diagnostics.length > 0)) {
-          flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
-          plan = null;
-        }
-      }
+      if (plan !== null) plan = checkSpeakerFlow(files, plan, origins, checked.speakerFlow);
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -383,6 +377,33 @@ function addSemanticDiagnostics(
     semanticDiagnostics,
     diagnostics: Object.freeze([...file.result.parserDiagnostics, ...semanticDiagnostics]),
   });
+}
+
+/** The plan when the flow check of speaker properties accepts it, else `null` with its diagnostics in the files. */
+function checkSpeakerFlow(
+  files: CompiledProjectFile[],
+  plan: InstructionPlan,
+  origins: ReadonlyMap<number, ControlOrigin>,
+  input: SpeakerFlowInput,
+): InstructionPlan | null {
+  let flow: readonly (readonly Diagnostic[])[];
+  try {
+    flow = speakerFlowDiagnostics(plan, origins, input);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    const main = files[0]!;
+    main.result = stackExhaustionResult(
+      main.result.path,
+      main.source,
+      main.result.program,
+      main.result.header,
+      main.parsed?.diagnostics,
+    );
+    return null;
+  }
+  if (!flow.some((diagnostics) => diagnostics.length > 0)) return plan;
+  flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
+  return null;
 }
 
 /**
