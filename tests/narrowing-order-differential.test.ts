@@ -125,6 +125,20 @@ const CONSTRUCTS: readonly Construct[] = [
     line: ([a, b]) => `showButton "Go", ${a}, ${b}`,
   },
   {
+    // The list has no position 1 or 6, so the default runs, after the index.
+    name: "a get's index and default",
+    parts: [INTEGER, TEXT],
+    line: ([a, b]) => `let r = ["a"].get(${a}, default: ${b})`,
+    fixed: true,
+  },
+  {
+    // The text is no JSON, so the default runs, after `files:`, which is written after it.
+    name: "fromJson's files and default",
+    parts: [{ clear: "clearInteger() > 0", read: "x + 1 > 0" }, TEXT],
+    line: ([a, b]) => `let r = fromJson("{", default: ${b}, files: ${a})`,
+    fixed: true,
+  },
+  {
     name: "named call arguments",
     parts: [named("a", INTEGER), named("b", INTEGER)],
     line: ([a, b]) => `let r = add(${a}, ${b})`,
