@@ -71,7 +71,7 @@ test("completion exposes optional speaker and current say modifiers", () => {
 
 test("every completion offered for a say's pacing compiles there", () => {
   // `|` marks the cursor, and the rest is written after the completion. The parser decides where the pacing is, also in
-  // the parentheses of a bounded say, whose `)` may not be written yet.
+  // the parentheses of a bounded say, whose `)` or enclosing block may not be written yet.
   const cases: readonly (readonly [marked: string, rest: string])[] = [
     ['say "Hi",|\nexit', ""],
     ['say "Hi", |\nexit', ""],
@@ -82,6 +82,8 @@ test("every completion offered for a say's pacing compiles there", () => {
     ['let lines = [say("Hi", |)]\nexit', ""],
     ['let lines = [say("Hi", |', ")]\nexit"],
     ['say "${say("Hi", |', ').text}"\nexit'],
+    ['if say("Hi", |).text == "Hi" {\n}\nexit', ""],
+    ['if say("Hi", |', ').text == "Hi" {\n}\nexit'],
     ['speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit', ""],
   ];
   for (const [marked, rest] of cases) {
