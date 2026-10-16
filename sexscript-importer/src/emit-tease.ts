@@ -318,6 +318,16 @@ export function emitExpression(expression: IrExpression): string {
         : expression.decimal === true && /^-?\d+$/u.test(String(expression.value))
           ? `${expression.value}.0`
           : String(expression.value);
+    case "angle": {
+      // The unit binds to a number, a name, a member, or a call, as a duration's does; anything else is parenthesized.
+      const value = expression.value;
+      const bare =
+        (value.kind === "literal" && typeof value.value === "number" && value.value >= 0) ||
+        value.kind === "variable" ||
+        value.kind === "property" ||
+        value.kind === "call";
+      return `${bare ? emitExpression(value) : `(${emitExpression(value)})`} ${expression.unit}`;
+    }
     case "duration":
       // Time model 2 writes calendar steps with `calendar`, as every month and year is one (time-model.ts).
       return timeModel() === 2 &&

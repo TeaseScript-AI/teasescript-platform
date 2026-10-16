@@ -367,6 +367,8 @@ export type IrExpression =
       unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
       calendar?: true;
     }
+  /** An angle (V30 "Exponentials, logarithms, and angles"): a number with its unit, `x rad` or `(a * b) deg`. */
+  | { kind: "angle"; value: IrExpression; unit: "rad" | "deg" }
   /**
    * A `say` used as a value: it shows its text at once as a `say` statement does and gives the message's handle, whose
    * `text` changes the message in place (V30 "Updatable messages").

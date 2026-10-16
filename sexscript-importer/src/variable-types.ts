@@ -2838,6 +2838,9 @@ export function expressionType(
       return UNKNOWN;
     case "message":
       return UNKNOWN;
+    // The importer keeps no variable of type angle; a value of one stays open.
+    case "angle":
+      return UNKNOWN;
     case "template":
       return scalar("string");
     case "variable":
@@ -3490,6 +3493,7 @@ export function mapChildren(
       return { ...value, from: map(value.from), to: map(value.to) };
     case "unary":
     case "typeTest":
+    case "angle":
       return { ...value, value: map(value.value) };
     case "binary":
       return { ...value, left: map(value.left), right: map(value.right) };

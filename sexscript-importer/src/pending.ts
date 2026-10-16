@@ -117,6 +117,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
         return { ...value, from: expression(value.from), to: expression(value.to) };
       case "unary":
       case "typeTest":
+      case "angle":
         return { ...value, value: expression(value.value) };
       case "binary":
         return { ...value, left: expression(value.left), right: expression(value.right) };

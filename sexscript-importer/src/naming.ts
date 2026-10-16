@@ -337,6 +337,7 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
       return { ...expression, from: child(expression.from), to: child(expression.to) };
     case "unary":
     case "typeTest":
+    case "angle":
       return { ...expression, value: child(expression.value) };
     case "binary":
       return { ...expression, left: child(expression.left), right: child(expression.right) };

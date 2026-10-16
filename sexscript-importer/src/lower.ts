@@ -3935,6 +3935,7 @@ function hasIrCall(expression: IrExpression): boolean {
       return hasIrCall(expression.from) || hasIrCall(expression.to);
     case "unary":
     case "typeTest":
+    case "angle":
       return hasIrCall(expression.value);
     case "binary":
       return hasIrCall(expression.left) || hasIrCall(expression.right);

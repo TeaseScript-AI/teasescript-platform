@@ -94,7 +94,7 @@ const URL_ENCODER = new Set(["URLEncoder", "java.net.URLEncoder"]);
 const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 
 const MATH_NOTE =
-  "Java computed this with its own floating-point library, and sin() and cos() of an angle in radians, which becomes degrees here; the result can differ in the last digits (more for very large angles), and the script stops where Java gave NaN or Infinity, which are no TeaseScript numbers.";
+  "Java computed this with its own floating-point library, and its sin(), cos(), and tan() took an angle as a number of radians, which is an angle in rad here; the result can differ in the last digits (more for very large angles), and the script stops where Java gave NaN or Infinity, which are no TeaseScript numbers.";
 const ENCODE_NOTE =
   "Java encoded every character as UTF-8; the generated helper encodes printable ASCII and Latin-1 characters, tabs, and line breaks the same way and stops the script at any other character, such as another control character or an emoji.";
 const NUMBER_TEXT_NOTE =
@@ -660,19 +660,56 @@ function mathCall(
 ): IrExpression | null | undefined {
   if (name === "random" && args.length === 0) return call("random");
   // TeaseScript's sqrt() and pow() give Java's results, and stop the script where Java gave NaN or Infinity (V30
-  // "Numeric functions"), as ln() and exp() do; sin() and cos() take degrees, where Java's took radians (V30
-  // "Exponentials, logarithms, and angles").
+  // "Numeric functions"), as ln() and exp() do. Java's sin(), cos(), and tan() took a number of radians, where
+  // TeaseScript's take an angle, `x rad`; its asin(), acos(), atan(), and atan2() give an angle, which a sine passes
+  // straight on; toRadians() and toDegrees() converted a number (V30 "Exponentials, logarithms, and angles").
   if ((name === "sqrt" && args.length === 1) || (name === "pow" && args.length === 2)) {
     const lowered = lowerEach(args, host);
     return lowered === null ? null : call(name, ...lowered);
   }
-  if (!["log", "exp", "sin", "cos"].includes(name) || args.length !== 1) return undefined;
+  const arity = MATH_FUNCTIONS.get(name);
+  if (arity === undefined || args.length !== arity) return undefined;
   const lowered = lowerEach(args, host);
   if (lowered === null) return null;
   noteOnce(host, "SX_MATH_PRECISION", MATH_NOTE, node.span);
-  if (name === "log") return call("ln", lowered[0]!);
-  if (name === "exp") return call("exp", lowered[0]!);
-  return call(name, binary("/", binary("*", lowered[0]!, literal(180)), PI));
+  const value = lowered[0]!;
+  switch (name) {
+    case "log":
+      return call("ln", value);
+    case "sin":
+    case "cos":
+    case "tan":
+      return call(name, isAngle(value) ? value : { kind: "angle", value, unit: "rad" });
+    case "toRadians":
+      return call("toRad", { kind: "angle", value, unit: "deg" });
+    case "toDegrees":
+      return call("toDeg", isAngle(value) ? value : { kind: "angle", value, unit: "rad" });
+    default:
+      return call(name, ...lowered);
+  }
+}
+
+/** The Java Math functions that TeaseScript has under its own names, by their number of arguments. */
+const MATH_FUNCTIONS = new Map([
+  ["log", 1],
+  ["exp", 1],
+  ["sin", 1],
+  ["cos", 1],
+  ["tan", 1],
+  ["asin", 1],
+  ["acos", 1],
+  ["atan", 1],
+  ["atan2", 2],
+  ["toRadians", 1],
+  ["toDegrees", 1],
+]);
+
+/** A value that is an angle already: an inverse function's result. */
+function isAngle(value: IrExpression): boolean {
+  return (
+    value.kind === "angle" ||
+    (value.kind === "call" && ["asin", "acos", "atan", "atan2"].includes(value.name))
+  );
 }
 
 /** Groovy `base ** exponent`, the power that Java's Math.pow() also gives. */
