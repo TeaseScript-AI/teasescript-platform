@@ -4,8 +4,8 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
-// `not` binds more loosely than a comparison (V30 §5), so `x == not a` has no operand after the `==`: one error names
-// the code to write instead, and the rest of the script parses on.
+// `not` binds more loosely than a comparison, `otherwise`, arithmetic, and a range (V30 §5), so `x == not a` has no
+// operand after the `==`: one error names the code to write instead, and the rest of the script parses on.
 
 function diagnostics(source: string): [string, string, string][] {
   return compileSource(source).diagnostics.map((diagnostic) => [
@@ -160,4 +160,113 @@ test("a comparison too long to quote, or an operand with an error of its own, is
         "'not' cannot follow '==' directly. Write it as in 'x != a', or 'x == (not a)'.",
     ),
   );
+});
+
+const OTHERWISE_NOT = "'not' cannot follow 'otherwise' directly. Write 'a otherwise (not b)'.";
+
+test("'not' right after 'otherwise' is one error, and the code it names runs as the fallback meant", () => {
+  const source = (form: string) => `let a: boolean? = null\nlet b = true\n${form}\nexit\n`;
+  assert.deepEqual(diagnostics(source('if a otherwise not b {\n    say "yes", instant\n}')), [
+    ["TSP012", OTHERWISE_NOT, "not"],
+  ]);
+  for (const [b, expected] of [
+    ["true", "false"],
+    ["false", "true"],
+  ])
+    assert.deepEqual(
+      sayTexts(`let a: boolean? = null\nlet b = ${b}\nsay a otherwise (not b), instant\nexit\n`),
+      [expected],
+      b,
+    );
+  const forms = [
+    "while a otherwise not b {\n    a = false\n}",
+    'if b {\n    say "no", instant\n} else if a otherwise not b {\n    say "yes", instant\n}',
+    "let c = a otherwise not b\nsay c, instant",
+    "function check {\n    return a otherwise not b\n}\nsay check(), instant",
+    "say a otherwise not b, instant",
+    "function same(value) {\n    return value\n}\nsay same(a otherwise not b), instant",
+    'if a otherwise not b and true {\n    say "yes", instant\n}',
+    'if a otherwise not b == true {\n    say "yes", instant\n}',
+    'if a otherwise\n    not b {\n    say "yes", instant\n}',
+  ];
+  for (const form of forms)
+    assert.deepEqual(diagnostics(source(form)), [["TSP012", OTHERWISE_NOT, "not"]], form);
+  // A chain is quoted whole; `!` has its own error and is then read as `not`; two `not`s cancel out; `??` has its own
+  // error, and the `not` gets one once it is the word.
+  assert.deepEqual(diagnostics(source("let c = a otherwise a otherwise not b")), [
+    [
+      "TSP012",
+      "'not' cannot follow 'otherwise' directly. Write 'a otherwise a otherwise (not b)'.",
+      "not",
+    ],
+  ]);
+  assert.deepEqual(diagnostics(source("let c = a otherwise !b")), [
+    ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+    ["TSP012", OTHERWISE_NOT, "!"],
+  ]);
+  assert.deepEqual(diagnostics(source("let c = a otherwise not not b")), [
+    ["TSP012", "'not' cannot follow 'otherwise' directly. Write 'a otherwise b'.", "not"],
+  ]);
+  assert.deepEqual(diagnostics(source("let c = a ?? not b")), [
+    [
+      "TSP037",
+      "TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise \"pet\"",
+      "??",
+    ],
+  ]);
+  // Arithmetic before `otherwise` needs parentheses that only its own error names, once the `not` has its own.
+  const example = "'not' cannot follow 'otherwise' directly. Write it as in 'a otherwise (not b)'.";
+  assert.deepEqual(diagnostics(source("let m: integer? = null\nlet c = m + 1 otherwise not b")), [
+    ["TSP012", example, "not"],
+  ]);
+  assert.deepEqual(
+    diagnostics(
+      "let firstLongerVariableName: boolean? = null\nlet secondLongerVariableName = true\n" +
+        "let c = firstLongerVariableName otherwise not secondLongerVariableName\nexit\n",
+    ),
+    [["TSP012", example, "not"]],
+  );
+});
+
+test("'not' right after arithmetic or a range operator is one error that names no grouping, which could not compile", () => {
+  const source = (form: string) => `let n = 1\nlet b = true\n${form}\nexit\n`;
+  const operators: [string, string][] = [
+    ["+", "'+'"],
+    ["-", "'-'"],
+    ["*", "'*'"],
+    ["/", "'/'"],
+    ["%", "'%'"],
+    ["..", "a range"],
+    ["..=", "a range"],
+  ];
+  for (const [operator, user] of operators) {
+    const message = `'not' cannot follow '${operator}': it gives true or false, which ${user} cannot use. Remove the 'not'.`;
+    const range = operator.startsWith("..");
+    const form = (operand: string) =>
+      range
+        ? `for i in 1${operator}${operand} {\n    say "yes", instant\n}`
+        : `if n ${operator} ${operand} == 2 {\n    say "yes", instant\n}`;
+    assert.deepEqual(diagnostics(source(form("not b"))), [["TSP012", message, "not"]], operator);
+    assert.deepEqual(
+      diagnostics(source(form("!b"))),
+      [
+        ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+        ["TSP012", message, "!"],
+      ],
+      operator,
+    );
+    // In parentheses, the true or false still reaches the operator, which rejects it.
+    assert.deepEqual(
+      diagnostics(source(form("(not b)"))).map(([code]) => code),
+      ["TSV043"],
+      operator,
+    );
+  }
+  assert.deepEqual(diagnostics(source("let c = n * 2 + not b\nsay c, instant")), [
+    [
+      "TSP012",
+      "'not' cannot follow '+': it gives true or false, which '+' cannot use. Remove the 'not'.",
+      "not",
+    ],
+  ]);
 });

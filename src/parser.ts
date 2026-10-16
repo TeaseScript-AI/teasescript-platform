@@ -3479,7 +3479,20 @@ class Parser {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
       const leftQuotable = this.#diagnostics.length === diagnosticCount;
-      const right = yield* parseChild(this.#parseComparedValue(left, operator, leftQuotable));
+      const right = yield* parseChild(
+        this.#parseOperand(
+          () => this.#parseOtherwise(),
+          "Expected an expression after the comparison operator.",
+          (operators, value, quotable) =>
+            this.#reportNotAfterComparison(
+              left,
+              operator,
+              operators,
+              value,
+              leftQuotable && quotable,
+            ),
+        ),
+      );
       if (right === null) return null;
       expression = this.#binary(left, right, binaryOperator(operator), operator.span);
     } else {
@@ -3507,15 +3520,15 @@ class Parser {
   }
 
   /**
-   * The right operand of a comparison. `not` binds more loosely than a comparison (V30 §5), so `x == not a` has no
-   * operand after the `==`: one error names the readings, and the rest is read as `x == (not a)`, so that nothing after
-   * it reports another error. An operand with an error of its own, as the `{` of `if x == not {` or the `??` of
-   * `x ?? false == not a`, is not quoted.
+   * The right operand of a comparison, `otherwise`, arithmetic, or a range, which `parse` reads, or `missing` without
+   * one. `not` binds more loosely than each of them (V30 §5), so `x == not a` has no operand after the `==`: `report`
+   * gives the one error for the `not`, and the rest is read as `x == (not a)`, so that nothing after it reports another
+   * error. `report` hears whether the operand is free of errors of its own, which the `{` of `if x == not {` is not.
    */
-  *#parseComparedValue(
-    left: Expression,
-    operator: Token,
-    leftQuotable: boolean,
+  *#parseOperand(
+    parse: () => ParseTask<Expression | null>,
+    missing: string,
+    report: (operators: readonly Token[], value: Expression, quotable: boolean) => void,
   ): ParseTask<Expression | null> {
     const operators: Token[] = [];
     while (this.#matchNot()) {
@@ -3523,19 +3536,16 @@ class Parser {
       this.#skipContinuationNewlines();
     }
     const diagnosticCount = this.#diagnostics.length;
-    let value = yield* parseChild(this.#parseOtherwise());
+    let value = yield* parseChild(parse());
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
-        operators.length === 0
-          ? "Expected an expression after the comparison operator."
-          : "Expected an expression after 'not'.",
+        operators.length === 0 ? missing : "Expected an expression after 'not'.",
       );
       return null;
     }
     if (operators.length === 0) return value;
-    const quotable = leftQuotable && this.#diagnostics.length === diagnosticCount;
-    this.#reportNotAfterComparison(left, operator, operators, value, quotable);
+    report(operators, value, this.#diagnostics.length === diagnosticCount);
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       value = this.#unary(operators[index]!, value, "not");
     }
@@ -3545,7 +3555,8 @@ class Parser {
   /**
    * Reports `not` right after a comparison operator. The message quotes the code as written in two forms that compile:
    * the opposite comparison, and the `not` in parentheses after `==` or `!=`, or before the whole comparison after `<`,
-   * `<=`, `>`, or `>=`, which do not compare true and false. Two `not`s cancel out.
+   * `<=`, `>`, or `>=`, which do not compare true and false. Two `not`s cancel out. An operand with an error of its own,
+   * as the `??` of `x ?? false == not a`, is not quoted.
    */
   #reportNotAfterComparison(
     left: Expression,
@@ -3555,24 +3566,60 @@ class Parser {
     quotable: boolean,
   ): void {
     const symbol = operator.lexeme;
-    const readings = (compared: string, negated: string): string[] => {
-      if (operators.length % 2 === 0) return [`${compared} ${symbol} ${negated}`];
-      const opposite = `${compared} ${OPPOSITE_COMPARISONS[symbol]!} ${negated}`;
-      return symbol === "==" || symbol === "!="
-        ? [opposite, `${compared} ${symbol} (not ${negated})`]
-        : [opposite, `not (${compared} ${symbol} ${negated})`];
-    };
-    // Only a short expression is quoted, as for `otherwise` (see `#reportMixedOtherwise`); an example stands in for it.
+    this.#reportNotReadings(
+      symbol,
+      left,
+      operators,
+      value,
+      quotable,
+      ["x", "a"],
+      (compared, negated) => {
+        if (operators.length % 2 === 0) return [`${compared} ${symbol} ${negated}`];
+        const opposite = `${compared} ${OPPOSITE_COMPARISONS[symbol]!} ${negated}`;
+        return symbol === "==" || symbol === "!="
+          ? [opposite, `${compared} ${symbol} (not ${negated})`]
+          : [opposite, `not (${compared} ${symbol} ${negated})`];
+      },
+    );
+  }
+
+  /**
+   * Reports `not` right after `symbol`, quoting the code to write: `readings` of the source text of `left` and of the
+   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportMixedOtherwise`), and
+   * one without errors of its own; the readings of `example` stand in for it.
+   */
+  #reportNotReadings(
+    symbol: string,
+    left: Expression,
+    operators: readonly Token[],
+    value: Expression,
+    quotable: boolean,
+    example: readonly [string, string],
+    readings: (left: string, value: string) => string[],
+  ): void {
     let written: string[] | undefined;
     if (quotable && value.span.end.offset - left.span.start.offset <= 240) {
       written = readings(this.#textOf(left.span, left.span), this.#textOf(value.span, value.span));
       if (!written.every((reading) => reading.length <= 60 && !reading.includes("\n")))
         written = undefined;
     }
-    const quoted = (written ?? readings("x", "a")).map((reading) => `'${reading}'`).join(", or ");
+    const quoted = (written ?? readings(...example)).map((reading) => `'${reading}'`).join(", or ");
     this.#reportSpan(
       parserDiagnosticCode.expectedExpression,
       `'not' cannot follow '${symbol}' directly. Write ${written === undefined ? "it as in " : ""}${quoted}.`,
+      operators[0]!.span,
+    );
+  }
+
+  /**
+   * Reports `not` right after arithmetic or a range operator, which cannot use the true or false it gives, also in
+   * parentheses, so the message names no grouping.
+   */
+  #reportNotAfterArithmetic(symbol: string, operators: readonly Token[]): void {
+    const user = symbol === ".." || symbol === "..=" ? "a range" : `'${symbol}'`;
+    this.#reportSpan(
+      parserDiagnosticCode.expectedExpression,
+      `'not' cannot follow '${symbol}': it gives true or false, which ${user} cannot use. Remove the 'not'.`,
       operators[0]!.span,
     );
   }
@@ -3638,6 +3685,7 @@ class Parser {
    * needs parentheses, because the fallback could be meant for its nearest value or for all of it (V30 §5, §18).
    */
   *#parseOtherwise(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     let expression = yield* parseChild(this.#parseRange());
     while (expression !== null) {
       const word = this.#matchOperator(TokenKind.KeywordOtherwise);
@@ -3651,16 +3699,38 @@ class Parser {
         );
       if (operator === null) break;
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseRange());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const left = expression;
+      // Arithmetic before `otherwise` needs parentheses too, which only its own message names (see below).
+      const leftQuotable =
+        this.#diagnostics.length === diagnosticCount && !isArithmetic(left) && !isSign(left);
+      const right = yield* parseChild(
+        this.#parseOperand(
+          () => this.#parseRange(),
           "Expected a fallback value after 'otherwise'.",
-        );
-        return null;
-      }
-      // A `??` has its one error already (V30 §39); the parentheses follow once it is the word.
-      if (word !== null) this.#reportMixedOtherwise(expression, right, operator);
+          (operators, value, quotable) => {
+            // A `??` has its one error already (V30 §39).
+            if (word === null) return;
+            this.#reportNotReadings(
+              "otherwise",
+              left,
+              operators,
+              value,
+              leftQuotable && quotable,
+              ["a", "b"],
+              (fallen, fallback) => [
+                operators.length % 2 === 0
+                  ? `${fallen} otherwise ${fallback}`
+                  : `${fallen} otherwise (not ${fallback})`,
+              ],
+            );
+          },
+        ),
+      );
+      if (right === null) return null;
+      // A `??` has its one error already (V30 §39), and so has a `not` that starts the fallback, which only
+      // `#parseOperand` reads there: the parentheses follow once both are written as they should be.
+      if (word !== null && !(right.kind === "unaryExpression" && right.operator === "not"))
+        this.#reportMixedOtherwise(expression, right, operator);
       expression = this.#binary(expression, right, "otherwise", operator);
     }
     return expression;
@@ -3710,14 +3780,14 @@ class Parser {
     }
     const operator = this.#advance();
     this.#skipContinuationNewlines();
-    const right = yield* parseChild(this.#parseAdditive());
-    if (right === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedExpression,
+    const right = yield* parseChild(
+      this.#parseOperand(
+        () => this.#parseAdditive(),
         "Expected an expression after the range operator.",
-      );
-      return null;
-    }
+        (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+      ),
+    );
+    if (right === null) return null;
     const expression: Expression = Object.freeze({
       kind: "rangeExpression",
       start: left,
@@ -3745,14 +3815,14 @@ class Parser {
     while (expression !== null && (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseMultiplicative());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const right = yield* parseChild(
+        this.#parseOperand(
+          () => this.#parseMultiplicative(),
           "Expected an expression after the arithmetic operator.",
-        );
-        return null;
-      }
+          (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+        ),
+      );
+      if (right === null) return null;
       expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
@@ -3771,14 +3841,14 @@ class Parser {
         break;
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = yield* parseChild(this.#parseUnaryArithmetic());
-      if (right === null) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedExpression,
+      const right = yield* parseChild(
+        this.#parseOperand(
+          () => this.#parseUnaryArithmetic(),
           "Expected an expression after the arithmetic operator.",
-        );
-        return null;
-      }
+          (operators) => this.#reportNotAfterArithmetic(operator.lexeme, operators),
+        ),
+      );
+      if (right === null) return null;
       expression = this.#binary(expression, right, binaryOperator(operator), operator.span);
     }
     return expression;
