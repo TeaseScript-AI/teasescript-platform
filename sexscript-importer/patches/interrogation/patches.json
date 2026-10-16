@@ -27,7 +27,7 @@
       "category": "speakers",
       "reason": "The chest word the player must write is the script's own list of degrading names for the player, which TeaseScript keeps on the built-in player speaker (V30 §37 name lists, owner 2026-10-15): the list fills player.degradingNames, and the text picks one of them as interpolation does. Groovy has no form for the player speaker, so this is an output edit.",
       "file": "interrogation.tease",
-      "baseHash": "c72279de241edecf670e8aba773a4edc2517ce8257adce6e306b2ba089da82dd",
+      "baseHash": "f81bbab5d3fcd94638ce0cca4c63c9e703ab626b3c506f4066c80281f41dca98",
       "edits": [
         {
           "find": "let insult = [\"slut\", \"slave\", \"whore\"]\n",
