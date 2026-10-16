@@ -484,6 +484,33 @@ const TEMPLATES: readonly Template[] = [
     main: (k) => [k.set, "stopAudio", "wait 1 ms", `say ${k.expr} // READ`],
   },
   {
+    name: "more statements between the store and the read",
+    kinds: ["custom"],
+    main: (k) => [
+      k.set,
+      "hideImage",
+      "hideCamera",
+      "speaker vera",
+      "player.copyFrom(account)",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "an image statement before a read that comes too early",
+    main: (k) => ["hideImage", `say ${k.expr} // READ`, k.set],
+  },
+  {
+    name: "a call with a call for an argument",
+    main: (k) => [
+      ...k.give("1"),
+      "function f(n: number) {",
+      "    say n",
+      "}",
+      "f(give())",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
     name: "a wait before a read that comes too early",
     main: (k) => ["wait 1 ms", `say ${k.expr} // READ`, k.set],
   },
