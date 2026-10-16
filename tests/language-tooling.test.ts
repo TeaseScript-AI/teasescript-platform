@@ -504,6 +504,9 @@ test("token classes follow the parse where a word means something else", () => {
     tokenClasses(source).filter((token) => /^(set|timer|min|random):/u.test(token)),
     ["set:type", "set:keyword", "timer:type", "min:command", "min:name", "min:name", "random:name"],
   );
+  // A keyword after `.` names a property too.
+  assert.deepEqual(compileSource("say {set: 1}.set\nexit").diagnostics, []);
+  assert.equal(tokenClasses("say {set: 1}.set").at(-1), "set:name");
 });
 
 test("token classes keep a string's text, its interpolations, and their code apart", () => {

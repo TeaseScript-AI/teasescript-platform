@@ -514,9 +514,11 @@ function tokenClass(
     case TokenKind.RegexLiteral:
       return "regex";
   }
-  // In a written type, `set`, `speaker`, and `null` name types.
-  if (token.kind.startsWith("keyword")) return inType ? "type" : "keyword";
-  return PUNCTUATION.has(token.kind) ? "punctuation" : "operator";
+  if (!token.kind.startsWith("keyword"))
+    return PUNCTUATION.has(token.kind) ? "punctuation" : "operator";
+  // After `.` a keyword names a property, and in a written type `set`, `speaker`, and `null` name types.
+  if (previous?.kind === TokenKind.Dot) return "name";
+  return inType ? "type" : "keyword";
 }
 
 /** The kinds of written type, whose every word names a type. */
