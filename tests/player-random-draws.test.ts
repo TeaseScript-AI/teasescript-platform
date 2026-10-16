@@ -405,9 +405,9 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
       .join(""),
     "chance(50)",
   );
-  // A file the lexer has problems with shows as plain text.
+  // A problem the lexer reports leaves the other tokens their colours.
   const broken = presentation.randomDrawCode(`${source}\n"unterminated`, site)!;
-  assert.ok(broken.lines.every((line) => line.segments.every((segment) => segment.kind === null)));
+  assert.deepEqual(broken.lines.slice(0, -1), code.lines);
   // Each draw marks only itself, also in a file drawn in before, and leaves the code shown for another draw as it was.
   const second = listRandomSites(plan)[1]!;
   const markedLines = (shown: { readonly lines: readonly CodeLine[] }) =>
@@ -417,6 +417,26 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
   assert.deepEqual(markedLines(presentation.randomDrawCode(source, second)!), [second.line]);
   assert.deepEqual(markedLines(code), [site.line]);
   assert.deepEqual(presentation.randomDrawCode(source, site), code);
+});
+
+test("the picker's code has the compiler's classes, lexed as the parser reads the file", () => {
+  // After a message mode, a slash starts a regex (V30 §8), which the lexer alone reads as a division and a problem.
+  const source = ["say prose /[a-z]+/", "let roll = randomInteger(1..=6)", "exit"].join("\n");
+  const [say, roll] = presentation.randomDrawCode(
+    source,
+    listRandomSites(compiled(source))[0]!,
+  )!.lines;
+  assert.deepEqual(
+    say!.segments.map(({ text, kind }) => [text, kind]),
+    [
+      ["say", "keyword"],
+      [" ", null],
+      ["prose", "name"],
+      [" ", null],
+      ["/[a-z]+/", "regex"],
+    ],
+  );
+  assert.equal(roll!.segments.find((segment) => segment.text === "randomInteger")?.kind, "command");
 });
 
 test("Show whole block fits the smallest statement or block around the draw that the default lines do not show whole", () => {

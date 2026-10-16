@@ -168,10 +168,10 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 - **Earlier outcomes** lists the outcomes the site took while Debug chose them, oldest first and numbered from the
   site's first draw, opening at the newest at the bottom; it keeps the last 1,000 per site, diagnostic tuning rather
   than a script limit, while the `×N` counts count all.
-- **Code** shows the draw's whole file, coloured by the compiler's own lexer with the theme's `syntax-*` roles: 7 lines
-  by default, with the draw's line highlighted in the middle and the draw itself underlined. A file the lexer rejects
-  shows plain. **Show whole function**, **Show whole block** for the smallest statement or block around the draw that
-  those lines do not show whole, or **Show whole file** fits that range together with the lines already shown, and
+- **Code** shows the draw's whole file, coloured by the compiler's token classes with the theme's `syntax-*` roles: 7
+  lines by default, with the draw's line highlighted in the middle and the draw itself underlined. **Show whole
+  function**, **Show whole block** for the smallest statement or block around the draw that those lines do not show
+  whole, or **Show whole file** fits that range together with the lines already shown, and
   **Show less** returns. Both blocks have **Copy visible lines**, **Wrap long lines**, and **Expand** in their top-right
   corner, shown while the pointer is over the block or one of them has keyboard focus, and always where the pointer
   cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
