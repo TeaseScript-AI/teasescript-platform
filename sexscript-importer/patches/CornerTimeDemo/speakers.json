@@ -7,11 +7,6 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [
-    {
-      "message": "scripts/MyDay/CornerTimeDemo.groovy:70",
-      "speaker": "system"
-    }
-  ],
+  "switches": [],
   "names": []
 }

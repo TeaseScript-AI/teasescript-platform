@@ -8,19 +8,6 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [
-    {
-      "message": "scripts/memoryforhardcore.groovy:213",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/memoryforhardcore.groovy:218",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/memoryforhardcore.groovy:222",
-      "speaker": "system"
-    }
-  ],
+  "switches": [],
   "names": []
 }

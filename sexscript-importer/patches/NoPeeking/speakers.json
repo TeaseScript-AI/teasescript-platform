@@ -2,8 +2,7 @@
   "reason": "Amia, the player's keyholder, runs the game and leads the blindfolded player to five friends in turn: Kaley, Cristina, Sunny, Lia and Gabby. Each girl's block opens with a 'Name:' line and uses its own numbered punishment closures; Amia speaks between the blocks (lines opening with '[narration] Amia:') and in the finale. The peek note and the peek-or-cum chooser are system screens.",
   "speakers": {
     "amia": {
-      "firstName": "Amia",
-      "displayName": "Mistress"
+      "firstName": "Amia"
     },
     "kaley": {
       "firstName": "Kaley"
@@ -104,22 +103,7 @@
     {
       "at": "scripts/NoPeeking.groovy:459",
       "speaker": "amia"
-    },
-    {
-      "message": "scripts/NoPeeking.groovy:92",
-      "speaker": "system"
     }
   ],
-  "names": [
-    {
-      "after": [
-        "scripts/NoPeeking.groovy:599"
-      ],
-      "files": [
-        "scripts/NoPeeking.groovy"
-      ],
-      "speaker": "amia",
-      "template": "Amia"
-    }
-  ]
+  "names": []
 }

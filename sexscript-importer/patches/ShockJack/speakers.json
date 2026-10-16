@@ -33,26 +33,6 @@
       "speaker": "system"
     },
     {
-      "message": "scripts/ShockJack.groovy:791",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:811",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:818",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:823",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:831",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/ShockJack.groovy:841",
       "speaker": "system"
     },
@@ -61,23 +41,7 @@
       "speaker": "system"
     },
     {
-      "message": "scripts/ShockJack.groovy:856",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:864",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/ShockJack.groovy:874",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:902",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:925",
       "speaker": "system"
     },
     {
@@ -90,10 +54,6 @@
     },
     {
       "message": "scripts/ShockJack.groovy:979",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/ShockJack.groovy:993",
       "speaker": "system"
     },
     {

@@ -10,14 +10,6 @@
   "prefixes": [],
   "switches": [
     {
-      "message": "scripts/SBLines.groovy:200",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/SBLines.groovy:203",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/SBLines.groovy:224",
       "speaker": "system"
     },

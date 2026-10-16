@@ -10,27 +10,11 @@
   "prefixes": [],
   "switches": [
     {
-      "message": "scripts/guessthenumber.groovy:245",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/guessthenumber.groovy:257",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/guessthenumber.groovy:294",
       "speaker": "system"
     },
     {
       "message": "scripts/guessthenumberalt.groovy:48",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/guessthenumberalt.groovy:251",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/guessthenumberalt.groovy:263",
       "speaker": "system"
     },
     {

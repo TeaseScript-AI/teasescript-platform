@@ -7,11 +7,6 @@
   },
   "default": "main",
   "prefixes": [],
-  "switches": [
-    {
-      "message": "scripts/milovana/fourinarow.groovy:66",
-      "speaker": "system"
-    }
-  ],
+  "switches": [],
   "names": []
 }

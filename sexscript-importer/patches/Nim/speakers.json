@@ -9,19 +9,11 @@
   "prefixes": [],
   "switches": [
     {
-      "message": "scripts/Nim.groovy:68",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/Nim.groovy:133",
       "speaker": "system"
     },
     {
       "message": "scripts/Nim.groovy:138",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Nim.groovy:188",
       "speaker": "system"
     },
     {

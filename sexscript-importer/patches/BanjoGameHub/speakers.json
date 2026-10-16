@@ -430,26 +430,6 @@
       "speaker": "system"
     },
     {
-      "message": "scripts/Banjo/guessthenumber_ee.groovy:721",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/guessthenumber_ee.groovy:733",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/hitorstay_ee.groovy:718",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/hitorstay_ee.groovy:733",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/hitorstay_ee.groovy:749",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/Banjo/hitorstay_ee.groovy:762",
       "speaker": "system"
     },
@@ -467,18 +447,6 @@
     },
     {
       "message": "scripts/Banjo/hitorstay_ee.groovy:770",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/rockpaperscissors.groovy:709",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/rockpaperscissors.groovy:725",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/rockpaperscissors.groovy:747",
       "speaker": "system"
     },
     {
@@ -611,10 +579,6 @@
     },
     {
       "message": "scripts/Banjo/wheelofdiscipline.groovy:1020",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/Banjo/wheelofdiscipline.groovy:1032",
       "speaker": "system"
     },
     {

@@ -9,19 +9,11 @@
   "prefixes": [],
   "switches": [
     {
-      "message": "scripts/gameofchance.groovy:138",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/gameofchance.groovy:209",
       "speaker": "system"
     },
     {
       "message": "scripts/gameofchance.groovy:220",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/gameofchance.groovy:252",
       "speaker": "system"
     },
     {

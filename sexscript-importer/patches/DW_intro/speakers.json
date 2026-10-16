@@ -69,10 +69,6 @@
       "speaker": "system"
     },
     {
-      "message": "scripts/DareWiliam/tasks.groovy:10",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/DareWiliam/tasks.groovy:32",
       "speaker": "system"
     },
@@ -86,54 +82,6 @@
     },
     {
       "message": "scripts/DareWiliam/tasks.groovy:133",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:151",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:153",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:155",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:165",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:167",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:169",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:179",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:181",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:183",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:193",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:195",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:197",
       "speaker": "system"
     },
     {
@@ -173,23 +121,7 @@
       "speaker": "system"
     },
     {
-      "message": "scripts/DareWiliam/tasks.groovy:501",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:503",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:505",
-      "speaker": "system"
-    },
-    {
       "message": "scripts/DareWiliam/tasks.groovy:618",
-      "speaker": "system"
-    },
-    {
-      "message": "scripts/DareWiliam/tasks.groovy:638",
       "speaker": "system"
     },
     {
