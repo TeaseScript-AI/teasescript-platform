@@ -149,7 +149,7 @@ import {
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
-  speakerFlowDiagnostics,
+  placeKey,
   type SpeakerFlowInput,
   type SpeakerFlowRead,
   type SpeakerFlowStore,
@@ -300,6 +300,8 @@ export interface TypeCheckResult {
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
   readonly flow: StatementFlow;
+  /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
+  readonly speakerFlow: SpeakerFlowInput;
   /**
    * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
@@ -469,17 +471,13 @@ export function checkTypes(
     }
     if (last) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
-      const speakerFlow = speakerFlowDiagnostics(
-        files,
-        checker.speakerFlowInput(),
-        checker.unreachable,
-      );
       return Object.freeze({
         diagnostics: Object.freeze(
           checker.fileDiagnostics.map((diagnostics, file) =>
-            Object.freeze([...diagnostics, ...closedLoops[file]!, ...speakerFlow[file]!]),
+            Object.freeze([...diagnostics, ...closedLoops[file]!]),
           ),
         ),
+        speakerFlow: checker.speakerFlowInput(),
         runtimeChecks: checker.runtimeChecks(),
         formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
@@ -1431,13 +1429,18 @@ class TypeChecker {
   readonly #copyStatements = new WeakSet<Expression>();
 
   // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
-  // speaker's name or `speaker` under `as`, the stores through a speaker's name, the author function each call calls,
-  // and which ways through each branch or loop are possible (see `SpeakerFlowInput.paths`).
-  readonly #flowReads = new Map<PropertyAccessExpression, Omit<SpeakerFlowRead, "sources">>();
-  readonly #flowStores = new Map<AssignmentStatement, SpeakerFlowStore>();
-  readonly #calledFunctions = new Map<CallExpression, FunctionDeclaration>();
+  // speaker's name or `speaker` under `as`, the stores through a speaker's name, and which ways through each branch,
+  // loop, and lazy operand are possible (see `SpeakerFlowInput`).
+  readonly #flowReads = new Map<
+    PropertyAccessExpression,
+    Omit<SpeakerFlowRead, "sources"> & { readonly file: number }
+  >();
+  readonly #flowStores = new Map<
+    AssignmentStatement,
+    SpeakerFlowStore & { readonly file: number }
+  >();
   readonly #pathFacts = new Map<Statement, boolean[]>();
-  readonly #operandFacts = new Map<Expression, boolean[]>();
+  readonly #operandFacts = new Map<string, boolean[]>();
 
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
@@ -1934,7 +1937,14 @@ class TypeChecker {
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
-    if (speaker !== undefined) this.#flowReads.set(read, { speaker, name, field: false });
+    if (speaker !== undefined)
+      this.#flowReads.set(read, {
+        speaker,
+        name,
+        field: false,
+        file: this.#file,
+        span: read.property.span,
+      });
     const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
@@ -2011,7 +2021,13 @@ class TypeChecker {
     this.#fieldReads.add(read);
     const speaker = this.#speakerName(read.object, scope);
     if (speaker !== undefined)
-      this.#flowReads.set(read, { speaker, name: read.property.name, field: true });
+      this.#flowReads.set(read, {
+        speaker,
+        name: read.property.name,
+        field: true,
+        file: this.#file,
+        span: read.property.span,
+      });
     this.#deferred.push({
       kind: "speakerField",
       file: this.#file,
@@ -2029,7 +2045,8 @@ class TypeChecker {
 
   /** Notes whether the right side of `and`, `or`, or `otherwise` may run, and whether it may be skipped. */
   #noteOperand(expression: Expression, ways: boolean[]): void {
-    this.#operandFacts.set(expression, joinedWays(this.#operandFacts.get(expression), ways));
+    const key = placeKey(this.#file, expression.span);
+    this.#operandFacts.set(key, joinedWays(this.#operandFacts.get(key), ways));
   }
 
   /**
@@ -2038,22 +2055,19 @@ class TypeChecker {
    * check reports the others, and that no store reaches unchecked, since such a store may give it to any speaker.
    */
   public speakerFlowInput(): SpeakerFlowInput {
-    const reads = new Map<PropertyAccessExpression, SpeakerFlowRead>();
-    for (const [read, flow] of this.#flowReads) {
+    const reads = new Map<string, SpeakerFlowRead>();
+    for (const [read, { file, ...flow }] of this.#flowReads) {
       const sources = flow.field ? fieldSources(flow.name) : [flow.name];
       if (sources.some((source) => this.#unchecked.has(source))) continue;
       const given = flow.field
         ? sources.some((source) => this.#speakerGets.get(flow.speaker)?.has(source) === true)
         : this.#speakerProperties.get(flow.speaker)?.has(flow.name) === true;
-      if (given) reads.set(read, { ...flow, sources });
+      if (given) reads.set(placeKey(file, read.span), { ...flow, sources });
     }
-    return {
-      reads,
-      stores: this.#flowStores,
-      calls: this.#calledFunctions,
-      paths: this.#pathFacts,
-      operands: this.#operandFacts,
-    };
+    const stores = new Map<string, SpeakerFlowStore>();
+    for (const [statement, { file, ...store }] of this.#flowStores)
+      stores.set(placeKey(file, statement.target.span), store);
+    return { reads, stores, paths: this.#pathFacts, operands: this.#operandFacts };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2949,7 +2963,7 @@ class TypeChecker {
           const speaker = this.#speakerName(target.object, scope);
           if (speaker !== undefined) {
             this.#speakerGets.get(speaker)?.add(name);
-            this.#flowStores.set(statement, { speaker, name });
+            this.#flowStores.set(statement, { speaker, name, file: this.#file });
           }
         }
         const custom = this.#customProperties(target.object, object, name, scope);
@@ -6425,10 +6439,8 @@ class TypeChecker {
     }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);
-      if (entry?.kind === "function") {
-        this.#calledFunctions.set(expression, entry.fn.declaration);
+      if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      }
       const values: StaticType[] = [];
       for (const argument of expression.arguments) {
         yield* compileChild(this.#expressionTask(argument.value, scope));

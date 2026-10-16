@@ -230,26 +230,20 @@ test("the player and the account have compile errors that name the form that exi
     ]),
     [["TSV041", "1"]],
   );
-  // So does a change checked before a copy in a block, a function, or another file. A copy that no call runs before
-  // the change gives the player no name lists there either.
-  for (const [files, early] of [
+  // So does a change checked before a copy in a block, a function, or another file. The flow check of the reads
+  // follows the plan, so it reports nothing while the script has an error.
+  for (const files of [
     [
-      [
-        "timer async 1 ms {\n    player.copyFrom(account)\n}\nwait 2 ms\nplayer.petNames.add(3)\nexit",
-      ],
-      false,
+      "timer async 1 ms {\n    player.copyFrom(account)\n}\nwait 2 ms\nplayer.petNames.add(3)\nexit",
     ],
-    [["function later {\n    player.copyFrom(account)\n}\nplayer.petNames.add(3)\nexit"], true],
-    [
-      ["player.petNames.add(3)\nexit", "global function copied {\n    player.copyFrom(account)\n}"],
-      true,
-    ],
-  ] as const)
+    ["function later {\n    player.copyFrom(account)\n}\nplayer.petNames.add(3)\nexit"],
+    ["player.petNames.add(3)\nexit", "global function copied {\n    player.copyFrom(account)\n}"],
+  ])
     assert.deepEqual(
       compileProject(
         files.map((source, index) => ({ path: index === 0 ? "main.tease" : "copy.tease", source })),
       ).diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
-      [["main.tease", "TSV041"], ...(early ? [["main.tease", "TSV043"]] : [])],
+      [["main.tease", "TSV041"]],
       files[0],
     );
   // A text of the account reverses into a new text.

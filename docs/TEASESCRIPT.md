@@ -412,8 +412,8 @@ types they support, and on a union every member must support them; reading an ob
 place can have, or a custom property, built-in field, term, or name list that no declaration or assignment gives any
 speaker the read may reach (V30 §37), is a compile error, decided at the end of the check from code anywhere in the
 project, and so is a read through a speaker's name or `speaker` under `as` where a way to it misses the custom property
-or no way to it gave the built-in field (`src/speaker-flow.ts`, after the check, through files, labels, functions, and
-start values); union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow
+or no way to it gave the built-in field (`src/speaker-flow.ts`, on the plan once the project is lowered, through files,
+labels, functions, and start values); union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow
 plain variables; using a possibly null value where its non-null type is required is a compile error that names the
 check and a fallback with
 `otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
