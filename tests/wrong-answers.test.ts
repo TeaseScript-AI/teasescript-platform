@@ -118,10 +118,13 @@ test("a malformed host payload is not reported as a wrong answer", () => {
       interactionKind: choiceAction.interactionKind,
       payload,
     });
-    assert.equal(outcome.kind, "invalidPayload", JSON.stringify(payload).slice(0, 60));
-    assert.doesNotMatch(
-      outcome.kind === "invalidPayload" ? outcome.message : "",
-      /^That is wrong|buttons above/,
+    assert.deepEqual(
+      outcome,
+      {
+        kind: "invalidPayload",
+        message: "Choice completion payload does not match the offered options.",
+      },
+      JSON.stringify(payload).slice(0, 60),
     );
   }
   const plan = compileValidPlan(FORM);
