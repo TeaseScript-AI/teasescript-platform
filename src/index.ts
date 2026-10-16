@@ -90,6 +90,7 @@ export type { RuntimeErrorInfo } from "./runtime/errors.js";
 export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export {
   applyLanguageTextEdits,
+  classifyTokens,
   createLanguageDocument,
   formatLanguageDocument,
   languageCompletions,
@@ -111,6 +112,8 @@ export {
   type LanguageRange,
   type LanguageSignatureHelp,
   type LanguageTextEdit,
+  type LanguageToken,
+  type LanguageTokenClass,
 } from "./language-tooling.js";
 export {
   inspectRuntimeState,

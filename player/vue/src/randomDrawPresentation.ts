@@ -1,14 +1,16 @@
 import {
   checkedOutcome,
-  lex,
+  classifyTokens,
   parse,
   randomDrawAlternatives,
   runtimeDebugPreview,
+  type LanguageToken,
+  type LanguageTokenClass,
+  type ParseResult,
   type RandomDrawView,
   type RandomOutcome,
   type RandomSite,
   type SourceSpan,
-  type Token,
 } from "../../../src/index.js";
 
 /**
@@ -120,8 +122,8 @@ export function randomOutcomeLabel(draw: RandomDrawView, outcome: RandomOutcome)
   }
 }
 
-/** What a stretch of code is, for its colour: the classes of the compiler's own tokens, or a comment between them. */
-export type CodeTokenClass = "keyword" | "string" | "number" | "comment" | "name" | "operator";
+/** What a stretch of code is, for its colour: the compiler's class of its token or comment (`classifyTokens`). */
+export type CodeTokenClass = LanguageTokenClass;
 
 export interface CodeSegment {
   readonly text: string;
@@ -140,12 +142,12 @@ export interface CodeLine {
 export const CONTEXT_ROWS = 7;
 
 /**
- * The code of the file a draw at `site` is in, highlighted with the compiler's own lexer: every line, with the draw
- * marked; `enclosing` is the range "Show whole" fits: the default lines around the draw together with the function the
- * draw is in, or for code outside functions, the smallest statement or block of several lines around it that the
+ * The code of the file a draw at `site` is in, highlighted with the compiler's own token classes: every line, with the
+ * draw marked; `enclosing` is the range "Show whole" fits: the default lines around the draw together with the function
+ * the draw is in, or for code outside functions, the smallest statement or block of several lines around it that the
  * default lines do not show whole, or the whole file when none of several lines is around it. `enclosing` is `null`
- * when the default lines already show it. The whole file is lexed, never a fragment, so a partial function is no
- * problem; a file the lexer reports problems in shows as plain text.
+ * when the default lines already show it. The whole file is classified, never a fragment, so a partial function is no
+ * problem.
  */
 export function randomDrawCode(
   source: string,
@@ -187,15 +189,13 @@ export function randomDrawCode(
 }
 
 /**
- * Earlier outcomes as code lines, numbered from `first`: each is lexed on its own, so a list or text reads like code;
- * one the lexer reports problems in is plain text.
+ * Earlier outcomes as code lines, numbered from `first`: each is classified on its own, so a list or text reads like
+ * code.
  */
 export function outcomeLines(outcomes: readonly string[], first = 1): readonly CodeLine[] {
   return outcomes.map((outcome, index) => {
     const text = outcome.replace(/\r?\n/g, " ");
-    const lexed = lex(text);
-    const tokens = lexed.diagnostics.length === 0 ? lexed.tokens : [];
-    return { ...renderLines(text, [0], tokens, 1, 1)[0]!, number: first + index };
+    return { ...renderLines(text, [0], classifyTokens(text), 1, 1)[0]!, number: first + index };
   });
 }
 
@@ -226,42 +226,29 @@ interface FileCode {
   readonly spans: EnclosingSpans | null;
 }
 
-// The file of the latest draw: lexing and parsing a long file is slow, and a file's draws often follow each other, as
-// in a loop.
+// The file of the latest draw: parsing and classifying a long file is slow, and a file's draws often follow each other,
+// as in a loop.
 let latestFile: FileCode | null = null;
 
 function fileCode(source: string): FileCode {
   if (latestFile?.source !== source) {
     const starts = lineStarts(source);
-    const lexed = lex(source);
-    const tokens = lexed.diagnostics.length === 0 ? lexed.tokens : [];
+    const parsed = parse(source);
     latestFile = {
       source,
       starts,
-      lines: renderLines(source, starts, tokens, 1, starts.length),
-      spans: enclosingSpans(source),
+      lines: renderLines(source, starts, classifyTokens(source, parsed), 1, starts.length),
+      spans: enclosingSpans(parsed),
     };
   }
   return latestFile;
-}
-
-const tokenClasses: Partial<Record<Token["kind"], CodeTokenClass>> = {
-  identifier: "name",
-  numberLiteral: "number",
-  stringStart: "string",
-  stringText: "string",
-  stringEnd: "string",
-};
-
-function tokenClass(kind: Token["kind"]): CodeTokenClass {
-  return tokenClasses[kind] ?? (kind.startsWith("keyword") ? "keyword" : "operator");
 }
 
 /** Lines `from` through `to`, one-based, split into segments by token and comment. */
 function renderLines(
   source: string,
   starts: readonly number[],
-  tokens: readonly Token[],
+  tokens: readonly LanguageToken[],
   from: number,
   to: number,
 ): CodeLine[] {
@@ -279,20 +266,18 @@ function renderLines(
       segments.push({ text: source.slice(cursor, end), kind, mark: false });
       cursor = end;
     };
+    // Between tokens is whitespace, or a character the lexer could not read.
     const gap = (end: number) => {
-      if (end <= cursor) return;
-      // The lexer skips only whitespace and comments.
-      piece(end, source.slice(cursor, end).trim() === "" || tokens.length === 0 ? null : "comment");
+      if (end > cursor) piece(end, null);
     };
     for (let index = next; index < tokens.length; index += 1) {
       const token = tokens[index]!;
       if (token.span.start.offset >= lineEnd) break;
-      if (token.kind === "newline" || token.kind === "endOfFile") continue;
       const start = Math.max(token.span.start.offset, lineStart);
       const end = Math.min(token.span.end.offset, lineEnd);
       if (end <= start) continue;
       gap(start);
-      piece(end, tokenClass(token.kind));
+      piece(end, token.kind);
       if (token.span.end.offset <= lineEnd) next = index + 1;
     }
     gap(lineEnd);
@@ -338,8 +323,7 @@ interface EnclosingSpans {
 }
 
 /** The spans `enclosingRange` chooses from, or `null` when the file does not parse. */
-function enclosingSpans(source: string): EnclosingSpans | null {
-  const parsed = parse(source);
+function enclosingSpans(parsed: ParseResult): EnclosingSpans | null {
   if (parsed.diagnostics.some((diagnostic) => diagnostic.severity === "error")) return null;
   // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
   // reaches.

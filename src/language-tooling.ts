@@ -9,6 +9,7 @@ import type {
   Statement,
   TimerParts,
   ShowPermanentButtonParts,
+  TypeAnnotation,
 } from "./ast.js";
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import {
@@ -30,7 +31,12 @@ import {
   type StatementRange,
 } from "./parser.js";
 import { compareProjectPaths } from "./project-paths.js";
-import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
+import {
+  TEASESCRIPT_GRAMMAR_KEYWORDS,
+  TEASESCRIPT_PROTECTED_ENGINE_NAMES,
+  TEASESCRIPT_PROTECTED_NAMES,
+  TEASESCRIPT_PROTECTED_TYPE_NAMES,
+} from "./protected-names.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -98,6 +104,28 @@ export interface LanguageTextEdit {
 export interface LanguageFormatResult {
   readonly edits: readonly LanguageTextEdit[];
   readonly text: string;
+}
+
+/** What a token or comment is, for its colour (see `classifyTokens`). */
+export const LANGUAGE_TOKEN_CLASSES = Object.freeze([
+  "keyword",
+  "type",
+  "command",
+  "name",
+  "number",
+  "string",
+  "interpolation",
+  "regex",
+  "comment",
+  "operator",
+  "punctuation",
+] as const);
+
+export type LanguageTokenClass = (typeof LANGUAGE_TOKEN_CLASSES)[number];
+
+export interface LanguageToken {
+  readonly kind: LanguageTokenClass;
+  readonly span: LanguageRange;
 }
 
 type CompactCommand = "showButton" | keyof typeof ASK_KINDS | "say";
@@ -402,6 +430,150 @@ export function applyLanguageTextEdits(
     previousStart = edit.range.start.offset;
   }
   return text;
+}
+
+/**
+ * The class of every token of `text` and every comment, in source order, for an editor or a code view to colour. `text`
+ * is lexed as `parsed`, its parse, read it, by default the parse editor help and formatting share, so a `/` the parser
+ * read as a regex starts one (V30 §8). A word's class comes from the protected names (V30 §38): a grammar keyword is a
+ * `keyword`, a protected type name a `type`, and a protected engine name, a command, built-in function, or engine
+ * reference such as `player`, a `command`; a word in a written type is a `type`, and a unit and a word after `.` are
+ * `name`s. A source with errors still has a class for every token the lexer reads. Whitespace and line breaks have
+ * none.
+ */
+export function classifyTokens(
+  text: string,
+  parsed: ParseResult = parseDocument(text),
+): readonly LanguageToken[] {
+  const { tokens, comments } = lex(text, parsed.regexStarts);
+  const { types, unitEnds } = syntaxReadings(parsed.program);
+  const classified: LanguageToken[] = [];
+  let comment = 0;
+  // The written types that start at or before the token, and the furthest end among them.
+  let type = 0;
+  let typeEnd = -1;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    const start = token.span.start.offset;
+    // Comments lie between tokens; only a block comment's line breaks are tokens, inside it.
+    while (comment < comments.length && comments[comment]!.start.offset < start)
+      classified.push(Object.freeze({ kind: "comment", span: comments[comment++]! }));
+    while (type < types.length && types[type]!.start.offset <= start)
+      typeEnd = Math.max(typeEnd, types[type++]!.end.offset);
+    const kind = tokenClass(token, tokens[index - 1], start < typeEnd, unitEnds);
+    if (kind !== null) classified.push(Object.freeze({ kind, span: token.span }));
+  }
+  return Object.freeze(classified);
+}
+
+const GRAMMAR_KEYWORDS: ReadonlySet<string> = new Set(TEASESCRIPT_GRAMMAR_KEYWORDS);
+const TYPE_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_TYPE_NAMES);
+const ENGINE_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_ENGINE_NAMES);
+
+/** The symbols that group and separate; the other symbols are operators. */
+const PUNCTUATION: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftBrace,
+  TokenKind.RightBrace,
+  TokenKind.LeftBracket,
+  TokenKind.RightBracket,
+  TokenKind.LeftParenthesis,
+  TokenKind.RightParenthesis,
+  TokenKind.Colon,
+  TokenKind.Comma,
+  TokenKind.Dot,
+  TokenKind.Question,
+  TokenKind.Pipe,
+]);
+
+function tokenClass(
+  token: Token,
+  previous: Token | undefined,
+  inType: boolean,
+  unitEnds: ReadonlySet<number>,
+): LanguageTokenClass | null {
+  switch (token.kind) {
+    case TokenKind.Newline:
+    case TokenKind.EndOfFile:
+      return null;
+    case TokenKind.Identifier: {
+      // A property, a method, or a unit is no protected name.
+      if (previous?.kind === TokenKind.Dot || unitEnds.has(token.span.end.offset)) return "name";
+      if (inType || TYPE_NAMES.has(token.lexeme)) return "type";
+      if (GRAMMAR_KEYWORDS.has(token.lexeme)) return "keyword";
+      return ENGINE_NAMES.has(token.lexeme) ? "command" : "name";
+    }
+    case TokenKind.NumberLiteral:
+      return "number";
+    case TokenKind.StringStart:
+    case TokenKind.StringText:
+    case TokenKind.StringEnd:
+      return "string";
+    case TokenKind.InterpolationStart:
+    case TokenKind.InterpolationEnd:
+      return "interpolation";
+    case TokenKind.RegexLiteral:
+      return "regex";
+  }
+  if (!token.kind.startsWith("keyword"))
+    return PUNCTUATION.has(token.kind) ? "punctuation" : "operator";
+  // After `.` a keyword names a property, and in a written type `set`, `speaker`, and `null` name types.
+  if (previous?.kind === TokenKind.Dot) return "name";
+  return inType ? "type" : "keyword";
+}
+
+/** The kinds of written type, whose every word names a type. */
+const TYPE_ANNOTATION_KINDS = {
+  namedType: true,
+  listType: true,
+  setType: true,
+  dictType: true,
+  optionalType: true,
+  unionType: true,
+} satisfies Record<TypeAnnotation["kind"], true>;
+
+/** Where the parse read words for what they are there: the written types, by start, and the end of every unit. */
+function syntaxReadings(program: Program): {
+  readonly types: readonly SourceSpan[];
+  readonly unitEnds: ReadonlySet<number>;
+} {
+  const types: SourceSpan[] = [];
+  const unitEnds = new Set<number>();
+  // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
+  // reaches.
+  const pending: unknown[] = [program.statements];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: the parser's syntax tree holds plain nodes, arrays, and values, and a node's spans are SourceSpans.
+    const record = node as {
+      readonly [key: string]: unknown;
+      readonly kind?: unknown;
+      readonly span?: SourceSpan;
+      readonly unit?: unknown;
+      readonly unitSpan?: SourceSpan;
+      readonly lengthSpan?: SourceSpan;
+    };
+    if (
+      typeof record.kind === "string" &&
+      Object.hasOwn(TYPE_ANNOTATION_KINDS, record.kind) &&
+      record.span !== undefined
+    ) {
+      types.push(record.span);
+      continue;
+    }
+    if (record.unitSpan !== undefined) unitEnds.add(record.unitSpan.end.offset);
+    // A wait or a timer keeps the unit after its length apart; the length as written ends with it.
+    if (typeof record.unit === "string" && record.lengthSpan !== undefined)
+      unitEnds.add(record.lengthSpan.end.offset);
+    for (const key in record)
+      if (key !== "span" && !key.endsWith("Span")) pending.push(record[key]);
+  }
+  types.sort((left, right) => left.start.offset - right.start.offset);
+  return { types, unitEnds };
 }
 
 function command(label: string, detail: string): LanguageCompletionItem {

@@ -1,14 +1,18 @@
 import {
+  classifyTokens,
   createLanguageDocument,
   formatLanguageDocument,
+  LANGUAGE_TOKEN_CLASSES,
   languageCompletions,
   languageHover,
   languagePositionAt,
   languageSignatureHelp,
+  type LanguageTokenClass,
 } from "../language-tooling.js";
 import {
   toMonacoCompletions,
   toMonacoHover,
+  toMonacoSemanticTokens,
   toMonacoSignatureHelp,
   toMonacoTextEdits,
   type MonacoPosition,
@@ -27,6 +31,7 @@ export interface TeaseScriptProviderRegistration {
   completion(provider: TeaseScriptProviders["completion"]): void;
   formatting(provider: TeaseScriptProviders["formatting"]): void;
   hover(provider: TeaseScriptProviders["hover"]): void;
+  semanticTokens(provider: TeaseScriptProviders["semanticTokens"]): void;
   signature(provider: TeaseScriptProviders["signature"]): void;
 }
 
@@ -38,6 +43,7 @@ export function registerTeaseScriptProviders(
   registration.hover(providers.hover);
   registration.signature(providers.signature);
   registration.formatting(providers.formatting);
+  registration.semanticTokens(providers.semanticTokens);
 }
 
 export function createTeaseScriptProviders(
@@ -53,7 +59,13 @@ export function createTeaseScriptProviders(
     readonly Variable: number;
     readonly Value: number;
   },
+  /** The editor theme's token type for each class of `classifyTokens`. */
+  tokenTypes: Readonly<Record<LanguageTokenClass, string>>,
 ) {
+  const legend = {
+    tokenTypes: LANGUAGE_TOKEN_CLASSES.map((kind) => tokenTypes[kind]),
+    tokenModifiers: [],
+  };
   return {
     completion: {
       triggerCharacters: [" ", "\n"],
@@ -97,6 +109,15 @@ export function createTeaseScriptProviders(
       provideDocumentFormattingEdits(model: MonacoProviderModel) {
         return toMonacoTextEdits(formatLanguageDocument(languageDocument(model)).edits);
       },
+    },
+    // Every token's colour comes from the compiler's classes, which the parse of help and formatting also serves.
+    semanticTokens: {
+      getLegend: () => legend,
+      provideDocumentSemanticTokens(model: MonacoProviderModel) {
+        const text = model.getValue();
+        return { data: toMonacoSemanticTokens(text, classifyTokens(text)) };
+      },
+      releaseDocumentSemanticTokens() {},
     },
   };
 }

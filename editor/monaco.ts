@@ -15,23 +15,16 @@ export function registerTeaseScriptLanguage(): void {
       extensions: [".tease"],
       aliases: ["TeaseScript"],
     });
+    // The colours come from the compiler's own token classes (`registerProviders`). This tokenizer marks only strings,
+    // with their interpolations, and line comments, which Monaco itself reads: brackets and quotes in them are text
+    // for bracket matching, bracket colours, and auto-closing, which semantic tokens cannot tell Monaco. It reads one
+    // line at a time and cannot tell a regex from a division, so it leaves regexes and block comments, which a regex
+    // such as `/[/*]/` can seem to open, to the compiler's classes.
     monaco.languages.setMonarchTokensProvider(TEASE_LANGUAGE_ID, {
       tokenizer: {
         root: [{ include: "@expression" }],
         expression: [
           [/\/\/.*$/, "comment"],
-          [
-            /[A-Za-z_][\w-]*/,
-            {
-              cases: {
-                "@keywords": "keyword",
-                "@types": "type",
-                "@commands": "type.identifier",
-                "@default": "identifier",
-              },
-            },
-          ],
-          [/-?\d+(?:\.\d+)?/, "number"],
           [/"""/, { token: "string.quote", next: "@blockString" }],
           [
             /"/,
@@ -42,7 +35,7 @@ export function registerTeaseScriptLanguage(): void {
               },
             },
           ],
-          [/[{}()[\],:|?]/, "delimiter"],
+          [/[^/"{}]+|[/{}]/, ""],
         ],
         singleLineString: [
           [
@@ -78,74 +71,6 @@ export function registerTeaseScriptLanguage(): void {
           { include: "@expression" },
         ],
       },
-      keywords: [
-        "as",
-        "skippable",
-        "unskippable",
-        "instant",
-        "speaker",
-        "let",
-        "global",
-        "if",
-        "else",
-        "switch",
-        "case",
-        "default",
-        "repeat",
-        "while",
-        "for",
-        "in",
-        "function",
-        "return",
-        "is",
-        "label",
-        "goto",
-        "tagged",
-        "call",
-        "fallback",
-      ],
-      types: [
-        "string",
-        "boolean",
-        "integer",
-        "number",
-        "date",
-        "time",
-        "datetime",
-        "absoluteDateTime",
-        "duration",
-        "calendarDuration",
-        "list",
-        "set",
-        "dict",
-        "object",
-        "range",
-        "media",
-        "script",
-      ],
-      commands: [
-        "showButton",
-        "askText",
-        "askNumber",
-        "choose",
-        "say",
-        "wait",
-        "timer",
-        "showImage",
-        "hideImage",
-        "showCamera",
-        "hideCamera",
-        "findImages",
-        "findScripts",
-        "playAudio",
-        "playVideo",
-        "takePhoto",
-        "save",
-        "load",
-        "delete",
-        "exit",
-        "end",
-      ],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
       comments: { lineComment: "//", blockComment: ["/*", "*/"] },
@@ -178,6 +103,20 @@ function registerProviders(): void {
     (startLineNumber, startColumn, endLineNumber, endColumn) =>
       new monaco.Range(startLineNumber, startColumn, endLineNumber, endColumn),
     monaco.languages.CompletionItemKind,
+    // The theme's colour for each class, by the token types Monaco's themes colour.
+    {
+      keyword: "keyword",
+      type: "type",
+      command: "type.identifier",
+      name: "identifier",
+      number: "number",
+      string: "string",
+      interpolation: "delimiter.bracket",
+      regex: "regexp",
+      comment: "comment",
+      operator: "operator",
+      punctuation: "delimiter",
+    },
   );
   registerTeaseScriptProviders(
     {
@@ -192,6 +131,9 @@ function registerProviders(): void {
       },
       formatting: (provider) => {
         monaco.languages.registerDocumentFormattingEditProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      semanticTokens: (provider) => {
+        monaco.languages.registerDocumentSemanticTokensProvider(TEASE_LANGUAGE_ID, provider);
       },
     },
     providers,

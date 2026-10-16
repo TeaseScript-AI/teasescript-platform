@@ -58,6 +58,8 @@ onMounted(async () => {
     minimap: { enabled: false },
     fontSize: 15,
     padding: { top: 16 },
+    // Monaco's own themes leave semantic tokens off, and the code's colours are the compiler's classes.
+    "semanticHighlighting.enabled": true,
   });
   listener = watchProject(
     models,

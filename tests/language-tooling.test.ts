@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  classifyTokens,
   compileSource,
   createLanguageDocument,
   formatLanguageDocument,
@@ -213,6 +214,8 @@ function assertDeepSayTooling(source: string): void {
   for (const edit of formatted.edits) {
     assert.ok(edit.range.start.offset > start && edit.range.end.offset < start + DEEP_SAY.length);
   }
+  const say = classifyTokens(source).find((token) => token.span.start.offset === start);
+  assert.equal(say?.kind, "keyword");
   const hover = languageHover(document, languagePositionAt(document, start + 1));
   assert.deepEqual(hover?.range, {
     start: languagePositionAt(document, start),
@@ -404,6 +407,140 @@ test("editor help reads only the statement the parser finds at the cursor", () =
   assert.deepEqual(help('let answer = askText "Q",\n  ', "\nexit"), ["question", "askText"]);
   assert.deepEqual(help('let answer = askText "Q", hint:\n  ', "\nexit"), ["hint", "askText"]);
   assert.deepEqual(help('let pick = askChoice [\n  "a",\n  '), ["options", "askChoice"]);
+});
+
+/** Each token and comment of `source` with its class, as `text:class`. */
+function tokenClasses(source: string): readonly string[] {
+  return classifyTokens(source).map(
+    ({ kind, span }) => `${source.slice(span.start.offset, span.end.offset)}:${kind}`,
+  );
+}
+
+test("token classes are the compiler's reading of numbers, names, comments, and regexes", () => {
+  // A hyphen subtracts (V30 §38), and a number may start with its dot or have an exponent.
+  assert.deepEqual(tokenClasses("let n = x-1 + 1e3 * .5"), [
+    "let:keyword",
+    "n:name",
+    "=:operator",
+    "x:name",
+    "-:operator",
+    "1:number",
+    "+:operator",
+    "1e3:number",
+    "*:operator",
+    ".5:number",
+  ]);
+  // A block comment is one comment, also over several lines, and the code in it is no code.
+  assert.deepEqual(tokenClasses('/* say "x"\n*/ exit // done'), [
+    '/* say "x"\n*/:comment',
+    "exit:keyword",
+    "// done:comment",
+  ]);
+  // After a message mode the parser expects a value, so the slash starts a regex (V30 §8).
+  assert.deepEqual(tokenClasses("say prose /[a-z]+/"), [
+    "say:keyword",
+    "prose:name",
+    "/[a-z]+/:regex",
+  ]);
+});
+
+test("token classes take keywords, types, and commands from the protected names", () => {
+  // Every grammar keyword (V30 §38), also the literals and the logical operators.
+  assert.deepEqual(tokenClasses("if true and not null { break }"), [
+    "if:keyword",
+    "true:keyword",
+    "and:keyword",
+    "not:keyword",
+    "null:keyword",
+    "{:punctuation",
+    "break:keyword",
+    "}:punctuation",
+  ]);
+  // Protected engine names are commands: an ask, a built-in function, and an engine reference.
+  assert.deepEqual(tokenClasses('let c = askChoice yes: "Yes"\nlet r = round(player.age)'), [
+    "let:keyword",
+    "c:name",
+    "=:operator",
+    "askChoice:command",
+    "yes:name",
+    "::punctuation",
+    '":string',
+    "Yes:string",
+    '":string',
+    "let:keyword",
+    "r:name",
+    "=:operator",
+    "round:command",
+    "(:punctuation",
+    "player:command",
+    ".:punctuation",
+    "age:name",
+    "):punctuation",
+  ]);
+  assert.deepEqual(tokenClasses("let turn: angle = 90 deg"), [
+    "let:keyword",
+    "turn:name",
+    "::punctuation",
+    "angle:type",
+    "=:operator",
+    "90:number",
+    "deg:name",
+  ]);
+});
+
+test("token classes follow the parse where a word means something else", () => {
+  // In a written type, `set` and `timer` are types; a unit is no function, also after a wait's length; a property is
+  // no protected name.
+  const source = [
+    'let s: string set = set["a"]',
+    "let t: timer? = null",
+    "let m = min(1, 2)",
+    "wait 2 min",
+    "wait m min",
+    "say [1, 2].random",
+  ].join("\n");
+  assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
+  assert.deepEqual(
+    tokenClasses(source).filter((token) => /^(set|timer|min|random):/u.test(token)),
+    ["set:type", "set:keyword", "timer:type", "min:command", "min:name", "min:name", "random:name"],
+  );
+  // A keyword after `.` names a property too.
+  assert.deepEqual(compileSource("say {set: 1}.set\nexit").diagnostics, []);
+  assert.equal(tokenClasses("say {set: 1}.set").at(-1), "set:name");
+});
+
+test("token classes keep a string's text, its interpolations, and their code apart", () => {
+  assert.deepEqual(tokenClasses('say "Hi ${name}!"'), [
+    "say:keyword",
+    '":string',
+    "Hi :string",
+    "${:interpolation",
+    "name:name",
+    "}:interpolation",
+    "!:string",
+    '":string',
+  ]);
+});
+
+test("a problem the lexer reports leaves every other token its class", () => {
+  // An invalid character, and a regex without its closing slash, which ends with its line.
+  const source = 'let a = @ + 1\nlet r = /a(b\nshowButton "Go"';
+  assert.ok(compileSource(source).diagnostics.some(({ code }) => code === "TSL001"));
+  assert.deepEqual(tokenClasses(source), [
+    "let:keyword",
+    "a:name",
+    "=:operator",
+    "+:operator",
+    "1:number",
+    "let:keyword",
+    "r:name",
+    "=:operator",
+    "/a(b:regex",
+    "showButton:command",
+    '":string',
+    "Go:string",
+    '":string',
+  ]);
 });
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {

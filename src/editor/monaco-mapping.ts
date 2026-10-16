@@ -1,9 +1,11 @@
-import type {
-  LanguageCompletionItem,
-  LanguageDiagnostic,
-  LanguageHover,
-  LanguageSignatureHelp,
-  LanguageTextEdit,
+import {
+  LANGUAGE_TOKEN_CLASSES,
+  type LanguageCompletionItem,
+  type LanguageDiagnostic,
+  type LanguageHover,
+  type LanguageSignatureHelp,
+  type LanguageTextEdit,
+  type LanguageToken,
 } from "../language-tooling.js";
 import type { SourcePosition, SourceSpan } from "../source.js";
 
@@ -126,4 +128,38 @@ export function toMonacoTextEdits(
   edits: readonly LanguageTextEdit[],
 ): { readonly range: MonacoRange; readonly text: string }[] {
   return edits.map((edit) => ({ range: toMonacoRange(edit.range), text: edit.newText }));
+}
+
+/**
+ * Classified tokens of `text` as Monaco's semantic tokens: five numbers for each, its line and start column relative to
+ * the token before, its length, its class as an index of `LANGUAGE_TOKEN_CLASSES`, and no modifiers. A Monaco token
+ * stays on its line, so a token over several lines, such as a block comment, gives one for each line it is on.
+ */
+export function toMonacoSemanticTokens(
+  text: string,
+  tokens: readonly LanguageToken[],
+): Uint32Array {
+  const data: number[] = [];
+  let line = 0;
+  let column = 0;
+  const push = (pieceLine: number, pieceColumn: number, length: number, kind: number) => {
+    data.push(pieceLine - line, pieceLine === line ? pieceColumn - column : pieceColumn, length);
+    data.push(kind, 0);
+    line = pieceLine;
+    column = pieceColumn;
+  };
+  for (const token of tokens) {
+    const kind = LANGUAGE_TOKEN_CLASSES.indexOf(token.kind);
+    const { start, end } = token.span;
+    let [pieceLine, pieceColumn, offset] = [start.line, start.column, start.offset];
+    while (pieceLine < end.line) {
+      // The line's piece ends before its line break, `\n` or `\r\n`.
+      const lineEnd = text.indexOf("\n", offset);
+      const length = lineEnd - offset - (text[lineEnd - 1] === "\r" ? 1 : 0);
+      if (length > 0) push(pieceLine, pieceColumn, length, kind);
+      [pieceLine, pieceColumn, offset] = [pieceLine + 1, 0, lineEnd + 1];
+    }
+    if (end.offset > offset) push(pieceLine, pieceColumn, end.offset - offset, kind);
+  }
+  return Uint32Array.from(data);
 }
