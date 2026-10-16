@@ -4009,7 +4009,8 @@ function collectSpeakerReferenceIds(
   }
 }
 
-function validSpan(value: unknown): value is SourceSpan {
+/** Whether `value` is a source span: a start and an end position, the end not before the start. */
+export function validSpan(value: unknown): value is SourceSpan {
   return (
     isPlainRecord(value) &&
     validPosition(value.start) &&

@@ -11,6 +11,7 @@ import {
   MAIN_FILE_PATH,
   restoreRuntimeSession,
   RuntimeSessionError,
+  runtimeTimedWork,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
@@ -43,6 +44,7 @@ import {
   type RuntimeSessionView,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type RuntimeTimedWork,
   type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
@@ -66,7 +68,6 @@ import {
   repeatsSilently,
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
-import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
@@ -871,33 +872,22 @@ export function playerRuntimeTimers(
   );
 }
 
-/** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
+/** Session-time deadlines at which the Player must observe time again: those of the session's timed work. */
 export function playerRuntimeDeadlines(state: PlayerRuntimeState): readonly number[] {
   return timedDeadlines(state, () => true);
 }
 
+/**
+ * The deadlines of the session's timed work that `counts`. Media events are not among them: they come due only through
+ * reported progress, which the Player's media device measures and asks an observation for.
+ */
 function timedDeadlines(
   state: RuntimeSessionView,
-  timerCounts: (timer: RuntimeTimerSnapshot) => boolean,
+  counts: (work: RuntimeTimedWork) => boolean,
 ): number[] {
   const deadlines: number[] = [];
-  if (state.status === "failed") return deadlines;
-  // An action a block suspended stands still, so it needs no observation until the block returns.
-  for (const action of [state.foregroundAction, ...state.backgroundActions]) {
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
-      deadlines.push(action.deadlineMs);
-    } else if (
-      action?.kind === "timer" &&
-      action.timer.deadlineMs !== null &&
-      timerCounts(action.timer)
-    ) {
-      deadlines.push(action.timer.deadlineMs);
-    }
-  }
-  // A button with a timeout times out only while it is presented.
-  const button = activePlayerRuntimeInteraction(state);
-  const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
-  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
+  for (const work of runtimeTimedWork(state))
+    if (work.kind !== "media" && counts(work)) deadlines.push(work.deadlineMs);
   return deadlines;
 }
 
@@ -1783,7 +1773,7 @@ export function observePlayerRuntimeTime(
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
 export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
-  const times = timedDeadlines(state, timerEvent);
+  const times = timedDeadlines(state, (work) => !work.silent);
   if (state.status !== "failed") {
     for (const action of state.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
@@ -1794,11 +1784,6 @@ export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | nu
   const nextMs = Math.min(...times);
   const observedMs = state.observedSessionTimeMs;
   return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
-}
-
-/** Whether a timer's deadline is an event: a round of a repeating timer without an expiry block runs nothing. */
-function timerEvent(timer: RuntimeTimerSnapshot): boolean {
-  return !timer.repeat || timer.handlerFunctionId !== null;
 }
 
 /** When the next event of media playing at 1× is due; a departure needs progress after the sample it leaves. */
@@ -1882,7 +1867,7 @@ export interface PlayerRuntimeCatchUp {
 export function nextPlayerRuntimeCatchUpStepMs(state: RuntimeSessionView): number | null {
   if (playerRuntimeAwaitsHost(state)) return null;
   let nextMs: number | null = null;
-  for (const atMs of timedDeadlines(state, (timer) => timerEvent(timer) || timer.range !== null)) {
+  for (const atMs of timedDeadlines(state, (work) => !work.silent || work.drawsNextRound)) {
     if (atMs > state.observedSessionTimeMs && (nextMs === null || atMs < nextMs)) nextMs = atMs;
   }
   return nextMs;

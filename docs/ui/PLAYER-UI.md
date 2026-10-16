@@ -458,8 +458,8 @@ save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
-a kept session whose events lack what the Player reads from them, such as a message's markup or an answer's form, is
-not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
+answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts

@@ -469,7 +469,8 @@ test("a fix writes another type where the place declares its type, and the code 
     [],
   );
   // A property has no written type (V30 §15, §37), so its first value gives it one. A loop variable, a property that a
-  // dict computes (V30 §40), and a media block's own handle have no declaration to change.
+  // dict computes (V30 §40), whose change is also lost with the copy (owner decision O3), and a media block's own handle
+  // have no declaration to change.
   assert.deepEqual(
     mismatches(
       [
@@ -508,6 +509,11 @@ test("a fix writes another type where the place declares its type, and the code 
         "TSV041",
         "'d.keys' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
         "2",
+      ],
+      [
+        "TSV004",
+        "This changes a copy that no variable holds: 'd.keys' gives a new list each time, so the change is lost. Change the dict itself, as in 'd[key] = value' or 'd.remove(key)'.",
+        "d.keys",
       ],
       [
         "TSV041",

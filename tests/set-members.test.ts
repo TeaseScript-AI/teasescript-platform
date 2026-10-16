@@ -113,7 +113,8 @@ test("a member is copied on insert, and first, last, random, and iteration give 
     says(
       [
         "let item = [1]",
-        "let holder = set[item]",
+        // The compiler rejects a change through a read member of a set whose members it knows (owner decision O3).
+        "let holder: set = set[item]",
         "holder.add([2])",
         "item.add(9)",
         "say holder",
@@ -127,7 +128,7 @@ test("a member is copied on insert, and first, last, random, and iteration give 
         "}",
         "say holder",
         "say holder.contains([1])",
-        "let doors = set[{ open: false }]",
+        "let doors: set = set[{ open: false }]",
         "doors.first.open = true",
         "say doors",
         "exit",
@@ -138,21 +139,28 @@ test("a member is copied on insert, and first, last, random, and iteration give 
 });
 
 test("what changes a read set member decides and widens nothing in the set, unlike a list element", () => {
+  // The change is lost with the copy, so it is a compile error (owner decision O3). The set keeps its type, so what is
+  // added to the set later is no error, and the copy takes the type the set gets.
   for (const selector of ["first", "last", "random"])
     assert.deepEqual(
-      says(`${DYNAMIC}let s = set[[]]\ns.${selector}.add("x")\ns.add(dynamic([1]))\nsay s\nexit`),
-      ["[[], [1]]"],
+      codes(`let s = set[[]]\ns.${selector}.add("x")\ns.add([1])\nexit`),
+      [
+        ["TSV041", '"x"'],
+        ["TSV004", `s.${selector}`],
+      ],
       selector,
     );
   assert.deepEqual(
-    says(
-      `${DYNAMIC}let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add(dynamic({ items: [1] }))\nsay s\nexit`,
-    ),
-    ["[{ items: [] }, { items: [1] }]"],
+    codes('let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add({ items: [1] })\nexit'),
+    [
+      ["TSV041", '"x"'],
+      ["TSV004", "s.first.items"],
+    ],
   );
   // A read member is a computed value like a literal, so a number does not widen the set's integer lists.
   assert.deepEqual(codes("let s = set[[1]]\ns.first.add(2.5)\nlet xs: integer[] = s.first\nexit"), [
     ["TSV041", "2.5"],
+    ["TSV004", "s.first"],
   ]);
   // A list element is a place: what changes it also changes the list and its element type.
   assert.deepEqual(says('let l = [[]]\nl.first.add("x")\nsay l\nexit'), ['[["x"]]']);
