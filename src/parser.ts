@@ -288,6 +288,15 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
     ["boolean", ["yesText", "noText", "prefill", "message"]],
     ["booleans", ["texts", "prefill", "cancel", "message"]],
   ]);
+/** The one named argument of `askChoice`, written once after its options. */
+const CHOICE_OPTIONS: readonly string[] = ["prefill"];
+/** The named options of `showButton` after its label. */
+export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
+
+/** The named arguments of an ask, such as `prefill:` and `hint:` of `askText`, as the parser accepts them. */
+export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
+  return kind === "choice" ? CHOICE_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
+}
 /**
  * The earlier name of an ask's `prefill:`, which is a compile error that names the fix (owner decision on #512,
  * 2026-10-08): `default:`, or `defaults:` for `askBooleans`.
@@ -741,7 +750,7 @@ class Parser {
       const name = this.#peek(offset);
       const option =
         name.kind === TokenKind.Identifier &&
-        (name.lexeme === "background" || name.lexeme === "timeout") &&
+        SHOW_BUTTON_OPTIONS.includes(name.lexeme) &&
         this.#peek(offset + 1).kind === TokenKind.Colon
           ? name.lexeme
           : null;
@@ -4423,7 +4432,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const names = NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS;
+      const names = askOptionNames(interactionKind);
       // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
       const removed = removedPrefillName(interactionKind);
       const recognized = removed === null ? names : [...names, removed];
@@ -4521,7 +4530,7 @@ class Parser {
     let missingChoiceOptionWasReported = false;
     while (!this.#isInteractionChoiceTerminator()) {
       // `prefill:` names the preselected button's value once, after the options, so no option is labelled `prefill`.
-      if (this.#checkIdentifier("prefill") && this.#peek(1).kind === TokenKind.Colon) {
+      if (this.#askOptionAt(0, askOptionNames("choice")) !== null) {
         const name = this.#advance();
         this.#advance();
         prefill = yield* parseChild(this.#parseColonValueTask(false));
@@ -4685,7 +4694,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      NAMED_ASK_OPTIONS.get(interactionKind) ?? ASK_OPTIONS,
+      askOptionNames(interactionKind),
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {

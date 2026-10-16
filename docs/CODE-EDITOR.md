@@ -78,7 +78,7 @@ official forms is parser/compiler-owned.
 The first implementation should provide:
 
 - completion and hover documentation for the automatically available Standard Library names;
-- signature guidance for optional `as speaker`, input hints, choice options with and without written values and list options, identifier and numeric values, `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
+- signature guidance for optional `as speaker`, input hints, choice options with and without written values and list options, identifier and numeric values, `skippable`, `unskippable`, exact seconds, `0 s`, and `instant`;
 - diagnostics for attempts to shadow selected Standard Library names;
 - diagnostics for mixed value types where no union type is declared
   ([V30 §19](specifications/accepted-syntaxes-v30.md#19-choices)) and choices without buttons;
