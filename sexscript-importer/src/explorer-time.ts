@@ -1,5 +1,5 @@
 import { isRecord } from "./ast.ts";
-import { exactMilliseconds, successors } from "./explorer-analysis.ts";
+import { exactMilliseconds, successors, unitMilliseconds } from "./explorer-analysis.ts";
 
 /**
  * Forward time for the explorer's search (`ExploreOptions.later`): the comparisons in conditions that read the clock,
@@ -931,6 +931,12 @@ function valueAt(expression: unknown, reading: Reading): Value {
       return runtimeValue(node.value);
     case "duration": {
       const milliseconds = exactMilliseconds(node);
+      return milliseconds === null ? undefined : { kind: "duration", milliseconds };
+    }
+    // `n s`: the number its operand gives, in that unit; a calendar unit's length depends on the date.
+    case "unit": {
+      const amount = valueAt(node.operand, reading);
+      const milliseconds = typeof amount === "number" ? unitMilliseconds(node, amount) : null;
       return milliseconds === null ? undefined : { kind: "duration", milliseconds };
     }
     case "group":

@@ -13,6 +13,7 @@ import {
   type Goal,
   goalsFor,
   type PlanDiagnostic,
+  unitMilliseconds,
 } from "../src/explorer-analysis.ts";
 import { FAR, TreasureMap } from "../src/explorer-guidance.ts";
 import { cutOff, explore, noteOf, type CorpusEntry } from "../src/explorer-search.ts";
@@ -2815,6 +2816,56 @@ test(
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, days: 2 }), null);
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 0, months: 1 }), null);
     assert.equal(exactMilliseconds({ kind: "duration", milliseconds: 129_600_000 }), 129_600_000);
+  },
+);
+
+test(
+  "forward time reads a unit after a variable, `n s`, as that many of the unit; a calendar unit has no exact length",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  () => {
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
+    // Batch 35 writes `n * 1 s` as `n s`, a plan `unit` (Baccarat.tease:567 `while getAbsoluteDateTime() - StartT < n s`).
+    const holds = (span: string) => {
+      const source =
+        'let n = 36\nlet start = getAbsoluteDateTime()\nshowButton "Go"\n' +
+        `if getAbsoluteDateTime() - start >= ${span} {\n  say "Later."\n}\nexit\n`;
+      const { plan } = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+      assert.ok(isRecord(plan));
+      const instructions = Array.isArray(plan.instructions)
+        ? plan.instructions.filter(isRecord)
+        : [];
+      const model = clockModel(plan, instructions);
+      const [comparison] = [...model.comparisons.values()][0] ?? [];
+      assert.ok(comparison !== undefined, span);
+      const kept = timeContext({
+        frames: [
+          {
+            file: 0,
+            bindings: [
+              { name: "n", value: 36 },
+              { name: "start", value: { kind: "absoluteDateTime", epochMilliseconds: EPOCH_MS } },
+            ],
+          },
+        ],
+      });
+      return [3600, 40 * 3600].map((seconds) =>
+        holdsAt(comparison, model, kept, EPOCH_MS + seconds * 1000),
+      );
+    };
+    assert.deepEqual(holds("n h"), [false, true]);
+    assert.deepEqual(holds("(n * 60) min"), [false, true]);
+    const unit = (calendar: boolean, unitName: string, value: number) => ({
+      kind: "unit",
+      operand: { kind: "literal", value },
+      calendar,
+      unit: unitName,
+    });
+    assert.equal(exactMilliseconds(unit(false, "s", 5)), 5000);
+    // A calendar unit lasts as long as the date makes it (`n calendar days` compares only with calendar durations).
+    assert.equal(exactMilliseconds(unit(true, "d", 2)), null);
+    assert.equal(unitMilliseconds({ kind: "unit", calendar: true, unit: "d" }, 2), null);
+    assert.equal(unitMilliseconds({ kind: "unit", calendar: false, unit: "min" }, 2), 120_000);
   },
 );
 

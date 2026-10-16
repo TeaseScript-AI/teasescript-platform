@@ -15,18 +15,50 @@ function record(value: unknown): Data {
 }
 
 /**
- * The milliseconds of an exact duration, a literal or value of kind `duration` without calendar months or days; null for
- * a calendar one, whose length depends on the date: a `calendarDuration` (`1 calendar day`), or a `duration` with months
- * or days, as plans wrote `1 day` and `1 month` before the time model made a day 24 hours.
+ * The milliseconds of an exact duration, a literal or value of kind `duration` without calendar months or days, or a
+ * unit after a number (`(5) s`); null for a calendar one, whose length depends on the date: a `calendarDuration`
+ * (`1 calendar day`), a calendar unit, or a `duration` with months or days, as plans wrote `1 day` and `1 month` before
+ * the time model made a day 24 hours.
  */
 export function exactMilliseconds(value: unknown): number | null {
   const duration = record(value);
+  if (duration.kind === "unit") {
+    const operand = record(duration.operand);
+    return typeof operand.value === "number" && operand.kind === "literal"
+      ? unitMilliseconds(duration, operand.value)
+      : null;
+  }
   return duration.kind === "duration" &&
     typeof duration.milliseconds === "number" &&
     duration.months === undefined &&
     duration.days === undefined
     ? duration.milliseconds
     : null;
+}
+
+/** The length of each exact unit (V30 durations: a day is 24 hours). */
+const UNIT_MILLISECONDS: Readonly<Record<string, number>> = {
+  ms: 1,
+  s: 1_000,
+  min: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+
+/**
+ * The milliseconds of a unit expression (`n s`, plan kind `unit`) whose operand gives `amount`; null for a calendar unit
+ * (`n calendar days`), whose length depends on the date.
+ */
+export function unitMilliseconds(unit: Data, amount: number): number | null {
+  const milliseconds = unit.calendar === true ? undefined : UNIT_MILLISECONDS[String(unit.unit)];
+  return milliseconds === undefined ? null : amount * milliseconds;
+}
+
+/** Whether an expression is a duration as written: a duration literal, or an exact unit after a value (`n s`). */
+function isDuration(value: unknown): boolean {
+  const node = record(value);
+  return node.kind === "duration" || (node.kind === "unit" && node.calendar !== true);
 }
 
 function list(value: unknown): Data[] {
@@ -252,6 +284,7 @@ function neverNull(expression: unknown): boolean {
       return value.value !== null && value.value !== undefined;
     case "duration":
     case "calendarDuration":
+    case "unit":
     case "list":
     case "set":
     case "object":
@@ -3086,9 +3119,8 @@ export function comparedSlots(flow: DataFlow, instructions: readonly Data[]): Sl
       if (value.kind === "unary") walk(value.operand);
       if (value.kind !== "binary") return;
       const comparison = String(value.operator) in FLIP;
-      if (comparison && record(value.right).kind === "duration") compared(value.left, value.right);
-      else if (comparison && record(value.left).kind === "duration")
-        compared(value.right, value.left);
+      if (comparison && isDuration(value.right)) compared(value.left, value.right);
+      else if (comparison && isDuration(value.left)) compared(value.right, value.left);
       else {
         walk(value.left);
         walk(value.right);
@@ -3694,8 +3726,8 @@ export function clockDifferences(flow: DataFlow, instructions: readonly Data[]):
       if (!(String(value.operator) in FLIP)) {
         walk(value.left);
         walk(value.right);
-      } else if (right.kind === "duration") compared(value.left, value.right);
-      else if (left.kind === "duration") compared(value.right, value.left);
+      } else if (isDuration(right)) compared(value.left, value.right);
+      else if (isDuration(left)) compared(value.right, value.left);
       else if (left.kind !== "literal" && right.kind !== "literal") {
         // Against a value that does not come from the clock (`took <= limit`), only how long the player took varies.
         for (const [subject, other] of [
