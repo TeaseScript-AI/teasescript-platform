@@ -475,7 +475,6 @@ export function analyzeFeasibility(
       report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
       report.storageReads.textTests +=
         count("SX_LOAD_TEXT_NULL_TEST") + count("SX_LOAD_TEXT_NULL_SET");
-      report.chanceOdds.calls += count("SX_CHANCE_ODDS");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
@@ -492,8 +491,11 @@ export function analyzeFeasibility(
       else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;
       else if (code === "SX_MESSAGE_COUNTER") report.messageHandles.counters += 1;
     }
-    for (const { code } of packageProgram.diagnostics)
+    for (const { code } of packageProgram.diagnostics) {
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;
+      // Every published file, a helper class's too, whose shared functions may call a chance helper.
+      else if (code === "SX_CHANCE_ODDS") report.chanceOdds.calls += 1;
+    }
 
     report.files.push({
       sourceName: file.sourceName,

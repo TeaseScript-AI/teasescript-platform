@@ -635,6 +635,74 @@ test(
   },
 );
 
+// The report counts each rounding and each 1–99 chance call where the package has it: two calls on one line, a helper
+// of the same name with other odds in another file, and a call in a helper class's shared function.
+test(
+  "counts each rounding and each 1–99 chance call in the report where the package has it",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-report-counts-"));
+    try {
+      const helper = (draw: string): string[] => [
+        "def percentChance = { percent ->",
+        `  switch (${draw}) {`,
+        "    case 0..percent: return true",
+        "    default: return false",
+        "  }",
+        "}",
+        'show("chance " + percentChance(50))',
+        "",
+      ];
+      const write = (name: string, lines: string[]): string => {
+        const file = path.join(directory, name);
+        writeFileSync(file, lines.join("\n"));
+        return file;
+      };
+      const rounding = write("rounding.groovy", ["show(1.5d.round() + 2.5d.round())", ""]);
+      const ninetyNine = write("ninety.groovy", helper("getRandom(99) + 1"));
+      const hundred = write("hundred.groovy", helper("getRandom(100)"));
+      const rounded = analyzeFeasibility([await parseGroovySource(rounding)]);
+      assert.equal(rounded.roundingTies.calls, 2);
+      const local = analyzeFeasibility(
+        await Promise.all([ninetyNine, hundred].map((file) => parseGroovySource(file))),
+      );
+      assert.equal(local.chanceOdds.calls, 1);
+      const classes = path.join(directory, "classes");
+      mkdirSync(classes);
+      write("classes/main.groovy", [
+        "def loader = new groovy.lang.GroovyClassLoader()",
+        'def ss = loader.loadClass("Helper")',
+        "ss.run(this)",
+        "",
+      ]);
+      write("classes/Helper.groovy", [
+        "class Helper {",
+        "  def static percentChance(main, percent) {",
+        "    switch (main.getRandom(99) + 1) {",
+        "      case 0..percent: return true",
+        "      default: return false",
+        "    }",
+        "  }",
+        "  static def run(main) {",
+        '    if (percentChance(main, 50)) main.show("Lucky")',
+        "  }",
+        "}",
+        "",
+      ]);
+      const shared = analyzeFeasibility(
+        await Promise.all(
+          ["main.groovy", "Helper.groovy"].map((name) =>
+            parseGroovySource(path.join(classes, name)),
+          ),
+        ),
+      );
+      assert.equal(shared.chanceOdds.calls, 1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
   try {

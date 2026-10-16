@@ -93,7 +93,7 @@ export interface JavaRuleHost {
 
 /**
  * A note that a line gives once, however many of its operations differ the same way. An `info` note goes only into the
- * conversion report, not into the output.
+ * conversion report, which counts the operations, so it is given once for each operation (its span) instead.
  */
 export function noteOnce(
   host: JavaRuleHost,
@@ -102,7 +102,11 @@ export function noteOnce(
   span: SourceSpan | null,
   severity: "info" | "warning" = "warning",
 ): void {
-  const key = `${code}:${span?.line ?? ""}`;
+  const at =
+    severity === "info" && span !== null
+      ? `${span.line}:${span.column}:${span.endLine}:${span.endColumn}`
+      : `${span?.line ?? ""}`;
+  const key = `${code}:${at}`;
   if (span !== null && host.state.data.noted.has(key)) return;
   host.state.data.noted.add(key);
   host.diagnostic(code, severity, message, span);

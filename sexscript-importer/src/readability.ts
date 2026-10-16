@@ -15,34 +15,41 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * coordinator 2026-10-16).
  */
 export function withChanceCalls(programs: readonly MigrationProgram[]): MigrationProgram[] {
-  const global = new Set<string>();
-  // The helpers that drew from 1 through 99, whose odds were percent/99.
-  const ninetyNine = new Set<string>();
+  // The template body of each helper by name: global ones for every file, and each file's own functions, which a call
+  // in that file names before a global one (null for a function that is no helper).
+  const global = new Map<string, string>();
   const local = programs.map((program) => {
-    const names = new Set<string>();
+    const bodies = new Map<string, string | null>();
     for (const statement of program.statements) {
-      const body = statement.kind === "function" ? chanceHelperBody(statement) : null;
-      if (statement.kind !== "function" || body === null) continue;
-      (statement.global === true ? global : names).add(statement.name);
-      if (body.includes(NINETY_NINE)) ninetyNine.add(statement.name);
+      if (statement.kind !== "function") continue;
+      const body = chanceHelperBody(statement);
+      if (statement.global !== true) bodies.set(statement.name, body);
+      else if (body !== null) global.set(statement.name, body);
     }
-    return names;
+    return bodies;
   });
-  if (global.size === 0 && local.every((names) => names.size === 0)) return [...programs];
+  if (
+    global.size === 0 &&
+    local.every((bodies) => [...bodies.values()].every((body) => body === null))
+  )
+    return [...programs];
   const replaced = programs.map((program, index) => {
-    const names = new Set([...global, ...local[index]!]);
-    if (names.size === 0) return program;
+    const bodies = local[index]!;
+    const helper = (name: string): string | null =>
+      bodies.has(name) ? bodies.get(name)! : (global.get(name) ?? null);
     const diagnostics: MigrationDiagnostic[] = [];
     const call = (value: IrExpression): IrExpression => {
       const next = mapChildren(value, call);
+      const body = next.kind === "call" ? helper(next.name) : null;
       if (
         next.kind !== "call" ||
-        !names.has(next.name) ||
+        body === null ||
         next.positional.length !== 1 ||
         !isPercentage(next.positional[0]!)
       )
         return next;
-      if (ninetyNine.has(next.name))
+      // A helper that drew from 1 through 99, whose odds were percent/99.
+      if (body.includes(NINETY_NINE))
         diagnostics.push({
           code: "SX_CHANCE_ODDS",
           severity: "info",
@@ -71,7 +78,7 @@ export function withChanceCalls(programs: readonly MigrationProgram[]): Migratio
         statement.kind !== "function" ||
         !(global.has(statement.name)
           ? !replaced.some((other) => names(other, statement.name))
-          : local[index]!.has(statement.name) && !names(program, statement.name)),
+          : local[index]!.get(statement.name) != null && !names(program, statement.name)),
     ),
   }));
 }
