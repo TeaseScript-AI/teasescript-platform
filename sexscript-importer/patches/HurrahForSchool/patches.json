@@ -20,6 +20,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): a task list reads toys.nippleclamps; the toy chest saves nipple clamps as toys.nipple_clamps, and nothing saves the other spelling, so \"put on nipple clamps\" never joined the list. Read toys.nipple_clamps.",
       "diff": "toy-keys.diff"
+    },
+    {
+      "id": "ice-tray-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): two gym tasks read toys.ice; the toy chest and this script's own toy screen save the ice tray as toys.ice_tray, and nothing saves toys.ice, so the ice tasks never joined the lists. Read toys.ice_tray.",
+      "diff": "ice-tray-key.diff"
     }
   ]
 }

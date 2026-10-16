@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "The forfeit URL was checked by opening a network connection to it (new URL(link).openConnection().connect() in a try/catch), which a package cannot do, so a non-blank URL was never accepted and the script asked for it forever. As in guillotine (owner decision 2026-10-10): a URL that starts with http counts as valid; any other non-blank answer is refused as before, and a blank one goes on as before.",
       "diff": "url-check.diff"
+    },
+    {
+      "id": "no-estim-start",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the start sets defaults for keys that are missing, and the one for stripordie.no_estim saves stripordie.audio_estim = false instead. no_estim is never saved, so every start reset the audio e-stim choice to false and the game used the external-device branch, although the setup text calls audio e-stim the default. Save no_estim = false, as the test intends.",
+      "diff": "no-estim-start.diff"
     }
   ]
 }

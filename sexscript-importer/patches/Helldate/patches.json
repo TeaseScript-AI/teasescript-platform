@@ -13,6 +13,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): the first date asks the player's hard limits and saves them as helldate.Limitpissy, helldate.LimitPissOral and helldate.LimitAnalY, but the third date reads helldate.limitpissy, helldate.limitpissoral and helldate.limitanaly. Legacy storage keys are case-sensitive (Java Properties), so the third date never saw a hard limit and could go on with what the player had ruled out. Read the keys the first date saves.",
       "diff": "limit-keys.diff"
+    },
+    {
+      "id": "furniture-path",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the human-furniture scene of the third date goes on to humanfurniture22bf, a block that does not exist, for a player without an anal hard limit, so the date ended there; the anal part starts at humanfurniture22b. Its end, humanfurniture25, then took a player whose hard limit is swallowing piss into the toilet scene, the opposite of humanfurniture21's test of the same limit; test it as humanfurniture21 does. Unreachable before limit-keys and this patch, as no limit was ever read.",
+      "diff": "furniture-path.diff"
     }
   ]
 }
