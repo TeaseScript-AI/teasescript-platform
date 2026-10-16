@@ -90,8 +90,9 @@ accessible-name data or localized default key
 
 The engine owns action identity, active state, completion validation, transcript-result derivation, result writes, events, settlement replay, checkpoint/restore, and structured rejection. Compiler/Standard Library lowering owns compact syntax and default UI payload.
 
-The selected interactions expose no player cancellation result. Timer interrupts may suspend them, and handler `exit`
-discards the interrupted instruction without producing a result; see [Timers and scene time](#timers-and-scene-time).
+Apart from a form with a cancel button ([Forms](#forms)), the selected interactions expose no player cancellation
+result. Timer interrupts may suspend them, and handler `exit` discards the interrupted instruction without producing a
+result; see [Timers and scene time](#timers-and-scene-time).
 Wrong-kind, whitespace-only required text, non-finite-number, unknown-option, unknown-visible-choice, ambiguous-choice,
 and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or
 continuation.
@@ -283,9 +284,10 @@ A positive reading time is one pending-action kind named `chatPacingGate`. It us
 deadline, typed completion, bounded `lastSettlement`, event sequencing, and checkpoint/restore. It is always the
 foreground action; `backgroundActions` never holds one.
 
-A `say` evaluates speaker, authored text, pacing, skip policy, and deterministic text selection once in source order,
-and parses the final authored string once into structured message content and its canonical visible text. Then one
-atomic instruction boundary:
+A `say` evaluates its parts once, in the order that
+[V30](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides) gives, and parses the final
+authored string once into structured message content and its canonical visible text. Then one atomic instruction
+boundary:
 
 1. emits the text-output event, which carries both representations, and gives a result-bearing `say` its handle;
 2. for a positive duration, stores a `chatPacingGate` as `foregroundAction` with a new action ID, absolute deadline,
@@ -1496,13 +1498,14 @@ file's code is malformed until `goto` and `call` can enter it. A runtime failure
 
 ## Visible text boundary
 
-Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, durations, and date and time
-values, and shows a script reference and a regex in their notation, such as `/\d+/i`. Duration formatting and date and
-time presentation are defined in specification
+Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, durations, angles, and date
+and time values, and shows a script reference and a regex in their notation, such as `/\d+/i`. Duration formatting and
+date and time presentation are defined in specification
 [§35](specifications/accepted-syntaxes-v30.md#35-date-time-and-durations): dates and times use the session's captured
 presentation, and an `absoluteDateTime` shows its local date and time in the captured zone (see [Date and time
-context](#date-and-time-context)). Prepared `say` text is never formatted again after restore. List text
-follows
+context](#date-and-time-context)). Angle text is defined in
+[§13](specifications/accepted-syntaxes-v30.md#exponentials-logarithms-and-angles). Prepared `say` text is never
+formatted again after restore. List text follows
 [§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
 
 - `${...}` interpolation checks that every element is a scalar visible-text value, then selects exactly one element
@@ -1744,7 +1747,7 @@ restart, and report the failure with its debug export.
 | `TSR018` | Too few elements: an empty collection, or fewer values than a statistic needs. | Check the length first. |
 | `TSR019` | A random selection from an empty list or set. | Check that it has an element first. |
 | `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
-| `TSR021` | A value that cannot be shown as text, such as a dict or a list inside a list. | Select an element or a property. |
+| `TSR021` | A value that cannot be shown where only scalar text is allowed ([Visible text boundary](#visible-text-boundary)), such as a dict in `${...}`, a list or dict as a button label, or a list inside a list that `${...}` or `join()` shows. | Select an element or a property. |
 | `TSR022` | A speaker whose `displayName` is empty. | Give it a name, or leave `displayName` out. |
 | `TSR023` | A speaker that the session does not have. _Defect._ | Report it. |
 | `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
@@ -1800,6 +1803,9 @@ restart, and report the failure with its debug export.
 | `TSR088` | A list, set, or dict larger than the host can hold: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`. | Build a smaller list, set, or dict. |
 | `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
 | `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |
+
+A list's `remove(value)` that finds no matching value leaves the list unchanged, reports developer warning `TSW002`, and
+the script continues ([§16](specifications/accepted-syntaxes-v30.md#16-lists)).
 
 ## Deterministic RNG invariant
 
