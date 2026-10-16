@@ -1,5 +1,6 @@
 import { angleStatisticMessage, angleValue } from "../angle.js";
 import { exactDuration } from "../duration.js";
+import { percentageFailure } from "../numeric-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -171,7 +172,7 @@ export function listStatistic(
         : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
       span,
     );
-  const share = percentile ? percentage(positional[1]!, span) : 0;
+  const share = percentile ? percentage(name, positional[1]!, span) : 0;
   const amounts = amountsOf(name, values, span);
   if (amounts.kind === "durations" && name === "sum") {
     // Exact like the other statistics: milliseconds rounded once.
@@ -207,19 +208,19 @@ export function listStatistic(
 }
 
 /** A percentage from 0 through 100, as `percentile` and `chance` take it. */
-function percentage(value: SerializableRuntimeValue, span: SourceSpan): number {
+export function percentage(
+  name: string,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): number {
   if (typeof value !== "number")
     throw fault(
       "TSR059",
-      `percentile(...) needs a number as its percentage, not ${describeRuntimeValue(value)}.`,
+      `${name}(...) needs a number as its percentage, not ${describeRuntimeValue(value)}.`,
       span,
     );
-  if (value < 0 || value > 100)
-    throw fault(
-      "TSR039",
-      `percentile(...) needs a percentage from 0 through 100, not ${value}.`,
-      span,
-    );
+  const failure = percentageFailure(name, value);
+  if (failure !== undefined) throw fault("TSR039", failure, span);
   return value;
 }
 

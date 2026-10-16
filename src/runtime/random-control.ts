@@ -5,7 +5,7 @@ import type {
   PlanSourceLocation,
 } from "../plan/model.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
-import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import { isPercentage, NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
 import type { InterpreterEvent } from "./events.js";
@@ -883,7 +883,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
       if (has()) support = { kind: "unit" };
       break;
     case "chance":
-      if (has("percent") && finite(percent) && percent >= 0 && percent <= 100)
+      if (has("percent") && finite(percent) && isPercentage(percent))
         support = { kind: "chance", percent };
       break;
     case "integer":

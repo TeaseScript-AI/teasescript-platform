@@ -102,7 +102,7 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
+import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
@@ -6951,13 +6951,19 @@ class TypeChecker {
       case "random":
         return NUMBER_TYPE;
       case "chance":
-        if (argument !== undefined && value !== undefined)
+        if (argument !== undefined && value !== undefined) {
           this.#reportUnless(
             value,
             isNumeric,
             argument.value,
             "chance(...) takes a percentage number",
           );
+          // A percentage the compiler can see is checked as the runtime checks it.
+          const known = this.#known(argument.value);
+          const failure = typeof known === "number" ? percentageFailure(name, known) : undefined;
+          if (failure !== undefined)
+            this.#report(typeCode.invalidOperand, failure, argument.value.span);
+        }
         return BOOLEAN_TYPE;
       case "randomInteger":
         if (argument !== undefined && value !== undefined) {

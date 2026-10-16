@@ -1,5 +1,6 @@
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
+import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
 import { staticVisibleText } from "./static-evaluation.js";
 import {
@@ -160,12 +161,10 @@ function listFunctionType(
             `${name}(...) needs a number as its percentage, not ${describeValue(forUse(context.typeOf(share)))}.`,
             share,
           );
-        else if (value !== undefined && (value < 0 || value > 100))
-          problem(
-            context,
-            `${name}(...) needs a percentage from 0 through 100, not ${value}.`,
-            share,
-          );
+        else {
+          const failure = value === undefined ? undefined : percentageFailure(name, value);
+          if (failure !== undefined) problem(context, failure, share);
+        }
       }
       const list = positionalArguments(call)[0]!;
       const minMax = name === "min" || name === "max";
