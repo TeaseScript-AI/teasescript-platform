@@ -15,6 +15,63 @@ export function registerTeaseScriptLanguage(): void {
       extensions: [".tease"],
       aliases: ["TeaseScript"],
     });
+    // The colours come from the compiler's own token classes (`registerProviders`). This tokenizer marks only strings,
+    // with their interpolations, and line comments, which Monaco itself reads: brackets and quotes in them are text
+    // for bracket matching, bracket colours, and auto-closing, which semantic tokens cannot tell Monaco. It reads one
+    // line at a time and cannot tell a regex from a division, so it leaves regexes and block comments, which a regex
+    // such as `/[/*]/` can seem to open, to the compiler's classes.
+    monaco.languages.setMonarchTokensProvider(TEASE_LANGUAGE_ID, {
+      tokenizer: {
+        root: [{ include: "@expression" }],
+        expression: [
+          [/\/\/.*$/, "comment"],
+          [/"""/, { token: "string.quote", next: "@blockString" }],
+          [
+            /"/,
+            {
+              cases: {
+                "@eos": "string.invalid",
+                "@default": { token: "string.quote", next: "@singleLineString" },
+              },
+            },
+          ],
+          [/[^/"{}]+|[/{}]/, ""],
+        ],
+        singleLineString: [
+          [
+            /[^\\$\"]+/,
+            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
+          ],
+          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/\\$/, { token: "string.escape.invalid", next: "@pop" }],
+          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
+          [
+            /\$(?!\{)/,
+            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
+          ],
+          [/"/, { token: "string.quote", next: "@pop" }],
+        ],
+        blockString: [
+          [/"""/, { token: "string.quote", next: "@pop" }],
+          [/[^\\$\"]+/, "string"],
+          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
+          [/"{1,2}(?!")|\$(?!\{)/, "string"],
+        ],
+        stringInterpolation: [
+          [/\}/, { token: "delimiter.bracket", next: "@pop" }],
+          [/\{/, { token: "delimiter", next: "@interpolationBrace" }],
+          { include: "@expression" },
+        ],
+        interpolationBrace: [
+          [/\}/, { token: "delimiter", next: "@pop" }],
+          [/\{/, { token: "delimiter", next: "@push" }],
+          { include: "@expression" },
+        ],
+      },
+    });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
       comments: { lineComment: "//", blockComment: ["/*", "*/"] },
       brackets: [
@@ -77,9 +134,6 @@ function registerProviders(): void {
       },
       semanticTokens: (provider) => {
         monaco.languages.registerDocumentSemanticTokensProvider(TEASE_LANGUAGE_ID, provider);
-      },
-      lineTokens: (provider) => {
-        monaco.languages.setTokensProvider(TEASE_LANGUAGE_ID, provider);
       },
     },
     providers,
