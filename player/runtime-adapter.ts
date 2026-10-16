@@ -5,12 +5,11 @@ import {
   compileProject,
   completeAction,
   createFreshRuntimeSession,
-  createRuntimeSession,
   DEFAULT_TEMPORAL_CONTEXT,
-  deserializeCheckpoint,
+  deserializeRuntimeSession,
   interactionDeadlineMs,
   MAIN_FILE_PATH,
-  restoreCheckpoint,
+  restoreRuntimeSession,
   RuntimeSessionError,
   serializeCheckpoint,
   type ActionCompletionOutcome,
@@ -593,15 +592,14 @@ export function createPlayerRuntimeRestorePoint(
   });
 }
 
+/** Restores `restorePoint`, whose checkpoint is parsed and validated once, as `deserializeCheckpoint` does. */
 export function restorePlayerRuntimeSession(
   restorePoint: PlayerRuntimeRestorePoint,
   recorder: DebugRecorder | null = null,
   debugTrace: RuntimeDebugContext | null = null,
 ): PlayerRuntimeSession {
-  const checkpoint = deserializeCheckpoint(restorePoint.checkpointJson);
   return restoredSession(
-    checkpoint.plan,
-    checkpoint.snapshot,
+    deserializeRuntimeSession(restorePoint.checkpointJson),
     restorePoint.events,
     recorder,
     debugTrace,
@@ -657,8 +655,9 @@ export function beginPlayerRuntimeRecording(
 }
 
 /**
- * Restores Debug's rewind history position: the state `snapshotJson` holds, validated against `plan`, with the
- * transcript rebuilt from the `events` that led to it. Nothing runs; the recorder and the value trace begin anew there.
+ * Restores a kept state, such as Debug's rewind history position or the kept session that Continue resumes: the state
+ * `snapshotJson` holds, captured and validated once against `plan` as `restoreCheckpoint` does, with the transcript
+ * rebuilt from the `events` that led to it. Nothing runs; the recorder and the value trace begin anew there.
  */
 export function restorePlayerRuntimeSessionAt(
   plan: InstructionPlan,
@@ -667,30 +666,31 @@ export function restorePlayerRuntimeSessionAt(
   recorder: DebugRecorder | null = null,
   debugTrace: RuntimeDebugContext | null = null,
 ): PlayerRuntimeSession {
-  const checkpoint = restoreCheckpoint({
+  const runtime = restoreRuntimeSession({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan,
     snapshot: JSON.parse(snapshotJson),
   });
-  return restoredSession(checkpoint.plan, checkpoint.snapshot, events, recorder, debugTrace);
+  return restoredSession(runtime, events, recorder, debugTrace);
 }
 
-/** A session continuing a validated `snapshot`, whose recording and value trace begin anew there; nothing runs. */
+/**
+ * A session continuing `runtime`, which the engine's restore just created from the state it validated, so the state is
+ * not validated again; its recording and value trace begin anew there, and nothing runs.
+ */
 function restoredSession(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
+  runtime: RuntimeSession,
   events: readonly InterpreterEvent[],
   recorder: DebugRecorder | null,
   debugTrace: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
-  const runtime = createRuntimeSession(plan, snapshot);
   const session = emptySession(
     runtime.plan,
     runtime,
     recorder,
     debugTrace,
-    snapshot.nextEventSequence,
+    runtime.view().nextEventSequence,
   );
   if (recorder !== null) session.engine.beginRecording(session, session.plan, recorder);
   // Restored values are trustworthy, but their history is not part of the checkpoint.

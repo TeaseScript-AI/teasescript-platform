@@ -7,6 +7,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
+  CheckpointError,
   compileSource,
   createFreshRuntimeSnapshot,
   run,
@@ -14,6 +17,7 @@ import {
   serializeCheckpoint,
   deserializeCheckpoint,
   recordContinueCapture,
+  restoreCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
@@ -574,6 +578,79 @@ test("the Player keeps its own state, for a save or a recording's anchor, as the
     [],
   );
   assert.equal(JSON.stringify(playerRuntimeSnapshot(restored)), checked);
+});
+
+test("Continue, a rewind, and a restore point check the kept state once and refuse what the engine's restore refuses", () => {
+  const session = createPlayerRuntimeSession(
+    'let numbers = [1, 2.5]\nlet person = {name: "Kiara", tags: ["a"]}\nsay "Hello", instant\nwait 1 s\nexit',
+  );
+  const json = playerRuntimeSnapshotJson(session);
+  const point = createPlayerRuntimeRestorePoint(session);
+  const checkpointOf = (snapshotJson: string) => ({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan: session.plan,
+    snapshot: JSON.parse(snapshotJson),
+  });
+  const captured = <T>(restore: () => T) =>
+    withValidationTestStatistics((statistics) => {
+      const result = restore();
+      return { result, visits: statistics().counts.externalCaptureVisits ?? 0 };
+    });
+  // Continue and a rewind capture the kept JSON as one checkpoint restore does; a restore point's JSON is validated as
+  // parsed, as `deserializeCheckpoint` does, so nothing is captured.
+  const once = captured(() => restoreCheckpoint(checkpointOf(json))).visits;
+  assert.ok(once > 0);
+  const continued = captured(() =>
+    restorePlayerRuntimeSessionAt(session.plan, json, session.events, new DebugRecorder()),
+  );
+  assert.equal(continued.visits, once);
+  assert.equal(captured(() => deserializeCheckpoint(point.checkpointJson)).visits, 0);
+  assert.equal(captured(() => restorePlayerRuntimeSession(point, new DebugRecorder())).visits, 0);
+  // The restored session runs the state it checked, and its own events follow the restored ones.
+  assert.equal(playerRuntimeSnapshotJson(continued.result), json);
+  assert.deepEqual(continued.result.events, session.events);
+  assert.equal(continued.result.liveEventSequence, JSON.parse(json).nextEventSequence);
+
+  // Each invalid state is refused with the error the engine's own restore gives for it.
+  const changed = (change: (snapshot: Record<string, unknown>) => void) => {
+    const snapshot = JSON.parse(json);
+    change(snapshot);
+    return JSON.stringify(snapshot);
+  };
+  const refusal = (restore: () => void) => {
+    try {
+      restore();
+    } catch (error) {
+      assert.ok(error instanceof CheckpointError, String(error));
+      return error.info;
+    }
+    assert.fail("The restore accepted an invalid state.");
+  };
+  for (const invalid of [
+    changed((snapshot) => (snapshot["nextEventSequence"] = 0)),
+    changed((snapshot) => (snapshot["version"] = 0)),
+    changed((snapshot) => (snapshot["nextInstruction"] = session.plan.instructions.length + 1)),
+    changed((snapshot) => (snapshot["unknown"] = true)),
+  ]) {
+    const expected = refusal(() => restoreCheckpoint(checkpointOf(invalid)));
+    assert.deepEqual(
+      refusal(() => restorePlayerRuntimeSessionAt(session.plan, invalid, session.events)),
+      expected,
+    );
+    const checkpointJson = JSON.stringify({
+      ...JSON.parse(point.checkpointJson),
+      snapshot: JSON.parse(invalid),
+    });
+    assert.deepEqual(
+      refusal(() => restorePlayerRuntimeSession({ checkpointJson, events: point.events })),
+      refusal(() => deserializeCheckpoint(checkpointJson)),
+    );
+  }
+  assert.equal(
+    refusal(() => restorePlayerRuntimeSession({ checkpointJson: "{", events: [] })).code,
+    "TSK003",
+  );
 });
 
 test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {

@@ -15,12 +15,13 @@ The Player runs each session on one [runtime session](#runtime-sessions). A `Pla
 of it: `state` holds the view, projections, active calls, and date and time presentation it shows. The complete state
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
-debug recorder's anchors, which are checked where they are restored or exported. An operation goes through a publication
-that shows the current state; once an operation changed the state, one made from an earlier publication throws. When
-an operation throws, the error reaches the Player, and the next use rebuilds the state of the latest publication from
-the calls the session's [debug recorder](DEBUGGER.md#debug-export) logged, so play continues from the state the Player
-showed. An operation's events reach the transcript only once the run that follows it has finished, so the transcript
-stays as shown too.
+debug recorder's anchors, which are checked where they are restored or exported. Continue and a rewind restore with
+`restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
+below). An operation goes through a publication that shows the current state; once an operation changed the state, one
+made from an earlier publication throws. When an operation throws, the error reaches the Player, and the next use
+rebuilds the state of the latest publication from the calls the session's [debug recorder](DEBUGGER.md#debug-export)
+logged, so play continues from the state the Player showed. An operation's events reach the transcript only once the
+run that follows it has finished, so the transcript stays as shown too.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -983,10 +984,10 @@ operations stay as they are.
 - **Results.** An operation returns `events`, `instructionsExecuted`, `instructionTrace` when requested, `outcome`
   where the snapshot API has one, and `randomChoices` and `randomRefusal` when it has them, as deeply frozen copies that
   share nothing with the session's state. `view()` returns the operational state a host acts on, also detached and
-  frozen: `status`, `failure`, `nextInstruction`, both session times, `runnable` (whether `run` executes something
-  now), `foregroundAction`, `backgroundActions`, `suspendedAction`, the foreground action of the path a running block
-  interrupted, `suspendedAtMs`, the scene time that block started, `cameraView`, `queuedBlocks`, how many timer, media,
-  and button blocks are queued, `debugMode`,
+  frozen: `status`, `failure`, `nextInstruction`, `nextEventSequence`, the sequence the next event gets, both session
+  times, `runnable` (whether `run` executes something now), `foregroundAction`, `backgroundActions`, `suspendedAction`,
+  the foreground action of the path a running block interrupted, `suspendedAtMs`, the scene time that block started,
+  `cameraView`, `queuedBlocks`, how many timer, media, and button blocks are queued, `debugMode`,
   `randomDraw`, the draw execution is paused at or `null`, and `forcedRandomChoices`. `stageProjection()`, `mediaPlaybackProjection()`, and
   `permanentButtonProjection()` give what the functions of those names give for a snapshot, also detached and frozen.
   `callReturnInstructions()` gives where each active call continues when it returns, outermost first, in work
@@ -1000,7 +1001,10 @@ operations stay as they are.
   it, or `null`, in work proportional to the scope depth. `inspect()` returns `inspectRuntimeState`'s detached debugger
   inspection after capturing and validating the whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
-  data that later operations do not change; importing it again crosses the external-data boundary. For trusted hosts
+  data that later operations do not change; importing it again crosses the external-data boundary. Data that crosses
+  it is validated exactly once, by the factory it enters: the session runs the state that the factory validated, so a
+  host restores a checkpoint with `restoreRuntimeSession` or `deserializeRuntimeSession` rather than `restoreCheckpoint`
+  followed by `createRuntimeSession`, which would validate it twice. For trusted hosts
   only, `exportTrustedSnapshot()` returns the same JSON as `exportSnapshot()`, copied without capture or validation,
   which shares nothing with the session: for a host that keeps the snapshot itself, such as a search frontier. It is not
   a boundary; the snapshot is captured and validated wherever it crosses one later, such as `createRuntimeSession`.
