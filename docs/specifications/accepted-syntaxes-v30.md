@@ -219,7 +219,7 @@ null
 
 ```text
 let count: integer = 5
-let duration: number = 2.5
+let ratio: number = 2.5
 ```
 
 - `integer` is for whole numbers.
@@ -4306,7 +4306,7 @@ File, folder, and camera APIs return engine-managed string references or `null` 
 let file: string? = chooseFile()
 let folder: string? = chooseFolder()
 let photo: string? = takePhoto()
-let tagged: string? = takePhoto(tags: ["bedroom"])    // joins the image catalog, see §41
+let taggedPhoto: string? = takePhoto(tags: ["bedroom"])    // joins the image catalog, see §41
 ```
 
 The returned string may be passed directly to compatible APIs:
@@ -4431,7 +4431,7 @@ A valid string reference may replace the missing value.
 ### Invalid number from stored or external data
 
 ```text
-let duration: number = load("settings.duration", default: 0)
+let volume: number = load("settings.volume", default: 0)
 ```
 
 A valid number may replace an invalid stored value. A `load` already uses its default for a stored value that does
