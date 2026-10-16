@@ -636,7 +636,8 @@ test(
 );
 
 // The report counts each rounding and each 1–99 chance call where the package has it: two calls on one line, a helper
-// of the same name with other odds in another file, and a call in a helper class's shared function.
+// of the same name with other odds in another file, a call in a helper class's shared function, and a class method a
+// script copies, which counts in the copy only.
 test(
   "counts each rounding and each 1–99 chance call in the report where the package has it",
   { skip: parserUnavailable },
@@ -697,6 +698,39 @@ test(
         ),
       );
       assert.equal(shared.chanceOdds.calls, 1);
+      // run() reads a computed static field, so it cannot be global: main.tease gets a copy and the class no file.
+      const copied = path.join(directory, "copied");
+      mkdirSync(copied);
+      write("copied/main.groovy", [
+        "def loader = new groovy.lang.GroovyClassLoader()",
+        'def ss = loader.loadClass("Helper")',
+        "ss.run(this)",
+        "",
+      ]);
+      write("copied/Helper.groovy", [
+        "class Helper {",
+        "  static def threshold = Math.round(1.5d)",
+        "  static def percentChance(main, percent) {",
+        "    switch (main.getRandom(99) + 1) {",
+        "      case 0..percent: return true",
+        "      default: return false",
+        "    }",
+        "  }",
+        "  static def run(main) {",
+        '    main.show("global " + percentChance(main, 50))',
+        '    main.show("threshold " + threshold)',
+        "  }",
+        "}",
+        "",
+      ]);
+      const copies = analyzeFeasibility(
+        await Promise.all(
+          ["main.groovy", "Helper.groovy"].map((name) =>
+            parseGroovySource(path.join(copied, name)),
+          ),
+        ),
+      );
+      assert.equal(copies.chanceOdds.calls, 1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

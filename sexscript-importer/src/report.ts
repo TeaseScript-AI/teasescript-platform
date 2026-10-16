@@ -183,13 +183,15 @@ export interface FeasibilityReport {
   /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
   blankTexts: number;
   /**
-   * Roundings that may round a tie differently (`SX_ROUNDING_TIES`), counted here instead of noted at each call
-   * (coordinator decision 2026-10-16): no corpus call was found where a negative tie changes what the player sees.
+   * The legacy source's roundings that may round a tie differently (`SX_ROUNDING_TIES`), each call once, counted here
+   * instead of noted at each call (coordinator decision 2026-10-16): no corpus call was found where a negative tie
+   * changes what the player sees.
    */
   roundingTies: { calls: number; rule: string };
   /**
-   * Calls of a legacy percentChance helper that drew from 1 through 99 (odds percent/99), now `chance(percent)`
-   * (`SX_CHANCE_ODDS`, readability.ts; coordinator decision 2026-10-16), with the note.
+   * The published files' calls of a legacy percentChance helper that drew from 1 through 99 (odds percent/99), now
+   * `chance(percent)` (`SX_CHANCE_ODDS`, readability.ts; coordinator decision 2026-10-16), with the note. A method a
+   * script copies from a helper class counts in each copy.
    */
   chanceOdds: { calls: number; note: string };
   /**
@@ -353,7 +355,16 @@ export function analyzeFeasibility(
     missingMedia: 0,
     blankTexts: 0,
     roundingTies: { calls: 0, rule: ROUNDING_TIES_RULE },
-    chanceOdds: { calls: 0, note: CHANCE_ODDS_NOTE },
+    // The calls in the files the package publishes, a helper class's own file too; a class whose methods its scripts
+    // copy is not published, so only the copies count.
+    chanceOdds: {
+      calls: projectFiles.reduce(
+        (sum, { program }) =>
+          sum + program.diagnostics.filter(({ code }) => code === "SX_CHANCE_ODDS").length,
+        0,
+      ),
+      note: CHANCE_ODDS_NOTE,
+    },
     forms: { sequences: 0, menus: 0 },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
@@ -491,11 +502,8 @@ export function analyzeFeasibility(
       else if (code === "SX_MESSAGE_ANIMATION") report.messageHandles.animations += 1;
       else if (code === "SX_MESSAGE_COUNTER") report.messageHandles.counters += 1;
     }
-    for (const { code } of packageProgram.diagnostics) {
+    for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;
-      // Every published file, a helper class's too, whose shared functions may call a chance helper.
-      else if (code === "SX_CHANCE_ODDS") report.chanceOdds.calls += 1;
-    }
 
     report.files.push({
       sourceName: file.sourceName,
